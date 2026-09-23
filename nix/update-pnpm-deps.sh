@@ -32,7 +32,7 @@ if nix build --no-link --impure --file "$expression_file" >"$build_log" 2>&1; th
   exit 0
 fi
 
-new_hash="$(grep -m1 -oE 'got: +sha256-[A-Za-z0-9+/=]+' "$build_log" | sed 's/.*got: *//')"
+new_hash="$(grep -m1 -oE 'got: +sha256-[A-Za-z0-9+/=]+' "$build_log" | sed 's/.*got: *//' || true)"
 
 if [[ -z "$new_hash" ]]; then
   cat "$build_log" >&2
