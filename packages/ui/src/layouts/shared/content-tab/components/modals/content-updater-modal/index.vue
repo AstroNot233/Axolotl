@@ -472,6 +472,8 @@ const props = withDefaults(
 		mode?: 'version' | 'incompatibility-warning'
 		warning?: string
 		actionLoading?: boolean
+		/** Keep the modal open until the parent confirms the operation was accepted. */
+		hideOnUpdate?: boolean
 		/** Whether versions are currently being loaded */
 		loading?: boolean
 		/** Whether changelog is being loaded for the selected version */
@@ -489,6 +491,7 @@ const props = withDefaults(
 		mode: 'version',
 		warning: undefined,
 		actionLoading: false,
+		hideOnUpdate: true,
 		loading: false,
 		loadingChangelog: false,
 		actionDisabled: false,
@@ -691,7 +694,7 @@ function handleUpdate(event: MouseEvent) {
 	if (props.actionLoading || props.actionDisabled) return
 	if (showSimplifiedWarning.value) {
 		emit('update', undefined as unknown as Labrinth.Versions.v2.Version, event)
-		hide()
+		if (props.hideOnUpdate) hide()
 		return
 	}
 	if (selectedVersion.value) {
@@ -755,7 +758,7 @@ function emitUpdate(
 ) {
 	emit('update', version, event)
 	if (options.hide ?? true) {
-		hide()
+		if (props.hideOnUpdate) hide()
 	}
 }
 

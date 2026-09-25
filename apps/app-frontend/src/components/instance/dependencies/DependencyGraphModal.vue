@@ -28,9 +28,9 @@ import { RouterLink } from 'vue-router'
 
 import {
 	buildDependencyGraph,
+	dependencyGraphMetrics,
 	type DependencyDirection,
 	type DependencyGraph,
-	type DependencyGraphEdge,
 	type DependencyGraphNode,
 	getDependencyTreeRows,
 	getRelatedNodeIds,
@@ -100,11 +100,11 @@ const messages = defineMessages({
 	},
 	graphDirection: {
 		id: 'app.instance.dependencies.graph-direction',
-		defaultMessage: 'Arrows point from dependent content to the content it uses.',
+		defaultMessage: 'Stable relationship clusters. Arrows point from dependent content to the content it uses.',
 	},
 	graphHint: {
 		id: 'app.instance.dependencies.graph-hint',
-		defaultMessage: 'Drag the canvas to explore. Drag a card to arrange it.',
+		defaultMessage: 'Drag the canvas to explore. Cards stay where you place them.',
 	},
 	reference: { id: 'app.instance.dependencies.reference', defaultMessage: 'Referenced elsewhere' },
 	cycleReference: {
@@ -162,14 +162,17 @@ const draggedNodeId = ref<string>()
 const nodeOffsets = ref(new Map<string, Point>())
 const graphViewport = ref<HTMLElement | null>(null)
 const graphCanvas = ref<HTMLElement | null>(null)
+const graphEdgesCanvas = ref<HTMLCanvasElement | null>(null)
 const dragState = ref<{ kind: 'pan' | 'node'; id?: string }>()
 let activePan: Point | undefined
 let lastPointerPosition: Point | undefined
+let activePointerId: number | undefined
 let pendingPointerMove: { dx: number; dy: number } | undefined
 let pointerFrame: number | undefined
 let constrainFrame: number | undefined
 let viewportObserver: ResizeObserver | undefined
 let fitFrame: number | undefined
+let edgeFrame: number | undefined
 
 const graph = computed<DependencyGraph>(() => buildDependencyGraph(items.value))
 const typeOptions = computed(() => [
@@ -278,6 +281,31 @@ const graphLayout = computed(() =>
 	layoutDependencyGraph(graph.value, graphNodeIds.value, nodeOffsets.value),
 )
 
+const visibleGraphNodes = computed(() => {
+	const viewport = graphViewport.value
+	if (!viewport || zoom.value < 0.58) return graphLayout.value.nodes
+	const overscan = 180 / zoom.value
+	const left = (-pan.value.x - overscan) / zoom.value
+	const top = (-pan.value.y - overscan) / zoom.value
+	const right = (viewport.clientWidth - pan.value.x + overscan) / zoom.value
+	const bottom = (viewport.clientHeight - pan.value.y + overscan) / zoom.value
+	const related = selectedNodeId.value
+		? new Set(
+				graph.value.edges
+					.filter((edge) => edge.source === related || edge.target === related)
+					.flatMap((edge) => [edge.source, edge.target]),
+			)
+		: new Set<string>()
+	return graphLayout.value.nodes.filter(
+		(node) =>
+			related.has(node.id) ||
+			(node.x + dependencyGraphMetrics.nodeWidth >= left &&
+				node.x <= right &&
+				node.y + dependencyGraphMetrics.nodeHeight >= top &&
+				node.y <= bottom),
+	)
+})
+
 const isolatedNodes = computed(() => {
 	const candidates = hasActiveGraphFilter.value
 		? matchedNodeIds.value
@@ -341,52 +369,130 @@ function applyCanvasTransform(nextPan = pan.value) {
 	graphCanvas.value.style.transform = `translate3d(${nextPan.x}px, ${nextPan.y}px, 0) scale(${zoom.value})`
 }
 
+function scheduleEdgeDraw() {
+	if (edgeFrame) return
+	edgeFrame = requestAnimationFrame(() => {
+		edgeFrame = undefined
+		drawGraphEdges()
+	})
+}
+
+function drawGraphEdges() {
+	const canvas = graphEdgesCanvas.value
+	if (!canvas) return
+	const width = graphLayout.value.width
+	const height = graphLayout.value.height
+	const deviceScale = window.devicePixelRatio || 1
+	if (
+		canvas.width !== Math.ceil(width * deviceScale) ||
+		canvas.height !== Math.ceil(height * deviceScale)
+	) {
+		canvas.width = Math.ceil(width * deviceScale)
+		canvas.height = Math.ceil(height * deviceScale)
+		canvas.style.width = `${width}px`
+		canvas.style.height = `${height}px`
+	}
+	const context = canvas.getContext('2d')
+	if (!context) return
+	context.setTransform(deviceScale, 0, 0, deviceScale, 0, 0)
+	context.clearRect(0, 0, width, height)
+	const styles = getComputedStyle(canvas)
+	const activeColor = styles.getPropertyValue('--color-brand').trim() || '#8bd450'
+	const mutedColor = styles.getPropertyValue('--surface-5').trim() || '#697384'
+	const orangeColor = styles.getPropertyValue('--color-orange').trim() || '#f2a65a'
+	const positions = new Map(graphLayout.value.nodes.map((node) => [node.id, node]))
+	for (const edge of graphLayout.value.edges) {
+		const source = positions.get(edge.source)
+		const target = positions.get(edge.target)
+		if (!source || !target) continue
+		const active =
+			!selectedNodeId.value ||
+			edge.source === selectedNodeId.value ||
+			edge.target === selectedNodeId.value
+		const color = !edge.resolved ? orangeColor : active ? activeColor : mutedColor
+		context.globalAlpha = active ? 0.9 : 0.18
+		context.strokeStyle = color
+		context.fillStyle = color
+		context.lineWidth = active ? 2 : 1
+		const startX = source.x + dependencyGraphMetrics.nodeWidth
+		const startY = source.y + dependencyGraphMetrics.nodeHeight / 2
+		const endX = target.x
+		const endY = target.y + dependencyGraphMetrics.nodeHeight / 2
+		const curve = Math.max(48, Math.abs(endX - startX) * 0.36)
+		context.beginPath()
+		context.moveTo(startX, startY)
+		context.bezierCurveTo(startX + curve, startY, endX - curve, endY, endX, endY)
+		context.stroke()
+		const angle = Math.atan2(endY - startY, endX - startX)
+		context.save()
+		context.translate(endX, endY)
+		context.rotate(angle)
+		context.beginPath()
+		context.moveTo(0, 0)
+		context.lineTo(-10, -5)
+		context.lineTo(-10, 5)
+		context.closePath()
+		context.fill()
+		context.restore()
+	}
+	context.globalAlpha = 1
+}
+
 function constrainedPan(nextPan: Point, nextZoom = zoom.value): Point {
 	const viewport = graphViewport.value
-	if (!viewport) return nextPan
-	const scaledWidth = graphLayout.value.width * nextZoom
-	const scaledHeight = graphLayout.value.height * nextZoom
-	const centerX = (viewport.clientWidth - scaledWidth) / 2
-	const centerY = (viewport.clientHeight - scaledHeight) / 2
+	const bounds = graphContentBounds()
+	if (!viewport || !bounds) return nextPan
+	const scaledWidth = bounds.width * nextZoom
+	const scaledHeight = bounds.height * nextZoom
+	const centerX = (viewport.clientWidth - scaledWidth) / 2 - bounds.minX * nextZoom
+	const centerY = (viewport.clientHeight - scaledHeight) / 2 - bounds.minY * nextZoom
 	return {
 		x: clamp(
 			nextPan.x,
 			scaledWidth <= viewport.clientWidth
 				? centerX
-				: viewport.clientWidth - scaledWidth - viewportPadding,
-			scaledWidth <= viewport.clientWidth ? centerX : viewportPadding,
+				: viewport.clientWidth - (bounds.minX + bounds.width) * nextZoom - viewportPadding,
+			scaledWidth <= viewport.clientWidth ? centerX : viewportPadding - bounds.minX * nextZoom,
 		),
 		y: clamp(
 			nextPan.y,
 			scaledHeight <= viewport.clientHeight
 				? centerY
-				: viewport.clientHeight - scaledHeight - viewportPadding,
-			scaledHeight <= viewport.clientHeight ? centerY : viewportPadding,
+				: viewport.clientHeight - (bounds.minY + bounds.height) * nextZoom - viewportPadding,
+			scaledHeight <= viewport.clientHeight ? centerY : viewportPadding - bounds.minY * nextZoom,
 		),
 	}
 }
 
+function graphContentBounds() {
+	const nodes = graphLayout.value.nodes
+	if (!nodes.length) return undefined
+	const minX = Math.min(...nodes.map((node) => node.x))
+	const minY = Math.min(...nodes.map((node) => node.y))
+	const maxX = Math.max(...nodes.map((node) => node.x + dependencyGraphMetrics.nodeWidth))
+	const maxY = Math.max(...nodes.map((node) => node.y + dependencyGraphMetrics.nodeHeight))
+	return { minX, minY, width: maxX - minX, height: maxY - minY }
+}
+
 function fitGraph() {
 	const viewport = graphViewport.value
-	if (!viewport || !graphLayout.value.nodes.length) return
+	const bounds = graphContentBounds()
+	if (!viewport || !bounds) return
 	const availableWidth = Math.max(1, viewport.clientWidth - viewportPadding * 2)
 	const availableHeight = Math.max(1, viewport.clientHeight - viewportPadding * 2)
 	zoom.value = clamp(
 		Math.min(
 			1,
-			availableWidth / graphLayout.value.width,
-			availableHeight / graphLayout.value.height,
+			availableWidth / bounds.width,
+			availableHeight / bounds.height,
 		),
 		minZoom,
 		maxZoom,
 	)
-	pan.value = constrainedPan(
-		{
-			x: (viewport.clientWidth - graphLayout.value.width * zoom.value) / 2,
-			y: (viewport.clientHeight - graphLayout.value.height * zoom.value) / 2,
-		},
-		zoom.value,
-	)
+	pan.value = {
+		x: (viewport.clientWidth - bounds.width * zoom.value) / 2 - bounds.minX * zoom.value,
+		y: (viewport.clientHeight - bounds.height * zoom.value) / 2 - bounds.minY * zoom.value,
+	}
 	applyCanvasTransform()
 }
 
@@ -412,7 +518,9 @@ function scheduleGraphFit() {
 
 function resetGraphView() {
 	nodeOffsets.value = new Map()
-	nextTick(scheduleGraphFit)
+	nextTick(() => {
+		scheduleGraphFit()
+	})
 }
 
 function zoomTo(nextZoom: number, anchor?: Point) {
@@ -425,6 +533,16 @@ function zoomTo(nextZoom: number, anchor?: Point) {
 		y: (focalPoint.y - pan.value.y) / zoom.value,
 	}
 	zoom.value = clampedZoom
+	if (clampedZoom === minZoom) {
+		const bounds = graphContentBounds()
+		if (!bounds) return
+		pan.value = {
+			x: (viewport.clientWidth - bounds.width * clampedZoom) / 2 - bounds.minX * clampedZoom,
+			y: (viewport.clientHeight - bounds.height * clampedZoom) / 2 - bounds.minY * clampedZoom,
+		}
+		applyCanvasTransform()
+		return
+	}
 	pan.value = constrainedPan(
 		{
 			x: focalPoint.x - graphPoint.x * clampedZoom,
@@ -447,21 +565,26 @@ function handleWheel(event: WheelEvent) {
 }
 
 function startPan(event: PointerEvent) {
+	if (event.button !== 0) return
 	if ((event.target as Element)?.closest('[data-dependency-node], [data-dependency-control]'))
 		return
+	event.preventDefault()
 	selectedNodeId.value = undefined
 	dragState.value = { kind: 'pan' }
+	activePointerId = event.pointerId
 	lastPointerPosition = { x: event.clientX, y: event.clientY }
-	;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+	graphViewport.value?.setPointerCapture(event.pointerId)
 }
 
 function startNodeDrag(event: PointerEvent, nodeId: string) {
+	if (event.button !== 0) return
 	event.stopPropagation()
 	selectNode(nodeId)
 	draggedNodeId.value = nodeId
 	dragState.value = { kind: 'node', id: nodeId }
+	activePointerId = event.pointerId
 	lastPointerPosition = { x: event.clientX, y: event.clientY }
-	;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+	graphViewport.value?.setPointerCapture(event.pointerId)
 }
 
 function applyPointerMove() {
@@ -479,13 +602,16 @@ function applyPointerMove() {
 		return
 	}
 	if (!state.id) return
-	const offset = nodeOffsets.value.get(state.id) ?? { x: 0, y: 0 }
+	const node = graphLayout.value.nodes.find((candidate) => candidate.id === state.id)
+	if (!node) return
 	const nextOffsets = new Map(nodeOffsets.value)
+	const offset = nextOffsets.get(state.id) ?? { x: 0, y: 0 }
 	nextOffsets.set(state.id, {
 		x: offset.x + movement.dx / zoom.value,
 		y: offset.y + movement.dy / zoom.value,
 	})
 	nodeOffsets.value = nextOffsets
+	scheduleEdgeDraw()
 }
 
 function movePointer(event: PointerEvent) {
@@ -511,6 +637,10 @@ function endPointer() {
 	lastPointerPosition = undefined
 	dragState.value = undefined
 	draggedNodeId.value = undefined
+	if (activePointerId !== undefined && graphViewport.value?.hasPointerCapture(activePointerId)) {
+		graphViewport.value.releasePointerCapture(activePointerId)
+	}
+	activePointerId = undefined
 }
 
 function nodeLink(node: DependencyGraphNode) {
@@ -550,14 +680,6 @@ function nodeStatusClass(node: DependencyGraphNode) {
 	return 'border-surface-4 bg-surface-2 shadow-black/20'
 }
 
-function edgeIsMuted(edge: DependencyGraphEdge) {
-	return (
-		!!selectedNodeId.value &&
-		edge.source !== selectedNodeId.value &&
-		edge.target !== selectedNodeId.value
-	)
-}
-
 function show(contentItems: ContentItem[]) {
 	items.value = [...contentItems]
 	selectedNodeId.value = undefined
@@ -584,7 +706,9 @@ function setItems(contentItems: ContentItem[]) {
 	selectedNodeId.value = ids.has(selectedNodeId.value ?? '') ? selectedNodeId.value : undefined
 	expandedIds.value = new Set([...expandedIds.value].filter((id) => ids.has(id)))
 	nodeOffsets.value = new Map([...nodeOffsets.value].filter(([id]) => ids.has(id)))
-	nextTick(scheduleGraphFit)
+	nextTick(() => {
+		scheduleGraphFit()
+	})
 }
 
 function hide() {
@@ -596,19 +720,31 @@ watch(direction, () => {
 })
 
 watch(viewMode, (mode) => {
-	if (mode === 'graph') nextTick(scheduleGraphFit)
+	if (mode === 'graph') {
+		nextTick(() => {
+			scheduleGraphFit()
+		})
+	}
 })
 
 watch(graphStructureKey, () => {
-	nextTick(scheduleGraphFit)
+	nextTick(() => {
+		scheduleGraphFit()
+	})
 })
+
+watch(graphLayout, scheduleEdgeDraw)
+watch(selectedNodeId, scheduleEdgeDraw)
 
 watch(graphViewport, (viewport) => {
 	viewportObserver?.disconnect()
 	if (!viewport || typeof ResizeObserver === 'undefined') return
 	viewportObserver = new ResizeObserver(schedulePanConstraint)
 	viewportObserver.observe(viewport)
-	nextTick(scheduleGraphFit)
+	nextTick(() => {
+		scheduleGraphFit()
+		scheduleEdgeDraw()
+	})
 })
 
 onBeforeUnmount(() => {
@@ -616,6 +752,7 @@ onBeforeUnmount(() => {
 	if (fitFrame) cancelAnimationFrame(fitFrame)
 	if (pointerFrame) cancelAnimationFrame(pointerFrame)
 	if (constrainFrame) cancelAnimationFrame(constrainFrame)
+	if (edgeFrame) cancelAnimationFrame(edgeFrame)
 })
 
 defineExpose({ show, hide, setItems })
@@ -624,9 +761,12 @@ defineExpose({ show, hide, setItems })
 <template>
 	<NewModal
 		ref="modal"
-		:max-width="'min(1180px, calc(100vw - 2rem))'"
-		:width="'min(1180px, calc(100vw - 2rem))'"
+		:max-width="'80vw'"
+		:width="'80vw'"
+		:style="{ height: '80vh', maxHeight: '80vh' }"
+		:scrollable="false"
 		:no-padding="true"
+		:fill-content="true"
 	>
 		<template #title>
 			<Avatar
@@ -645,7 +785,7 @@ defineExpose({ show, hide, setItems })
 			</div>
 		</template>
 
-		<div class="flex h-[min(640px,calc(100vh-8rem))] min-h-0 flex-col">
+		<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
 			<div
 				class="flex flex-wrap items-center gap-3 border-0 border-b border-solid border-surface-4 px-6 py-4"
 			>
@@ -705,7 +845,7 @@ defineExpose({ show, hide, setItems })
 			</div>
 
 			<div class="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
-				<div class="min-h-0 min-w-0 flex-1">
+				<div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 					<div
 						v-if="items.length === 0"
 						class="flex h-full items-center justify-center p-8 text-secondary"
@@ -805,7 +945,7 @@ defineExpose({ show, hide, setItems })
 						</div>
 					</div>
 
-					<div v-else class="flex h-full min-h-0 flex-col p-4">
+					<div v-else class="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
 						<div
 							class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-solid border-surface-5 bg-surface-1 shadow-sm"
 						>
@@ -845,10 +985,10 @@ defineExpose({ show, hide, setItems })
 								ref="graphViewport"
 								class="dependency-graph-viewport relative min-h-0 flex-1 overflow-hidden touch-none"
 								@wheel="handleWheel"
-								@pointerdown="startPan"
-								@pointermove="movePointer"
-								@pointerup="endPointer"
-								@pointercancel="endPointer"
+								@pointerdown.capture="startPan"
+								@pointermove.capture="movePointer"
+								@pointerup.capture="endPointer"
+								@pointercancel.capture="endPointer"
 							>
 								<div
 									data-dependency-control
@@ -888,7 +1028,7 @@ defineExpose({ show, hide, setItems })
 
 								<div
 									ref="graphCanvas"
-									class="dependency-graph-canvas relative"
+									class="dependency-graph-canvas absolute left-0 top-0"
 									:style="{
 										width: `${graphLayout.width}px`,
 										height: `${graphLayout.height}px`,
@@ -896,6 +1036,12 @@ defineExpose({ show, hide, setItems })
 										transformOrigin: 'top left',
 									}"
 								>
+									<canvas
+										ref="graphEdgesCanvas"
+										class="dependency-graph-edges pointer-events-none absolute left-0 top-0"
+										:width="graphLayout.width"
+										:height="graphLayout.height"
+									/>
 									<div
 										v-for="component in graphLayout.components"
 										:key="component.id"
@@ -908,32 +1054,14 @@ defineExpose({ show, hide, setItems })
 										}"
 									/>
 									<div
-										v-for="edge in graphLayout.edges"
-										:key="edge.id"
-										class="dependency-graph-connector"
-										:class="{
-											'dependency-graph-connector-muted': edgeIsMuted(edge),
-											'dependency-graph-connector-unresolved': !edge.resolved,
-										}"
-										:style="{
-											'--connector-length': `${edge.connector.length}px`,
-											left: `${edge.connector.x}px`,
-											top: `${edge.connector.y}px`,
-											transform: `rotate(${edge.connector.rotation}deg)`,
-										}"
-									>
-										<span class="dependency-graph-connector-line" />
-										<span class="dependency-graph-connector-arrow" />
-									</div>
-
-									<div
-										v-for="node in graphLayout.nodes"
+										v-for="node in visibleGraphNodes"
 										:key="node.id"
 										data-dependency-node
 										class="dependency-graph-node absolute flex h-[76px] w-[228px] cursor-grab items-center gap-3 rounded-2xl border-2 px-3 shadow-lg transition-[box-shadow,opacity,transform] active:cursor-grabbing"
 										:class="[
 											nodeStatusClass(node),
 											selectedNodeId && selectedNodeId !== node.id ? 'opacity-35' : '',
+										zoom < 0.34 ? 'dependency-graph-node-compact' : '',
 											draggedNodeId === node.id ? 'z-10 scale-[1.03] shadow-xl' : '',
 										]"
 										:style="{ left: `${node.x}px`, top: `${node.y}px` }"
@@ -1080,6 +1208,7 @@ defineExpose({ show, hide, setItems })
 
 <style scoped>
 .dependency-graph-viewport {
+	min-height: 0;
 	background-color: var(--surface-1);
 	background-image:
 		linear-gradient(color-mix(in srgb, var(--surface-4) 76%, transparent) 1px, transparent 1px),
@@ -1096,6 +1225,11 @@ defineExpose({ show, hide, setItems })
 	will-change: transform;
 }
 
+.dependency-graph-edges {
+	z-index: 1;
+	will-change: contents;
+}
+
 .dependency-graph-component {
 	position: absolute;
 	z-index: 0;
@@ -1104,61 +1238,22 @@ defineExpose({ show, hide, setItems })
 	background: color-mix(in srgb, var(--surface-2) 70%, transparent);
 }
 
-.dependency-graph-connector {
-	position: absolute;
-	z-index: 1;
-	display: block;
-	width: var(--connector-length);
-	height: 0;
-	transform-origin: 0 50%;
-}
-
-.dependency-graph-connector-line {
-	position: absolute;
-	inset: -5px 0 auto;
-	display: block;
-	height: 10px;
-	border-radius: 999px;
-	background: var(--surface-5);
-}
-
-.dependency-graph-connector-line::after {
-	position: absolute;
-	top: 3px;
-	right: 0;
-	left: 0;
-	display: block;
-	height: 4px;
-	border-radius: inherit;
-	background: var(--color-brand);
-	content: '';
-}
-
-.dependency-graph-connector-arrow {
-	position: absolute;
-	top: -8px;
-	right: -1px;
-	width: 0;
-	height: 0;
-	border-top: 8px solid transparent;
-	border-bottom: 8px solid transparent;
-	border-left: 12px solid var(--color-brand);
-}
-
-.dependency-graph-connector-unresolved .dependency-graph-connector-line::after {
-	background: var(--color-orange);
-}
-
-.dependency-graph-connector-unresolved .dependency-graph-connector-arrow {
-	border-left-color: var(--color-orange);
-}
-
-.dependency-graph-connector-muted {
-	opacity: 0.28;
-}
-
 .dependency-graph-node {
 	z-index: 2;
+}
+
+.dependency-graph-node-compact {
+	gap: 0;
+	justify-content: center;
+	width: 48px;
+	height: 48px;
+	padding: 4px;
+	border-radius: 999px;
+}
+
+.dependency-graph-node-compact > div,
+.dependency-graph-node-compact .dependency-graph-port {
+	display: none;
 }
 
 .dependency-graph-port {

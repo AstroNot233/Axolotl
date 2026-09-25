@@ -18,6 +18,7 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import SkinPreviewRenderer from '@modrinth/ui/src/components/skin/SkinPreviewRenderer.vue'
+import type { ArmorPreviewConfig } from '@modrinth/ui/src/composables/skin-rendering/armor-preview-types.ts'
 import { arrayBufferToBase64 } from '@modrinth/utils'
 import { useQuery } from '@tanstack/vue-query'
 import { invoke } from '@tauri-apps/api/core'
@@ -33,6 +34,7 @@ import EditSkinModal from '@/components/ui/skin/EditSkinModal.vue'
 import VirtualSkinSectionList from '@/components/ui/skin/VirtualSkinSectionList.vue'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { check_reachable, get_default_user, users } from '@/helpers/auth'
+import { loadSkinArmorPreview, saveSkinArmorPreview } from '@/helpers/skin-armor-preview'
 import type { RenderResult } from '@/helpers/rendering/batch-skin-renderer.ts'
 import { skinBlobUrlMap } from '@/helpers/rendering/batch-skin-renderer.ts'
 import type { Cape, Skin, SkinTextureUrl } from '@/helpers/skins.ts'
@@ -211,6 +213,9 @@ const editSkinModal = useTemplateRef('editSkinModal')
 const addSkinFileInput = useTemplateRef<HTMLInputElement>('addSkinFileInput')
 const skinSectionList = useTemplateRef<VirtualSkinSectionListExpose>('skinSectionList')
 const skinPreviewArea = useTemplateRef<HTMLElement>('skinPreviewArea')
+const armorPreviewConfig = ref<ArmorPreviewConfig>(loadSkinArmorPreview())
+
+watch(armorPreviewConfig, saveSkinArmorPreview, { deep: true })
 
 const { formatMessage } = useVIntl()
 const router = useRouter()
@@ -1063,6 +1068,7 @@ await loadSkins()
 			>
 				<SkinPreviewRenderer
 					armor-preview
+					v-model:armor-config="armorPreviewConfig"
 					:cape-src="capeTexture"
 					:texture-src="skinTexture || ''"
 					:variant="skinVariant"
