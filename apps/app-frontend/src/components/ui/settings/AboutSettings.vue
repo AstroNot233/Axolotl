@@ -427,7 +427,7 @@ const projectLinks = [
 					:aria-label="
 						copied ? formatMessage(messages.copiedQqGroup) : formatMessage(messages.copyQqGroup)
 					"
-					class="flex min-w-0 items-center gap-3 rounded-xl bg-surface-4 p-4 text-left transition-colors hover:bg-surface-5 disabled:cursor-default"
+					class="flex w-full min-w-0 items-center gap-3 rounded-xl bg-surface-4 p-4 text-left transition-colors hover:bg-surface-5 disabled:cursor-default"
 					@click="copyQqGroupNumber"
 				>
 					<span
