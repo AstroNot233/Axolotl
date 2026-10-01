@@ -28,6 +28,24 @@ export const ANNOUNCEMENT_CHANGE_TYPES: readonly AnnouncementChangeType[] = [
 
 export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 	{
+		id: 'launcher-1.9.8-beta.1',
+		version: '1.9.8-beta.1',
+		publishedAt: '2026-10-01',
+		title: {
+			'en-US': 'Axolotl Launcher 1.9.8-beta.1',
+			'zh-CN': 'Axolotl Launcher 1.9.8-beta.1',
+		},
+		changes: {
+			fixed: [
+				{
+					'en-US':
+						'Fixed right-click Copy and Paste menus in the Discover and Library search fields.',
+					'zh-CN': '修复发现页和库页面搜索框无法通过右键菜单复制、粘贴的问题。',
+				},
+			],
+		},
+	},
+	{
 		id: 'launcher-1.9.7',
 		version: '1.9.7',
 		publishedAt: '2026-09-30',

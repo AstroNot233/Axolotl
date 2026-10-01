@@ -1485,13 +1485,12 @@ async function setupApp() {
 	})
 
 	if (!dev) {
-		// Capture phase so WebView2 never shows its native edit menu (Shift+RMB
-		// on search/inputs included). Copy/paste stays available via keyboard
-		// shortcuts; launcher chrome uses our custom menus.
+		// Keep the native edit menu on inputs while suppressing the WebView menu
+		// elsewhere in the launcher.
 		document.addEventListener(
 			'contextmenu',
 			(event) => {
-				event.preventDefault()
+				if (!isEditableTarget(event.target)) event.preventDefault()
 			},
 			{ capture: true },
 		)
