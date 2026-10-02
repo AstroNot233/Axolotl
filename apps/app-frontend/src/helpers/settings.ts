@@ -181,6 +181,7 @@ export type AppSettings = {
 	telemetry: boolean
 	telemetry_consent_version: number
 	discord_rpc: boolean
+	allow_external_scheme: boolean
 	onboarded: boolean
 	onboarding_version: number
 	onboarding_instance_tour_completed: boolean
@@ -258,6 +259,7 @@ function normalizeDownloadSettings(settings: AppSettings & LegacyMirrorSettings)
 	settings.mojang_auth_source ??= 'auto'
 	settings.terracotta_public_nodes ??= ['wss://center.node.1tmc.top']
 	settings.hidden_nav_items ??= []
+	settings.allow_external_scheme ??= true
 	settings.custom_window_title_enabled ??= false
 	settings.default_window_title ??= 'Minecraft'
 	settings.custom_background_component_opacity ??= 100

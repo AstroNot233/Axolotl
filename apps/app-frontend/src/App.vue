@@ -132,6 +132,7 @@ import { cancelLogin, get as getCreds, login, logout } from '@/helpers/mr_auth.t
 import { getNavShortcutEnabled } from '@/helpers/nav-shortcut-state'
 import { runWhenIdle } from '@/helpers/page-transition'
 import { mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
+import { resolveOpenRoute, resolveSettingsRoute } from '@/helpers/deep-links.ts'
 import { getQuickScrollEnabled, getShowScrollTop } from '@/helpers/scroll-top-state'
 import {
 	get as getSettings,
@@ -2268,6 +2269,33 @@ command_listener(handleCommand)
 
 async function handleCommand(e) {
 	if (!e) return
+	if (e.event === 'OpenRoute') {
+		const target = resolveOpenRoute(e.path ?? '', e.query ?? null)
+		if (!target) {
+			addNotification({
+				title: formatMessage(messages.warning),
+				text: `Unsupported link: ${e.path ?? ''}`,
+				type: 'warning',
+			})
+			return
+		}
+		if (offline.value && (target.path.startsWith('/browse') || target.path.startsWith('/project'))) {
+			await router.push('/library')
+			return
+		}
+		await router.push(target)
+		return
+	}
+	if (e.event === 'OpenSettings') {
+		const target = resolveSettingsRoute(e.tab ?? null, e.entry ?? null)
+		await router.push({ path: target.path, hash: target.hash })
+		if (target.entry) {
+			await nextTick()
+			const el = document.getElementById(target.entry)
+			el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+		}
+		return
+	}
 	if (e.event === 'OpenSeedMap') {
 		const query = Object.fromEntries(new URLSearchParams(e.query ?? ''))
 		await router.push({ path: '/lab/seed-map', query })

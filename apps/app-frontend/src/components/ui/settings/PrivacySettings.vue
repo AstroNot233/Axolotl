@@ -4,6 +4,8 @@ import { computed, ref } from 'vue'
 
 import { getPrivacySettings, setDiscordRpcEnabled, setTelemetryEnabled } from '@/helpers/settings'
 
+import { get as getSettings, set as setSettings } from '@/helpers/settings'
+
 import SettingsRow from './SettingsRow.vue'
 import SettingsSaveStatus from './SettingsSaveStatus.vue'
 import SettingsSection from './SettingsSection.vue'
@@ -13,6 +15,8 @@ const { handleError } = injectNotificationManager()
 const privacy = ref(await getPrivacySettings())
 const telemetrySaving = ref(false)
 const discordSaving = ref(false)
+const schemeSaving = ref(false)
+const allowExternalScheme = ref((await getSettings()).allow_external_scheme)
 const lastSaveState = ref<'idle' | 'saved' | 'error'>('idle')
 const retrySave = ref<(() => void) | undefined>()
 
@@ -38,6 +42,14 @@ const messages = defineMessages({
 		id: 'app.settings.privacy.discord-rpc-description',
 		defaultMessage: 'Show your current launcher or game activity in Discord.',
 	},
+	externalScheme: {
+		id: 'app.settings.privacy.external-scheme',
+		defaultMessage: 'Allow external links',
+	},
+	externalSchemeDescription: {
+		id: 'app.settings.privacy.external-scheme-description',
+		defaultMessage: 'Respond to axolotl:// links from browsers and other apps. Turning this off blocks launches, installs and page jumps from outside.',
+	},
 	dataHandling: {
 		id: 'app.settings.privacy.data-handling',
 		defaultMessage:
@@ -45,7 +57,7 @@ const messages = defineMessages({
 	},
 })
 const saveStatus = computed(() => {
-	if (telemetrySaving.value || discordSaving.value) return 'saving'
+	if (telemetrySaving.value || discordSaving.value || schemeSaving.value) return 'saving'
 	return lastSaveState.value
 })
 
@@ -68,6 +80,28 @@ async function updateTelemetry(value: boolean) {
 		handleError(error)
 	} finally {
 		telemetrySaving.value = false
+	}
+}
+
+async function updateExternalScheme(value: boolean) {
+	if (schemeSaving.value) return
+	const previous = allowExternalScheme.value
+	allowExternalScheme.value = value
+	schemeSaving.value = true
+	lastSaveState.value = 'idle'
+	retrySave.value = undefined
+	try {
+		const settings = await getSettings()
+		settings.allow_external_scheme = value
+		await setSettings(settings)
+		lastSaveState.value = 'saved'
+	} catch (error) {
+		allowExternalScheme.value = previous
+		retrySave.value = () => void updateExternalScheme(value)
+		lastSaveState.value = 'error'
+		handleError(error)
+	} finally {
+		schemeSaving.value = false
 	}
 }
 
@@ -131,6 +165,21 @@ async function updateDiscordRpc(value: boolean) {
 						:model-value="privacy.discord_rpc"
 						:disabled="discordSaving"
 						@update:model-value="(value) => updateDiscordRpc(!!value)"
+					/>
+				</template>
+			<SettingsRow>
+				<template #label>
+					<span id="settings-target-privacy-external-scheme" tabindex="-1">
+						{{ formatMessage(messages.externalScheme) }}
+					</span>
+				</template>
+				<template #description>{{ formatMessage(messages.externalSchemeDescription) }}</template>
+				<template #control>
+					<Toggle
+						id="privacy-external-scheme"
+						:model-value="allowExternalScheme"
+						:disabled="schemeSaving"
+						@update:model-value="(value) => updateExternalScheme(!!value)"
 					/>
 				</template>
 			</SettingsRow>

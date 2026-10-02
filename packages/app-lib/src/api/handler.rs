@@ -5,10 +5,11 @@ use crate::{
 		CommandPayload,
 		emit::{emit_command, emit_warning},
 	},
+	state::Settings,
 	util::io,
 };
 use url::form_urlencoded;
-use urlencoding::decode;
+use urlencoding::decode as url_decode;
 
 fn query_map(query: &str) -> std::collections::HashMap<String, String> {
 	let mut map = std::collections::HashMap::new();
@@ -101,7 +102,13 @@ fn split_path_query(sublink: &str) -> (&str, &str) {
 }
 
 fn decode_segment(raw: &str) -> Option<String> {
-	decode(raw).ok().map(|v| v.to_string()).filter(|v| !v.trim().is_empty())
+	match url_decode(raw) {
+		Ok(v) => {
+			let v = v.to_string();
+			if v.trim().is_empty() { None } else { Some(v) }
+		}
+		Err(_) => None,
+	}
 }
 
 pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
@@ -145,13 +152,7 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 			)
 			.into());
 		}
-		return launch_payload(id.or(Some(String::new())), server, world).await
-			.or(match (id, server, world) {
-				_ => {
-					let _ = id;
-					unknown_path(sublink).await
-				}
-			});
+		return launch_payload(id, server, world).await;
 	}
 	if let Some(query) = sublink.strip_prefix("launch?") {
 		let (id, server, world) = launch_parts(query);
@@ -225,7 +226,7 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 			return launch_payload(id, server, world).await;
 		}
 		"project" if !first.is_empty() && !extra => {
-			let id = decode(first);
+			let id = decoded(first);
 			let map = query_map(query_part);
 			let tab = map.get("tab").map(String::as_str).unwrap_or("");
 			let version = non_empty(map.get("version").cloned());
@@ -255,7 +256,7 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 			return open_route(path, (!query_part.is_empty()).then_some(query_part));
 		}
 		"instance" if !first.is_empty() && !extra => {
-			let id = decode(first);
+			let id = decoded(first);
 			let map = query_map(query_part);
 			let tab = map.get("tab").map(String::as_str).unwrap_or("");
 			let path = match tab {
@@ -333,8 +334,18 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 	unknown_path(sublink).await
 }
 
-fn decode(raw: &str) -> String {
+fn decoded(raw: &str) -> String {
 	decode_segment(raw).unwrap_or_default()
+}
+
+async fn external_scheme_allowed() -> bool {
+	match crate::State::get().await {
+		Ok(state) => match Settings::get(&state.pool).await {
+			Ok(settings) => settings.allow_external_scheme,
+			Err(_) => true,
+		},
+		Err(_) => true,
+	}
 }
 
 pub async fn parse_command(
@@ -342,6 +353,13 @@ pub async fn parse_command(
 ) -> crate::Result<CommandPayload> {
 	tracing::debug!("Parsing command: {}", &command_string);
 	if let Some(sublink) = command_string.strip_prefix("axolotl://") {
+		if !external_scheme_allowed().await {
+			emit_warning("External links are disabled in settings").await?;
+			return Err(crate::ErrorKind::InputError(
+				"External links are disabled in settings".to_string(),
+			)
+			.into());
+		}
 		Ok(handle_url(sublink).await?)
 	} else {
 		let path = PathBuf::from(command_string);

@@ -471,6 +471,16 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
 		targetId: 'settings-target-privacy-discord-rpc',
 		label: message('app.settings.privacy.discord-rpc', 'Discord rich presence'),
 	},
+	{
+		id: 'privacy-external-scheme',
+		categoryId: 'privacy-data',
+		targetId: 'settings-target-privacy-external-scheme',
+		label: message('app.settings.privacy.external-scheme', 'Allow external links'),
+		description: message(
+			'app.settings.privacy.external-scheme-description',
+			'Respond to axolotl:// links from browsers and other apps.',
+		),
+	},
 	// The instance-sync category had no entries at all, so none of its rows
 	// could be found by search even though the category is registered.
 	{
