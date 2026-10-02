@@ -1325,7 +1325,7 @@ Function un.ReportInstallerProgress
     ClearErrors
     FileOpen $1 "$StatusFile" w
     ${IfNot} ${Errors}
-      FileWrite $1 "$0"
+      FileWriteUTF16LE /BOM $1 "$0"
       FileClose $1
     ${EndIf}
   ${EndIf}

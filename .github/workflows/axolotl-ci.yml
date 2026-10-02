@@ -137,6 +137,15 @@ jobs:
             throw "Expected one modern NSIS installer, found $($installers.Count)"
           }
           Write-Output "Built modern installer: $($installers[0].Name)"
+      - name: Test actual Windows uninstallation
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm install --prefix target/uninstall-verification --no-save --no-audit --no-fund handlebars@4.7.8
+          if ($LASTEXITCODE -ne 0) { throw "Failed to prepare NSIS fixture dependencies" }
+          node apps/installer-ui/tests/compile-fixture.cjs --tauri-nsis target/release/nsis/x64
+          if ($LASTEXITCODE -ne 0) { throw "Failed to compile NSIS uninstall fixture" }
+          & apps/installer-ui/tests/uninstall-smoke.ps1
       - name: Build native NSIS Windows installer
         if: runner.os == 'Windows'
         run: pnpm --filter @modrinth/app tauri build

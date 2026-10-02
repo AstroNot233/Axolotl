@@ -185,3 +185,27 @@ test('installation still supports first install and in-place update', async () =
 		await browser.close()
 	}
 })
+
+test('cancelled UAC request restores uninstall controls without reporting success', async () => {
+	const browser = await chromium.launch({ headless: true })
+	try {
+		const { page, errors } = await openPage(browser, { uninstall: true })
+		await page.locator('#primary-action').click()
+		assert.equal(await page.locator('#primary-action').isDisabled(), true)
+		await page.evaluate(() =>
+			window.axolotlInstaller.receive({
+				type: 'installFailed',
+				exitCode: null,
+				message: 'The operation was canceled by the user. (os error 1223)',
+			}),
+		)
+		assert.equal(await page.locator('#primary-action').isDisabled(), false)
+		assert.equal(await page.locator('#close').isDisabled(), false)
+		assert.equal(await page.locator('[data-screen="complete"]').getAttribute('class'), 'screen')
+		assert.match(await page.locator('#install-error').textContent(), /canceled/)
+		assert.equal(await page.locator('.spinner').isVisible(), false)
+		assert.deepEqual(errors, [])
+	} finally {
+		await browser.close()
+	}
+})

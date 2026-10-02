@@ -130,8 +130,10 @@ impl InstallerProcess {
                 match unsafe { WaitForSingleObject(*process, 0) } {
                     WAIT_OBJECT_0 => {
                         let mut exit_code = 0;
-                        unsafe { GetExitCodeProcess(*process, &mut exit_code) }
-                            .map_err(windows_error)?;
+                        unsafe {
+                            GetExitCodeProcess(*process, &raw mut exit_code)
+                        }
+                        .map_err(windows_error)?;
                         let process = std::mem::take(process);
                         let _ = unsafe { CloseHandle(process) };
                         Ok(Some(exit_code as i32))
@@ -661,7 +663,7 @@ fn uninstall_result(
     status_path: &Path,
     install_dir: &Path,
 ) -> Result<(), InstallFailure> {
-    let status = fs::read_to_string(status_path).unwrap_or_default();
+    let status = read_installer_status(status_path).unwrap_or_default();
     if exit_code != 0 || status.trim() != "100" {
         return Err(InstallFailure {
             exit_code: Some(exit_code),
@@ -775,7 +777,7 @@ fn elevated_installer_process(
         ..Default::default()
     };
 
-    unsafe { ShellExecuteExW(&mut execute_info) }.map_err(windows_error)?;
+    unsafe { ShellExecuteExW(&raw mut execute_info) }.map_err(windows_error)?;
     if execute_info.hProcess.is_invalid() {
         return Err(std::io::Error::other(
             "elevated installer did not return a process handle",
@@ -792,17 +794,15 @@ fn wide_null(value: impl AsRef<std::ffi::OsStr>) -> Vec<u16> {
 }
 
 fn windows_error(error: windows::core::Error) -> std::io::Error {
-    use windows::core::HRESULT;
-
     const FACILITY_WIN32: i32 = 7;
 
-    let hr: HRESULT = error.code();
+    let hr = error.code();
     let raw = hr.0;
 
     // If this is a Win32 error (FACILITY_WIN32), extract the underlying Win32 error code
     let facility = (raw >> 16) & 0x1fff;
     if facility == FACILITY_WIN32 {
-        let win32_code = (raw & 0xFFFF) as i32;
+        let win32_code = raw & 0xFFFF;
         std::io::Error::from_raw_os_error(win32_code)
     } else {
         // Fall back to using the HRESULT value as a raw OS error code when representable
@@ -814,6 +814,29 @@ fn nsis_value_option(name: &str, value: &str) -> String {
     format!(r#"/{name}="{value}""#)
 }
 
+fn read_installer_status(status_path: &Path) -> std::io::Result<String> {
+    let bytes = fs::read(status_path)?;
+    if let Some(bytes) = bytes.strip_prefix(&[0xff, 0xfe]) {
+        if bytes.len() % 2 != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Incomplete uninstaller status",
+            ));
+        }
+        let words: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        String::from_utf16(&words).map_err(|error| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, error)
+        })
+    } else {
+        String::from_utf8(bytes).map_err(|error| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, error)
+        })
+    }
+}
+
 fn wait_for_installer(
     process: &mut InstallerProcess,
     status_path: &Path,
@@ -821,7 +844,7 @@ fn wait_for_installer(
 ) -> Result<(), InstallFailure> {
     let mut last_progress = 0;
     loop {
-        if let Ok(value) = fs::read_to_string(status_path)
+        if let Ok(value) = read_installer_status(status_path)
             && let Ok(progress) = value.trim().parse::<u8>()
             && progress != last_progress
         {
@@ -1000,6 +1023,41 @@ mod tests {
         }
         assert!(uninstall_result(0, &status, &directory).is_ok());
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn uninstall_preserves_unicode_failure_paths() {
+        let directory = std::env::temp_dir()
+            .join(format!("axolotl-uninstall-unicode-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let status = directory.join("uninstall.status");
+        let message = r"error:Could not remove: D:\游戏\启动器.exe";
+        let bytes: Vec<u8> = [0xfeff_u16]
+            .into_iter()
+            .chain(message.encode_utf16())
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        fs::write(&status, bytes).unwrap();
+        assert_eq!(
+            uninstall_result(2, &status, &directory)
+                .unwrap_err()
+                .message,
+            &message[6..]
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn uac_cancellation_and_access_denied_keep_the_windows_error_codes() {
+        for code in [1223, 5] {
+            let error = windows::core::Error::from_hresult(
+                windows::core::HRESULT::from_win32(code),
+            );
+            assert_eq!(
+                super::windows_error(error).raw_os_error(),
+                Some(code as i32)
+            );
+        }
     }
 
     #[test]
