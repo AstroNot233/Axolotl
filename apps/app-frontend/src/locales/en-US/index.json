@@ -6606,10 +6606,10 @@
     "message": "Axolotl guide"
   },
   "app.onboarding.offline-account.description": {
-    "message": "Prefer not to sign in yet? Open Playing as in the sidebar and add an offline Minecraft account with just a username."
+    "message": "Open Playing as in the sidebar to add an offline Minecraft account. Outside China, you must first sign in with an official Minecraft account on this device."
   },
   "app.onboarding.offline-account.title": {
-    "message": "Play without signing in"
+    "message": "Offline accounts"
   },
   "app.onboarding.privacy.description": {
     "message": "Manage anonymous telemetry, Discord Rich Presence, and the Minecraft log analysis service whenever you need to."
@@ -13084,5 +13084,29 @@
   },
   "unknown-pack-warning-modal.warning.title": {
     "message": "Unknown file warning"
+  },
+  "minecraft-account.restriction.title": {
+    "message": "Offline accounts are unavailable"
+  },
+  "minecraft-account.restriction.description": {
+    "message": "In your current region, an official Minecraft account must have been signed in on this device before offline accounts can be created or used."
+  },
+  "minecraft-account.restriction.sign-in": {
+    "message": "Sign in with Minecraft"
+  },
+  "minecraft-account.restriction.buy": {
+    "message": "Buy Minecraft"
+  },
+  "app.settings.developer.official-login-section": {
+    "message": "Official Minecraft login record"
+  },
+  "app.settings.developer.official-login-description": {
+    "message": "Clear the record that allows offline accounts outside China after an official Minecraft sign-in."
+  },
+  "app.settings.developer.clear-official-login-marker": {
+    "message": "Clear login record"
+  },
+  "app.settings.developer.official-login-marker-cleared": {
+    "message": "Official Minecraft login record cleared"
   }
 }

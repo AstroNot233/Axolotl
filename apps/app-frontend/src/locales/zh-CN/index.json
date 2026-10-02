@@ -6597,10 +6597,10 @@
     "message": "引导吉祥物"
   },
   "app.onboarding.offline-account.description": {
-    "message": "暂时不想登录？在侧栏「当前游玩账号」中添加离线 Minecraft 账号，只需一个用户名即可。"
+    "message": "在侧栏「当前游玩账号」中添加离线 Minecraft 账号。在中国以外的地区，需要先在此设备上登录一次正版 Minecraft 账号。"
   },
   "app.onboarding.offline-account.title": {
-    "message": "不登录也能玩"
+    "message": "离线账号"
   },
   "app.onboarding.privacy.description": {
     "message": "匿名遥测、Discord 活动状态与 Minecraft 日志分析服务都可以在这里调整。"
@@ -13096,5 +13096,29 @@
   },
   "app.settings.feature-flags.auto-install-dependencies": {
     "message": "自动安装依赖项"
+  },
+  "minecraft-account.restriction.title": {
+    "message": "离线账号暂不可用"
+  },
+  "minecraft-account.restriction.description": {
+    "message": "根据当前地区的使用规则，需要先在此设备上登录一次正版 Minecraft 账号，才能创建或使用离线账号。"
+  },
+  "minecraft-account.restriction.sign-in": {
+    "message": "登录正版 Minecraft"
+  },
+  "minecraft-account.restriction.buy": {
+    "message": "购买 Minecraft"
+  },
+  "app.settings.developer.official-login-section": {
+    "message": "正版 Minecraft 登录记录"
+  },
+  "app.settings.developer.official-login-description": {
+    "message": "清除此设备曾登录正版 Minecraft 的记录。清除后，在中国以外的地区将重新限制离线账号。"
+  },
+  "app.settings.developer.clear-official-login-marker": {
+    "message": "清除登录记录"
+  },
+  "app.settings.developer.official-login-marker-cleared": {
+    "message": "已清除正版 Minecraft 登录记录"
   }
 }
