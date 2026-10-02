@@ -2299,15 +2299,6 @@ async function handleCommand(e) {
 		}
 		return
 	}
-	if (e.event === 'OpenSeedMap') {
-		const query = Object.fromEntries(new URLSearchParams(e.query ?? ''))
-		await router.push({ path: '/lab/seed-map', query })
-		return
-	}
-	if (e.event === 'OpenDiscovery') {
-		await router.push('/browse/mod')
-		return
-	}
 	if (offline.value && e.event !== 'LaunchInstance') {
 		await router.push('/library')
 		return

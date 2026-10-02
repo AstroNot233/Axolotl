@@ -10,16 +10,6 @@ const PROJECT_TYPES = new Set([
 	'server',
 ])
 
-const INSTANCE_TABS: Record<string, string> = {
-	mods: '',
-	files: '/files',
-	studio: '/files/studio',
-	logs: '/logs',
-	worlds: '/worlds',
-	screenshots: '/screenshots',
-	upgrade: '/upgrade',
-}
-
 const SETTINGS_TABS = new Set([
 	'interface',
 	'home-navigation',
@@ -119,5 +109,3 @@ export function resolveSettingsRoute(tab?: string | null, entry?: string | null)
 		entry && /^[A-Za-z0-9\-_]+$/.test(entry) ? `settings-target-${entry}` : undefined
 	return { path: '/settings', hash: `#${cleanTab}`, entry: cleanEntry }
 }
-
-export { INSTANCE_TABS }

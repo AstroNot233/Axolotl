@@ -318,9 +318,6 @@ pub enum CommandPayload {
         // run or install .mrpack
         path: PathBuf,
     },
-    OpenSeedMap {
-        query: String,
-    },
     OpenRoute {
         path: String,
         query: Option<String>,
@@ -329,7 +326,6 @@ pub enum CommandPayload {
         tab: Option<String>,
         entry: Option<String>,
     },
-    OpenDiscovery,
 }
 
 #[derive(Serialize, Clone)]

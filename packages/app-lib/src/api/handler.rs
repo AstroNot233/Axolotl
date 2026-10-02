@@ -23,7 +23,7 @@ fn non_empty(value: Option<String>) -> Option<String> {
 	value.filter(|v| !v.trim().is_empty())
 }
 
-fn launch_parts(
+fn launch_params(
 	query: &str,
 ) -> (Option<String>, Option<String>, Option<String>) {
 	let map = query_map(query);
@@ -40,7 +40,7 @@ async fn launch_payload(
 	singleplayer_world: Option<String>,
 ) -> crate::Result<CommandPayload> {
 	if server.is_some() && singleplayer_world.is_some() {
-		emit_warning("Invalid command, cannot launch both a server and a singleplayer world").await?;
+		emit_warning("Cannot launch both a server and a singleplayer world").await?;
 		return Err(crate::ErrorKind::InputError(
 			"Cannot launch both a server and a singleplayer world".to_string(),
 		)
@@ -57,6 +57,20 @@ async fn launch_payload(
 		)
 		.into()),
 	}
+}
+
+async fn join_payload(
+	id: Option<String>,
+	server: Option<String>,
+	singleplayer_world: Option<String>,
+) -> crate::Result<CommandPayload> {
+	if server.is_none() && singleplayer_world.is_none() {
+		return Err(crate::ErrorKind::InputError(
+			"Join command requires a server or singleplayer_world query parameter".to_string(),
+		)
+		.into());
+	}
+	launch_payload(id, server, singleplayer_world).await
 }
 
 async fn unknown_path(sublink: &str) -> crate::Result<CommandPayload> {
@@ -111,6 +125,25 @@ fn decode_segment(raw: &str) -> Option<String> {
 	}
 }
 
+async fn install_payload(
+	project: Option<String>,
+	version: Option<String>,
+	kind: &str,
+) -> crate::Result<CommandPayload> {
+	match (project, version) {
+		(_, Some(version)) => Ok(CommandPayload::InstallVersion { id: version }),
+		(Some(project), None) => match kind {
+			"modpack" => Ok(CommandPayload::InstallModpack { id: project }),
+			"server" => Ok(CommandPayload::InstallServer { id: project }),
+			_ => Ok(CommandPayload::InstallMod { id: project }),
+		},
+		_ => Err(crate::ErrorKind::InputError(
+			"Install command requires a project or version query parameter".to_string(),
+		)
+		.into()),
+	}
+}
+
 pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 	let sublink = sublink.trim().trim_start_matches('/');
 	if sublink.is_empty() {
@@ -136,59 +169,33 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 		return open_route("/".to_string(), None);
 	}
 	if sublink == "discovery" {
-		return Ok(CommandPayload::OpenDiscovery);
+		return open_route("/browse/mod".to_string(), None);
 	}
 	if sublink == "favorites" {
 		return open_route("/browse/favorites".to_string(), None);
 	}
 	if let Some(query) = sublink.strip_prefix("join?") {
-		let map = query_map(query);
-		let id = non_empty(map.get("instance_id").cloned());
-		let server = non_empty(map.get("server").cloned());
-		let world = non_empty(map.get("singleplayer_world").cloned());
-		if server.is_none() && world.is_none() {
-			return Err(crate::ErrorKind::InputError(
-				"Join command requires a server or singleplayer_world query parameter".to_string(),
-			)
-			.into());
-		}
-		return launch_payload(id, server, world).await;
+		let (id, server, world) = launch_params(query);
+		return join_payload(id, server, world).await;
 	}
 	if let Some(query) = sublink.strip_prefix("launch?") {
-		let (id, server, world) = launch_parts(query);
+		let (id, server, world) = launch_params(query);
 		return launch_payload(id, server, world).await;
 	}
 	if let Some(query) = sublink.strip_prefix("install?") {
 		let map = query_map(query);
-		let project = non_empty(map.get("project").cloned());
-		let version = non_empty(map.get("version").cloned());
-		match (project, version) {
-			(_, Some(version)) => {
-				return Ok(CommandPayload::InstallVersion { id: version });
-			}
-			(Some(project), None) => {
-				let kind = map.get("kind").map(String::as_str).unwrap_or("mod");
-				return match kind {
-					"modpack" => Ok(CommandPayload::InstallModpack { id: project }),
-					"server" => Ok(CommandPayload::InstallServer { id: project }),
-					_ => Ok(CommandPayload::InstallMod { id: project }),
-				};
-			}
-			_ => {
-				return Err(crate::ErrorKind::InputError(
-					"Install command requires a project or version query parameter".to_string(),
-				)
-				.into());
-			}
-		}
+		return install_payload(
+			non_empty(map.get("project").cloned()),
+			non_empty(map.get("version").cloned()),
+			map.get("kind").map(String::as_str).unwrap_or("mod"),
+		)
+		.await;
 	}
 	if let Some(rest) = sublink.strip_prefix("seed-map")
 		&& (rest.is_empty() || rest.starts_with('?') || rest.starts_with('/'))
 	{
 		let query = rest.trim_start_matches('/').trim_start_matches('?');
-		return Ok(CommandPayload::OpenSeedMap {
-			query: query.to_string(),
-		});
+		return open_route("/lab/seed-map".to_string(), (!query.is_empty()).then_some(query));
 	}
 	if let Some(rest) = sublink.strip_prefix("settings") {
 		let query = rest.trim_start_matches('/').trim_start_matches('?');
@@ -207,23 +214,21 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 	match namespace {
 		"launch" if first == "instance" && !extra => {
 			let map = query_map(query_part);
-			let id = decode_segment(second);
-			let server = non_empty(map.get("server").cloned());
-			let world = non_empty(map.get("singleplayer_world").cloned());
-			return launch_payload(id, server, world).await;
+			return launch_payload(
+				decode_segment(second),
+				non_empty(map.get("server").cloned()),
+				non_empty(map.get("singleplayer_world").cloned()),
+			)
+			.await;
 		}
 		"join" if !extra => {
-			let id = decode_segment(first);
 			let map = query_map(query_part);
-			let server = non_empty(map.get("server").cloned());
-			let world = non_empty(map.get("singleplayer_world").cloned());
-			if server.is_none() && world.is_none() {
-				return Err(crate::ErrorKind::InputError(
-					"Join command requires a server or singleplayer_world query parameter".to_string(),
-				)
-				.into());
-			}
-			return launch_payload(id, server, world).await;
+			return join_payload(
+				decode_segment(first),
+				non_empty(map.get("server").cloned()),
+				non_empty(map.get("singleplayer_world").cloned()),
+			)
+			.await;
 		}
 		"project" if !first.is_empty() && !extra => {
 			let id = decoded(first);
@@ -302,11 +307,6 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 			return open_route(path, (!query_part.is_empty()).then_some(query_part));
 		}
 		"lab" if (first.is_empty() || first == "seed-map" || valid_lab_tool(first)) && second.is_empty() && !extra => {
-			if first == "seed-map" {
-				return Ok(CommandPayload::OpenSeedMap {
-					query: query_part.to_string(),
-				});
-			}
 			let path = if first.is_empty() {
 				"/lab".to_string()
 			} else {
@@ -318,16 +318,31 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 			return open_route("/help/drop".to_string(), None);
 		}
 		"mod" if !first.is_empty() && second.is_empty() && !extra => {
-			return Ok(CommandPayload::InstallMod { id: first.to_string() });
+			return install_payload(
+				Some(first.to_string()),
+				None,
+				"mod",
+			)
+			.await;
 		}
 		"version" if !first.is_empty() && second.is_empty() && !extra => {
-			return Ok(CommandPayload::InstallVersion { id: first.to_string() });
+			return install_payload(None, Some(first.to_string()), "mod").await;
 		}
 		"modpack" if !first.is_empty() && second.is_empty() && !extra => {
-			return Ok(CommandPayload::InstallModpack { id: first.to_string() });
+			return install_payload(
+				Some(first.to_string()),
+				None,
+				"modpack",
+			)
+			.await;
 		}
 		"server" if !first.is_empty() && second.is_empty() && !extra => {
-			return Ok(CommandPayload::InstallServer { id: first.to_string() });
+			return install_payload(
+				Some(first.to_string()),
+				None,
+				"server",
+			)
+			.await;
 		}
 		_ => {}
 	}
@@ -408,10 +423,23 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn parses_discovery_command() {
+	async fn parses_legacy_aliases() {
 		assert!(matches!(
 			parse_command("axolotl://discovery").await.unwrap(),
-			CommandPayload::OpenDiscovery
+			CommandPayload::OpenRoute { path, .. } if path == "/browse/mod"
+		));
+		assert!(matches!(
+			parse_command("axolotl://seed-map?seed=1").await.unwrap(),
+			CommandPayload::OpenRoute { path, query } if path == "/lab/seed-map" && query == Some("seed=1".to_string())
+		));
+		assert!(matches!(
+			parse_command("axolotl://mod/sodium").await.unwrap(),
+			CommandPayload::InstallMod { id } if id == "sodium"
+		));
+		assert!(matches!(
+			parse_command("axolotl://launch/instance/my-pack?server=example.org").await.unwrap(),
+			CommandPayload::LaunchInstance { id, server: Some(server), .. }
+				if id == "my-pack" && server == "example.org"
 		));
 	}
 
