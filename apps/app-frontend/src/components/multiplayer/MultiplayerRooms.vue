@@ -399,6 +399,7 @@ const selectedNodeName = ref(localStorage.getItem(nodeStorageKey) ?? 'auto')
 const selectedInstanceId = ref('manual')
 const initialPort = typeof route.query.port === 'string' ? route.query.port : ''
 const manualPort = ref(validLocalPort(initialPort) ? initialPort : '25565')
+const portSelectionTouched = ref(!!validLocalPort(initialPort))
 const hongshiFailure = computed(() =>
 	formatMessage(hongshiErrorMessage(hongshiState.value?.error_type)),
 )
@@ -448,7 +449,7 @@ const selectedProviderOption = computed(
 watch(
 	detectedPorts,
 	(ports) => {
-		if (validLocalPort(initialPort) && selectedInstanceId.value === 'manual') return
+		if (portSelectionTouched.value && selectedInstanceId.value === 'manual') return
 		selectedInstanceId.value = selectedDetectedInstance(selectedInstanceId.value, ports)
 	},
 	{ immediate: true },
@@ -1202,6 +1203,7 @@ function submitJoin() {
 							}}</span>
 							<Combobox
 								v-model="selectedInstanceId"
+								@update:model-value="portSelectionTouched = true"
 								class="!w-full"
 								:options="
 									detectedPortOptions.map((value) => ({ value, label: detectedPortLabel(value) }))

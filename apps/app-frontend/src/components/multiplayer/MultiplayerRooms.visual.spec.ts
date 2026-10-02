@@ -32,7 +32,7 @@ vi.mock('@/helpers/multiplayer', async (original) => ({
 				cached: false,
 			},
 		],
-		getDetectedPorts: async () => fixture.ports,
+		getDetectedPorts: async () => structuredClone(fixture.ports),
 		getPlayerName: async () => 'Player',
 		hostHongshi: fixture.host,
 		stop: fixture.stop,
@@ -237,6 +237,27 @@ it('an unpublished macOS build keeps port and node inputs and succeeds on retry'
 	await button(wrapper, 'Create public room').trigger('click')
 	await vi.waitFor(() => expect(wrapper.text()).toContain('Public address'))
 	expect(fixture.host).toHaveBeenNthCalledWith(2, 25578, 'New region', null)
+})
+
+it('an explicit manual port survives refreshed LAN detection, failure and retry', async () => {
+	fixture.ports = [{ instance_id: 'game', instance_name: 'Detected game', port: 54321 }]
+	fixture.host.mockImplementation(async () => {
+		fixture.state!.hongshi = { ...idle(), status: 'error', error_type: 'build_unavailable' }
+		throw { message: 'not uploaded yet' }
+	})
+	const wrapper = await rooms()
+	expect((wrapper.findAll('select')[0].element as HTMLSelectElement).value).toBe('game')
+	await wrapper.findAll('select')[0].setValue('manual')
+	await wrapper.get('#hongshi-local-port').setValue('25582')
+	await button(wrapper, 'Create public room').trigger('click')
+	await vi.waitFor(() => expect(wrapper.text()).toContain('not been published'))
+	expect((wrapper.get('#hongshi-local-port').element as HTMLInputElement).value).toBe('25582')
+	expect(fixture.host).toHaveBeenCalledExactlyOnceWith(25582, null, null)
+	await button(wrapper, 'Create public room').trigger('click')
+	await vi.waitFor(() => expect(fixture.host).toHaveBeenCalledTimes(2))
+	await flushPromises()
+	expect((wrapper.get('#hongshi-local-port').element as HTMLInputElement).value).toBe('25582')
+	expect(fixture.host).toHaveBeenNthCalledWith(2, 25582, null, null)
 })
 
 it('server sharing starts before navigation and preserves its port when the detail page unmounts', async () => {
