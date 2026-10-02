@@ -25,9 +25,13 @@ const lastSaveState = ref<'idle' | 'saved' | 'error'>('idle')
 const retrySave = ref<(() => void) | undefined>()
 
 const messages = defineMessages({
-	sectionTitle: {
+	privacyTitle: {
 		id: 'app.settings.privacy.section-title',
 		defaultMessage: 'Privacy & data sharing',
+	},
+	securityTitle: {
+		id: 'app.settings.privacy.security-title',
+		defaultMessage: 'Security',
 	},
 	telemetry: {
 		id: 'app.settings.privacy.telemetry',
@@ -135,7 +139,7 @@ async function updateDiscordRpc(value: boolean) {
 <template>
 	<div class="flex w-full flex-col gap-6">
 		<SettingsSection
-			:title="formatMessage(messages.sectionTitle)"
+			:title="formatMessage(messages.privacyTitle)"
 			title-id="settings-target-privacy"
 		>
 			<template #extra>
@@ -173,6 +177,15 @@ async function updateDiscordRpc(value: boolean) {
 					/>
 				</template>
 			</SettingsRow>
+		</SettingsSection>
+		<p class="settings-page-note">{{ formatMessage(messages.dataHandling) }}</p>
+		<SettingsSection
+			:title="formatMessage(messages.securityTitle)"
+			title-id="settings-target-privacy"
+		>
+			<template #extra>
+				<SettingsSaveStatus :status="saveStatus" :retry="retrySave" />
+			</template>
 			<SettingsRow>
 				<template #label>
 					<span id="settings-target-privacy-external-scheme" tabindex="-1">
@@ -190,8 +203,6 @@ async function updateDiscordRpc(value: boolean) {
 				</template>
 			</SettingsRow>
 		</SettingsSection>
-
-		<p class="settings-page-note">{{ formatMessage(messages.dataHandling) }}</p>
 	</div>
 </template>
 
