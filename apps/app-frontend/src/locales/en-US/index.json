@@ -6060,13 +6060,13 @@
     "message": "Guest"
   },
   "app.multiplayer.hongshi.binary-missing": {
-    "message": "Download the RedStone kernel for this device before creating a room."
+    "message": "The RedStone Online 2 kernel will be installed when you create your first room."
   },
   "app.multiplayer.hongshi.cached": {
     "message": " (cached)"
   },
   "app.multiplayer.hongshi.closed": {
-    "message": "The RedStone room has closed. Create a new room to receive a new address."
+    "message": "The RedStone Online 2 room has closed. Create a new room to receive a new address."
   },
   "app.multiplayer.hongshi.create": {
     "message": "Create public room"
@@ -6077,11 +6077,38 @@
   "app.multiplayer.hongshi.detected-port": {
     "message": "{instance} — port {port}"
   },
-  "app.multiplayer.hongshi.download": {
-    "message": "Download RedStone"
+  "app.multiplayer.hongshi.cancel": {
+    "message": "Cancel"
   },
-  "app.multiplayer.hongshi.limits": {
-    "message": "Tunnels close after 10 minutes without players or 6 hours total. Maximum 10 players and 10 Mbps shared bandwidth."
+  "app.multiplayer.hongshi.no-nodes": {
+    "message": "No relay nodes are listed right now. Refresh the list to try again."
+  },
+  "app.multiplayer.hongshi.error.build-unavailable": {
+    "message": "The RedStone Online 2 build for this device has not been published yet. Try again later."
+  },
+  "app.multiplayer.hongshi.error.node-list": {
+    "message": "Could not load relay nodes. Check your connection and refresh the list."
+  },
+  "app.multiplayer.hongshi.error.node-unavailable": {
+    "message": "No relay could create a room. Refresh the nodes or choose another relay."
+  },
+  "app.multiplayer.hongshi.error.invalid-port": {
+    "message": "Enter a local port between 1 and 65535."
+  },
+  "app.multiplayer.hongshi.error.install": {
+    "message": "Could not install the RedStone Online 2 kernel. Check your connection and try again."
+  },
+  "app.multiplayer.hongshi.error.kernel-start": {
+    "message": "The RedStone Online 2 kernel could not start a room. Try again or open the logs."
+  },
+  "app.multiplayer.hongshi.error.kernel-exit": {
+    "message": "The RedStone Online 2 kernel stopped unexpectedly. Create a new room or open the logs."
+  },
+  "app.multiplayer.hongshi.error.kernel-output": {
+    "message": "The RedStone Online 2 kernel returned an invalid address or output. Open the logs for details."
+  },
+  "app.multiplayer.hongshi.error.unknown": {
+    "message": "Could not create the RedStone Online 2 room. Try again or open the logs."
   },
   "app.multiplayer.hongshi.local-port": {
     "message": "Local Minecraft port"
@@ -6099,7 +6126,7 @@
     "message": "{name} — {latency} ms{cached}"
   },
   "app.multiplayer.hongshi.open-logs": {
-    "message": "Open RedStone logs"
+    "message": "Open RedStone Online 2 logs"
   },
   "app.multiplayer.hongshi.port-changed": {
     "message": "Minecraft opened a different LAN port. Restart the tunnel before sharing it."
@@ -6111,7 +6138,7 @@
     "message": "Public address"
   },
   "app.multiplayer.hongshi.public-address-hint": {
-    "message": "Friends can enter this address directly in Minecraft. They do not need RedStone."
+    "message": "Friends can enter this address directly in Minecraft. They do not need RedStone Online 2."
   },
   "app.multiplayer.hongshi.refresh-nodes": {
     "message": "Refresh nodes"
@@ -6126,7 +6153,7 @@
     "message": "unreachable"
   },
   "app.multiplayer.hongshi.unsupported": {
-    "message": "RedStone is not available for this operating system or architecture."
+    "message": "RedStone Online 2 is not available for this operating system or architecture."
   },
   "app.multiplayer.host": {
     "message": "Host"
@@ -6180,7 +6207,7 @@
     "message": "Powered by Terracotta"
   },
   "app.multiplayer.provider.hongshi": {
-    "message": "RedStone"
+    "message": "RedStone Online 2"
   },
   "app.multiplayer.provider.terracotta": {
     "message": "Terracotta"
