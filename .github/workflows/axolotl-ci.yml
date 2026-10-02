@@ -119,6 +119,12 @@ jobs:
       - name: Test version metadata writes
         run: cargo test --package theseus writing_version_info_creates_missing_parent_directory
       - run: cargo check --package theseus_gui --features updater
+      - name: Test Windows installer UI and core
+        if: runner.os == 'Windows'
+        run: |
+          cargo test --package axolotl-installer-ui
+          pnpm --filter @modrinth/app-frontend exec playwright install chromium
+          node --test apps/installer-ui/tests/installer-ui.test.cjs
       - name: Build modern Windows installer
         if: runner.os == 'Windows'
         run: pnpm --filter @modrinth/app tauri build --config tauri-release.conf.json --config tauri-modern.conf.json
