@@ -2,9 +2,13 @@
 import { defineMessages, injectNotificationManager, Toggle, useVIntl } from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
-import { getPrivacySettings, setDiscordRpcEnabled, setTelemetryEnabled } from '@/helpers/settings'
-
-import { get as getSettings, set as setSettings } from '@/helpers/settings'
+import {
+	get as getSettings,
+	getPrivacySettings,
+	set as setSettings,
+	setDiscordRpcEnabled,
+	setTelemetryEnabled,
+} from '@/helpers/settings'
 
 import SettingsRow from './SettingsRow.vue'
 import SettingsSaveStatus from './SettingsSaveStatus.vue'
@@ -48,7 +52,8 @@ const messages = defineMessages({
 	},
 	externalSchemeDescription: {
 		id: 'app.settings.privacy.external-scheme-description',
-		defaultMessage: 'Respond to axolotl:// links from browsers and other apps. Turning this off blocks launches, installs and page jumps from outside.',
+		defaultMessage:
+			'Respond to axolotl:// links from browsers and other apps. Turning this off blocks launches, installs and page jumps from outside.',
 	},
 	dataHandling: {
 		id: 'app.settings.privacy.data-handling',
@@ -167,6 +172,7 @@ async function updateDiscordRpc(value: boolean) {
 						@update:model-value="(value) => updateDiscordRpc(!!value)"
 					/>
 				</template>
+			</SettingsRow>
 			<SettingsRow>
 				<template #label>
 					<span id="settings-target-privacy-external-scheme" tabindex="-1">
