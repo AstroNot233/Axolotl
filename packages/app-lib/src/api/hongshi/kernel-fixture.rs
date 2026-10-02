@@ -4,6 +4,19 @@ use std::time::Duration;
 fn main() {
 	let args = std::env::args().collect::<Vec<_>>();
 	if args.iter().any(|arg| arg == "--print-help") {
+		let directory = std::env::current_exe()
+			.unwrap()
+			.parent()
+			.unwrap()
+			.to_path_buf();
+		if directory.join("slow-help").exists() {
+			std::fs::write(
+				directory.join("help-started"),
+				std::process::id().to_string(),
+			)
+			.unwrap();
+			std::thread::sleep(Duration::from_secs(30));
+		}
 		println!("--to --game-port --game-host --control-port --data-port");
 		return;
 	}

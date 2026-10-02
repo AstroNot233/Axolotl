@@ -345,7 +345,13 @@ struct BinaryCheck {
 	compatible: bool,
 }
 
-async fn compatible_help(path: &Path) -> eyre::Result<bool> {
+async fn compatible_help(
+	path: &Path,
+	cancellation: &CancellationToken,
+) -> eyre::Result<bool> {
+	if cancellation.is_cancelled() {
+		bail!("RedStone operation cancelled");
+	}
 	let mut child = hidden_command(path)
 		.arg("--print-help")
 		.stdout(Stdio::piped())
@@ -385,15 +391,30 @@ async fn compatible_help(path: &Path) -> eyre::Result<bool> {
 				.all(|flag| help.contains(flag)),
 		)
 	};
-	let result = tokio::time::timeout(Duration::from_secs(5), read).await;
+	let result = tokio::select! {
+		biased;
+		_ = cancellation.cancelled() => Err(eyre::eyre!("RedStone operation cancelled")),
+		result = tokio::time::timeout(Duration::from_secs(5), read) => result.wrap_err("RedStone help check timed out").and_then(|result| result),
+	};
 	if result.is_err() {
 		let _ = child.kill().await;
 	}
-	result.wrap_err("RedStone help check timed out")?
+	result
 }
 
 async fn compatible_binary(path: &Path) -> bool {
-	let mut cached = BINARY_CHECK.lock().await;
+	compatible_binary_cancellable(path, &CancellationToken::new()).await
+}
+
+async fn compatible_binary_cancellable(
+	path: &Path,
+	cancellation: &CancellationToken,
+) -> bool {
+	let mut cached = tokio::select! {
+		biased;
+		_ = cancellation.cancelled() => return false,
+		cached = BINARY_CHECK.lock() => cached,
+	};
 	let Ok(metadata) = tokio::fs::metadata(path).await else {
 		*cached = None;
 		return false;
@@ -410,7 +431,10 @@ async fn compatible_binary(path: &Path) -> bool {
 		&& tokio::fs::read(path)
 			.await
 			.is_ok_and(|data| valid_binary(&data))
-		&& compatible_help(path).await.unwrap_or(false);
+		&& compatible_help(path, cancellation).await.unwrap_or(false);
+	if cancellation.is_cancelled() {
+		return false;
+	}
 	*cached = Some(BinaryCheck {
 		path: path.to_path_buf(),
 		modified: metadata.modified().ok(),
@@ -507,7 +531,7 @@ async fn install_from(
 	} else {
 		"hongshic.download"
 	});
-	let install = async {
+	let download = async {
 		let mut response = client
 			.get(endpoint)
 			.header(reqwest::header::ACCEPT, "application/json")
@@ -576,7 +600,11 @@ async fn install_from(
 			)
 			.await?;
 		}
-		if !compatible_help(&temporary).await? {
+		Ok::<_, eyre::Report>(())
+	};
+	let install = async {
+		cancellable(cancellation, download).await?;
+		if !compatible_help(&temporary, cancellation).await? {
 			bail!(
 				"downloaded RedStone kernel does not support the RedStone Online 2 arguments"
 			);
@@ -588,7 +616,7 @@ async fn install_from(
 		*BINARY_CHECK.lock().await = None;
 		Ok(())
 	};
-	let result = cancellable(cancellation, install).await;
+	let result = install.await;
 	if result.is_err() {
 		let _ = tokio::fs::remove_file(&temporary).await;
 	}
@@ -601,9 +629,10 @@ async fn prepare_binary(
 	force: bool,
 ) -> eyre::Result<PathBuf> {
 	let path = binary_path();
-	let compatible =
-		cancellable(cancellation, async { Ok(compatible_binary(&path).await) })
-			.await?;
+	let compatible = compatible_binary_cancellable(&path, cancellation).await;
+	if cancellation.is_cancelled() {
+		bail!("RedStone operation cancelled");
+	}
 	update_state(id, |state| state.binary_installed = compatible).await;
 	if compatible && !force {
 		return Ok(path);

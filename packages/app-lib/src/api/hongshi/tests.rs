@@ -1,6 +1,116 @@
 use super::*;
 use tokio::net::TcpListener;
 
+#[tokio::test]
+#[ignore = "requires official relay access and a running local Minecraft server; set HONGSHI_MINECRAFT_PORT"]
+async fn official_kernel_forwards_a_real_minecraft_connection() {
+	let _serial = SESSION_TEST.lock().await;
+	let port: u16 = std::env::var("HONGSHI_MINECRAFT_PORT")
+		.expect("set the local Minecraft port")
+		.parse()
+		.unwrap();
+	let local = async_minecraft_ping::ConnectionConfig::build("127.0.0.1")
+		.with_port(port)
+		.with_timeout(Duration::from_secs(10))
+		.connect()
+		.await
+		.unwrap()
+		.status()
+		.await
+		.unwrap();
+	let version = local.status.version.name.clone();
+	local.ping(12345).await.unwrap();
+	let client = reqwest::Client::new();
+	let directory = tempfile::tempdir().unwrap();
+	let binary = directory.path().join(binary_name());
+	install_from(
+		&client,
+		&download_endpoint_for(std::env::consts::OS, std::env::consts::ARCH)
+			.unwrap(),
+		&binary,
+		0,
+		&CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+	assert!(compatible_binary(&binary).await);
+	let (map, cached) = load_node_map_from(
+		&client,
+		NODE_ENDPOINT,
+		&directory.path().join("nodes.json"),
+		&Mutex::new(NodeCache::default()),
+		true,
+	)
+	.await
+	.unwrap();
+	let nodes = join_all(
+		map.into_iter()
+			.map(|(name, address)| probe_node(name, address, cached)),
+	)
+	.await;
+	let node = nodes
+		.into_iter()
+		.filter(|node| node.reachable)
+		.min_by_key(|node| node.latency_ms)
+		.expect("a reachable official relay");
+	let (id, token, done) = reserve_session(Some(port), None).await.unwrap();
+	let mut kernel = spawn_kernel(&binary, &node, port, id).await.unwrap();
+	let cancellation = token.clone();
+	let (sender, receiver) = oneshot::channel();
+	let actor = tokio::spawn(async move {
+		let mut ready = Some(sender);
+		let result = supervise_kernel(
+			&mut kernel,
+			id,
+			&cancellation,
+			&mut ready,
+			START_TIMEOUT,
+		)
+		.await;
+		finish_kernel(&mut kernel).await;
+		assert!(kernel.child.try_wait().unwrap().is_some());
+		assert!(kernel.readers.iter().all(|reader| reader.is_finished()));
+		finish_session(id, &cancellation, result.map(|_| ()), &mut ready, done)
+			.await;
+	});
+	let acceptance = async {
+		receiver.await??;
+		let address =
+			HONGSHI_STATE.lock().await.public_address.clone().unwrap();
+		println!(
+			"Official RedStone endpoint: {address}; local Minecraft: {version}"
+		);
+		if let Ok(path) = std::env::var("HONGSHI_ACCEPTANCE_ENDPOINT_FILE") {
+			tokio::fs::write(path, &address).await?;
+		}
+		let (host, port) = address.rsplit_once(':').unwrap();
+		let remote = async_minecraft_ping::ConnectionConfig::build(host)
+			.with_port(port.parse().unwrap())
+			.with_timeout(Duration::from_secs(15))
+			.connect()
+			.await?
+			.status()
+			.await?;
+		assert_eq!(remote.status.version.name, version);
+		remote.ping(54321).await?;
+		if let Ok(seconds) = std::env::var("HONGSHI_ACCEPTANCE_HOLD_SECONDS") {
+			tokio::time::sleep(Duration::from_secs(seconds.parse()?)).await;
+		}
+		Ok::<_, eyre::Report>(())
+	}
+	.await;
+	multiplayer::shutdown().await.unwrap();
+	actor.await.unwrap();
+	assert!(HONGSHI_RUNTIME.lock().await.session.is_none());
+	assert!(HONGSHI_STATE.lock().await.public_address.is_none());
+	assert!(
+		multiplayer::claim_provider(MultiplayerProvider::Hongshi)
+			.await
+			.is_err()
+	);
+	acceptance.unwrap();
+}
+
 static SESSION_TEST: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 fn fixture() -> tempfile::TempDir {
@@ -71,6 +181,90 @@ async fn direct_binary_install_succeeds_then_cached_help_is_reused() {
 		.is_err()
 	);
 	assert!(blocked.is_dir());
+	server.await.unwrap();
+}
+
+#[tokio::test]
+async fn missing_build_can_later_install_a_valid_binary_without_resetting_availability()
+ {
+	let _serial = SESSION_TEST.lock().await;
+	let fixture = fixture();
+	let directory = tempfile::tempdir().unwrap();
+	let path = directory.path().join(binary_name());
+	let (url, server) = http_server(vec![
+		(
+			404,
+			String::new(),
+			br#"{"detail":{"message":"not uploaded yet"}}"#.to_vec(),
+		),
+		(
+			200,
+			String::new(),
+			std::fs::read(fixture.path().join(binary_name())).unwrap(),
+		),
+	])
+	.await;
+	let client = reqwest::Client::new();
+	let token = CancellationToken::new();
+	let error = install_from(&client, &url, &path, 0, &token)
+		.await
+		.unwrap_err();
+	assert_eq!(
+		classify(&error, HongshiErrorType::Unknown),
+		HongshiErrorType::BuildUnavailable
+	);
+	assert!(!compatible_binary(&path).await);
+	install_from(&client, &url, &path, 0, &token).await.unwrap();
+	assert!(compatible_binary(&path).await);
+	assert_eq!(server.await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn cancelling_staged_help_reaps_the_process_before_removing_download() {
+	let _serial = SESSION_TEST.lock().await;
+	let fixture = fixture();
+	let directory = tempfile::tempdir().unwrap();
+	std::fs::write(directory.path().join("slow-help"), b"").unwrap();
+	let (url, server) = http_server(vec![(
+		200,
+		String::new(),
+		std::fs::read(fixture.path().join(binary_name())).unwrap(),
+	)])
+	.await;
+	let token = CancellationToken::new();
+	let cancellation = token.clone();
+	let marker = directory.path().join("help-started");
+	let cancel = tokio::spawn(async move {
+		tokio::time::timeout(Duration::from_secs(5), async {
+			while !marker.exists() {
+				tokio::time::sleep(Duration::from_millis(10)).await;
+			}
+		})
+		.await
+		.unwrap();
+		cancellation.cancel();
+	});
+	let error = install_from(
+		&reqwest::Client::new(),
+		&url,
+		&directory.path().join(binary_name()),
+		0,
+		&token,
+	)
+	.await
+	.unwrap_err();
+	assert!(error.to_string().contains("cancelled"));
+	assert!(
+		!directory
+			.path()
+			.join(if cfg!(target_os = "windows") {
+				"hongshic.download.exe"
+			} else {
+				"hongshic.download"
+			})
+			.exists()
+	);
+	cancel.await.unwrap();
 	server.await.unwrap();
 }
 
