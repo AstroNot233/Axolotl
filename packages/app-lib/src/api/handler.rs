@@ -147,63 +147,7 @@ async fn install_payload(
 pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 	let sublink = sublink.trim().trim_start_matches('/');
 	if sublink.is_empty() {
-		return Ok(CommandPayload::OpenRoute {
-			path: "/".to_string(),
-			query: None,
-		});
-	}
-	if let Some(rest) = sublink.strip_prefix("open?").or_else(|| sublink.strip_prefix("open/")) {
-		let rest = rest.trim_start_matches('/').trim_start_matches('?');
-		let map = query_map(rest);
-		if let Some(path) = non_empty(map.get("path").cloned()) {
-			let extra: Vec<String> = form_urlencoded::parse(rest.as_bytes())
-				.filter(|(k, _)| k != "path")
-				.map(|(k, v)| format!("{k}={v}"))
-				.collect();
-			let query = (!extra.is_empty()).then(|| extra.join("&"));
-			return open_route(format!("/{}", path.trim_start_matches('/')), query.as_deref());
-		}
-		return unknown_path(sublink).await;
-	}
-	if sublink == "home" {
 		return open_route("/".to_string(), None);
-	}
-	if sublink == "discovery" {
-		return open_route("/browse/mod".to_string(), None);
-	}
-	if sublink == "favorites" {
-		return open_route("/browse/favorites".to_string(), None);
-	}
-	if let Some(query) = sublink.strip_prefix("join?") {
-		let (id, server, world) = launch_params(query);
-		return join_payload(id, server, world).await;
-	}
-	if let Some(query) = sublink.strip_prefix("launch?") {
-		let (id, server, world) = launch_params(query);
-		return launch_payload(id, server, world).await;
-	}
-	if let Some(query) = sublink.strip_prefix("install?") {
-		let map = query_map(query);
-		return install_payload(
-			non_empty(map.get("project").cloned()),
-			non_empty(map.get("version").cloned()),
-			map.get("kind").map(String::as_str).unwrap_or("mod"),
-		)
-		.await;
-	}
-	if let Some(rest) = sublink.strip_prefix("seed-map")
-		&& (rest.is_empty() || rest.starts_with('?') || rest.starts_with('/'))
-	{
-		let query = rest.trim_start_matches('/').trim_start_matches('?');
-		return open_route("/lab/seed-map".to_string(), (!query.is_empty()).then_some(query));
-	}
-	if let Some(rest) = sublink.strip_prefix("settings") {
-		let query = rest.trim_start_matches('/').trim_start_matches('?');
-		let map = query_map(query);
-		return Ok(CommandPayload::OpenSettings {
-			tab: non_empty(map.get("tab").cloned()),
-			entry: non_empty(map.get("entry").cloned()),
-		});
 	}
 	let (path_part, query_part) = split_path_query(sublink);
 	let mut segments = path_part.split('/').filter(|s| !s.is_empty());
@@ -212,6 +156,25 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 	let second = segments.next().unwrap_or("");
 	let extra = segments.next().is_some();
 	match namespace {
+		"open" if !extra => {
+			let map = query_map(query_part);
+			if let Some(path) = non_empty(map.get("path").cloned()) {
+				let extra: Vec<String> = form_urlencoded::parse(query_part.as_bytes())
+					.filter(|(k, _)| k != "path")
+					.map(|(k, v)| format!("{k}={v}"))
+					.collect();
+				let query = (!extra.is_empty()).then(|| extra.join("&"));
+				return open_route(format!("/{}", path.trim_start_matches('/')), query.as_deref());
+			}
+			return unknown_path(sublink).await;
+		}
+		"home" if first.is_empty() && !extra => {
+			return open_route("/".to_string(), (!query_part.is_empty()).then_some(query_part));
+		}
+		"launch" if first.is_empty() && !extra => {
+			let (id, server, world) = launch_params(query_part);
+			return launch_payload(id, server, world).await;
+		}
 		"launch" if first == "instance" && !extra => {
 			let map = query_map(query_part);
 			return launch_payload(
@@ -221,6 +184,10 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 			)
 			.await;
 		}
+		"join" if first.is_empty() && !extra => {
+			let (id, server, world) = launch_params(query_part);
+			return join_payload(id, server, world).await;
+		}
 		"join" if !extra => {
 			let map = query_map(query_part);
 			return join_payload(
@@ -229,6 +196,19 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 				non_empty(map.get("singleplayer_world").cloned()),
 			)
 			.await;
+		}
+		"install" if first.is_empty() && !extra => {
+			let map = query_map(query_part);
+			return install_payload(
+				non_empty(map.get("project").cloned()),
+				non_empty(map.get("version").cloned()),
+				map.get("kind").map(String::as_str).unwrap_or("mod"),
+			)
+			.await;
+		}
+		"settings" if second.is_empty() && !extra => {
+			let (tab, entry) = settings_params(query_part, first);
+			return Ok(CommandPayload::OpenSettings { tab, entry });
 		}
 		"project" if !first.is_empty() && !extra => {
 			let id = decoded(first);
@@ -288,7 +268,7 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 				(!query_part.is_empty()).then_some(query_part),
 			);
 		}
-		"skins" | "worlds" | "screenshots" | "favorites" if first.is_empty() && !extra => {
+		"skins" | "worlds" | "screenshots" if first.is_empty() && !extra => {
 			return open_route(
 				format!("/{namespace}"),
 				(!query_part.is_empty()).then_some(query_part),
@@ -317,36 +297,50 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 		"help" if first == "drop" && second.is_empty() && !extra => {
 			return open_route("/help/drop".to_string(), None);
 		}
+
+		// 旧别名
+		"discovery" if first.is_empty() && !extra => {
+			return open_route("/browse/mod".to_string(), (!query_part.is_empty()).then_some(query_part));
+		}
+		"favorites" if first.is_empty() && !extra => {
+			return open_route(
+				"/browse/favorites".to_string(),
+				(!query_part.is_empty()).then_some(query_part),
+			);
+		}
+		"seed-map" if first.is_empty() && !extra => {
+			return open_route(
+				"/lab/seed-map".to_string(),
+				(!query_part.is_empty()).then_some(query_part),
+			);
+		}
 		"mod" if !first.is_empty() && second.is_empty() && !extra => {
-			return install_payload(
-				Some(first.to_string()),
-				None,
-				"mod",
-			)
-			.await;
+			return install_payload(Some(first.to_string()), None, "mod").await;
 		}
 		"version" if !first.is_empty() && second.is_empty() && !extra => {
 			return install_payload(None, Some(first.to_string()), "mod").await;
 		}
 		"modpack" if !first.is_empty() && second.is_empty() && !extra => {
-			return install_payload(
-				Some(first.to_string()),
-				None,
-				"modpack",
-			)
-			.await;
+			return install_payload(Some(first.to_string()), None, "modpack").await;
 		}
 		"server" if !first.is_empty() && second.is_empty() && !extra => {
-			return install_payload(
-				Some(first.to_string()),
-				None,
-				"server",
-			)
-			.await;
+			return install_payload(Some(first.to_string()), None, "server").await;
 		}
-		_ => {}
+			_ => {}
 	}
 	unknown_path(sublink).await
+}
+
+fn settings_params(
+	query: &str,
+	tab_segment: &str,
+) -> (Option<String>, Option<String>) {
+	let map = query_map(query);
+	let tab = non_empty(map.get("tab").cloned()).or_else(|| {
+		let seg = tab_segment.trim();
+		(!seg.is_empty()).then(|| seg.to_string())
+	});
+	(tab, non_empty(map.get("entry").cloned()))
 }
 
 fn decoded(raw: &str) -> String {
@@ -427,6 +421,10 @@ mod tests {
 		assert!(matches!(
 			parse_command("axolotl://discovery").await.unwrap(),
 			CommandPayload::OpenRoute { path, .. } if path == "/browse/mod"
+		));
+		assert!(matches!(
+			parse_command("axolotl://favorites?x=1").await.unwrap(),
+			CommandPayload::OpenRoute { path, query } if path == "/browse/favorites" && query == Some("x=1".to_string())
 		));
 		assert!(matches!(
 			parse_command("axolotl://seed-map?seed=1").await.unwrap(),
