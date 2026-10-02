@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ExternalIcon, LogInIcon } from '@modrinth/assets'
-import { Button, defineMessages, NewModal, useVIntl } from '@modrinth/ui'
+import { Button, defineMessages, injectNotificationManager, NewModal, useVIntl } from '@modrinth/ui'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { ref } from 'vue'
 
 const emit = defineEmits<{ signIn: [] }>()
 const modal = ref<InstanceType<typeof NewModal> | null>(null)
 const { formatMessage } = useVIntl()
+const { addNotification } = injectNotificationManager()
+const openingStore = ref(false)
 const messages = defineMessages({
 	title: {
 		id: 'minecraft-account.restriction.title',
@@ -25,7 +27,32 @@ const messages = defineMessages({
 		id: 'minecraft-account.restriction.buy',
 		defaultMessage: 'Buy Minecraft',
 	},
+	openFailed: {
+		id: 'minecraft-account.restriction.open-failed',
+		defaultMessage: 'Could not open the Minecraft store',
+	},
+	openFailedDescription: {
+		id: 'minecraft-account.restriction.open-failed-description',
+		defaultMessage:
+			'Try again, or open https://www.minecraft.net in your browser to purchase Minecraft.',
+	},
 })
+
+async function buyMinecraft() {
+	if (openingStore.value) return
+	openingStore.value = true
+	try {
+		await openUrl('https://www.minecraft.net/en-us/store/minecraft-java-bedrock-edition-pc')
+	} catch {
+		addNotification({
+			title: formatMessage(messages.openFailed),
+			text: formatMessage(messages.openFailedDescription),
+			type: 'error',
+		})
+	} finally {
+		openingStore.value = false
+	}
+}
 
 function signIn() {
 	modal.value?.hide()
@@ -42,12 +69,7 @@ defineExpose({ show: () => modal.value?.show() })
 		</p>
 		<template #actions>
 			<div class="flex w-full flex-wrap justify-end gap-2">
-				<Button
-					type="base"
-					@click="
-						openUrl('https://www.minecraft.net/en-us/store/minecraft-java-bedrock-edition-pc')
-					"
-				>
+				<Button type="base" :disabled="openingStore" @click="buyMinecraft">
 					<ExternalIcon /> {{ formatMessage(messages.buy) }}
 				</Button>
 				<Button type="colored" color="brand" @click="signIn">

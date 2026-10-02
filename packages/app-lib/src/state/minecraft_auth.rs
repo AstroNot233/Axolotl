@@ -305,9 +305,12 @@ async fn finish_microsoft_login(
 
     credentials.upsert(exec).await?;
 
-    if let Err(error) = crate::anti_piracy::mark_official_login().await {
+    crate::anti_piracy::mark_official_login().await.map_err(|error| {
         tracing::warn!(%error, "Could not persist official Minecraft login proof");
-    }
+        crate::ErrorKind::InputError(
+            "Your Minecraft account was saved, but its official login record could not be saved. Offline account access was not unlocked. Please sign in again to retry.".to_string(),
+        ).as_error()
+    })?;
 
     Ok(credentials)
 }

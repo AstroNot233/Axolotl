@@ -211,11 +211,6 @@ pub async fn offline_action_guard()
 
 pub async fn mark_official_login() -> crate::Result<()> {
     let _guard = PROOF_WRITE.lock().await;
-    {
-        let _session_guard = SESSION_GATE.write().await;
-        SESSION_OFFICIAL_LOGIN.store(true, Ordering::Release);
-        STATUS_REVISION.fetch_add(1, Ordering::AcqRel);
-    }
     let state = State::get().await?;
     let key = tokio::task::spawn_blocking(|| {
         let entry = proof_entry()?;
@@ -250,6 +245,9 @@ pub async fn mark_official_login() -> crate::Result<()> {
         .bind(mac)
         .execute(&state.pool)
         .await?;
+    let _session_guard = SESSION_GATE.write().await;
+    SESSION_OFFICIAL_LOGIN.store(true, Ordering::Release);
+    STATUS_REVISION.fetch_add(1, Ordering::AcqRel);
     Ok(())
 }
 

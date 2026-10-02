@@ -13106,6 +13106,12 @@
   "minecraft-account.restriction.sign-in": {
     "message": "登录正版 Minecraft"
   },
+  "minecraft-account.restriction.open-failed": {
+    "message": "无法打开 Minecraft 商店"
+  },
+  "minecraft-account.restriction.open-failed-description": {
+    "message": "请重试，或在浏览器中手动访问 https://www.minecraft.net 购买 Minecraft。"
+  },
   "minecraft-account.restriction.buy": {
     "message": "购买 Minecraft"
   },

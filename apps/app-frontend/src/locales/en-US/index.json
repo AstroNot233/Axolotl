@@ -12929,6 +12929,12 @@
   "minecraft-account.restriction.description": {
     "message": "Sign in with an official Minecraft account on this device before creating or using offline accounts. If you do not own Minecraft yet, you can purchase it from the official website."
   },
+  "minecraft-account.restriction.open-failed": {
+    "message": "Could not open the Minecraft store"
+  },
+  "minecraft-account.restriction.open-failed-description": {
+    "message": "Try again, or open https://www.minecraft.net in your browser to purchase Minecraft."
+  },
   "minecraft-account.restriction.sign-in": {
     "message": "Sign in with Minecraft"
   },
