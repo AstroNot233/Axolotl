@@ -112,6 +112,7 @@ import { trackEvent } from '@/helpers/analytics'
 import { check_reachable } from '@/helpers/auth.js'
 import { get_user, get_version } from '@/helpers/cache.js'
 import { configureCurseForgeManualDownloadWatcher } from '@/helpers/curseforge'
+import { resolveOpenRoute, resolveSettingsRoute } from '@/helpers/deep-links.ts'
 import { DIRECT_LINKS_SYNCED_EVENT, syncConfiguredDirectLinks } from '@/helpers/direct-link-sync'
 import { getMissingContentScannerSettings } from '@/helpers/downloads-scanner'
 import { classifyDroppedItem } from '@/helpers/drop'
@@ -132,7 +133,6 @@ import { cancelLogin, get as getCreds, login, logout } from '@/helpers/mr_auth.t
 import { getNavShortcutEnabled } from '@/helpers/nav-shortcut-state'
 import { runWhenIdle } from '@/helpers/page-transition'
 import { mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
-import { resolveOpenRoute, resolveSettingsRoute } from '@/helpers/deep-links.ts'
 import { getQuickScrollEnabled, getShowScrollTop } from '@/helpers/scroll-top-state'
 import {
 	get as getSettings,
@@ -2279,7 +2279,10 @@ async function handleCommand(e) {
 			})
 			return
 		}
-		if (offline.value && (target.path.startsWith('/browse') || target.path.startsWith('/project'))) {
+		if (
+			offline.value &&
+			(target.path.startsWith('/browse') || target.path.startsWith('/project'))
+		) {
 			await router.push('/library')
 			return
 		}

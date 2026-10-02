@@ -82,7 +82,10 @@ export function resolveOpenRoute(path: string, query?: string | null) {
 	if (path.startsWith('/instance/')) {
 		const id = path.slice('/instance/'.length).split('/')[0]
 		const tail = path.slice(`/instance/${id}`.length)
-		if (id && ['', '/files', '/files/studio', '/logs', '/worlds', '/screenshots', '/upgrade'].includes(tail)) {
+		if (
+			id &&
+			['', '/files', '/files/studio', '/logs', '/worlds', '/screenshots', '/upgrade'].includes(tail)
+		) {
 			return route(path, query)
 		}
 		return null
@@ -104,9 +107,7 @@ export function resolveOpenRoute(path: string, query?: string | null) {
 		}
 		return null
 	}
-	if (
-		['/downloads', '/create', '/skins', '/worlds', '/screenshots', '/help/drop'].includes(path)
-	) {
+	if (['/downloads', '/create', '/skins', '/worlds', '/screenshots', '/help/drop'].includes(path)) {
 		return route(path, query)
 	}
 	return null
@@ -114,7 +115,8 @@ export function resolveOpenRoute(path: string, query?: string | null) {
 
 export function resolveSettingsRoute(tab?: string | null, entry?: string | null) {
 	const cleanTab = tab && SETTINGS_TABS.has(tab) ? tab : 'interface'
-	const cleanEntry = entry && /^[A-Za-z0-9\-_]+$/.test(entry) ? `settings-target-${entry}` : undefined
+	const cleanEntry =
+		entry && /^[A-Za-z0-9\-_]+$/.test(entry) ? `settings-target-${entry}` : undefined
 	return { path: '/settings', hash: `#${cleanTab}`, entry: cleanEntry }
 }
 
