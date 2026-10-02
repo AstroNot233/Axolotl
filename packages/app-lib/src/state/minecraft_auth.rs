@@ -305,6 +305,10 @@ async fn finish_microsoft_login(
 
     credentials.upsert(exec).await?;
 
+    if let Err(error) = crate::anti_piracy::mark_official_login().await {
+        tracing::warn!(%error, "Could not persist official Minecraft login proof");
+    }
+
     Ok(credentials)
 }
 

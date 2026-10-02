@@ -205,6 +205,8 @@ fn main() {
                         "get_default_user",
                         "set_default_user",
                         "get_users",
+                        "get_anti_piracy_status",
+                        "clear_official_login_marker",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

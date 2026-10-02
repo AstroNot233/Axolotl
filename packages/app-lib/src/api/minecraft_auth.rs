@@ -161,6 +161,7 @@ pub async fn add_offline_user(
     uuid: Option<Uuid>,
 ) -> crate::Result<Credentials> {
     let state = State::get().await?;
+    crate::anti_piracy::ensure_offline_allowed().await?;
     let credentials = match uuid {
         Some(uuid) => Credentials::offline_with_uuid(username, uuid)?,
         None => Credentials::offline(username)?,
@@ -179,6 +180,7 @@ pub async fn add_offline_user(
         }
     }
 
+    crate::anti_piracy::ensure_offline_allowed().await?;
     credentials.upsert(&state.pool).await?;
     Ok(credentials)
 }
@@ -233,6 +235,10 @@ pub async fn set_default_user(account_id: &str) -> crate::Result<()> {
             ))
             .as_error()
         })?;
+
+    if user.is_offline() {
+        crate::anti_piracy::ensure_offline_allowed().await?;
+    }
 
     user.active = true;
     user.upsert(&state.pool).await?;
