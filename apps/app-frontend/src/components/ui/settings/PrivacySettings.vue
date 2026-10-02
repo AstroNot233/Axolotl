@@ -21,6 +21,8 @@ const telemetrySaving = ref(false)
 const discordSaving = ref(false)
 const schemeSaving = ref(false)
 const allowExternalScheme = ref((await getSettings()).allow_external_scheme)
+const privilegedSaving = ref(false)
+const allowPrivilegedScheme = ref((await getSettings()).allow_privileged_scheme)
 const lastSaveState = ref<'idle' | 'saved' | 'error'>('idle')
 const retrySave = ref<(() => void) | undefined>()
 
@@ -59,6 +61,15 @@ const messages = defineMessages({
 		defaultMessage:
 			'Respond to axolotl:// links from browsers and other apps. Turning this off blocks launches, installs and page jumps from outside.',
 	},
+	privilegedScheme: {
+		id: 'app.settings.privacy.privileged-scheme',
+		defaultMessage: 'Allow privileged link actions',
+	},
+	privilegedSchemeDescription: {
+		id: 'app.settings.privacy.privileged-scheme-description',
+		defaultMessage:
+			'Let axolotl:// links change settings and stop game processes. Every such action still requires a 10-second confirmation dialog with a risk warning.',
+	},
 	dataHandling: {
 		id: 'app.settings.privacy.data-handling',
 		defaultMessage:
@@ -66,7 +77,8 @@ const messages = defineMessages({
 	},
 })
 const saveStatus = computed(() => {
-	if (telemetrySaving.value || discordSaving.value || schemeSaving.value) return 'saving'
+	if (telemetrySaving.value || discordSaving.value || schemeSaving.value || privilegedSaving.value)
+		return 'saving'
 	return lastSaveState.value
 })
 
@@ -111,6 +123,28 @@ async function updateExternalScheme(value: boolean) {
 		handleError(error)
 	} finally {
 		schemeSaving.value = false
+	}
+}
+
+async function updatePrivilegedScheme(value: boolean) {
+	if (privilegedSaving.value) return
+	const previous = allowPrivilegedScheme.value
+	allowPrivilegedScheme.value = value
+	privilegedSaving.value = true
+	lastSaveState.value = 'idle'
+	retrySave.value = undefined
+	try {
+		const settings = await getSettings()
+		settings.allow_privileged_scheme = value
+		await setSettings(settings)
+		lastSaveState.value = 'saved'
+	} catch (error) {
+		allowPrivilegedScheme.value = previous
+		retrySave.value = () => void updatePrivilegedScheme(value)
+		lastSaveState.value = 'error'
+		handleError(error)
+	} finally {
+		privilegedSaving.value = false
 	}
 }
 
@@ -199,6 +233,22 @@ async function updateDiscordRpc(value: boolean) {
 						:model-value="allowExternalScheme"
 						:disabled="schemeSaving"
 						@update:model-value="(value) => updateExternalScheme(!!value)"
+					/>
+				</template>
+			</SettingsRow>
+			<SettingsRow>
+				<template #label>
+					<span id="settings-target-privacy-privileged-scheme" tabindex="-1">
+						{{ formatMessage(messages.privilegedScheme) }}
+					</span>
+				</template>
+				<template #description>{{ formatMessage(messages.privilegedSchemeDescription) }}</template>
+				<template #control>
+					<Toggle
+						id="privacy-privileged-scheme"
+						:model-value="allowPrivilegedScheme"
+						:disabled="privilegedSaving"
+						@update:model-value="(value) => updatePrivilegedScheme(!!value)"
 					/>
 				</template>
 			</SettingsRow>

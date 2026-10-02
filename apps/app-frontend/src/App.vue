@@ -87,6 +87,7 @@ import AddServerToInstanceModal from '@/components/ui/install_flow/AddServerToIn
 import UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
 import MinecraftAuthErrorModal from '@/components/ui/minecraft-auth-error-modal/MinecraftAuthErrorModal.vue'
 import MinecraftCrashModal from '@/components/ui/MinecraftCrashModal.vue'
+import PrivilegedActionConfirmModal from '@/components/ui/modal/PrivilegedActionConfirmModal.vue'
 import AuthGrantFlowWaitModal from '@/components/ui/modal/AuthGrantFlowWaitModal.vue'
 import CurseForgeManualDownloadsModal from '@/components/ui/modal/CurseForgeManualDownloadsModal.vue'
 import InstanceIconPickerModal from '@/components/ui/modal/InstanceIconPickerModal.vue'
@@ -112,6 +113,7 @@ import { trackEvent } from '@/helpers/analytics'
 import { check_reachable } from '@/helpers/auth.js'
 import { get_user, get_version } from '@/helpers/cache.js'
 import { configureCurseForgeManualDownloadWatcher } from '@/helpers/curseforge'
+import { applySettingChanges, diffSettings } from '@/helpers/deep-link-settings.ts'
 import { resolveOpenRoute, resolveSettingsRoute } from '@/helpers/deep-links.ts'
 import { DIRECT_LINKS_SYNCED_EVENT, syncConfiguredDirectLinks } from '@/helpers/direct-link-sync'
 import { getMissingContentScannerSettings } from '@/helpers/downloads-scanner'
@@ -132,6 +134,7 @@ import {
 import { cancelLogin, get as getCreds, login, logout } from '@/helpers/mr_auth.ts'
 import { getNavShortcutEnabled } from '@/helpers/nav-shortcut-state'
 import { runWhenIdle } from '@/helpers/page-transition'
+import { get_by_instance_id, kill as killProcess } from '@/helpers/process.js'
 import { mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
 import { getQuickScrollEnabled, getShowScrollTop } from '@/helpers/scroll-top-state'
 import {
@@ -2330,6 +2333,11 @@ async function handleCommand(e) {
 		}
 		return
 	}
+	// 特权动作：离线也允许，但必须过确认弹窗
+	if (e.event === 'UpdateSettings' || e.event === 'StopInstance') {
+		await handlePrivilegedCommand(e)
+		return
+	}
 	if (offline.value && e.event !== 'LaunchInstance') {
 		await router.push('/library')
 		return
@@ -2392,6 +2400,66 @@ async function handleCommand(e) {
 			.install(e.id, null, null, 'URLConfirmModal', undefined, undefined, { showProjectInfo: true })
 			.catch(handleError)
 	}
+}
+
+const privilegedActionModal = ref<InstanceType<typeof PrivilegedActionConfirmModal> | null>(null)
+
+const privilegedMessages = defineMessages({
+	applied: {
+		id: 'app.privileged-modal.applied',
+		defaultMessage: 'Privileged link applied',
+	},
+	stopped: {
+		id: 'app.privileged-modal.stopped',
+		defaultMessage: 'Stop request sent',
+	},
+	noProcesses: {
+		id: 'app.privileged-modal.no-processes',
+		defaultMessage: 'No running game processes for this instance',
+	},
+})
+
+// 确认弹窗通过后才执行
+async function handlePrivilegedCommand(e) {
+	if (e.event === 'UpdateSettings') {
+		const current = await getSettings().catch(handleError)
+		if (!current) return
+		const rows = diffSettings(current, e.changes ?? [])
+		const confirmed = await privilegedActionModal.value?.request({
+			event: 'UpdateSettings',
+			source: e.source ?? '',
+			rows,
+		})
+		if (!confirmed) return
+		const latest = await getSettings().catch(handleError)
+		if (!latest || !applySettingChanges(latest, e.changes ?? [])) return
+		await setSettings(latest).catch(handleError)
+		addNotification({
+			title: formatMessage(privilegedMessages.applied),
+			type: 'success',
+		})
+		return
+	}
+	const processes = await get_by_instance_id(e.instance_id).catch(() => [])
+	const confirmed = await privilegedActionModal.value?.request({
+		event: 'StopInstance',
+		source: e.source ?? '',
+		instanceId: e.instance_id,
+		processCount: processes.length,
+	})
+	if (!confirmed) return
+	if (!processes.length) {
+		addNotification({
+			title: formatMessage(privilegedMessages.noProcesses),
+			type: 'warning',
+		})
+		return
+	}
+	for (const process of processes) await killProcess(process.uuid).catch(handleError)
+	addNotification({
+		title: formatMessage(privilegedMessages.stopped),
+		type: 'success',
+	})
 }
 
 const updatePopupMessages = defineMessages({
@@ -3164,6 +3232,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		:error-action-label="formatMessage(messages.exportErrorLogs)"
 	/>
 	<MinecraftCrashModal ref="minecraftCrashModal" />
+	<PrivilegedActionConfirmModal ref="privilegedActionModal" />
 	<JavaDownloadConfirmationModal ref="javaDownloadConfirmationModal" />
 	<PrivacyConsentModal ref="privacyConsentModal" @saved="handlePrivacyConsentSaved" />
 	<RemoteAnnouncements

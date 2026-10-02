@@ -182,6 +182,7 @@ export type AppSettings = {
 	telemetry_consent_version: number
 	discord_rpc: boolean
 	allow_external_scheme: boolean
+	allow_privileged_scheme: boolean
 	onboarded: boolean
 	onboarding_version: number
 	onboarding_instance_tour_completed: boolean
@@ -212,6 +213,13 @@ export type AppSettings = {
 	skipped_update: string | null
 	pending_update_toast_for_version: string | null
 	auto_download_updates: boolean | null
+
+	// 音乐播放器
+	music_volume: number
+	music_muted: boolean
+	music_play_mode: string
+	music_autoplay_on_launch: boolean
+	music_current_track_id: string | null
 
 	version: number
 }
@@ -260,6 +268,7 @@ function normalizeDownloadSettings(settings: AppSettings & LegacyMirrorSettings)
 	settings.terracotta_public_nodes ??= ['wss://center.node.1tmc.top']
 	settings.hidden_nav_items ??= []
 	settings.allow_external_scheme ??= true
+	settings.allow_privileged_scheme ??= false
 	settings.custom_window_title_enabled ??= false
 	settings.default_window_title ??= 'Minecraft'
 	settings.custom_background_component_opacity ??= 100
