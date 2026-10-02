@@ -180,7 +180,7 @@ pub async fn add_offline_user(
         }
     }
 
-    crate::anti_piracy::ensure_offline_allowed().await?;
+    let _eligibility = crate::anti_piracy::offline_action_guard().await?;
     credentials.upsert(&state.pool).await?;
     Ok(credentials)
 }
@@ -236,9 +236,11 @@ pub async fn set_default_user(account_id: &str) -> crate::Result<()> {
             .as_error()
         })?;
 
-    if user.is_offline() {
-        crate::anti_piracy::ensure_offline_allowed().await?;
-    }
+    let _eligibility = if user.is_offline() {
+        Some(crate::anti_piracy::offline_action_guard().await?)
+    } else {
+        None
+    };
 
     user.active = true;
     user.upsert(&state.pool).await?;
