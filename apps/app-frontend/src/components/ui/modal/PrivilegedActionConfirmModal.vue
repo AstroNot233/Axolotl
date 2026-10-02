@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { Button, Checkbox, commonMessages, defineMessages, NewModal, useVIntl } from '@modrinth/ui'
+import {
+	Admonition,
+	Button,
+	Checkbox,
+	commonMessages,
+	defineMessages,
+	NewModal,
+	useVIntl,
+} from '@modrinth/ui'
 import { computed, nextTick, ref } from 'vue'
 
 import type { PrivilegedActionRequest } from '@/helpers/deep-link-settings'
@@ -111,18 +119,14 @@ defineExpose({ request: requestAction })
 		:on-hide="() => finish(false)"
 	>
 		<div class="flex w-full flex-col gap-4">
-			<p class="m-0 text-sm font-semibold text-[var(--color-red)]">
-				{{ formatMessage(messages.warning) }}
-			</p>
-			<p
-				v-if="request?.event === 'UpdateSettings'"
-				class="m-0 text-sm text-[var(--color-text-primary)]"
-			>
-				{{ formatMessage(messages.dangerSettings) }}
-			</p>
-			<p v-else-if="request" class="m-0 text-sm text-[var(--color-text-primary)]">
-				{{ formatMessage(messages.dangerStop, { instance: request.instanceId ?? '' }) }}
-			</p>
+			<Admonition type="critical" :header="formatMessage(messages.warning)">
+				<template v-if="request?.event === 'UpdateSettings'">
+					{{ formatMessage(messages.dangerSettings) }}
+				</template>
+				<template v-else-if="request">
+					{{ formatMessage(messages.dangerStop, { instance: request.instanceId ?? '' }) }}
+				</template>
+			</Admonition>
 			<div class="flex flex-col gap-1">
 				<span class="text-xs font-semibold text-[var(--color-text-tertiary)]">
 					{{ formatMessage(messages.linkLabel) }}
