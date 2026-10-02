@@ -218,6 +218,20 @@ pub struct Settings {
     pub auto_download_updates: Option<bool>,
     #[serde(default = "default_true")]
     pub allow_external_scheme: bool,
+    #[serde(default)]
+    pub allow_privileged_scheme: bool,
+
+    // 音乐播放器
+    #[serde(default = "default_music_volume")]
+    pub music_volume: u32,
+    #[serde(default)]
+    pub music_muted: bool,
+    #[serde(default = "default_music_play_mode")]
+    pub music_play_mode: String,
+    #[serde(default)]
+    pub music_autoplay_on_launch: bool,
+    #[serde(default)]
+    pub music_current_track_id: Option<String>,
 
     pub version: usize,
 }
@@ -270,6 +284,23 @@ fn sanitize_font_family(family: Option<String>) -> Option<String> {
 /// the logger's own fallback.
 fn default_log_level() -> String {
     crate::logger::DEFAULT_LOG_LEVEL.to_string()
+}
+
+// 音乐默认音量
+fn default_music_volume() -> u32 {
+    70
+}
+
+/// 播放模式只认这四个 wire 值，其余回退顺序播放
+pub fn normalize_music_play_mode(value: &str) -> String {
+    match value {
+        "shuffle" | "loop_all" | "loop_one" => value.to_string(),
+        _ => "sequence".to_string(),
+    }
+}
+
+fn default_music_play_mode() -> String {
+    "sequence".to_string()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Eq, Hash, PartialEq)]
@@ -417,6 +448,18 @@ impl Settings {
         )
         .fetch_one(exec)
         .await?;
+        // 音乐五列
+        let (
+            music_volume,
+            music_muted,
+            music_play_mode,
+            music_autoplay_on_launch,
+            music_current_track_id,
+        ): (i64, i64, String, i64, Option<String>) = sqlx::query_as(
+            "SELECT music_volume, music_muted, music_play_mode, music_autoplay_on_launch, music_current_track_id FROM settings WHERE id = 0",
+        )
+        .fetch_one(exec)
+        .await?;
         let settings = Self {
             max_concurrent_downloads: res.max_concurrent_downloads as usize,
             max_concurrent_writes: res.max_concurrent_writes as usize,
@@ -554,6 +597,17 @@ impl Settings {
             .fetch_one(exec)
             .await
             .unwrap_or(true),
+            allow_privileged_scheme: sqlx::query_scalar(
+                "SELECT allow_privileged_scheme FROM settings WHERE id = 0",
+            )
+            .fetch_one(exec)
+            .await
+            .unwrap_or(false),
+            music_volume: music_volume.clamp(0, 100) as u32,
+            music_muted: music_muted == 1,
+            music_play_mode: normalize_music_play_mode(&music_play_mode),
+            music_autoplay_on_launch: music_autoplay_on_launch == 1,
+            music_current_track_id,
             version: res.version as usize,
         };
         crate::util::download::set_active_engine(settings.download_engine);
@@ -844,6 +898,22 @@ impl Settings {
             .bind(self.allow_external_scheme)
             .execute(exec)
             .await?;
+        sqlx::query("UPDATE settings SET allow_privileged_scheme = ? WHERE id = 0")
+            .bind(self.allow_privileged_scheme)
+            .execute(exec)
+            .await?;
+
+        // 音乐五列
+        sqlx::query(
+            "UPDATE settings SET music_volume = ?, music_muted = ?, music_play_mode = ?, music_autoplay_on_launch = ?, music_current_track_id = ? WHERE id = 0",
+        )
+        .bind(self.music_volume.clamp(0, 100) as i64)
+        .bind(self.music_muted)
+        .bind(normalize_music_play_mode(&self.music_play_mode))
+        .bind(self.music_autoplay_on_launch)
+        .bind(self.music_current_track_id.as_deref())
+        .execute(exec)
+        .await?;
 
         Ok(())
     }
