@@ -96,12 +96,14 @@ import ModpackInstallModal from '@/components/ui/modal/ModpackInstallModal.vue'
 import PrivacyConsentModal from '@/components/ui/modal/PrivacyConsentModal.vue'
 import NavButton from '@/components/ui/NavButton.vue'
 import NavRail from '@/components/ui/NavRail.vue'
+import OfflineAccountRestrictionModal from '@/components/ui/OfflineAccountRestrictionModal.vue'
 import OnboardingOverlay from '@/components/ui/onboarding/OnboardingOverlay.vue'
 import QuickInstanceSwitcher from '@/components/ui/QuickInstanceSwitcher.vue'
 import RemoteAnnouncements from '@/components/ui/RemoteAnnouncements.vue'
 import SplashScreen from '@/components/ui/SplashScreen.vue'
 import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
+import { isOfflineAccountRestrictedError } from '@/composables/useAntiPiracyStatus'
 import { useDropImport } from '@/composables/useDropImport'
 import { minecraftLaunchErrorKey } from '@/composables/useMinecraftLaunchError'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
@@ -1674,11 +1676,13 @@ async function previewPrivacyConsentModal() {
 }
 
 provide('replayOnboarding', replayOnboarding)
-provide(
-	minecraftLaunchErrorKey,
-	async (launchError, payload) =>
-		(await minecraftCrashModal.value?.handleLaunchError(launchError, payload)) ?? false,
-)
+provide(minecraftLaunchErrorKey, async (launchError, payload) => {
+	if (isOfflineAccountRestrictedError(launchError)) {
+		useError().showAntiPiracyNotice()
+		return true
+	}
+	return (await minecraftCrashModal.value?.handleLaunchError(launchError, payload)) ?? false
+})
 provide('previewMinecraftCrashModal', () => minecraftCrashModal.value?.showPreview())
 const remoteAnnouncementPreview = ref<InstanceType<typeof RemoteAnnouncements>>()
 provide('previewRemoteAnnouncement', (type: 'modal' | 'notification', withAction = false) => {
@@ -2012,6 +2016,7 @@ error.setMinecraftLaunchErrorHandler((launchError, context) => {
 	return true
 })
 const errorModal = ref()
+const antiPiracyNoticeModal = ref<InstanceType<typeof OfflineAccountRestrictionModal>>()
 const minecraftAuthErrorModal = ref()
 
 const contentInstall = createContentInstall({ router, handleError, addNotification })
@@ -2220,6 +2225,7 @@ onMounted(() => {
 	invoke('show_window')
 
 	error.setErrorModal(errorModal.value)
+	error.setAntiPiracyNoticeModal(antiPiracyNoticeModal.value)
 	error.setMinecraftAuthErrorModal(minecraftAuthErrorModal.value)
 
 	setContentIncompatibilityWarningModal(incompatibilityWarningModal.value)
@@ -2255,7 +2261,7 @@ onMounted(() => {
 	})()
 })
 
-const accounts = ref(null)
+const accounts = ref<InstanceType<typeof AccountsCard> | null>(null)
 provide('accountsCard', accounts)
 
 command_listener(handleCommand)
@@ -2299,6 +2305,10 @@ async function handleCommand(e) {
 	} else if (e.event === 'LaunchInstance') {
 		const instance = await getInstance(e.id).catch(() => null)
 		const handleLaunchCommandError = async (launchError) => {
+			if (isOfflineAccountRestrictedError(launchError)) {
+				error.showAntiPiracyNotice()
+				return
+			}
 			const handled =
 				(await minecraftCrashModal.value?.handleLaunchError(launchError, {
 					instance_id: e.id,
@@ -3183,6 +3193,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		</template>
 	</NewModal>
 	<ErrorModal ref="errorModal" />
+	<OfflineAccountRestrictionModal ref="antiPiracyNoticeModal" @sign-in="accounts?.login()" />
 	<MinecraftAuthErrorModal ref="minecraftAuthErrorModal" />
 	<ContentInstallModal
 		ref="modInstallModal"

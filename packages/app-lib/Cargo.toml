@@ -49,6 +49,7 @@ heck = { workspace = true }
 hickory-resolver = { workspace = true }
 hmac = { workspace = true }
 http = { workspace = true }
+iana-time-zone = { workspace = true }
 indicatif = { workspace = true, optional = true }
 itertools = { workspace = true }
 jsonwebtoken = { workspace = true }

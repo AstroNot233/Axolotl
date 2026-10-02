@@ -6606,10 +6606,10 @@
     "message": "Axolotl guide"
   },
   "app.onboarding.offline-account.description": {
-    "message": "Prefer not to sign in yet? Open Playing as in the sidebar and add an offline Minecraft account with just a username."
+    "message": "Open Playing as in the sidebar to add an offline Minecraft account. You may need to sign in with an official Minecraft account on this device first."
   },
   "app.onboarding.offline-account.title": {
-    "message": "Play without signing in"
+    "message": "Offline accounts"
   },
   "app.onboarding.privacy.description": {
     "message": "Manage anonymous telemetry, Discord Rich Presence, and the Minecraft log analysis service whenever you need to."
@@ -7916,8 +7916,20 @@
   "app.settings.developer.announcement-preview-description": {
     "message": "Preview the real announcement components using local sample content, without fetching or marking real announcements as read."
   },
+  "app.settings.developer.clear-official-login-marker": {
+    "message": "Clear login record"
+  },
   "app.settings.developer.feature-flags-section-title": {
     "message": "Feature flags"
+  },
+  "app.settings.developer.official-login-description": {
+    "message": "Clear the official Minecraft sign-in record. You may need to sign in again before creating or using offline accounts."
+  },
+  "app.settings.developer.official-login-marker-cleared": {
+    "message": "Official Minecraft login record cleared"
+  },
+  "app.settings.developer.official-login-section": {
+    "message": "Official Minecraft login record"
   },
   "app.settings.developer.preview-announcement-modal": {
     "message": "Preview startup modal"
@@ -12910,6 +12922,24 @@
   },
   "minecraft-account.remove-account": {
     "message": "Remove account"
+  },
+  "minecraft-account.restriction.buy": {
+    "message": "Buy Minecraft"
+  },
+  "minecraft-account.restriction.description": {
+    "message": "Sign in with an official Minecraft account on this device before creating or using offline accounts. If you do not own Minecraft yet, you can purchase it from the official website."
+  },
+  "minecraft-account.restriction.open-failed": {
+    "message": "Could not open the Minecraft store"
+  },
+  "minecraft-account.restriction.open-failed-description": {
+    "message": "Try again, or open https://www.minecraft.net in your browser to purchase Minecraft."
+  },
+  "minecraft-account.restriction.sign-in": {
+    "message": "Sign in with Minecraft"
+  },
+  "minecraft-account.restriction.title": {
+    "message": "Offline accounts are unavailable"
   },
   "minecraft-account.select-account": {
     "message": "Select account"
