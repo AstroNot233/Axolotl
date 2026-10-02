@@ -7772,6 +7772,93 @@
   "app.settings.about.repository": {
     "message": "Source code"
   },
+  "app.settings.about.run.apex": {
+    "message": "Apex clear +{score}"
+  },
+  "app.settings.about.run.best": {
+    "message": "Best: {score}"
+  },
+  "app.settings.about.run.best-label": {
+    "message": "Best"
+  },
+  "app.settings.about.run.chain": {
+    "message": "Chain!"
+  },
+  "app.settings.about.run.chain-jump": {
+    "message": "Chain jump +{score}"
+  },
+  "app.settings.about.run.combo": {
+    "message": "Combo {count}"
+  },
+  "app.settings.about.run.conduit": {
+    "message": "Conduit power"
+  },
+  "app.settings.about.run.diamond": {
+    "message": "Diamond"
+  },
+  "app.settings.about.run.dolphin": {
+    "message": "Dolphin’s Grace"
+  },
+  "app.settings.about.run.exit": {
+    "message": "Exit game"
+  },
+  "app.settings.about.run.game-over": {
+    "message": "Game over"
+  },
+  "app.settings.about.run.hold-to-jump": {
+    "message": "Short tap for a small hop, hold for a high jump"
+  },
+  "app.settings.about.run.last-stand": {
+    "message": "Last stand +{score}"
+  },
+  "app.settings.about.run.milk": {
+    "message": "Milk"
+  },
+  "app.settings.about.run.new-record": {
+    "message": "New record!"
+  },
+  "app.settings.about.run.poison": {
+    "message": "Poison"
+  },
+  "app.settings.about.run.restart": {
+    "message": "Restart"
+  },
+  "app.settings.about.run.score": {
+    "message": "Score: {score}"
+  },
+  "app.settings.about.run.score-label": {
+    "message": "Score"
+  },
+  "app.settings.about.run.shield": {
+    "message": "Shield"
+  },
+  "app.settings.about.run.slow": {
+    "message": "Slowness"
+  },
+  "app.settings.about.run.slow-fall": {
+    "message": "Slow Falling"
+  },
+  "app.settings.about.run.stew": {
+    "message": "Suspicious Stew"
+  },
+  "app.settings.about.run.streak": {
+    "message": "No damage x{count}"
+  },
+  "app.settings.about.run.swift": {
+    "message": "Swiftness"
+  },
+  "app.settings.about.run.tap-to-start": {
+    "message": "Press Space or click to start"
+  },
+  "app.settings.about.run.tnt": {
+    "message": "TNT"
+  },
+  "app.settings.about.run.title": {
+    "message": "Axolotl run"
+  },
+  "app.settings.about.run.totem": {
+    "message": "Totem of Undying"
+  },
   "app.settings.about.test-error": {
     "message": "Trigger test error"
   },

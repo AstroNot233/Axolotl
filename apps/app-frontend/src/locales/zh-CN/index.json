@@ -7763,6 +7763,93 @@
   "app.settings.about.repository": {
     "message": "源代码"
   },
+  "app.settings.about.run.apex": {
+    "message": "极限高度 +{score}"
+  },
+  "app.settings.about.run.best": {
+    "message": "最佳：{score}"
+  },
+  "app.settings.about.run.best-label": {
+    "message": "最佳"
+  },
+  "app.settings.about.run.chain": {
+    "message": "连锁！"
+  },
+  "app.settings.about.run.chain-jump": {
+    "message": "连跳 +{score}"
+  },
+  "app.settings.about.run.combo": {
+    "message": "连击 {count}"
+  },
+  "app.settings.about.run.conduit": {
+    "message": "潮涌核心"
+  },
+  "app.settings.about.run.diamond": {
+    "message": "钻石"
+  },
+  "app.settings.about.run.dolphin": {
+    "message": "海豚的恩惠"
+  },
+  "app.settings.about.run.exit": {
+    "message": "退出游戏"
+  },
+  "app.settings.about.run.game-over": {
+    "message": "游戏结束"
+  },
+  "app.settings.about.run.hold-to-jump": {
+    "message": "轻点为小跳，按住可高跳"
+  },
+  "app.settings.about.run.last-stand": {
+    "message": "残血通关 +{score}"
+  },
+  "app.settings.about.run.milk": {
+    "message": "牛奶"
+  },
+  "app.settings.about.run.new-record": {
+    "message": "新纪录！"
+  },
+  "app.settings.about.run.poison": {
+    "message": "中毒"
+  },
+  "app.settings.about.run.restart": {
+    "message": "重新开始"
+  },
+  "app.settings.about.run.score": {
+    "message": "得分：{score}"
+  },
+  "app.settings.about.run.score-label": {
+    "message": "得分"
+  },
+  "app.settings.about.run.shield": {
+    "message": "护盾"
+  },
+  "app.settings.about.run.slow": {
+    "message": "迟缓"
+  },
+  "app.settings.about.run.slow-fall": {
+    "message": "缓降"
+  },
+  "app.settings.about.run.stew": {
+    "message": "迷之炖菜"
+  },
+  "app.settings.about.run.streak": {
+    "message": "无伤 x{count}"
+  },
+  "app.settings.about.run.swift": {
+    "message": "迅捷"
+  },
+  "app.settings.about.run.tap-to-start": {
+    "message": "按空格或点击开始"
+  },
+  "app.settings.about.run.tnt": {
+    "message": "TNT"
+  },
+  "app.settings.about.run.title": {
+    "message": "美西螈快跑"
+  },
+  "app.settings.about.run.totem": {
+    "message": "不死图腾"
+  },
   "app.settings.about.test-error": {
     "message": "触发测试错误"
   },
