@@ -3986,6 +3986,12 @@
 	"app.lab.mod-translation.completed-count": {
 		"message": "{count} 个已完成"
 	},
+	"app.lab.mod-translation.copy-diagnostics": {
+		"message": "复制诊断"
+	},
+	"app.lab.mod-translation.copy-diagnostics-info": {
+		"message": "复制诊断信息"
+	},
 	"app.lab.mod-translation.description": {
 		"message": "把任意 Minecraft 模组 JAR 翻译成简体中文。"
 	},
@@ -4073,11 +4079,38 @@
 	"app.lab.mod-translation.preparing": {
 		"message": "准备中…"
 	},
+	"app.lab.mod-translation.progress.current-batch": {
+		"message": "当前批次 {completed} / {total}"
+	},
+	"app.lab.mod-translation.progress.recently-written": {
+		"message": "最近写入"
+	},
+	"app.lab.mod-translation.progress.verified-weights": {
+		"message": "当前复验通过 {verified} / {total}"
+	},
+	"app.lab.mod-translation.progress.workload-measuring": {
+		"message": "正在建立可验证工作量…"
+	},
 	"app.lab.mod-translation.provider": {
 		"message": "AI 提供商"
 	},
 	"app.lab.mod-translation.repair-enabled": {
 		"message": "复验后批量修复疑难翻译"
+	},
+	"app.lab.mod-translation.result.changed-files": {
+		"message": "改动文件：{files}"
+	},
+	"app.lab.mod-translation.result.class-text": {
+		"message": "Class 文本"
+	},
+	"app.lab.mod-translation.result.completed": {
+		"message": "翻译完成"
+	},
+	"app.lab.mod-translation.result.completed-warnings": {
+		"message": "已生成，但仍有未覆盖文本"
+	},
+	"app.lab.mod-translation.result.mod-label": {
+		"message": "模组"
 	},
 	"app.lab.mod-translation.select-file": {
 		"message": "选择模组 JAR"
@@ -4090,6 +4123,15 @@
 	},
 	"app.lab.mod-translation.start-hint": {
 		"message": "先选择 JAR 和 AI 模型再开始。"
+	},
+	"app.lab.mod-translation.technical-details": {
+		"message": "技术详情"
+	},
+	"app.lab.mod-translation.timeline.empty": {
+		"message": "等待处理事件…"
+	},
+	"app.lab.mod-translation.timeline.title": {
+		"message": "处理时间线 ({count})"
 	},
 	"app.lab.mod-translation.title": {
 		"message": "模组翻译"
@@ -6077,6 +6119,39 @@
 	"app.multiplayer.hongshi.detected-port": {
 		"message": "{instance} — 端口 {port}"
 	},
+	"app.multiplayer.hongshi.cancel": {
+		"message": "取消"
+	},
+	"app.multiplayer.hongshi.no-nodes": {
+		"message": "当前没有已发布的中转节点，请刷新列表后重试。"
+	},
+	"app.multiplayer.hongshi.error.build-unavailable": {
+		"message": "适用于当前设备的红石联机 2 内核暂未发布，请稍后重试。"
+	},
+	"app.multiplayer.hongshi.error.node-list": {
+		"message": "无法获取中转节点，请检查网络并刷新列表。"
+	},
+	"app.multiplayer.hongshi.error.node-unavailable": {
+		"message": "中转节点未能创建房间，请刷新节点列表或选择其他节点。"
+	},
+	"app.multiplayer.hongshi.error.invalid-port": {
+		"message": "请输入 1 到 65535 之间的本地端口。"
+	},
+	"app.multiplayer.hongshi.error.install": {
+		"message": "无法安装红石联机 2 内核，请检查网络后重试。"
+	},
+	"app.multiplayer.hongshi.error.kernel-start": {
+		"message": "红石联机 2 内核未能创建房间，请重试或打开日志。"
+	},
+	"app.multiplayer.hongshi.error.kernel-exit": {
+		"message": "红石联机 2 内核意外退出，请重新创建房间或打开日志。"
+	},
+	"app.multiplayer.hongshi.error.kernel-output": {
+		"message": "红石联机 2 内核返回了无效地址或输出，请打开日志查看详情。"
+	},
+	"app.multiplayer.hongshi.error.unknown": {
+		"message": "无法创建红石联机 2 房间，请重试或打开日志。"
+	},
 	"app.multiplayer.hongshi.local-port": {
 		"message": "本地 Minecraft 端口"
 	},
@@ -7729,6 +7804,93 @@
 	},
 	"app.settings.about.repository": {
 		"message": "源代码"
+	},
+	"app.settings.about.run.apex": {
+		"message": "极限高度 +{score}"
+	},
+	"app.settings.about.run.best": {
+		"message": "最佳：{score}"
+	},
+	"app.settings.about.run.best-label": {
+		"message": "最佳"
+	},
+	"app.settings.about.run.chain": {
+		"message": "连锁！"
+	},
+	"app.settings.about.run.chain-jump": {
+		"message": "连跳 +{score}"
+	},
+	"app.settings.about.run.combo": {
+		"message": "连击 {count}"
+	},
+	"app.settings.about.run.conduit": {
+		"message": "潮涌核心"
+	},
+	"app.settings.about.run.diamond": {
+		"message": "钻石"
+	},
+	"app.settings.about.run.dolphin": {
+		"message": "海豚的恩惠"
+	},
+	"app.settings.about.run.exit": {
+		"message": "退出游戏"
+	},
+	"app.settings.about.run.game-over": {
+		"message": "游戏结束"
+	},
+	"app.settings.about.run.hold-to-jump": {
+		"message": "轻点为小跳，按住可高跳"
+	},
+	"app.settings.about.run.last-stand": {
+		"message": "残血通关 +{score}"
+	},
+	"app.settings.about.run.milk": {
+		"message": "牛奶"
+	},
+	"app.settings.about.run.new-record": {
+		"message": "新纪录！"
+	},
+	"app.settings.about.run.poison": {
+		"message": "中毒"
+	},
+	"app.settings.about.run.restart": {
+		"message": "重新开始"
+	},
+	"app.settings.about.run.score": {
+		"message": "得分：{score}"
+	},
+	"app.settings.about.run.score-label": {
+		"message": "得分"
+	},
+	"app.settings.about.run.shield": {
+		"message": "护盾"
+	},
+	"app.settings.about.run.slow": {
+		"message": "迟缓"
+	},
+	"app.settings.about.run.slow-fall": {
+		"message": "缓降"
+	},
+	"app.settings.about.run.stew": {
+		"message": "迷之炖菜"
+	},
+	"app.settings.about.run.streak": {
+		"message": "无伤 x{count}"
+	},
+	"app.settings.about.run.swift": {
+		"message": "迅捷"
+	},
+	"app.settings.about.run.tap-to-start": {
+		"message": "按空格或点击开始"
+	},
+	"app.settings.about.run.tnt": {
+		"message": "TNT"
+	},
+	"app.settings.about.run.title": {
+		"message": "美西螈快跑"
+	},
+	"app.settings.about.run.totem": {
+		"message": "不死图腾"
 	},
 	"app.settings.about.test-error": {
 		"message": "触发测试错误"
@@ -13067,17 +13229,17 @@
 	"minecraft-account.restriction.title": {
 		"message": "离线账号暂不可用"
 	},
+	"minecraft-account.restriction.description": {
+		"message": "请先在此设备上登录一次正版 Minecraft 账号，再创建或使用离线账号。如果你尚未拥有 Minecraft，可以前往官方网站购买。"
+	},
 	"minecraft-account.restriction.sign-in": {
 		"message": "登录正版 Minecraft"
-	},
-	"minecraft-account.restriction.open-failed-description": {
-		"message": "请重试，或在浏览器中手动访问 https://www.minecraft.net 购买 Minecraft。"
 	},
 	"minecraft-account.restriction.open-failed": {
 		"message": "无法打开 Minecraft 商店"
 	},
-	"minecraft-account.restriction.description": {
-		"message": "请先在此设备上登录一次正版 Minecraft 账号，再创建或使用离线账号。如果你尚未拥有 Minecraft，可以前往官方网站购买。"
+	"minecraft-account.restriction.open-failed-description": {
+		"message": "请重试，或在浏览器中手动访问 https://www.minecraft.net 购买 Minecraft。"
 	},
 	"minecraft-account.restriction.buy": {
 		"message": "购买 Minecraft"
@@ -13085,179 +13247,14 @@
 	"app.settings.developer.official-login-section": {
 		"message": "正版 Minecraft 登录记录"
 	},
-	"app.settings.developer.official-login-marker-cleared": {
-		"message": "已清除正版 Minecraft 登录记录"
-	},
 	"app.settings.developer.official-login-description": {
 		"message": "清除此设备曾登录正版 Minecraft 的记录。清除后，你可能需要重新登录正版账号，才能创建或使用离线账号。"
 	},
 	"app.settings.developer.clear-official-login-marker": {
 		"message": "清除登录记录"
 	},
-	"app.settings.about.run.totem": {
-		"message": "不死图腾"
-	},
-	"app.settings.about.run.tnt": {
-		"message": "TNT"
-	},
-	"app.settings.about.run.title": {
-		"message": "美西螈快跑"
-	},
-	"app.settings.about.run.tap-to-start": {
-		"message": "按空格或点击开始"
-	},
-	"app.settings.about.run.swift": {
-		"message": "迅捷"
-	},
-	"app.settings.about.run.streak": {
-		"message": "无伤 x{count}"
-	},
-	"app.settings.about.run.stew": {
-		"message": "迷之炖菜"
-	},
-	"app.settings.about.run.slow-fall": {
-		"message": "缓降"
-	},
-	"app.settings.about.run.slow": {
-		"message": "迟缓"
-	},
-	"app.settings.about.run.shield": {
-		"message": "护盾"
-	},
-	"app.settings.about.run.score-label": {
-		"message": "得分"
-	},
-	"app.settings.about.run.score": {
-		"message": "得分：{score}"
-	},
-	"app.settings.about.run.restart": {
-		"message": "重新开始"
-	},
-	"app.settings.about.run.poison": {
-		"message": "中毒"
-	},
-	"app.settings.about.run.new-record": {
-		"message": "新纪录！"
-	},
-	"app.settings.about.run.milk": {
-		"message": "牛奶"
-	},
-	"app.settings.about.run.last-stand": {
-		"message": "残血通关 +{score}"
-	},
-	"app.settings.about.run.hold-to-jump": {
-		"message": "轻点为小跳，按住可高跳"
-	},
-	"app.settings.about.run.game-over": {
-		"message": "游戏结束"
-	},
-	"app.settings.about.run.exit": {
-		"message": "退出游戏"
-	},
-	"app.settings.about.run.dolphin": {
-		"message": "海豚的恩惠"
-	},
-	"app.settings.about.run.diamond": {
-		"message": "钻石"
-	},
-	"app.settings.about.run.conduit": {
-		"message": "潮涌核心"
-	},
-	"app.settings.about.run.combo": {
-		"message": "连击 {count}"
-	},
-	"app.settings.about.run.chain-jump": {
-		"message": "连跳 +{score}"
-	},
-	"app.settings.about.run.chain": {
-		"message": "连锁！"
-	},
-	"app.settings.about.run.best-label": {
-		"message": "最佳"
-	},
-	"app.settings.about.run.best": {
-		"message": "最佳：{score}"
-	},
-	"app.settings.about.run.apex": {
-		"message": "极限高度 +{score}"
-	},
-	"app.multiplayer.hongshi.no-nodes": {
-		"message": "当前没有已发布的中转节点，请刷新列表后重试。"
-	},
-	"app.multiplayer.hongshi.error.unknown": {
-		"message": "无法创建红石联机 2 房间，请重试或打开日志。"
-	},
-	"app.multiplayer.hongshi.error.node-unavailable": {
-		"message": "中转节点未能创建房间，请刷新节点列表或选择其他节点。"
-	},
-	"app.multiplayer.hongshi.error.node-list": {
-		"message": "无法获取中转节点，请检查网络并刷新列表。"
-	},
-	"app.multiplayer.hongshi.error.kernel-start": {
-		"message": "红石联机 2 内核未能创建房间，请重试或打开日志。"
-	},
-	"app.multiplayer.hongshi.error.kernel-output": {
-		"message": "红石联机 2 内核返回了无效地址或输出，请打开日志查看详情。"
-	},
-	"app.multiplayer.hongshi.error.kernel-exit": {
-		"message": "红石联机 2 内核意外退出，请重新创建房间或打开日志。"
-	},
-	"app.multiplayer.hongshi.error.invalid-port": {
-		"message": "请输入 1 到 65535 之间的本地端口。"
-	},
-	"app.multiplayer.hongshi.error.install": {
-		"message": "无法安装红石联机 2 内核，请检查网络后重试。"
-	},
-	"app.multiplayer.hongshi.error.build-unavailable": {
-		"message": "适用于当前设备的红石联机 2 内核暂未发布，请稍后重试。"
-	},
-	"app.multiplayer.hongshi.cancel": {
-		"message": "取消"
-	},
-	"app.lab.mod-translation.timeline.title": {
-		"message": "处理时间线 ({count})"
-	},
-	"app.lab.mod-translation.timeline.empty": {
-		"message": "等待处理事件…"
-	},
-	"app.lab.mod-translation.technical-details": {
-		"message": "技术详情"
-	},
-	"app.lab.mod-translation.result.mod-label": {
-		"message": "模组"
-	},
-	"app.lab.mod-translation.result.completed-warnings": {
-		"message": "已生成，但仍有未覆盖文本"
-	},
-	"app.lab.mod-translation.result.completed": {
-		"message": "翻译完成"
-	},
-	"app.lab.mod-translation.result.class-text": {
-		"message": "Class 文本"
-	},
-	"app.lab.mod-translation.result.changed-files": {
-		"message": "改动文件：{files}"
-	},
-	"app.lab.mod-translation.progress.workload-measuring": {
-		"message": "正在建立可验证工作量…"
-	},
-	"app.lab.mod-translation.progress.verified-weights": {
-		"message": "当前复验通过 {verified} / {total}"
-	},
-	"app.lab.mod-translation.progress.recently-written": {
-		"message": "最近写入"
-	},
-	"app.lab.mod-translation.progress.current-batch": {
-		"message": "当前批次 {completed} / {total}"
-	},
-	"app.lab.mod-translation.copy-diagnostics-info": {
-		"message": "复制诊断信息"
-	},
-	"app.lab.mod-translation.copy-diagnostics": {
-		"message": "复制诊断"
-	},
-	"app.settings.privacy.security-title": {
-		"message": "安全"
+	"app.settings.developer.official-login-marker-cleared": {
+		"message": "已清除正版 Minecraft 登录记录"
 	},
 	"app.settings.privacy.external-scheme-description": {
 		"message": "响应来自浏览器及其他应用的 axolotl:// 链接。关闭后，外部的启动、安装与页面跳转将被阻止。"
@@ -13306,5 +13303,8 @@
 	},
 	"app.java-arguments.gc.reason.ample-memory-high-cores": {
 		"message": "内存充足且 CPU 核心数高"
+	},
+	"app.settings.privacy.security-title": {
+		"message": "安全"
 	}
 }

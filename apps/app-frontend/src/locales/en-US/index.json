@@ -3977,6 +3977,12 @@
 	"app.lab.mod-translation.completed-count": {
 		"message": "{count} completed"
 	},
+	"app.lab.mod-translation.copy-diagnostics": {
+		"message": "Copy diagnostics"
+	},
+	"app.lab.mod-translation.copy-diagnostics-info": {
+		"message": "Copy diagnostic information"
+	},
 	"app.lab.mod-translation.description": {
 		"message": "Translate any Minecraft mod JAR into Simplified Chinese."
 	},
@@ -4064,11 +4070,38 @@
 	"app.lab.mod-translation.preparing": {
 		"message": "Preparing…"
 	},
+	"app.lab.mod-translation.progress.current-batch": {
+		"message": "Batch {completed} / {total}"
+	},
+	"app.lab.mod-translation.progress.recently-written": {
+		"message": "Recently written"
+	},
+	"app.lab.mod-translation.progress.verified-weights": {
+		"message": "Verified {verified} / {total}"
+	},
+	"app.lab.mod-translation.progress.workload-measuring": {
+		"message": "Establishing a verifiable workload…"
+	},
 	"app.lab.mod-translation.provider": {
 		"message": "AI provider"
 	},
 	"app.lab.mod-translation.repair-enabled": {
 		"message": "Repair difficult translations after verification"
+	},
+	"app.lab.mod-translation.result.changed-files": {
+		"message": "Changed files: {files}"
+	},
+	"app.lab.mod-translation.result.class-text": {
+		"message": "Class text"
+	},
+	"app.lab.mod-translation.result.completed": {
+		"message": "Translation complete"
+	},
+	"app.lab.mod-translation.result.completed-warnings": {
+		"message": "Generated, but some text is still uncovered"
+	},
+	"app.lab.mod-translation.result.mod-label": {
+		"message": "Mod"
 	},
 	"app.lab.mod-translation.select-file": {
 		"message": "Choose a mod JAR"
@@ -4081,6 +4114,15 @@
 	},
 	"app.lab.mod-translation.start-hint": {
 		"message": "Choose a JAR and an AI model to start."
+	},
+	"app.lab.mod-translation.technical-details": {
+		"message": "Technical details"
+	},
+	"app.lab.mod-translation.timeline.empty": {
+		"message": "Waiting for processing events…"
+	},
+	"app.lab.mod-translation.timeline.title": {
+		"message": "Processing timeline ({count})"
 	},
 	"app.lab.mod-translation.title": {
 		"message": "Mod translation"
@@ -7850,11 +7892,11 @@
 	"app.settings.about.run.tap-to-start": {
 		"message": "Press Space or click to start"
 	},
-	"app.settings.about.run.tnt": {
-		"message": "TNT"
-	},
 	"app.settings.about.run.title": {
 		"message": "Axolotl run"
+	},
+	"app.settings.about.run.tnt": {
+		"message": "TNT"
 	},
 	"app.settings.about.run.totem": {
 		"message": "Totem of Undying"
@@ -9295,6 +9337,30 @@
 	},
 	"app.settings.logs.retention.title": {
 		"message": "Automatic log retention"
+	},
+	"app.settings.privacy.data-handling": {
+		"message": "Telemetry uses a random installation identifier and sends only a daily activity signal. Turning telemetry off clears pending data immediately."
+	},
+	"app.settings.privacy.discord-rpc": {
+		"message": "Discord Rich Presence"
+	},
+	"app.settings.privacy.discord-rpc-description": {
+		"message": "Show your current launcher or game activity in Discord."
+	},
+	"app.settings.privacy.external-scheme": {
+		"message": "Allow external links"
+	},
+	"app.settings.privacy.external-scheme-description": {
+		"message": "Respond to axolotl:// links from browsers and other apps. Turning this off blocks launches, installs and page jumps from outside."
+	},
+	"app.settings.privacy.section-title": {
+		"message": "Privacy & data sharing"
+	},
+	"app.settings.privacy.telemetry": {
+		"message": "Allow telemetry"
+	},
+	"app.settings.privacy.telemetry-description": {
+		"message": "Send one anonymous daily activity signal to improve usage statistics. Minecraft logs and account credentials are never uploaded."
 	},
 	"app.settings.resources.add-minecraft-directory": {
 		"message": "Add .minecraft directory"
@@ -13184,75 +13250,6 @@
 	"unknown-pack-warning-modal.warning.title": {
 		"message": "Unknown file warning"
 	},
-	"app.lab.mod-translation.timeline.title": {
-		"message": "Processing timeline ({count})"
-	},
-	"app.lab.mod-translation.timeline.empty": {
-		"message": "Waiting for processing events…"
-	},
-	"app.lab.mod-translation.technical-details": {
-		"message": "Technical details"
-	},
-	"app.lab.mod-translation.result.mod-label": {
-		"message": "Mod"
-	},
-	"app.lab.mod-translation.result.completed-warnings": {
-		"message": "Generated, but some text is still uncovered"
-	},
-	"app.lab.mod-translation.result.completed": {
-		"message": "Translation complete"
-	},
-	"app.lab.mod-translation.result.class-text": {
-		"message": "Class text"
-	},
-	"app.lab.mod-translation.result.changed-files": {
-		"message": "Changed files: {files}"
-	},
-	"app.lab.mod-translation.progress.workload-measuring": {
-		"message": "Establishing a verifiable workload…"
-	},
-	"app.lab.mod-translation.progress.verified-weights": {
-		"message": "Verified {verified} / {total}"
-	},
-	"app.lab.mod-translation.progress.recently-written": {
-		"message": "Recently written"
-	},
-	"app.lab.mod-translation.progress.current-batch": {
-		"message": "Batch {completed} / {total}"
-	},
-	"app.lab.mod-translation.copy-diagnostics-info": {
-		"message": "Copy diagnostic information"
-	},
-	"app.lab.mod-translation.copy-diagnostics": {
-		"message": "Copy diagnostics"
-	},
-	"app.settings.privacy.telemetry-description": {
-		"message": "Send one anonymous daily activity signal to improve usage statistics. Minecraft logs and account credentials are never uploaded."
-	},
-	"app.settings.privacy.telemetry": {
-		"message": "Allow telemetry"
-	},
-	"app.settings.privacy.section-title": {
-		"message": "Privacy & data sharing"
-	},
-	"app.settings.privacy.external-scheme-description": {
-		"message": "Respond to axolotl:// links from browsers and other apps. Turning this off blocks launches, installs and page jumps from outside."
-	},
-	"app.settings.privacy.external-scheme": {
-		"message": "Allow external links"
-	},
-	"app.settings.privacy.discord-rpc-description": {
-		"message": "Show your current launcher or game activity in Discord."
-	},
-	"app.settings.privacy.discord-rpc": {
-		"message": "Discord Rich Presence"
-	},
-	"app.settings.privacy.data-handling": {
-		"message": "Telemetry uses a random installation identifier and sends only a daily activity signal. Turning telemetry off clears pending data immediately."
-	},
-	"app.settings.privacy.security-title": {
-		"message": "Security"
-	},
 	"app.notification.error-occurred": {
 		"message": "An error occurred"
 	},
@@ -13294,5 +13291,8 @@
 	},
 	"app.java-arguments.gc.reason.ample-memory-high-cores": {
 		"message": "Ample memory and high CPU core count"
+	},
+	"app.settings.privacy.security-title": {
+		"message": "Security"
 	}
 }
