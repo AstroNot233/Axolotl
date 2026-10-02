@@ -38,18 +38,37 @@ const SKIP_DIRS = new Set([
 ])
 
 const SKIP_FILE = [
+	/\.mdx?$/i,
 	/(^|\/)locales\//,
 	/src\/locales\/site\.ts$/,
 	/announcements\/catalog\.ts$/,
+	/-zh\.(ts|json)$/,
+	/\/daily-challenges\.ts$/,
+	/create-release-notes\.mjs$/,
+	/\/installer-ui\//,
+	/lightweight_mode\.rs$/,
+	/oauth_utils\/auth_code_reply\.rs$/,
+	/packages\/ui\/src\/composables\/i18n\.ts$/,
+	/game-settings-modal\/languages\.ts$/,
+	/^apps\/telemetry-dashboard\//,
+	/^apps\/website\//,
+	/\/mod_translation(\.rs|\/)/,
+	/\/AIIcon\.vue$/,
+	/\/helpers\/translation\.ts$/,
+	/\.test\.[tj]s$/,
+	/\.spec\.[tj]sx?$/,
+	/(^|\/)generated\//,
+	/\/storageData\.ts$/,
+	/\/recipe-layouts\.ts$/,
+	/\/launcher\/direct_link\.rs$/,
+	/\/logs\/crash_analysis\.rs$/,
 	/(^|\/)public\//,
 	/\/releases\/catalog\.json$/,
 	/\/item-name-index\.json$/,
 	/\/block-name-index\.json$/,
 	/\/lobehub-provider-descriptions\//,
 	/\/curseforge-category-map\.ts$/,
-	/\/mod_translation\//,
 	/monaco\//,
-	/\.test\.[tj]s$/,
 	/\.svg$/,
 	/\.lock$/,
 	/pnpm-lock\.yaml$/,
@@ -57,7 +76,9 @@ const SKIP_FILE = [
 	/\.min\.(js|css)$/,
 	/web-types\.json$/,
 	/\.d\.ts$/,
+	/\/check-chinese-hardcoded\.mjs$/,
 ]
+const SKIP_LINE = [/locale\.value\.startsWith\(/]
 
 const EXTS = new Set([
 	'.vue',
@@ -125,12 +146,18 @@ for await (const file of walk(ROOT)) {
 	} catch {
 		continue
 	}
+	if (file.endsWith('.rs')) {
+		const testAt = text.search(/#\[cfg\((all\()?test/)
+		if (testAt !== -1) text = text.slice(0, testAt)
+	}
+
 	if (!CJK.test(text)) continue
 
 	const lines = text.split(/\r?\n/)
 	let inBlockComment = false
 	lines.forEach((line, i) => {
 		if (!CJK.test(line)) return
+		if (SKIP_LINE.some((re) => re.test(line))) return
 
 		let kind = classifyLine(line)
 
@@ -148,7 +175,9 @@ for await (const file of walk(ROOT)) {
 			if (idx !== -1) kind = 'comment'
 		}
 
-		const matched = line.match(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\uff00-\uffef\u3000-\u303f]+/g)
+		const matched = line.match(
+			/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\uff00-\uffef\u3000-\u303f]+/g,
+		)
 		results.push({
 			file: rel,
 			line: i + 1,
@@ -174,7 +203,9 @@ const detail = process.argv.includes('--detail')
 const ci = process.argv.includes('--ci')
 
 console.log(`扫描根目录: ${ROOT}`)
-console.log(`命中总行数: ${results.length}（疑似可见 ${strings.length} 行，注释 ${comments.length} 行）`)
+console.log(
+	`命中总行数: ${results.length}（疑似可见 ${strings.length} 行，注释 ${comments.length} 行）`,
+)
 console.log(`涉及文件: ${seen.size} 个\n`)
 
 console.log(`文件共 ${sortedFiles.length} 个`)

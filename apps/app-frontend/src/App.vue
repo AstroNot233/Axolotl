@@ -1326,7 +1326,13 @@ const messages = defineMessages({
 		id: 'app.drop.compatible-mode-cancel',
 		defaultMessage: 'Cancel',
 	},
+	errorOccurred: {
+		id: 'app.notification.error-occurred',
+		defaultMessage: 'An error occurred',
+	},
 })
+
+notificationManager.errorTitleProvider = () => formatMessage(messages.errorOccurred)
 
 function getErrorNotificationDetails(notification) {
 	const details = [notification.title, notification.text, notification.errorCode].filter(Boolean)

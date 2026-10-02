@@ -6077,39 +6077,6 @@
 	"app.multiplayer.hongshi.detected-port": {
 		"message": "{instance} — 端口 {port}"
 	},
-	"app.multiplayer.hongshi.cancel": {
-		"message": "取消"
-	},
-	"app.multiplayer.hongshi.no-nodes": {
-		"message": "当前没有已发布的中转节点，请刷新列表后重试。"
-	},
-	"app.multiplayer.hongshi.error.build-unavailable": {
-		"message": "适用于当前设备的红石联机 2 内核暂未发布，请稍后重试。"
-	},
-	"app.multiplayer.hongshi.error.node-list": {
-		"message": "无法获取中转节点，请检查网络并刷新列表。"
-	},
-	"app.multiplayer.hongshi.error.node-unavailable": {
-		"message": "中转节点未能创建房间，请刷新节点列表或选择其他节点。"
-	},
-	"app.multiplayer.hongshi.error.invalid-port": {
-		"message": "请输入 1 到 65535 之间的本地端口。"
-	},
-	"app.multiplayer.hongshi.error.install": {
-		"message": "无法安装红石联机 2 内核，请检查网络后重试。"
-	},
-	"app.multiplayer.hongshi.error.kernel-start": {
-		"message": "红石联机 2 内核未能创建房间，请重试或打开日志。"
-	},
-	"app.multiplayer.hongshi.error.kernel-exit": {
-		"message": "红石联机 2 内核意外退出，请重新创建房间或打开日志。"
-	},
-	"app.multiplayer.hongshi.error.kernel-output": {
-		"message": "红石联机 2 内核返回了无效地址或输出，请打开日志查看详情。"
-	},
-	"app.multiplayer.hongshi.error.unknown": {
-		"message": "无法创建红石联机 2 房间，请重试或打开日志。"
-	},
 	"app.multiplayer.hongshi.local-port": {
 		"message": "本地 Minecraft 端口"
 	},
@@ -13100,17 +13067,17 @@
 	"minecraft-account.restriction.title": {
 		"message": "离线账号暂不可用"
 	},
-	"minecraft-account.restriction.description": {
-		"message": "请先在此设备上登录一次正版 Minecraft 账号，再创建或使用离线账号。如果你尚未拥有 Minecraft，可以前往官方网站购买。"
-	},
 	"minecraft-account.restriction.sign-in": {
 		"message": "登录正版 Minecraft"
+	},
+	"minecraft-account.restriction.open-failed-description": {
+		"message": "请重试，或在浏览器中手动访问 https://www.minecraft.net 购买 Minecraft。"
 	},
 	"minecraft-account.restriction.open-failed": {
 		"message": "无法打开 Minecraft 商店"
 	},
-	"minecraft-account.restriction.open-failed-description": {
-		"message": "请重试，或在浏览器中手动访问 https://www.minecraft.net 购买 Minecraft。"
+	"minecraft-account.restriction.description": {
+		"message": "请先在此设备上登录一次正版 Minecraft 账号，再创建或使用离线账号。如果你尚未拥有 Minecraft，可以前往官方网站购买。"
 	},
 	"minecraft-account.restriction.buy": {
 		"message": "购买 Minecraft"
@@ -13118,14 +13085,14 @@
 	"app.settings.developer.official-login-section": {
 		"message": "正版 Minecraft 登录记录"
 	},
+	"app.settings.developer.official-login-marker-cleared": {
+		"message": "已清除正版 Minecraft 登录记录"
+	},
 	"app.settings.developer.official-login-description": {
 		"message": "清除此设备曾登录正版 Minecraft 的记录。清除后，你可能需要重新登录正版账号，才能创建或使用离线账号。"
 	},
 	"app.settings.developer.clear-official-login-marker": {
 		"message": "清除登录记录"
-	},
-	"app.settings.developer.official-login-marker-cleared": {
-		"message": "已清除正版 Minecraft 登录记录"
 	},
 	"app.settings.about.run.totem": {
 		"message": "不死图腾"
@@ -13214,8 +13181,38 @@
 	"app.settings.about.run.apex": {
 		"message": "极限高度 +{score}"
 	},
-	"app.settings.privacy.security-title": {
-		"message": "安全"
+	"app.multiplayer.hongshi.no-nodes": {
+		"message": "当前没有已发布的中转节点，请刷新列表后重试。"
+	},
+	"app.multiplayer.hongshi.error.unknown": {
+		"message": "无法创建红石联机 2 房间，请重试或打开日志。"
+	},
+	"app.multiplayer.hongshi.error.node-unavailable": {
+		"message": "中转节点未能创建房间，请刷新节点列表或选择其他节点。"
+	},
+	"app.multiplayer.hongshi.error.node-list": {
+		"message": "无法获取中转节点，请检查网络并刷新列表。"
+	},
+	"app.multiplayer.hongshi.error.kernel-start": {
+		"message": "红石联机 2 内核未能创建房间，请重试或打开日志。"
+	},
+	"app.multiplayer.hongshi.error.kernel-output": {
+		"message": "红石联机 2 内核返回了无效地址或输出，请打开日志查看详情。"
+	},
+	"app.multiplayer.hongshi.error.kernel-exit": {
+		"message": "红石联机 2 内核意外退出，请重新创建房间或打开日志。"
+	},
+	"app.multiplayer.hongshi.error.invalid-port": {
+		"message": "请输入 1 到 65535 之间的本地端口。"
+	},
+	"app.multiplayer.hongshi.error.install": {
+		"message": "无法安装红石联机 2 内核，请检查网络后重试。"
+	},
+	"app.multiplayer.hongshi.error.build-unavailable": {
+		"message": "适用于当前设备的红石联机 2 内核暂未发布，请稍后重试。"
+	},
+	"app.multiplayer.hongshi.cancel": {
+		"message": "取消"
 	},
 	"app.lab.mod-translation.timeline.title": {
 		"message": "处理时间线 ({count})"
@@ -13258,5 +13255,56 @@
 	},
 	"app.lab.mod-translation.copy-diagnostics": {
 		"message": "复制诊断"
+	},
+	"app.settings.privacy.security-title": {
+		"message": "安全"
+	},
+	"app.settings.privacy.external-scheme-description": {
+		"message": "响应来自浏览器及其他应用的 axolotl:// 链接。关闭后，外部的启动、安装与页面跳转将被阻止。"
+	},
+	"app.settings.privacy.external-scheme": {
+		"message": "允许外部链接唤起"
+	},
+	"app.notification.error-occurred": {
+		"message": "发生错误"
+	},
+	"app.java-arguments.gc.reason.zgc-non-generational": {
+		"message": "Java < 21，ZGC 非分代模式性能不佳"
+	},
+	"app.java-arguments.gc.reason.medium-resources": {
+		"message": "资源中 ({memory}GB, {cores}核)"
+	},
+	"app.java-arguments.gc.reason.low-resources": {
+		"message": "资源低 ({memory}GB, {cores}核)"
+	},
+	"app.java-arguments.gc.reason.lightweight-instance": {
+		"message": "轻量实例 ({loader}, {mods} mods)"
+	},
+	"app.java-arguments.gc.reason.large-modpack-low-memory": {
+		"message": "大型 ModPack ({mods} mods) 但资源不足 ({allocated}GB < 8GB)"
+	},
+	"app.java-arguments.gc.reason.java-version-unknown": {
+		"message": "Java 版本未知"
+	},
+	"app.java-arguments.gc.reason.java-too-old": {
+		"message": "Java 太旧，Shenandoah/ZGC 不可靠"
+	},
+	"app.java-arguments.gc.reason.insufficient-memory": {
+		"message": "内存不足 ({allocated}GB < 4GB)"
+	},
+	"app.java-arguments.gc.reason.insufficient-cpu": {
+		"message": "CPU 资源不足 ({cores}核/{threads}线程)"
+	},
+	"app.java-arguments.gc.reason.high-resources": {
+		"message": "资源高 ({memory}GB, {cores}核)"
+	},
+	"app.java-arguments.gc.reason.heavy-instance": {
+		"message": "重型实例 ({loader}, {mods} mods)"
+	},
+	"app.java-arguments.gc.reason.below-zgc-recommendation": {
+		"message": "资源未达到 ZGC 推荐配置"
+	},
+	"app.java-arguments.gc.reason.ample-memory-high-cores": {
+		"message": "内存充足且 CPU 核心数高"
 	}
 }
