@@ -1203,11 +1203,11 @@ function submitJoin() {
 							}}</span>
 							<Combobox
 								v-model="selectedInstanceId"
-								@update:model-value="portSelectionTouched = true"
 								class="!w-full"
 								:options="
 									detectedPortOptions.map((value) => ({ value, label: detectedPortLabel(value) }))
 								"
+								@update:model-value="portSelectionTouched = true"
 							/>
 						</div>
 

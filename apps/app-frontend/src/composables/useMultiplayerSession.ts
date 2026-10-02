@@ -1,6 +1,7 @@
 import { injectNotificationManager, useVIntl } from '@modrinth/ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
+import { hongshiErrorMessage } from '@/helpers/hongshi-messages'
 import {
 	type DetectedLanPort,
 	type HongshiNode,
@@ -9,7 +10,6 @@ import {
 	type MultiplayerProvider,
 	type MultiplayerState,
 } from '@/helpers/multiplayer'
-import { hongshiErrorMessage } from '@/helpers/hongshi-messages'
 import { terracotta, type TerracottaUpdate } from '@/helpers/terracotta'
 import { exportErrorLogs } from '@/helpers/utils'
 
