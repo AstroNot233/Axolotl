@@ -1,18 +1,8 @@
-<script lang="ts">
-import type { SettingsDiffRow } from '@/helpers/deep-link-settings'
-
-export type PrivilegedActionRequest = {
-	event: 'UpdateSettings' | 'StopInstance'
-	source: string
-	rows?: SettingsDiffRow[]
-	instanceId?: string
-	processCount?: number
-}
-</script>
-
 <script setup lang="ts">
 import { Button, Checkbox, commonMessages, defineMessages, NewModal, useVIntl } from '@modrinth/ui'
 import { computed, nextTick, ref } from 'vue'
+
+import type { PrivilegedActionRequest } from '@/helpers/deep-link-settings'
 
 const { formatMessage } = useVIntl()
 const messages = defineMessages({
@@ -42,7 +32,8 @@ const messages = defineMessages({
 	columnAfter: { id: 'app.privileged-modal.column-after', defaultMessage: 'New value' },
 	processCount: {
 		id: 'app.privileged-modal.process-count',
-		defaultMessage: '{count, plural, one {# running process} other {# running processes}} will be stopped.',
+		defaultMessage:
+			'{count, plural, one {# running process} other {# running processes}} will be stopped.',
 	},
 	countdown: {
 		id: 'app.privileged-modal.countdown',
@@ -123,7 +114,10 @@ defineExpose({ request: requestAction })
 			<p class="m-0 text-sm font-semibold text-[var(--color-red)]">
 				{{ formatMessage(messages.warning) }}
 			</p>
-			<p v-if="request?.event === 'UpdateSettings'" class="m-0 text-sm text-[var(--color-text-primary)]">
+			<p
+				v-if="request?.event === 'UpdateSettings'"
+				class="m-0 text-sm text-[var(--color-text-primary)]"
+			>
 				{{ formatMessage(messages.dangerSettings) }}
 			</p>
 			<p v-else-if="request" class="m-0 text-sm text-[var(--color-text-primary)]">
@@ -137,10 +131,7 @@ defineExpose({ request: requestAction })
 					request?.source
 				}}</code>
 			</div>
-			<div
-				v-if="request?.event === 'UpdateSettings'"
-				class="flex flex-col gap-1"
-			>
+			<div v-if="request?.event === 'UpdateSettings'" class="flex flex-col gap-1">
 				<span class="text-xs font-semibold text-[var(--color-text-tertiary)]">
 					{{ formatMessage(messages.changesLabel) }}
 				</span>
@@ -161,7 +152,9 @@ defineExpose({ request: requestAction })
 					<tbody>
 						<tr v-for="row in request?.rows ?? []" :key="row.key">
 							<td class="break-all p-1 font-mono">{{ row.key }}</td>
-							<td class="break-all p-1 text-[var(--color-text-tertiary)]">{{ row.before }}</td>
+							<td class="break-all p-1 text-[var(--color-text-tertiary)]">
+								{{ row.before }}
+							</td>
 							<td class="break-all p-1 font-semibold">{{ row.after }}</td>
 						</tr>
 					</tbody>
@@ -175,22 +168,13 @@ defineExpose({ request: requestAction })
 			</p>
 			<Checkbox v-model="acknowledged" :label="formatMessage(messages.acknowledge)" />
 			<span class="text-xs text-[var(--color-text-tertiary)]">
-				{{
-					secondsLeft > 0
-						? formatMessage(messages.countdown, { seconds: secondsLeft })
-						: ''
-				}}
+				{{ secondsLeft > 0 ? formatMessage(messages.countdown, { seconds: secondsLeft }) : '' }}
 			</span>
 		</div>
 		<template #actions>
 			<div ref="cancelWrap" class="flex w-full flex-row justify-end gap-2">
 				<Button @click="finish(false)">{{ formatMessage(commonMessages.cancelButton) }}</Button>
-				<Button
-					type="colored"
-					color="red"
-					:disabled="confirmDisabled"
-					@click="finish(true)"
-				>
+				<Button type="colored" color="red" :disabled="confirmDisabled" @click="finish(true)">
 					{{ formatMessage(messages.confirm) }}
 				</Button>
 			</div>

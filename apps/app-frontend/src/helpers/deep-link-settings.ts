@@ -2,6 +2,14 @@ import type { AppSettings } from './settings'
 
 export type PrivilegedSettingChange = { key: string; value: string }
 
+export type PrivilegedActionRequest = {
+	event: 'UpdateSettings' | 'StopInstance'
+	source: string
+	rows?: SettingsDiffRow[]
+	instanceId?: string
+	processCount?: number
+}
+
 export type SettingsDiffRow = {
 	key: string
 	before: string
