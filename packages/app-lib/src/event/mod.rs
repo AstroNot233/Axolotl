@@ -319,8 +319,15 @@ pub enum CommandPayload {
         path: PathBuf,
     },
     OpenSeedMap {
-        // URL query string describing the shared seed-map state
         query: String,
+    },
+    OpenRoute {
+        path: String,
+        query: Option<String>,
+    },
+    OpenSettings {
+        tab: Option<String>,
+        entry: Option<String>,
     },
     OpenDiscovery,
 }
