@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::{
 	event::{
 		CommandPayload,
+		SettingChange,
 		emit::{emit_command, emit_warning},
 	},
 	state::Settings,
@@ -206,6 +207,19 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 			)
 			.await;
 		}
+		"settings" if first == "set" && second.is_empty() && !extra => {
+			require_privileged().await?;
+			return privileged_settings_payload(sublink, query_part).await;
+		}
+		"stop" if first.is_empty() && !extra => {
+			require_privileged().await?;
+			let map = query_map(query_part);
+			return stop_payload(sublink, non_empty(map.get("instance_id").cloned()));
+		}
+		"stop" if second.is_empty() && !extra => {
+			require_privileged().await?;
+			return stop_payload(sublink, decode_segment(first));
+		}
 		"settings" if second.is_empty() && !extra => {
 			let (tab, entry) = settings_params(query_part, first);
 			return Ok(CommandPayload::OpenSettings { tab, entry });
@@ -341,6 +355,181 @@ fn settings_params(
 		(!seg.is_empty()).then(|| seg.to_string())
 	});
 	(tab, non_empty(map.get("entry").cloned()))
+}
+
+// 特权双闸：两开关均开启才放行，取不到状态时拒绝
+async fn require_privileged() -> crate::Result<()> {
+	let allowed = match crate::State::get().await {
+		Ok(state) => match Settings::get(&state.pool).await {
+			Ok(settings) => {
+				settings.allow_external_scheme
+					&& settings.allow_privileged_scheme
+			}
+			Err(_) => false,
+		},
+		Err(_) => false,
+	};
+	if allowed {
+		return Ok(());
+	}
+	emit_warning("Privileged links are disabled in settings").await?;
+	Err(crate::ErrorKind::InputError(
+		"Privileged links are disabled in settings".to_string(),
+	)
+	.into())
+}
+
+fn in_range(value: &str, min: i64, max: i64) -> bool {
+	value
+		.parse::<i64>()
+		.is_ok_and(|n| (min..=max).contains(&n))
+}
+
+fn no_control(value: &str) -> bool {
+	value.chars().all(|c| !c.is_control())
+}
+
+fn valid_accent_color(value: &str) -> bool {
+	matches!(
+		value,
+		"pink" | "orange" | "green" | "blue" | "purple" | "system"
+	) || value.strip_prefix("custom:#").is_some_and(|hex| {
+		hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit())
+	})
+}
+
+// 特权设置键白名单：未知键/非法值整单拒绝
+fn valid_privileged_setting(key: &str, value: &str) -> bool {
+	let text = |v: &str| no_control(v) && v.len() <= 1024;
+	match key {
+		"collapsed_navigation"
+		| "toggle_sidebar"
+		| "hide_nametag_skins_page"
+		| "advanced_rendering"
+		| "native_decorations"
+		| "auto_hide_downloads_button"
+		| "show_files_tab_in_instances"
+		| "show_worlds_tab_in_instances"
+		| "show_screenshots_tab_in_instances"
+		| "show_skin_selector_in_sidebar"
+		| "hide_on_process_start"
+		| "enter_lightweight_mode_on_game_launch"
+		| "auto_set_java_high_performance_mode"
+		| "force_fullscreen"
+		| "maximize_window"
+		| "bypass_curseforge_download_restrictions"
+		| "ignore_ssl_errors"
+		| "auto_concurrent_downloads"
+		| "transparent_background"
+		| "transparent_background_blur"
+		| "custom_window_title_enabled"
+		| "memory_auto"
+		| "memory_optimize" => matches!(value, "true" | "false"),
+		"theme" => matches!(value, "dark" | "light" | "oled" | "system"),
+		"default_page" => {
+			matches!(value, "Home" | "DiscoverContent" | "Library")
+		}
+		"close_behavior" => {
+			matches!(value, "ask" | "close" | "lightweight")
+		}
+		"log_level" => {
+			matches!(value, "error" | "warn" | "info" | "debug" | "trace")
+		}
+		"home_layout" => matches!(value, "standard" | "minimal"),
+		"download_engine" => matches!(value, "legacy" | "xmcl"),
+		"minecraft_metadata_source"
+		| "minecraft_file_source"
+		| "modrinth_source"
+		| "curseforge_source"
+		| "mojang_auth_source" => matches!(
+			value,
+			"auto"
+				| "official_only"
+				| "mirror_preferred"
+				| "official_preferred"
+		),
+		"accent_color" => valid_accent_color(value),
+		"sidebar_instance_count" => in_range(value, 0, 50),
+		"max_concurrent_downloads" | "max_concurrent_writes" => {
+			in_range(value, 1, 256)
+		}
+		"memory_max" => in_range(value, 1, 1_048_576),
+		"game_resolution_x" | "game_resolution_y" => {
+			in_range(value, 1, 65535)
+		}
+		"custom_background_blur" => in_range(value, 0, 40),
+		"custom_background_opacity" => in_range(value, 10, 100),
+		"custom_background_component_opacity"
+		| "home_widget_background_opacity"
+		| "transparent_background_opacity" => in_range(value, 0, 100),
+		"locale" | "default_window_title" => {
+			!value.trim().is_empty() && value.len() <= 128 && no_control(value)
+		}
+		// 空串表示清空
+		"hooks_pre_launch"
+		| "hooks_wrapper"
+		| "hooks_post_exit"
+		| "custom_dir"
+		| "backup_repository_path"
+		| "custom_background_path" => text(value),
+		_ => false,
+	}
+}
+
+async fn privileged_settings_payload(
+	sublink: &str,
+	query: &str,
+) -> crate::Result<CommandPayload> {
+	let mut changes: Vec<SettingChange> = Vec::new();
+	for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+		let (key, value) = (key.into_owned(), value.into_owned());
+		if !valid_privileged_setting(&key, &value) {
+			emit_warning(&format!(
+				"Invalid privileged settings change: {key}={value}"
+			))
+			.await?;
+			return Err(crate::ErrorKind::InputError(format!(
+				"Invalid privileged settings change: {key}={value}"
+			))
+			.into());
+		}
+		if changes.iter().any(|change| change.key == key) {
+			emit_warning(&format!("Duplicate privileged settings key: {key}"))
+				.await?;
+			return Err(crate::ErrorKind::InputError(format!(
+				"Duplicate privileged settings key: {key}"
+			))
+			.into());
+		}
+		changes.push(SettingChange { key, value });
+	}
+	if changes.is_empty() {
+		emit_warning("Settings update requires at least one key").await?;
+		return Err(crate::ErrorKind::InputError(
+			"Settings update requires at least one key".to_string(),
+		)
+		.into());
+	}
+	Ok(CommandPayload::UpdateSettings {
+		changes,
+		source: format!("axolotl://{sublink}"),
+	})
+}
+
+fn stop_payload(
+	sublink: &str,
+	instance_id: Option<String>,
+) -> crate::Result<CommandPayload> {
+	match instance_id {
+		Some(instance_id) => Ok(CommandPayload::StopInstance {
+			instance_id,
+			source: format!("axolotl://{sublink}"),
+		}),
+		None => Err(crate::ErrorKind::InputError(
+			"Stop command requires an instance_id query parameter".to_string(),
+		)
+		.into()),
+	}
 }
 
 fn decoded(raw: &str) -> String {
