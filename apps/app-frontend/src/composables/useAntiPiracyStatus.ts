@@ -1,14 +1,26 @@
 import { listen } from '@tauri-apps/api/event'
 import { readonly, ref } from 'vue'
 
-import { clear_official_login_marker, get_anti_piracy_status } from '@/helpers/auth'
+import { clear_official_login_marker, get_anti_piracy_status } from '../helpers/auth.js'
 
 export type AntiPiracyStatus = {
 	region: 'checking' | 'cn' | 'non_cn' | 'unavailable'
 	restricted: boolean
+	revision: number
 }
 
-const status = ref<AntiPiracyStatus>({ region: 'checking', restricted: false })
+export function createAntiPiracyStatus() {
+	const status = ref<AntiPiracyStatus>({ region: 'checking', restricted: false, revision: 0 })
+
+	function setStatus(next: AntiPiracyStatus) {
+		if (next.revision < status.value.revision) return
+		status.value = next
+	}
+
+	return { status: readonly(status), setStatus }
+}
+
+const { status, setStatus } = createAntiPiracyStatus()
 let initialization: Promise<void> | undefined
 
 export function isOfflineAccountRestrictedError(error: unknown): boolean {
@@ -22,14 +34,15 @@ export function isOfflineAccountRestrictedError(error: unknown): boolean {
 }
 
 export async function refreshAntiPiracyStatus(): Promise<void> {
-	status.value = (await get_anti_piracy_status()) as AntiPiracyStatus
+	const next = (await get_anti_piracy_status()) as AntiPiracyStatus
+	setStatus(next)
 }
 
 export function useAntiPiracyStatus() {
 	initialization ??= (async () => {
 		try {
 			await listen<AntiPiracyStatus>('anti-piracy-status-changed', ({ payload }) => {
-				status.value = payload
+				setStatus(payload)
 			})
 		} catch (error) {
 			console.warn('Could not subscribe to offline account eligibility changes', error)
@@ -39,10 +52,10 @@ export function useAntiPiracyStatus() {
 		console.warn('Could not initialize offline account eligibility status', error)
 	})
 	return {
-		status: readonly(status),
+		status,
 		refresh: refreshAntiPiracyStatus,
 		clear: async () => {
-			status.value = (await clear_official_login_marker()) as AntiPiracyStatus
+			setStatus((await clear_official_login_marker()) as AntiPiracyStatus)
 		},
 	}
 }
