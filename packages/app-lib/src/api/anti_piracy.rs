@@ -1,15 +1,24 @@
 use base64::Engine;
 use hmac::{Hmac, Mac};
 use rand::RngCore;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::Sha256;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
-use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
 
 use crate::State;
 
-const IP_API_URL: &str = "http://ip-api.com/json/";
+const MAINLAND_CHINA_TIMEZONES: &[&str] = &[
+    "Asia/Shanghai",
+    "Asia/Urumqi",
+    "Asia/Chongqing",
+    "Asia/Chungking",
+    "Asia/Harbin",
+    "Asia/Kashgar",
+    "PRC",
+    // Common non-IANA spelling, accepted for compatibility.
+    "Asia/Beijing",
+];
 const PROOF_KEY: &str = "official-minecraft-login-proof-v1";
 const PROOF_MESSAGE: &[u8] = b"axolotl:official-minecraft-login:1:1";
 const RESTRICTED_ERROR: &str = "OFFLINE_ACCOUNT_RESTRICTED";
@@ -46,62 +55,14 @@ pub struct Status {
     pub revision: u64,
 }
 
-#[derive(Deserialize)]
-struct IpApiResponse {
-    status: String,
-    #[serde(rename = "countryCode")]
-    country_code: Option<String>,
-}
-
-fn parse_region(body: &str) -> Option<Region> {
-    let response: IpApiResponse = serde_json::from_str(body).ok()?;
-    if response.status != "success" {
-        return None;
-    }
-    match response.country_code.as_deref() {
-        Some("CN") => Some(Region::Cn),
-        Some(code)
-            if code.len() == 2
-                && code.bytes().all(|byte| byte.is_ascii_uppercase()) =>
-        {
-            Some(Region::NonCn)
-        }
-        _ => None,
-    }
-}
-
-async fn fetch_region(
-    client: &reqwest::Client,
-    url: &str,
-    timeout: Duration,
-) -> Result<Option<Region>, reqwest::Error> {
-    let response = client
-        .get(url)
-        .timeout(timeout)
-        .send()
-        .await?
-        .error_for_status()?;
-    let body = response.text().await?;
-    Ok(parse_region(&body))
-}
-
-async fn lookup_region(
-    client: &reqwest::Client,
-    url: &str,
-    timeout: Duration,
-) -> Region {
-    match fetch_region(client, url, timeout).await {
-        Ok(Some(region)) => region,
-        Ok(None) => {
-            tracing::warn!(
-                "IP country lookup returned invalid data; offline accounts remain available"
-            );
-            Region::Unavailable
-        }
-        Err(error) => {
-            tracing::warn!(%error, "IP country lookup failed; offline accounts remain available");
-            Region::Unavailable
-        }
+fn region_for_timezone(timezone: &str) -> Region {
+    let timezone = timezone.trim();
+    if timezone.is_empty() {
+        Region::Unavailable
+    } else if MAINLAND_CHINA_TIMEZONES.contains(&timezone) {
+        Region::Cn
+    } else {
+        Region::NonCn
     }
 }
 
@@ -120,17 +81,16 @@ async fn publish_region(region: Region) {
 }
 
 pub async fn check_region() -> Status {
-    let region = match State::get().await {
-        Ok(state) => {
-            lookup_region(
-                &state.configured_http_client(),
-                IP_API_URL,
-                Duration::from_secs(5),
-            )
-            .await
+    let region = match tokio::task::spawn_blocking(iana_time_zone::get_timezone)
+        .await
+    {
+        Ok(Ok(timezone)) => region_for_timezone(&timezone),
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "Offline account eligibility check failed; offline accounts remain available");
+            Region::Unavailable
         }
         Err(error) => {
-            tracing::warn!(%error, "IP country lookup could not start; offline accounts remain available");
+            tracing::warn!(%error, "Offline account eligibility task failed; offline accounts remain available");
             Region::Unavailable
         }
     };
@@ -323,46 +283,44 @@ mod tests {
     use super::*;
     use sqlx::migrate::Migrator;
     use sqlx::sqlite::SqlitePoolOptions;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
 
-    async fn mock_response(
-        status: &str,
-        body: &str,
-        delay: Duration,
-    ) -> (String, tokio::task::JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/json/", listener.local_addr().unwrap());
-        let response = format!(
-            "HTTP/1.1 {status}\r\nContent-Length: {}\r\n\r\n{body}",
-            body.len()
-        );
-        let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0u8; 2048];
-            let _ = stream.read(&mut request).await;
-            tokio::time::sleep(delay).await;
-            let _ = stream.write_all(response.as_bytes()).await;
-        });
-        (url, server)
+    #[test]
+    fn allows_mainland_china_timezones_and_aliases() {
+        for timezone in [
+            "Asia/Shanghai",
+            "Asia/Urumqi",
+            "Asia/Beijing",
+            "Asia/Chongqing",
+            "Asia/Chungking",
+            "Asia/Harbin",
+            "Asia/Kashgar",
+            "PRC",
+        ] {
+            assert_eq!(region_for_timezone(timezone), Region::Cn, "{timezone}");
+        }
     }
 
     #[test]
-    fn accepts_only_successful_country_responses() {
-        assert_eq!(
-            parse_region(r#"{"status":"success","countryCode":"CN"}"#),
-            Some(Region::Cn)
-        );
-        assert_eq!(
-            parse_region(r#"{"status":"success","countryCode":"US"}"#),
-            Some(Region::NonCn)
-        );
-        assert_eq!(
-            parse_region(r#"{"status":"fail","countryCode":"US"}"#),
-            None
-        );
-        assert_eq!(parse_region(r#"{"status":"success"}"#), None);
-        assert_eq!(parse_region("invalid"), None);
+    fn does_not_exempt_other_timezones_with_the_same_offset() {
+        for timezone in [
+            "Asia/Hong_Kong",
+            "Asia/Macau",
+            "Asia/Macao",
+            "Asia/Taipei",
+            "Asia/Singapore",
+            "Asia/Kuala_Lumpur",
+            "Etc/GMT-8",
+            "UTC",
+            "America/New_York",
+        ] {
+            assert_eq!(
+                region_for_timezone(timezone),
+                Region::NonCn,
+                "{timezone}"
+            );
+        }
+        assert_eq!(region_for_timezone(""), Region::Unavailable);
+        assert_eq!(region_for_timezone("  "), Region::Unavailable);
     }
 
     #[test]
@@ -381,90 +339,6 @@ mod tests {
         }
         assert!(restricted(Region::NonCn, false));
         assert!(!restricted(Region::NonCn, true));
-    }
-
-    #[tokio::test]
-    async fn slow_lookup_times_out_without_a_country_verdict() {
-        let (url, server) = mock_response(
-            "200 OK",
-            r#"{"status":"success","countryCode":"US"}"#,
-            Duration::from_millis(150),
-        )
-        .await;
-        let result = lookup_region(
-            &reqwest::Client::new(),
-            &url,
-            Duration::from_millis(20),
-        )
-        .await;
-        assert_eq!(result, Region::Unavailable);
-        server.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn lookup_classifies_valid_and_invalid_responses() {
-        for (status, body, expected) in [
-            (
-                "200 OK",
-                r#"{"status":"success","countryCode":"CN"}"#,
-                Region::Cn,
-            ),
-            (
-                "200 OK",
-                r#"{"status":"success","countryCode":"US"}"#,
-                Region::NonCn,
-            ),
-            ("200 OK", "not json", Region::Unavailable),
-            (
-                "500 Internal Server Error",
-                r#"{"status":"success","countryCode":"US"}"#,
-                Region::Unavailable,
-            ),
-        ] {
-            let (url, server) =
-                mock_response(status, body, Duration::ZERO).await;
-            let region = lookup_region(
-                &reqwest::Client::new(),
-                &url,
-                Duration::from_secs(1),
-            )
-            .await;
-            assert_eq!(region, expected);
-            server.await.unwrap();
-        }
-    }
-
-    #[tokio::test]
-    async fn background_lookup_leaves_other_tasks_ready() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/json/", listener.local_addr().unwrap());
-        let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
-        let (respond_tx, respond_rx) = tokio::sync::oneshot::channel();
-        let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0u8; 2048];
-            let _ = stream.read(&mut request).await;
-            accepted_tx.send(()).unwrap();
-            respond_rx.await.unwrap();
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 39\r\n\r\n{\"status\":\"success\",\"countryCode\":\"US\"}")
-                .await
-                .unwrap();
-        });
-        let lookup = tokio::spawn(async move {
-            lookup_region(&reqwest::Client::new(), &url, Duration::from_secs(1))
-                .await
-        });
-        accepted_rx.await.unwrap();
-        tokio::time::timeout(Duration::from_millis(50), async {
-            tokio::spawn(async { 42 }).await.unwrap()
-        })
-        .await
-        .unwrap();
-        assert!(!lookup.is_finished());
-        respond_tx.send(()).unwrap();
-        assert_eq!(lookup.await.unwrap(), Region::NonCn);
-        server.await.unwrap();
     }
 
     #[tokio::test]

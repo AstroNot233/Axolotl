@@ -6597,7 +6597,7 @@
     "message": "引导吉祥物"
   },
   "app.onboarding.offline-account.description": {
-    "message": "在侧栏「当前游玩账号」中添加离线 Minecraft 账号。在中国以外的地区，需要先在此设备上登录一次正版 Minecraft 账号。"
+    "message": "在侧栏「当前游玩账号」中添加离线 Minecraft 账号。你可能需要先在此设备上登录一次正版 Minecraft 账号。"
   },
   "app.onboarding.offline-account.title": {
     "message": "离线账号"
@@ -13101,7 +13101,7 @@
     "message": "离线账号暂不可用"
   },
   "minecraft-account.restriction.description": {
-    "message": "根据当前地区的使用规则，需要先在此设备上登录一次正版 Minecraft 账号，才能创建或使用离线账号。"
+    "message": "请先在此设备上登录一次正版 Minecraft 账号，再创建或使用离线账号。如果你尚未拥有 Minecraft，可以前往官方网站购买。"
   },
   "minecraft-account.restriction.sign-in": {
     "message": "登录正版 Minecraft"
@@ -13113,7 +13113,7 @@
     "message": "正版 Minecraft 登录记录"
   },
   "app.settings.developer.official-login-description": {
-    "message": "清除此设备曾登录正版 Minecraft 的记录。清除后，在中国以外的地区将重新限制离线账号。"
+    "message": "清除此设备曾登录正版 Minecraft 的记录。清除后，你可能需要重新登录正版账号，才能创建或使用离线账号。"
   },
   "app.settings.developer.clear-official-login-marker": {
     "message": "清除登录记录"

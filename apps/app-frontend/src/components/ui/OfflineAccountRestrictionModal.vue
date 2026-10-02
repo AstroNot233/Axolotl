@@ -15,7 +15,7 @@ const messages = defineMessages({
 	description: {
 		id: 'minecraft-account.restriction.description',
 		defaultMessage:
-			'In your current region, an official Minecraft account must have been signed in on this device before offline accounts can be created or used.',
+			'Sign in with an official Minecraft account on this device before creating or using offline accounts. If you do not own Minecraft yet, you can purchase it from the official website.',
 	},
 	signIn: {
 		id: 'minecraft-account.restriction.sign-in',

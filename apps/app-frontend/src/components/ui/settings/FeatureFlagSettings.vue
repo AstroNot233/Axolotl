@@ -145,7 +145,7 @@ const messages = defineMessages({
 	officialLoginDescription: {
 		id: 'app.settings.developer.official-login-description',
 		defaultMessage:
-			'Clear the record that allows offline accounts outside China after an official Minecraft sign-in.',
+			'Clear the official Minecraft sign-in record. You may need to sign in again before creating or using offline accounts.',
 	},
 	clearOfficialLoginMarker: {
 		id: 'app.settings.developer.clear-official-login-marker',

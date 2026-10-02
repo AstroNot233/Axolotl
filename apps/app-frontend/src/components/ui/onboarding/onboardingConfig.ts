@@ -132,7 +132,7 @@ export const onboardingMessages = defineMessages({
 	offlineAccountDescription: {
 		id: 'app.onboarding.offline-account.description',
 		defaultMessage:
-			'Open Playing as in the sidebar to add an offline Minecraft account. Outside China, you must first sign in with an official Minecraft account on this device.',
+			'Open Playing as in the sidebar to add an offline Minecraft account. You may need to sign in with an official Minecraft account on this device first.',
 	},
 	downloadsTitle: { id: 'app.onboarding.downloads.title', defaultMessage: 'Download control room' },
 	downloadsDescription: {

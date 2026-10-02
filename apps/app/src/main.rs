@@ -211,7 +211,7 @@ async fn initialize_state(app: tauri::AppHandle) -> api::Result<()> {
         if let Err(error) =
             anti_piracy_app.emit("anti-piracy-status-changed", status)
         {
-            tracing::warn!(%error, "Could not notify frontend of IP country result");
+            tracing::warn!(%error, "Could not notify frontend of offline account eligibility");
         }
     });
     if let Err(error) = theseus::instance::maintain_backup_repository().await {

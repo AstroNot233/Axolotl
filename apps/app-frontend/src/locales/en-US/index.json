@@ -6606,7 +6606,7 @@
     "message": "Axolotl guide"
   },
   "app.onboarding.offline-account.description": {
-    "message": "Open Playing as in the sidebar to add an offline Minecraft account. Outside China, you must first sign in with an official Minecraft account on this device."
+    "message": "Open Playing as in the sidebar to add an offline Minecraft account. You may need to sign in with an official Minecraft account on this device first."
   },
   "app.onboarding.offline-account.title": {
     "message": "Offline accounts"
@@ -13089,7 +13089,7 @@
     "message": "Offline accounts are unavailable"
   },
   "minecraft-account.restriction.description": {
-    "message": "In your current region, an official Minecraft account must have been signed in on this device before offline accounts can be created or used."
+    "message": "Sign in with an official Minecraft account on this device before creating or using offline accounts. If you do not own Minecraft yet, you can purchase it from the official website."
   },
   "minecraft-account.restriction.sign-in": {
     "message": "Sign in with Minecraft"
@@ -13101,7 +13101,7 @@
     "message": "Official Minecraft login record"
   },
   "app.settings.developer.official-login-description": {
-    "message": "Clear the record that allows offline accounts outside China after an official Minecraft sign-in."
+    "message": "Clear the official Minecraft sign-in record. You may need to sign in again before creating or using offline accounts."
   },
   "app.settings.developer.clear-official-login-marker": {
     "message": "Clear login record"
