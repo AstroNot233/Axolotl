@@ -208,6 +208,23 @@ const APP_LEFT_NAV_WIDTH = '4rem'
 
 const discoverContentPath = computed(() => discoverContentTarget(route))
 
+const pagePathCopied = ref(false)
+let pagePathCopiedTimer: ReturnType<typeof window.setTimeout> | undefined
+
+async function copyPagePath() {
+	try {
+		await navigator.clipboard.writeText(route.fullPath)
+	} catch {
+		return
+	}
+
+	pagePathCopied.value = true
+	if (pagePathCopiedTimer) window.clearTimeout(pagePathCopiedTimer)
+	pagePathCopiedTimer = window.setTimeout(() => {
+		pagePathCopied.value = false
+	}, 2000)
+}
+
 function getPageTransitionKey(route: RouteLocationNormalizedLoaded) {
 	const transitionGroup = route.meta.pageTransitionGroup
 	if (typeof transitionGroup !== 'string') return route.fullPath
@@ -1081,6 +1098,14 @@ const messages = defineMessages({
 	exportErrorLogs: {
 		id: 'app.notification.export-error-logs',
 		defaultMessage: 'Export error logs',
+	},
+	copyPagePath: {
+		id: 'app.page-path.copy',
+		defaultMessage: 'Copy page path',
+	},
+	pagePathCopied: {
+		id: 'app.page-path.copied',
+		defaultMessage: 'Copied',
 	},
 
 	// ── Drop / import notification messages ──
@@ -3034,12 +3059,15 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			>
 				<LoadingBar position="absolute" />
 			</div>
-			<div
+			<button
 				v-if="themeStore.featureFlags.page_path"
-				class="absolute bottom-0 left-0 m-2 bg-tooltip-bg text-tooltip-text font-semibold rounded-full px-2 py-1 text-xs z-50"
+				v-tooltip="formatMessage(pagePathCopied ? messages.pagePathCopied : messages.copyPagePath)"
+				type="button"
+				class="absolute bottom-0 left-0 m-2 bg-tooltip-bg text-tooltip-text font-semibold rounded-full px-2 py-1 text-xs z-50 cursor-pointer border-0 text-left"
+				@click="copyPagePath"
 			>
 				{{ route.fullPath }}
-			</div>
+			</button>
 			<div
 				id="background-teleport-target"
 				class="absolute h-full -z-10 rounded-tl-[--radius-xl] overflow-hidden"

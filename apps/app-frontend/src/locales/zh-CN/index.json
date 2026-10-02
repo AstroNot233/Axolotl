@@ -6698,6 +6698,12 @@
 	"app.onboarding.welcome.title": {
 		"message": "一切就绪"
 	},
+	"app.page-path.copied": {
+		"message": "已复制"
+	},
+	"app.page-path.copy": {
+		"message": "复制页面路径"
+	},
 	"app.privacy-consent.continue": {
 		"message": "保存并继续"
 	},
@@ -13260,7 +13266,7 @@
 		"message": "响应来自浏览器及其他应用的 axolotl:// 链接。关闭后，外部的启动、安装与页面跳转将被阻止。"
 	},
 	"app.settings.privacy.external-scheme": {
-		"message": "允许外部链接唤起"
+		"message": "接受外部 Scheme URL"
 	},
 	"app.notification.error-occurred": {
 		"message": "发生错误"
