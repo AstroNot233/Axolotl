@@ -628,7 +628,16 @@ async fn prepare_binary(
 	cancellation: &CancellationToken,
 	force: bool,
 ) -> eyre::Result<PathBuf> {
-	let path = binary_path();
+	prepare_binary_in(&hongshi_root(), id, cancellation, force).await
+}
+
+async fn prepare_binary_in(
+	root: &Path,
+	id: u64,
+	cancellation: &CancellationToken,
+	force: bool,
+) -> eyre::Result<PathBuf> {
+	let path = root.join("v2").join(binary_name());
 	let compatible = compatible_binary_cancellable(&path, cancellation).await;
 	if cancellation.is_cancelled() {
 		bail!("RedStone operation cancelled");
@@ -654,12 +663,12 @@ async fn prepare_binary(
 		));
 	}
 	for legacy in [
-		hongshi_root().join(if cfg!(target_os = "windows") {
+		root.join(if cfg!(target_os = "windows") {
 			"hongshi.exe"
 		} else {
 			"hongshi"
 		}),
-		hongshi_root().join("nodes.json"),
+		root.join("nodes.json"),
 	] {
 		if let Err(error) = tokio::fs::remove_file(&legacy).await
 			&& error.kind() != std::io::ErrorKind::NotFound
@@ -1165,12 +1174,24 @@ async fn host_session(
 ) -> eyre::Result<()> {
 	let binary = prepare_binary(id, cancellation, false).await?;
 	update_state(id, |state| state.status = HongshiStatus::SelectingNode).await;
-	let mut nodes =
+	let nodes =
 		cancellable(cancellation, get_nodes(true))
 			.await
 			.map_err(|error| {
 				failure(HongshiErrorType::NodeList, format!("{error:#}"))
 			})?;
+	host_kernels(id, port, node_name, &binary, nodes, cancellation, ready).await
+}
+
+async fn host_kernels(
+	id: u64,
+	port: u16,
+	node_name: Option<String>,
+	binary: &Path,
+	mut nodes: Vec<HongshiNode>,
+	cancellation: &CancellationToken,
+	ready: &mut Option<oneshot::Sender<eyre::Result<()>>>,
+) -> eyre::Result<()> {
 	if let Some(name) = node_name.as_deref() {
 		nodes.retain(|node| node.name == name);
 	} else {
@@ -1193,7 +1214,7 @@ async fn host_session(
 		})
 		.await;
 		let mut kernel =
-			cancellable(cancellation, spawn_kernel(&binary, &node, port, id))
+			cancellable(cancellation, spawn_kernel(binary, &node, port, id))
 				.await
 				.map_err(|error| {
 					failure(HongshiErrorType::KernelStart, format!("{error:#}"))
@@ -1212,12 +1233,18 @@ async fn host_session(
 			Attempt::Exited(code, opened) => {
 				update_state(id, |state| state.last_exit_code = Some(code))
 					.await;
-				if opened && code == 0 {
+				if code == 0 {
 					update_state(id, |state| {
 						state.status = HongshiStatus::Closed;
 						state.public_address = None;
 					})
 					.await;
+					if let Some(sender) = ready.take() {
+						let _ = sender.send(Err(failure(
+							HongshiErrorType::KernelStart,
+							"RedStone room closed before returning an address",
+						)));
+					}
 					return Ok(());
 				}
 				if !opened && code == 1 && node_name.is_none() {

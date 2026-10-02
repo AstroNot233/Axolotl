@@ -9,6 +9,12 @@ fn main() {
 			.parent()
 			.unwrap()
 			.to_path_buf();
+		let count = directory.join("help-count");
+		let previous = std::fs::read_to_string(&count)
+			.ok()
+			.and_then(|value| value.parse::<u32>().ok())
+			.unwrap_or(0);
+		std::fs::write(count, (previous + 1).to_string()).unwrap();
 		if directory.join("slow-help").exists() {
 			std::fs::write(
 				directory.join("help-started"),
@@ -28,6 +34,12 @@ fn main() {
 	if node == "error.example.com" {
 		std::process::exit(1);
 	}
+	if node == "empty-close.example.com" {
+		return;
+	}
+	if node == "abnormal.example.com" {
+		std::process::exit(2);
+	}
 	if node == "timeout.example.com" {
 		loop {
 			std::thread::sleep(Duration::from_secs(1));
@@ -46,6 +58,10 @@ fn main() {
 		);
 	}
 	io::stdout().flush().unwrap();
+	if node == "double.example.com" {
+		println!("endpoint=other.example.com:34576");
+		io::stdout().flush().unwrap();
+	}
 	if node == "immediate.example.com" {
 		return;
 	}

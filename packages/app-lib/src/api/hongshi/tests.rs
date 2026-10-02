@@ -1,3 +1,4 @@
+use super::multiplayer::SESSION_TEST;
 use super::*;
 use tokio::net::TcpListener;
 
@@ -54,24 +55,21 @@ async fn official_kernel_forwards_a_real_minecraft_connection() {
 		.min_by_key(|node| node.latency_ms)
 		.expect("a reachable official relay");
 	let (id, token, done) = reserve_session(Some(port), None).await.unwrap();
-	let mut kernel = spawn_kernel(&binary, &node, port, id).await.unwrap();
 	let cancellation = token.clone();
 	let (sender, receiver) = oneshot::channel();
 	let actor = tokio::spawn(async move {
 		let mut ready = Some(sender);
-		let result = supervise_kernel(
-			&mut kernel,
+		let result = host_kernels(
 			id,
+			port,
+			Some(node.name.clone()),
+			&binary,
+			vec![node],
 			&cancellation,
 			&mut ready,
-			START_TIMEOUT,
 		)
 		.await;
-		finish_kernel(&mut kernel).await;
-		assert!(kernel.child.try_wait().unwrap().is_some());
-		assert!(kernel.readers.iter().all(|reader| reader.is_finished()));
-		finish_session(id, &cancellation, result.map(|_| ()), &mut ready, done)
-			.await;
+		finish_session(id, &cancellation, result, &mut ready, done).await;
 	});
 	let acceptance = async {
 		receiver.await??;
@@ -110,8 +108,6 @@ async fn official_kernel_forwards_a_real_minecraft_connection() {
 	);
 	acceptance.unwrap();
 }
-
-static SESSION_TEST: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 fn fixture() -> tempfile::TempDir {
 	let directory = tempfile::tempdir().unwrap();
@@ -165,6 +161,23 @@ async fn direct_binary_install_succeeds_then_cached_help_is_reused() {
 	assert_eq!(std::fs::read(&path).unwrap(), binary);
 	assert!(compatible_binary(&path).await);
 	assert!(compatible_binary(&path).await);
+	assert_eq!(
+		std::fs::read_to_string(directory.path().join("help-count")).unwrap(),
+		"2"
+	);
+	std::io::Write::write_all(
+		&mut std::fs::OpenOptions::new()
+			.append(true)
+			.open(&path)
+			.unwrap(),
+		b"changed",
+	)
+	.unwrap();
+	assert!(compatible_binary(&path).await);
+	assert_eq!(
+		std::fs::read_to_string(directory.path().join("help-count")).unwrap(),
+		"3"
+	);
 	assert_eq!(server.await.unwrap().len(), 1);
 	let blocked = directory.path().join("blocked");
 	std::fs::create_dir_all(&blocked).unwrap();
@@ -182,6 +195,121 @@ async fn direct_binary_install_succeeds_then_cached_help_is_reused() {
 	);
 	assert!(blocked.is_dir());
 	server.await.unwrap();
+}
+
+#[tokio::test]
+async fn node_attempts_fallback_only_in_automatic_mode_and_exit_zero_closes() {
+	let _serial = SESSION_TEST.lock().await;
+	let fixture = fixture();
+	let binary = fixture.path().join(binary_name());
+	for (first, manual, expected) in [
+		("error.example.com", false, "closed"),
+		("timeout.example.com", false, "closed"),
+		("error.example.com", true, "error"),
+		("abnormal.example.com", false, "error"),
+		("empty-close.example.com", false, "early-close"),
+		("immediate.example.com", false, "immediate-close"),
+	] {
+		let (id, token, done) =
+			reserve_session(Some(25565), None).await.unwrap();
+		let (sender, receiver) = oneshot::channel();
+		let mut ready = Some(sender);
+		let result = host_kernels(
+			id,
+			25565,
+			manual.then(|| first.into()),
+			&binary,
+			vec![test_node(first), test_node("closed.example.com")],
+			&token,
+			&mut ready,
+		)
+		.await;
+		let snapshot = HONGSHI_STATE.lock().await.clone();
+		match expected {
+			"closed" => {
+				assert!(result.is_ok());
+				assert_eq!(snapshot.node.unwrap().name, "closed.example.com");
+				assert_eq!(snapshot.status, HongshiStatus::Closed);
+				assert!(receiver.await.unwrap().is_ok());
+			}
+			"early-close" => {
+				assert!(result.is_ok());
+				assert_eq!(snapshot.status, HongshiStatus::Closed);
+				assert_eq!(snapshot.last_exit_code, Some(0));
+				assert!(receiver.await.unwrap().is_err());
+			}
+			"immediate-close" => {
+				assert!(result.is_ok());
+				assert_eq!(snapshot.status, HongshiStatus::Closed);
+				assert_eq!(snapshot.last_exit_code, Some(0));
+				let _ = receiver.await.unwrap();
+			}
+			"error" => {
+				assert!(result.is_err());
+				assert_eq!(snapshot.node.unwrap().name, first);
+				assert_eq!(
+					snapshot.last_exit_code,
+					Some(if manual { 1 } else { 2 })
+				);
+			}
+			_ => unreachable!(),
+		}
+		assert!(HONGSHI_STATE.lock().await.public_address.is_none());
+		finish_session(id, &token, result, &mut ready, done).await;
+		assert!(HONGSHI_RUNTIME.lock().await.session.is_none());
+	}
+}
+
+#[tokio::test]
+async fn a_second_endpoint_cannot_replace_the_first_address() {
+	let _serial = SESSION_TEST.lock().await;
+	let fixture = fixture();
+	let (id, token, done) = reserve_session(Some(25565), None).await.unwrap();
+	let mut kernel = spawn_kernel(
+		&fixture.path().join(binary_name()),
+		&test_node("double.example.com"),
+		25565,
+		id,
+	)
+	.await
+	.unwrap();
+	let cancellation = token.clone();
+	let (sender, receiver) = oneshot::channel();
+	let actor = tokio::spawn(async move {
+		let mut ready = Some(sender);
+		assert!(matches!(
+			supervise_kernel(
+				&mut kernel,
+				id,
+				&cancellation,
+				&mut ready,
+				START_TIMEOUT
+			)
+			.await
+			.unwrap(),
+			Attempt::Cancelled
+		));
+		finish_kernel(&mut kernel).await;
+		assert!(kernel.child.try_wait().unwrap().is_some());
+		assert!(kernel.readers.iter().all(|reader| reader.is_finished()));
+		finish_session(
+			id,
+			&cancellation,
+			Err(eyre::eyre!("cancelled")),
+			&mut ready,
+			done,
+		)
+		.await;
+	});
+	receiver.await.unwrap().unwrap();
+	tokio::time::sleep(Duration::from_millis(100)).await;
+	assert_eq!(
+		HONGSHI_STATE.lock().await.public_address.as_deref(),
+		Some("relay.example.com:34575")
+	);
+	stop().await.unwrap();
+	actor.await.unwrap();
+	assert!(HONGSHI_STATE.lock().await.public_address.is_none());
 }
 
 #[tokio::test]
@@ -217,6 +345,80 @@ async fn missing_build_can_later_install_a_valid_binary_without_resetting_availa
 	install_from(&client, &url, &path, 0, &token).await.unwrap();
 	assert!(compatible_binary(&path).await);
 	assert_eq!(server.await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn room_preparation_reuses_a_compatible_v2_kernel_without_requesting_downloads()
+ {
+	let _serial = SESSION_TEST.lock().await;
+	let fixture = fixture();
+	let directory = tempfile::tempdir().unwrap();
+	let path = directory.path().join("v2").join(binary_name());
+	std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+	std::fs::copy(fixture.path().join(binary_name()), &path).unwrap();
+	for _ in 0..2 {
+		assert_eq!(
+			prepare_binary_in(
+				directory.path(),
+				0,
+				&CancellationToken::new(),
+				false
+			)
+			.await
+			.unwrap(),
+			path
+		);
+	}
+	assert_eq!(
+		std::fs::read_to_string(path.parent().unwrap().join("help-count"))
+			.unwrap(),
+		"1"
+	);
+	assert!(
+		!path
+			.with_file_name(if cfg!(target_os = "windows") {
+				"hongshic.download.exe"
+			} else {
+				"hongshic.download"
+			})
+			.exists()
+	);
+}
+
+#[tokio::test]
+async fn download_size_header_is_rejected_before_a_file_is_installed() {
+	let directory = tempfile::tempdir().unwrap();
+	let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+	let url = format!("http://{}", listener.local_addr().unwrap());
+	let server = tokio::spawn(async move {
+		let (mut stream, _) = listener.accept().await.unwrap();
+		let mut request = [0; 2048];
+		stream.read(&mut request).await.unwrap();
+		stream
+			.write_all(
+				format!(
+					"HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+					MAX_BINARY_SIZE + 1
+				)
+				.as_bytes(),
+			)
+			.await
+			.unwrap();
+	});
+	let path = directory.path().join(binary_name());
+	std::fs::write(&path, b"existing file").unwrap();
+	let error = install_from(
+		&reqwest::Client::new(),
+		&url,
+		&path,
+		0,
+		&CancellationToken::new(),
+	)
+	.await
+	.unwrap_err();
+	assert!(error.to_string().contains("too large"));
+	assert_eq!(std::fs::read(path).unwrap(), b"existing file");
+	server.await.unwrap();
 }
 
 #[tokio::test]
@@ -415,6 +617,120 @@ async fn truncated_node_response_falls_back_to_validated_v2_disk_cache() {
 	assert!(cached);
 	assert_eq!(map["cached region"], "relay.example.com");
 	server.await.unwrap();
+}
+
+#[tokio::test]
+async fn node_fallback_ignores_legacy_and_invalid_v2_cache_files() {
+	let directory = tempfile::tempdir().unwrap();
+	std::fs::write(
+		directory.path().join("nodes.json"),
+		br#"{"legacy":"old.example.com"}"#,
+	)
+	.unwrap();
+	let path = directory.path().join("v2/nodes.json");
+	let (url, server) = http_server(vec![
+		(503, String::new(), Vec::new()),
+		(503, String::new(), Vec::new()),
+		(503, String::new(), Vec::new()),
+	])
+	.await;
+	let client = reqwest::Client::new();
+	let cache = Mutex::new(NodeCache::default());
+	assert!(
+		load_node_map_from(&client, &url, &path, &cache, true)
+			.await
+			.is_err()
+	);
+	std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+	std::fs::write(&path, br#"{"invalid":"127.0.0.1"}"#).unwrap();
+	assert!(
+		load_node_map_from(&client, &url, &path, &cache, true)
+			.await
+			.is_err()
+	);
+	std::fs::write(&path, br#"{"v2":"new.example.com"}"#).unwrap();
+	let (map, cached) = load_node_map_from(&client, &url, &path, &cache, true)
+		.await
+		.unwrap();
+	assert!(cached);
+	assert_eq!(map.len(), 1);
+	assert_eq!(map["v2"], "new.example.com");
+	assert_eq!(server.await.unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn bound_game_port_changes_require_restart_and_game_exit_reaps_the_kernel()
+ {
+	let _serial = SESSION_TEST.lock().await;
+	let fixture = fixture();
+	observe_minecraft_log(
+		"bound-game",
+		"Game",
+		"process",
+		"Local game hosted on port 25565",
+	)
+	.await;
+	let (id, token, done) =
+		reserve_session(Some(25565), Some("bound-game".into()))
+			.await
+			.unwrap();
+	let mut kernel = spawn_kernel(
+		&fixture.path().join(binary_name()),
+		&test_node("double.example.com"),
+		25565,
+		id,
+	)
+	.await
+	.unwrap();
+	let cancellation = token.clone();
+	let (sender, receiver) = oneshot::channel();
+	let actor = tokio::spawn(async move {
+		let mut ready = Some(sender);
+		assert!(matches!(
+			supervise_kernel(
+				&mut kernel,
+				id,
+				&cancellation,
+				&mut ready,
+				START_TIMEOUT
+			)
+			.await
+			.unwrap(),
+			Attempt::Cancelled
+		));
+		finish_kernel(&mut kernel).await;
+		assert!(kernel.child.try_wait().unwrap().is_some());
+		assert!(kernel.readers.iter().all(|reader| reader.is_finished()));
+		finish_session(
+			id,
+			&cancellation,
+			Err(eyre::eyre!("cancelled")),
+			&mut ready,
+			done,
+		)
+		.await;
+	});
+	receiver.await.unwrap().unwrap();
+	observe_minecraft_log(
+		"bound-game",
+		"Game",
+		"process",
+		"Local game hosted on port 25566",
+	)
+	.await;
+	assert!(HONGSHI_STATE.lock().await.port_changed);
+	assert_eq!(HONGSHI_STATE.lock().await.local_port, Some(25565));
+	minecraft_process_finished("bound-game").await;
+	actor.await.unwrap();
+	assert!(HONGSHI_RUNTIME.lock().await.session.is_none());
+	assert!(HONGSHI_STATE.lock().await.public_address.is_none());
+	assert!(!HONGSHI_STATE.lock().await.port_changed);
+	assert!(
+		get_detected_ports()
+			.await
+			.iter()
+			.all(|port| port.instance_id != "bound-game")
+	);
 }
 
 struct TestDirectory(PathBuf);
