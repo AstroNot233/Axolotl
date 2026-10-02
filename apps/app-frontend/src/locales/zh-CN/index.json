@@ -6060,13 +6060,13 @@
     "message": "访客"
   },
   "app.multiplayer.hongshi.binary-missing": {
-    "message": "创建房间前，请先下载适用于当前设备的红石联机内核。"
+    "message": "首次创建房间时将自动安装红石联机 2 内核。"
   },
   "app.multiplayer.hongshi.cached": {
     "message": "（缓存）"
   },
   "app.multiplayer.hongshi.closed": {
-    "message": "红石房间已关闭。重新创建后会获得新的联机地址。"
+    "message": "红石联机 2 房间已关闭。重新创建后会获得新的联机地址。"
   },
   "app.multiplayer.hongshi.create": {
     "message": "创建公网房间"
@@ -6077,11 +6077,38 @@
   "app.multiplayer.hongshi.detected-port": {
     "message": "{instance} — 端口 {port}"
   },
-  "app.multiplayer.hongshi.download": {
-    "message": "下载红石联机"
+  "app.multiplayer.hongshi.cancel": {
+    "message": "取消"
   },
-  "app.multiplayer.hongshi.limits": {
-    "message": "隧道无玩家 10 分钟或运行满 6 小时后自动关闭；最多 10 名玩家，共享 10Mbps 带宽。"
+  "app.multiplayer.hongshi.no-nodes": {
+    "message": "当前没有已发布的中转节点，请刷新列表后重试。"
+  },
+  "app.multiplayer.hongshi.error.build-unavailable": {
+    "message": "适用于当前设备的红石联机 2 内核暂未发布，请稍后重试。"
+  },
+  "app.multiplayer.hongshi.error.node-list": {
+    "message": "无法获取中转节点，请检查网络并刷新列表。"
+  },
+  "app.multiplayer.hongshi.error.node-unavailable": {
+    "message": "中转节点未能创建房间，请刷新节点列表或选择其他节点。"
+  },
+  "app.multiplayer.hongshi.error.invalid-port": {
+    "message": "请输入 1 到 65535 之间的本地端口。"
+  },
+  "app.multiplayer.hongshi.error.install": {
+    "message": "无法安装红石联机 2 内核，请检查网络后重试。"
+  },
+  "app.multiplayer.hongshi.error.kernel-start": {
+    "message": "红石联机 2 内核未能创建房间，请重试或打开日志。"
+  },
+  "app.multiplayer.hongshi.error.kernel-exit": {
+    "message": "红石联机 2 内核意外退出，请重新创建房间或打开日志。"
+  },
+  "app.multiplayer.hongshi.error.kernel-output": {
+    "message": "红石联机 2 内核返回了无效地址或输出，请打开日志查看详情。"
+  },
+  "app.multiplayer.hongshi.error.unknown": {
+    "message": "无法创建红石联机 2 房间，请重试或打开日志。"
   },
   "app.multiplayer.hongshi.local-port": {
     "message": "本地 Minecraft 端口"
@@ -6099,7 +6126,7 @@
     "message": "{name} — {latency} 毫秒{cached}"
   },
   "app.multiplayer.hongshi.open-logs": {
-    "message": "打开红石日志"
+    "message": "打开红石联机 2 日志"
   },
   "app.multiplayer.hongshi.port-changed": {
     "message": "Minecraft 已开放新的局域网端口，请重启隧道后再分享地址。"
@@ -6111,7 +6138,7 @@
     "message": "公网地址"
   },
   "app.multiplayer.hongshi.public-address-hint": {
-    "message": "好友可直接在 Minecraft 中输入此地址，无需运行红石内核。"
+    "message": "好友可直接在 Minecraft 中输入此地址，无需运行红石联机 2 内核。"
   },
   "app.multiplayer.hongshi.refresh-nodes": {
     "message": "刷新节点"
@@ -6126,7 +6153,7 @@
     "message": "不可用"
   },
   "app.multiplayer.hongshi.unsupported": {
-    "message": "红石联机暂不支持当前操作系统或处理器架构。"
+    "message": "红石联机 2 暂不支持当前操作系统或处理器架构。"
   },
   "app.multiplayer.host": {
     "message": "创建房间"
@@ -6180,7 +6207,7 @@
     "message": "由 Terracotta | 陶瓦联机 强力驱动"
   },
   "app.multiplayer.provider.hongshi": {
-    "message": "红石联机"
+    "message": "红石联机 2"
   },
   "app.multiplayer.provider.terracotta": {
     "message": "陶瓦联机"
