@@ -4,7 +4,6 @@ import { Button, defineMessages, injectNotificationManager, Toggle, useVIntl } f
 import { inject, ref, watch } from 'vue'
 
 import { useAntiPiracyStatus } from '@/composables/useAntiPiracyStatus'
-
 import { get as getSettings, set as setSettings } from '@/helpers/settings.ts'
 import { isDev } from '@/helpers/utils'
 import { handleSevereError } from '@/store/error.js'

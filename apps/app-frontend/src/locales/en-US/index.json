@@ -7916,8 +7916,20 @@
   "app.settings.developer.announcement-preview-description": {
     "message": "Preview the real announcement components using local sample content, without fetching or marking real announcements as read."
   },
+  "app.settings.developer.clear-official-login-marker": {
+    "message": "Clear login record"
+  },
   "app.settings.developer.feature-flags-section-title": {
     "message": "Feature flags"
+  },
+  "app.settings.developer.official-login-description": {
+    "message": "Clear the official Minecraft sign-in record. You may need to sign in again before creating or using offline accounts."
+  },
+  "app.settings.developer.official-login-marker-cleared": {
+    "message": "Official Minecraft login record cleared"
+  },
+  "app.settings.developer.official-login-section": {
+    "message": "Official Minecraft login record"
   },
   "app.settings.developer.preview-announcement-modal": {
     "message": "Preview startup modal"
@@ -12911,6 +12923,18 @@
   "minecraft-account.remove-account": {
     "message": "Remove account"
   },
+  "minecraft-account.restriction.buy": {
+    "message": "Buy Minecraft"
+  },
+  "minecraft-account.restriction.description": {
+    "message": "Sign in with an official Minecraft account on this device before creating or using offline accounts. If you do not own Minecraft yet, you can purchase it from the official website."
+  },
+  "minecraft-account.restriction.sign-in": {
+    "message": "Sign in with Minecraft"
+  },
+  "minecraft-account.restriction.title": {
+    "message": "Offline accounts are unavailable"
+  },
   "minecraft-account.select-account": {
     "message": "Select account"
   },
@@ -13084,29 +13108,5 @@
   },
   "unknown-pack-warning-modal.warning.title": {
     "message": "Unknown file warning"
-  },
-  "minecraft-account.restriction.title": {
-    "message": "Offline accounts are unavailable"
-  },
-  "minecraft-account.restriction.description": {
-    "message": "Sign in with an official Minecraft account on this device before creating or using offline accounts. If you do not own Minecraft yet, you can purchase it from the official website."
-  },
-  "minecraft-account.restriction.sign-in": {
-    "message": "Sign in with Minecraft"
-  },
-  "minecraft-account.restriction.buy": {
-    "message": "Buy Minecraft"
-  },
-  "app.settings.developer.official-login-section": {
-    "message": "Official Minecraft login record"
-  },
-  "app.settings.developer.official-login-description": {
-    "message": "Clear the official Minecraft sign-in record. You may need to sign in again before creating or using offline accounts."
-  },
-  "app.settings.developer.clear-official-login-marker": {
-    "message": "Clear login record"
-  },
-  "app.settings.developer.official-login-marker-cleared": {
-    "message": "Official Minecraft login record cleared"
   }
 }

@@ -399,11 +399,11 @@ import { useRoute } from 'vue-router'
 import axolotlLogo from '@/assets/axolotl.png'
 import steveSkinTexture from '@/assets/skins/steve.png?inline'
 import MinecraftLoginModal from '@/components/ui/MinecraftLoginModal.vue'
-import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import {
 	isOfflineAccountRestrictedError,
 	useAntiPiracyStatus,
 } from '@/composables/useAntiPiracyStatus'
+import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { preferredOnlineAccountId } from '@/helpers/account-selection'
 import { compareMinecraftAccounts } from '@/helpers/accounts'
 import { trackEvent } from '@/helpers/analytics'
@@ -425,8 +425,7 @@ import { process_listener } from '@/helpers/events'
 import { getPlayerHeadUrl } from '@/helpers/rendering/batch-skin-renderer.ts'
 import type { Skin } from '@/helpers/skins'
 import { get_available_skins } from '@/helpers/skins'
-import { handleSevereError } from '@/store/error.js'
-import { useError } from '@/store/error.js'
+import { handleSevereError, useError } from '@/store/error.js'
 
 const { formatMessage } = useVIntl()
 const { handleError } = injectNotificationManager()
