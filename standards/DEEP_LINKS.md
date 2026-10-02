@@ -9,7 +9,7 @@ axolotl://<命名空间>[/<动作>/<标识>][?<参数>]
 - 命名空间小写；标识保持原样（URL 编码）；参数 UTF-8 编码
 - 未知参数忽略；缺必填参数拒绝并提示
 - **副作用类**走 `launch` / `install` / `join`（需用户确认）
-- **特权写操作**走 `settings/set` / `stop`（双闸开关 + 10 秒强制确认，见 §6）
+- **特权写操作**走 `settings/set` / `stop`（双闸开关 + 启用时 10 秒强制阅读 + 每次执行确认，见 §6）
 - **纯导航**走各命名空间或通用 `open`（仅白名单路径）
 - 关闭“允许外部链接”开关后，所有 axolotl:// 仅提示不执行
 
@@ -81,7 +81,7 @@ axolotl://<命名空间>[/<动作>/<标识>][?<参数>]
 - 离线时浏览类（browse/project）自动回落 `/library`
 - 文件/Studio 等页只导航不自动连接/执行
 - 关闭“允许外部链接”开关后，所有 axolotl:// 仅弹警告不执行
-- 特权动作（`settings/set`、`stop`）需“允许外部链接”与“允许特权链接操作”双开关同时开启，且必须通过 10 秒强制风险确认弹窗；确认前不产生任何写操作
+- 特权动作（`settings/set`、`stop`）需“允许外部链接”与“允许特权链接操作”双开关同时开启，且每次执行都必须通过确认弹窗（可拒绝）；确认前不产生任何写操作
 - 特权写操作只允许白名单键，未知键、非法值整单拒绝并提示
 - `file://` `javascript:` 等伪协议直接拒绝
 
@@ -96,7 +96,8 @@ axolotl://<命名空间>[/<动作>/<标识>][?<参数>]
 - 设置开关：`PrivacySettings.vue` `allow_external_scheme`（默认 true）、`allow_privileged_scheme`（默认 false，双闸）
 - 特权载荷：`CommandPayload::UpdateSettings` / `StopInstance`（`event/mod.rs`），后端只解析校验、不直接写
 - 特权键表：`apps/app-frontend/src/helpers/deep-link-settings.ts`（与 `handler.rs` 白名单同步）
-- 特权确认弹窗：`apps/app-frontend/src/components/ui/modal/PrivilegedActionConfirmModal.vue`（红色最高警告 + 旧值/新值 diff + 10 秒倒计时 + 勾选 + 默认焦点取消；确认后才调用 `settings_set` / `process_kill`）
+- 特权确认弹窗：`apps/app-frontend/src/components/ui/modal/PrivilegedActionConfirmModal.vue`（红色最高警告 + 旧值/新值 diff + 默认焦点取消；确认后才调用 `settings_set` / `process_kill`）
+- 启用确认弹窗：`apps/app-frontend/src/components/ui/modal/PrivilegedConsentModal.vue`（开启开关时强制 10 秒阅读 + 勾选已了解风险；取消则开关保持关闭）
 - 种子地图分享：`LabSeedMap.vue` 生成 `axolotl://lab/seed-map?...`
 - 桌面快捷方式：`shortcuts/mod.rs` 生成 `axolotl://launch?instance_id=...`
 
@@ -113,7 +114,8 @@ axolotl://<命名空间>[/<动作>/<标识>][?<参数>]
 
 - **双闸**：`allow_external_scheme` 与 `allow_privileged_scheme` 同时开启才受理（后者默认关闭，入口：设置 > 隐私与数据 > 安全）
 - 后端只解析校验并生成载荷，**不直接写入**；前端唯一执行出口是特权确认弹窗
-- 弹窗内容：红色最高警告 + 原始链接全文 + 逐键“当前值 → 新值”对照 + **10 秒倒计时锁死确认键** + 勾选“已阅读并了解风险” + 默认焦点在取消
+- 弹窗内容：红色最高警告 + 原始链接全文 + 逐键“当前值 → 新值”对照 + 默认焦点在取消（可拒绝，无倒计时）
+- 强制 10 秒阅读只发生在**启用开关时**（需勾选“我已了解风险”才能开启）；此后每次执行仅需一次确认
 - 取消 / Esc / 点遮罩均中止；只有点击确认后才调用 `settings_set` / `process_kill`
 - 离线可用（本地写库），多条命令逐条弹窗、不叠加
 

@@ -2,7 +2,6 @@
 import {
 	Admonition,
 	Button,
-	Checkbox,
 	commonMessages,
 	defineMessages,
 	NewModal,
@@ -43,40 +42,20 @@ const messages = defineMessages({
 		defaultMessage:
 			'{count, plural, one {# running process} other {# running processes}} will be stopped.',
 	},
-	countdown: {
-		id: 'app.privileged-modal.countdown',
-		defaultMessage: 'Confirm unlocks in {seconds}s',
-	},
-	acknowledge: {
-		id: 'app.privileged-modal.acknowledge',
-		defaultMessage: 'I have read the warning above and understand the risks',
-	},
 	confirm: { id: 'app.privileged-modal.confirm', defaultMessage: 'Confirm and apply' },
 })
 
 const modal = ref<InstanceType<typeof NewModal>>()
 const cancelWrap = ref<HTMLElement>()
 const request = ref<PrivilegedActionRequest>()
-const acknowledged = ref(false)
-const secondsLeft = ref(0)
 const settled = ref(true)
 let resolver: ((ok: boolean) => void) | undefined
-let countdownTimer: ReturnType<typeof setInterval> | undefined
 
 const title = computed(() => formatMessage(messages.title))
-const confirmDisabled = computed(() => secondsLeft.value > 0 || !acknowledged.value)
-
-function stopCountdown() {
-	if (countdownTimer) {
-		clearInterval(countdownTimer)
-		countdownTimer = undefined
-	}
-}
 
 function finish(ok: boolean) {
 	if (settled.value) return
 	settled.value = true
-	stopCountdown()
 	modal.value?.hide()
 	const resolve = resolver
 	resolver = undefined
@@ -85,15 +64,8 @@ function finish(ok: boolean) {
 
 function run(next: PrivilegedActionRequest, resolve: (ok: boolean) => void) {
 	request.value = next
-	acknowledged.value = false
-	secondsLeft.value = 10
 	settled.value = false
 	resolver = resolve
-	stopCountdown()
-	countdownTimer = setInterval(() => {
-		secondsLeft.value -= 1
-		if (secondsLeft.value <= 0) stopCountdown()
-	}, 1000)
 	modal.value?.show()
 	void nextTick(() => cancelWrap.value?.querySelector('button')?.focus())
 }
@@ -170,15 +142,11 @@ defineExpose({ request: requestAction })
 			>
 				{{ formatMessage(messages.processCount, { count: request.processCount }) }}
 			</p>
-			<Checkbox v-model="acknowledged" :label="formatMessage(messages.acknowledge)" />
-			<span class="text-xs text-[var(--color-text-tertiary)]">
-				{{ secondsLeft > 0 ? formatMessage(messages.countdown, { seconds: secondsLeft }) : '' }}
-			</span>
 		</div>
 		<template #actions>
 			<div ref="cancelWrap" class="flex w-full flex-row justify-end gap-2">
 				<Button @click="finish(false)">{{ formatMessage(commonMessages.cancelButton) }}</Button>
-				<Button type="colored" color="red" :disabled="confirmDisabled" @click="finish(true)">
+				<Button type="colored" color="red" @click="finish(true)">
 					{{ formatMessage(messages.confirm) }}
 				</Button>
 			</div>

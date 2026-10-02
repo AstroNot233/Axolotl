@@ -2,6 +2,7 @@
 import { defineMessages, injectNotificationManager, Toggle, useVIntl } from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
+import PrivilegedConsentModal from '@/components/ui/modal/PrivilegedConsentModal.vue'
 import {
 	get as getSettings,
 	getPrivacySettings,
@@ -23,6 +24,7 @@ const schemeSaving = ref(false)
 const allowExternalScheme = ref((await getSettings()).allow_external_scheme)
 const privilegedSaving = ref(false)
 const allowPrivilegedScheme = ref((await getSettings()).allow_privileged_scheme)
+const privilegedConsentModal = ref<InstanceType<typeof PrivilegedConsentModal> | null>(null)
 const lastSaveState = ref<'idle' | 'saved' | 'error'>('idle')
 const retrySave = ref<(() => void) | undefined>()
 
@@ -68,7 +70,7 @@ const messages = defineMessages({
 	privilegedSchemeDescription: {
 		id: 'app.settings.privacy.privileged-scheme-description',
 		defaultMessage:
-			'Let axolotl:// links change settings and stop game processes. Every such action still requires a 10-second confirmation dialog with a risk warning.',
+			'Let axolotl:// links change settings and stop game processes. Turning this on requires reading a risk warning; every action still asks for your confirmation.',
 	},
 	dataHandling: {
 		id: 'app.settings.privacy.data-handling',
@@ -128,6 +130,11 @@ async function updateExternalScheme(value: boolean) {
 
 async function updatePrivilegedScheme(value: boolean) {
 	if (privilegedSaving.value) return
+	// 启用前强制阅读确认；取消则保持关闭
+	if (value) {
+		const consented = await privilegedConsentModal.value?.request()
+		if (!consented) return
+	}
 	const previous = allowPrivilegedScheme.value
 	allowPrivilegedScheme.value = value
 	privilegedSaving.value = true
@@ -254,6 +261,7 @@ async function updateDiscordRpc(value: boolean) {
 			</SettingsRow>
 		</SettingsSection>
 	</div>
+	<PrivilegedConsentModal ref="privilegedConsentModal" />
 </template>
 
 <style scoped>

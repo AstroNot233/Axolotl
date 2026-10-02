@@ -1378,6 +1378,31 @@ async function exportNotificationErrorLogs(notification) {
 	}
 }
 
+// 把设置同步到界面（主题/外观）；深链改完设置后复用同一套应用逻辑
+async function applyThemeFromSettings(s: Awaited<ReturnType<typeof getSettings>>) {
+	themeStore.setThemeState(s.theme)
+	await initializeSystemAccentColor()
+	themeStore.setAccentColor(s.accent_color)
+	themeStore.collapsedNavigation = s.collapsed_navigation
+	themeStore.advancedRendering = s.advanced_rendering
+	themeStore.hideNametagSkinsPage = s.hide_nametag_skins_page
+	themeStore.toggleSidebar = s.toggle_sidebar
+	themeStore.customBackgroundPath = s.custom_background_path
+	themeStore.customBackgroundBlur = s.custom_background_blur
+	themeStore.customBackgroundOpacity = s.custom_background_opacity
+	themeStore.customBackgroundComponentOpacity = s.custom_background_component_opacity ?? 100
+	themeStore.setCustomBackgroundOpacity()
+	themeStore.uiFont = s.ui_font ?? null
+	themeStore.monoFont = s.mono_font ?? null
+	themeStore.setUiFont()
+	themeStore.setMonoFont()
+	themeStore.transparentBackground = s.transparent_background
+	themeStore.transparentBackgroundOpacity = s.transparent_background_opacity
+	themeStore.transparentBackgroundBlur = s.transparent_background_blur
+	themeStore.setTransparentBackgroundClass()
+	themeStore.setCustomBackgroundClass()
+}
+
 async function setupApp() {
 	try {
 		await reconcileMojangAuthSourceAtStartup()
@@ -2434,6 +2459,9 @@ async function handlePrivilegedCommand(e) {
 		const latest = await getSettings().catch(handleError)
 		if (!latest || !applySettingChanges(latest, e.changes ?? [])) return
 		await setSettings(latest).catch(handleError)
+		await applyThemeFromSettings(latest)
+		setFollowSystemLocale(!latest.locale || latest.locale === 'system')
+		applyLocalePreference(latest.locale)
 		addNotification({
 			title: formatMessage(privilegedMessages.applied),
 			type: 'success',

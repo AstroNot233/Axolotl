@@ -6980,8 +6980,23 @@
   "app.privacy-consent.title": {
     "message": "Privacy & security"
   },
-  "app.privileged-modal.acknowledge": {
-    "message": "I have read the warning above and understand the risks"
+  "app.privileged-consent.acknowledge": {
+    "message": "I understand the risks and want to enable privileged link actions"
+  },
+  "app.privileged-consent.confirm": {
+    "message": "Enable"
+  },
+  "app.privileged-consent.countdown": {
+    "message": "You can enable this in {seconds}s"
+  },
+  "app.privileged-consent.danger": {
+    "message": "Links from websites, chat messages or other apps will be able to request settings changes, including launch commands, directories and network options, and to stop a running game. Every request still shows a confirmation dialog that you can decline."
+  },
+  "app.privileged-consent.title": {
+    "message": "Enable privileged link actions?"
+  },
+  "app.privileged-consent.warning": {
+    "message": "These actions can change security-sensitive settings and stop games"
   },
   "app.privileged-modal.applied": {
     "message": "Privileged link applied"
@@ -7000,9 +7015,6 @@
   },
   "app.privileged-modal.confirm": {
     "message": "Confirm and apply"
-  },
-  "app.privileged-modal.countdown": {
-    "message": "Confirm unlocks in {seconds}s"
   },
   "app.privileged-modal.danger-settings": {
     "message": "These changes can alter security-sensitive settings such as launch commands, directories and the network. Review every row before confirming."
@@ -9654,7 +9666,7 @@
     "message": "Allow privileged link actions"
   },
   "app.settings.privacy.privileged-scheme-description": {
-    "message": "Let axolotl:// links change settings and stop game processes. Every such action still requires a 10-second confirmation dialog with a risk warning."
+    "message": "Let axolotl:// links change settings and stop game processes. Turning this on requires reading a risk warning; every action still asks for your confirmation."
   },
   "app.settings.privacy.section-title": {
     "message": "Privacy & data sharing"
