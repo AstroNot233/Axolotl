@@ -341,8 +341,8 @@
 				display: flex;
 				flex-direction: column;
 				align-items: center;
-				justify-content: center;
-				padding: 0 48px;
+				padding: 24px 48px;
+				overflow-y: auto;
 				opacity: 0;
 				transform: translateY(20px) scale(0.98);
 				pointer-events: none;
@@ -358,8 +358,15 @@
 			.screen-content-wrapper {
 				width: 100%;
 				max-width: 540px;
+				min-width: 0;
+				margin-block: auto;
+				flex-shrink: 0;
 				display: flex;
 				flex-direction: column;
+			}
+
+			.screen[data-screen='welcome'] .screen-content-wrapper {
+				max-width: none;
 			}
 
 			h1,
@@ -425,7 +432,9 @@
 				animation: random-spotlight 16s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 				-webkit-background-clip: text;
 				-webkit-text-fill-color: transparent;
-				white-space: nowrap;
+				max-width: 100%;
+				white-space: normal;
+				overflow-wrap: anywhere;
 				filter: drop-shadow(0 16px 32px rgba(244, 114, 182, 0.2));
 			}
 
@@ -442,8 +451,8 @@
 				line-height: 1.5;
 				font-weight: 500;
 				color: var(--text-secondary);
-				max-width: none;
-				white-space: nowrap;
+				max-width: 100%;
+				white-space: normal;
 				margin-left: auto;
 				margin-right: auto;
 			}
@@ -472,12 +481,6 @@
 			body.is-uninstalling .fact-value {
 				white-space: normal;
 				overflow-wrap: anywhere;
-			}
-
-			.screen-content-wrapper {
-				min-width: 0;
-				max-height: 100%;
-				overflow-y: auto;
 			}
 
 			.error-panel {
