@@ -2486,6 +2486,72 @@
 	"app.home.shortcut.server.players-online": {
 		"message": "{count} online"
 	},
+	"app.home.source.acknowledge": {
+		"message": "I understand the risks"
+	},
+	"app.home.source.choose-file": {
+		"message": "Choose file"
+	},
+	"app.home.source.file-chosen": {
+		"message": "Selected: {name}"
+	},
+	"app.home.source.fit-label": {
+		"message": "Display"
+	},
+	"app.home.source.fit.contain": {
+		"message": "Fit inside"
+	},
+	"app.home.source.fit.cover": {
+		"message": "Fill the widget"
+	},
+	"app.home.source.fit.fill": {
+		"message": "Stretch"
+	},
+	"app.home.source.html.title": {
+		"message": "Local HTML widget"
+	},
+	"app.home.source.image.title": {
+		"message": "Image widget"
+	},
+	"app.home.source.local": {
+		"message": "Local file"
+	},
+	"app.home.source.remote": {
+		"message": "Online image"
+	},
+	"app.home.source.scripts-description": {
+		"message": "Scripts run in a sandbox. Turn off to only show static content."
+	},
+	"app.home.source.scripts-label": {
+		"message": "Allow page scripts"
+	},
+	"app.home.source.source-label": {
+		"message": "Source"
+	},
+	"app.home.source.url-invalid": {
+		"message": "Enter a valid http(s) address."
+	},
+	"app.home.source.url-label": {
+		"message": "URL"
+	},
+	"app.home.source.url-placeholder": {
+		"message": "https://example.com/pic.png"
+	},
+	"app.home.source.warn-html": {
+		"message": "Only open HTML files you trust. A malicious page could try to trick you or waste resources. It cannot reach your files or control the launcher, but never enter passwords in it."
+	},
+	"app.home.source.warn-title": {
+		"message": "Warning: stranger content"
+	},
+	"app.home.source.warn-web": {
+		"message": "Only open pages you trust. A malicious page could try to trick you into signing in or downloading something. Never enter passwords in it."
+	},
+	"app.home.source.web.title": {
+		"message": "Web widget"
+	},
+	"app.home.source.widget-title": {
+		"message": "Title (optional)"
+	},
 	"app.home.widgets.add": {
 		"message": "Add widget"
 	},
@@ -2531,11 +2597,53 @@
 	"app.home.widgets.group.collections": {
 		"message": "Pinned collections"
 	},
+	"app.home.widgets.group.custom": {
+		"message": "Media & custom"
+	},
 	"app.home.widgets.group.overview": {
 		"message": "Overview"
 	},
 	"app.home.widgets.group.shortcuts": {
 		"message": "Single-item shortcuts"
+	},
+	"app.home.widgets.html": {
+		"message": "Local HTML page"
+	},
+	"app.home.widgets.html-description": {
+		"message": "Run a local single-file HTML page in a sandbox."
+	},
+	"app.home.widgets.html.broken": {
+		"message": "HTML file could not be read"
+	},
+	"app.home.widgets.html.configure": {
+		"message": "Choose file"
+	},
+	"app.home.widgets.html.confirm-open": {
+		"message": "The page wants to open {path} inside the launcher. Continue?"
+	},
+	"app.home.widgets.html.empty": {
+		"message": "No HTML file selected"
+	},
+	"app.home.widgets.html.retry": {
+		"message": "Try again"
+	},
+	"app.home.widgets.html.unsupported-link": {
+		"message": "That link is not allowed inside a widget."
+	},
+	"app.home.widgets.image": {
+		"message": "Image"
+	},
+	"app.home.widgets.image-description": {
+		"message": "Show a local picture or an online image on Home."
+	},
+	"app.home.widgets.image.broken": {
+		"message": "Image unavailable"
+	},
+	"app.home.widgets.image.configure": {
+		"message": "Choose image"
+	},
+	"app.home.widgets.image.empty": {
+		"message": "No image selected"
 	},
 	"app.home.widgets.instance": {
 		"message": "Single instance"
@@ -2560,6 +2668,69 @@
 	},
 	"app.home.widgets.move-later": {
 		"message": "Move later"
+	},
+	"app.home.widgets.music": {
+		"message": "Music player"
+	},
+	"app.home.widgets.music.add": {
+		"message": "Add songs"
+	},
+	"app.home.widgets.music.autoplay-off": {
+		"message": "Autoplay: off"
+	},
+	"app.home.widgets.music.autoplay-on": {
+		"message": "Autoplay: on"
+	},
+	"app.home.widgets.music-description": {
+		"message": "Play local music, even while you are in a game."
+	},
+	"app.home.widgets.music.hide-list": {
+		"message": "Hide track list"
+	},
+	"app.home.widgets.music.mode.loop-all": {
+		"message": "Loop all"
+	},
+	"app.home.widgets.music.mode.loop-one": {
+		"message": "Loop this song"
+	},
+	"app.home.widgets.music.mode.sequence": {
+		"message": "Play in order"
+	},
+	"app.home.widgets.music.mode.shuffle": {
+		"message": "Shuffle"
+	},
+	"app.home.widgets.music.mute": {
+		"message": "Mute"
+	},
+	"app.home.widgets.music.next": {
+		"message": "Next track"
+	},
+	"app.home.widgets.music.options": {
+		"message": "Player options"
+	},
+	"app.home.widgets.music.pause": {
+		"message": "Pause"
+	},
+	"app.home.widgets.music.play": {
+		"message": "Play"
+	},
+	"app.home.widgets.music.prev": {
+		"message": "Previous track"
+	},
+	"app.home.widgets.music.remove": {
+		"message": "Remove song"
+	},
+	"app.home.widgets.music.show-list": {
+		"message": "Show track list"
+	},
+	"app.home.widgets.music.unknown-track": {
+		"message": "Nothing playing"
+	},
+	"app.home.widgets.music.unmute": {
+		"message": "Unmute"
+	},
+	"app.home.widgets.music.volume": {
+		"message": "Volume"
 	},
 	"app.home.widgets.no-results": {
 		"message": "No matching items"
@@ -2618,8 +2789,38 @@
 	"app.home.widgets.size": {
 		"message": "Size {size}"
 	},
+	"app.home.widgets.source-settings": {
+		"message": "Widget settings"
+	},
 	"app.home.widgets.unavailable": {
 		"message": "Content unavailable"
+	},
+	"app.home.widgets.web": {
+		"message": "Web page"
+	},
+	"app.home.widgets.web-description": {
+		"message": "Embed an online page. Be careful with pages from strangers."
+	},
+	"app.home.widgets.web.broken": {
+		"message": "The page could not be embedded. Try opening it in the browser."
+	},
+	"app.home.widgets.web.open-external": {
+		"message": "Open in browser"
+	},
+	"app.home.widgets.web.reload": {
+		"message": "Reload"
+	},
+	"app.home.widgets.web.warn-accept": {
+		"message": "I understand, load it"
+	},
+	"app.home.widgets.web.warn-body": {
+		"message": "This page comes from the internet. It runs inside a sandbox, but it could still try to trick you into signing in or downloading something. Never enter passwords here."
+	},
+	"app.home.widgets.web.warn-remove": {
+		"message": "Remove widget"
+	},
+	"app.home.widgets.web.warn-title": {
+		"message": "Stranger content warning"
 	},
 	"app.home.widgets.world": {
 		"message": "Single world"
@@ -6737,6 +6938,54 @@
 	"app.privacy-consent.title": {
 		"message": "Privacy & security"
 	},
+	"app.privileged-modal.acknowledge": {
+		"message": "I have read the warning above and understand the risks"
+	},
+	"app.privileged-modal.applied": {
+		"message": "Privileged link applied"
+	},
+	"app.privileged-modal.changes-label": {
+		"message": "Setting changes"
+	},
+	"app.privileged-modal.column-after": {
+		"message": "New value"
+	},
+	"app.privileged-modal.column-before": {
+		"message": "Current value"
+	},
+	"app.privileged-modal.column-setting": {
+		"message": "Setting"
+	},
+	"app.privileged-modal.confirm": {
+		"message": "Confirm and apply"
+	},
+	"app.privileged-modal.countdown": {
+		"message": "Confirm unlocks in {seconds}s"
+	},
+	"app.privileged-modal.danger-settings": {
+		"message": "These changes can alter security-sensitive settings such as launch commands, directories and the network. Review every row before confirming."
+	},
+	"app.privileged-modal.danger-stop": {
+		"message": "This force-stops the running game of instance {instance}. Unsaved world progress may be lost."
+	},
+	"app.privileged-modal.link-label": {
+		"message": "Requested link"
+	},
+	"app.privileged-modal.no-processes": {
+		"message": "No running game processes for this instance"
+	},
+	"app.privileged-modal.process-count": {
+		"message": "{count, plural, one {# running process} other {# running processes}} will be stopped."
+	},
+	"app.privileged-modal.stopped": {
+		"message": "Stop request sent"
+	},
+	"app.privileged-modal.title": {
+		"message": "Privileged action request"
+	},
+	"app.privileged-modal.warning": {
+		"message": "This link was sent from outside Axolotl Launcher. If you did not create it yourself, choose Cancel."
+	},
 	"app.project.curseforge.unavailable-description": {
 		"message": "The CurseForge project did not return any data."
 	},
@@ -9358,6 +9607,12 @@
 	},
 	"app.settings.privacy.external-scheme-description": {
 		"message": "Respond to axolotl:// links from browsers and other apps. Turning this off blocks launches, installs and page jumps from outside."
+	},
+	"app.settings.privacy.privileged-scheme": {
+		"message": "Allow privileged link actions"
+	},
+	"app.settings.privacy.privileged-scheme-description": {
+		"message": "Let axolotl:// links change settings and stop game processes. Every such action still requires a 10-second confirmation dialog with a risk warning."
 	},
 	"app.settings.privacy.section-title": {
 		"message": "Privacy & data sharing"
