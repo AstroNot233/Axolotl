@@ -591,6 +591,14 @@ a {
 	user-select: text;
 }
 
+input:placeholder-shown,
+textarea:placeholder-shown {
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	user-select: none;
+}
+
 /* Chrome, Edge, and Safari */
 *::-webkit-scrollbar {
 	width: 16px;
