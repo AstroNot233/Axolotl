@@ -561,7 +561,7 @@ function errorMessage(error: unknown) {
 }
 
 function isTransientInstallJobQueryError(error: unknown) {
-	return /timed out|timeout|temporar|busy|connection|network|fetch|database is locked|try again/i.test(
+	return /timed out|timeout|temporary|busy|connection|network|fetch|database is locked|try again/i.test(
 		errorMessage(error),
 	)
 }
