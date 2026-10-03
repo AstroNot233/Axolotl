@@ -994,7 +994,14 @@ export function useDropImport(options: DropImportOptions) {
 		innerBase?: string,
 		throwOnError = false,
 	) {
+		const throwIfBatchCancelled = () => {
+			if (throwOnError && batchInstallCancelled) {
+				throw new Error('Batch import cancelled')
+			}
+		}
+
 		try {
+			throwIfBatchCancelled()
 			if (type === 'world_save') {
 				await import_world_save(instId, filePath, innerBase)
 				addNotification({
@@ -1015,6 +1022,7 @@ export function useDropImport(options: DropImportOptions) {
 				let modrinthLookup: ModrinthLookupResult | null = null
 
 				const metaStr = await extractModMetadata(filePath)
+				throwIfBatchCancelled()
 				dropDebug('installContentDirectly: mod metadata extraction', {
 					filePath,
 					hasMeta: !!metaStr,
@@ -1031,6 +1039,7 @@ export function useDropImport(options: DropImportOptions) {
 
 				try {
 					modrinthLookup = await lookupModHash(filePath)
+					throwIfBatchCancelled()
 					dropDebug('installContentDirectly: modrinth hash lookup', {
 						found: !!modrinthLookup,
 					})
@@ -1039,6 +1048,7 @@ export function useDropImport(options: DropImportOptions) {
 				}
 
 				const inst = await getInstance(instId)
+				throwIfBatchCancelled()
 				dropDebug('installContentDirectly: instance details', {
 					inst: inst?.id,
 					game_version: inst?.game_version,
@@ -1071,6 +1081,7 @@ export function useDropImport(options: DropImportOptions) {
 					})
 
 					if (versionMismatch || loaderMismatch) {
+						throwIfBatchCancelled()
 						pendingDropIncompatibility.value = {
 							filePath,
 							instId,
@@ -1096,6 +1107,7 @@ export function useDropImport(options: DropImportOptions) {
 						contentInstall.incompatibilityWarningInstalling.value = false
 						incompatWarningKey.value++
 						await nextTick()
+						throwIfBatchCancelled()
 						incompatibilityWarningModal.value?.show()
 						return
 					}
@@ -1115,6 +1127,7 @@ export function useDropImport(options: DropImportOptions) {
 				type: 'success',
 			})
 		} catch (e) {
+			if (throwOnError && batchInstallCancelled) throw e
 			let errMsg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e)
 			try {
 				const lockInfo = await detectFileLock(filePath)
@@ -1932,11 +1945,15 @@ export function useDropImport(options: DropImportOptions) {
 			if (item.scanState !== 'done') continue
 			const groupKey =
 				item.itemType === 'ambiguous'
-					? `${item.itemType}:${JSON.stringify(
-							(item.choices ?? (item.candidates ?? []).map((itemType) => ({ itemType })))
-								.slice()
-								.sort((left, right) => left.itemType.localeCompare(right.itemType)),
-						)}`
+					? `${item.itemType}:${[
+							...new Set(
+								(item.choices ?? (item.candidates ?? []).map((itemType) => ({ itemType }))).map(
+									({ itemType }) => itemType,
+								),
+							),
+						]
+							.sort()
+							.join(',')}`
 					: item.itemType
 			const list = byType.get(groupKey) ?? []
 			list.push(item)
@@ -2201,6 +2218,7 @@ export function useDropImport(options: DropImportOptions) {
 			console.log(`[BatchDrop] install start type=${item.itemType} name=${item.name}`)
 			try {
 				await installBatchItem(item)
+				if (batchInstallCancelled) break
 				if (pendingDropIncompatibility.value) {
 					const installed = await new Promise<boolean>((resolve) => {
 						batchCompatResolve = resolve
@@ -2220,6 +2238,7 @@ export function useDropImport(options: DropImportOptions) {
 					console.log(`[BatchDrop] install SUCCESS name=${item.name}`)
 				}
 			} catch (error) {
+				if (batchInstallCancelled) break
 				item.installState = 'failed'
 				failed++
 				console.log(`[BatchDrop] install FAILED name=${item.name}`, error)

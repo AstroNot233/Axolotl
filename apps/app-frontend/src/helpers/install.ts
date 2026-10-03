@@ -556,6 +556,16 @@ const INSTALL_JOB_POLL_INTERVAL_MS = 1000
 const INSTALL_JOB_QUERY_TIMEOUT_MS = 10 * 1000
 const INSTALL_JOB_TIMEOUT_MS = 30 * 60 * 1000
 
+function errorMessage(error: unknown) {
+	return error instanceof Error ? error.message : typeof error === 'string' ? error : String(error)
+}
+
+function isTransientInstallJobQueryError(error: unknown) {
+	return /timed out|timeout|temporar|busy|connection|network|fetch|database is locked|try again/i.test(
+		errorMessage(error),
+	)
+}
+
 async function queryInstallJob(jobId: string) {
 	return await new Promise<InstallJobSnapshot>((resolve, reject) => {
 		const timeout = setTimeout(() => {
@@ -588,6 +598,8 @@ export async function wait_for_install_job(jobId: string) {
 		let pollTimer: ReturnType<typeof setInterval> | null = null
 		let timeoutTimer: ReturnType<typeof setTimeout> | null = null
 		let pollInFlight = false
+		let cancellationRequested = false
+		let cancellationInFlight = false
 
 		const cleanup = () => {
 			if (unlisten) {
@@ -628,23 +640,38 @@ export async function wait_for_install_job(jobId: string) {
 			if (finished || pollInFlight) return
 			pollInFlight = true
 			queryInstallJob(jobId)
-				.then(resolveJob)
-				.catch(() => {
-					// The terminal timeout remains the source of truth when a
-					// transient query fails or the backend is temporarily busy.
+				.then((job) => {
+					resolveJob(job)
+				})
+				.catch((error) => {
+					// A job that is already being canceled must still be observed
+					// until a terminal snapshot is available; otherwise callers may
+					// clean up files that the backend is still reading.
+					if (cancellationRequested || isTransientInstallJobQueryError(error)) return
+					rejectWait(error)
 				})
 				.finally(() => {
 					pollInFlight = false
 				})
 		}
 
+		const requestCancellation = async () => {
+			if (finished || cancellationRequested || cancellationInFlight) return
+			cancellationRequested = true
+			cancellationInFlight = true
+			try {
+				resolveJob(await install_job_cancel(jobId))
+			} catch {
+				// Polling remains active and will observe the terminal state even
+				// if the cancellation request races with job completion.
+			} finally {
+				cancellationInFlight = false
+			}
+		}
+
 		pollTimer = setInterval(poll, INSTALL_JOB_POLL_INTERVAL_MS)
 		timeoutTimer = setTimeout(() => {
-			rejectWait(
-				new Error(
-					`Install job ${jobId} did not reach a terminal state within ${INSTALL_JOB_TIMEOUT_MS / 60000} minutes`,
-				),
-			)
+			void requestCancellation()
 		}, INSTALL_JOB_TIMEOUT_MS)
 
 		install_job_listener(resolveJob)

@@ -1133,6 +1133,7 @@ async fn copy_import_file_atomically(
     dest: &Path,
     io_semaphore: &IoSemaphore,
 ) -> crate::Result<()> {
+    let _permit = io_semaphore.0.acquire().await?;
     let parent = dest.parent().ok_or_else(|| {
         crate::ErrorKind::InputError(format!(
             "Import destination has no parent directory: {}",
@@ -1141,23 +1142,12 @@ async fn copy_import_file_atomically(
     })?;
     io::create_dir_all(parent).await?;
 
-    let temporary = TempFileBuilder::new()
-        .prefix(".axolotl-import-")
-        .tempfile_in(parent)
-        .map_err(|error| {
-            crate::ErrorKind::IOError(IOError::with_path(error, parent))
-        })?
-        .into_temp_path();
-    fetch::copy(src, &temporary, io_semaphore).await?;
+    let temporary = create_import_temp_path(parent, ".axolotl-import-").await?;
+    io::copy(src, &temporary).await?;
 
     let backup = if tokio::fs::try_exists(dest).await? {
-        let backup = TempFileBuilder::new()
-            .prefix(".axolotl-import-backup-")
-            .tempfile_in(parent)
-            .map_err(|error| {
-                crate::ErrorKind::IOError(IOError::with_path(error, parent))
-            })?
-            .into_temp_path();
+        let backup =
+            create_import_temp_path(parent, ".axolotl-import-backup-").await?;
         tokio::fs::remove_file(&backup).await?;
         tokio::fs::rename(dest, &backup).await.map_err(|error| {
             crate::ErrorKind::IOError(IOError::with_path(error, dest))
@@ -1202,6 +1192,29 @@ async fn copy_import_file_atomically(
     Ok(())
 }
 
+async fn create_import_temp_path(
+    parent: &Path,
+    prefix: &str,
+) -> crate::Result<tempfile::TempPath> {
+    let parent = parent.to_path_buf();
+    let prefix = prefix.to_string();
+    Ok(tokio::task::spawn_blocking(move || {
+        TempFileBuilder::new()
+            .prefix(&prefix)
+            .tempfile_in(&parent)
+            .map(|file| file.into_temp_path())
+            .map_err(|error| {
+                crate::ErrorKind::IOError(IOError::with_path(error, &parent))
+            })
+    })
+    .await
+    .map_err(|error| {
+        crate::ErrorKind::FSError(format!(
+            "Import temp-file task failed: {error}"
+        ))
+    })??)
+}
+
 /// Copies the collected files into the instance profile concurrently, bounded
 /// by the I/O semaphore, reporting progress after every completed file.
 async fn copy_files_with_progress(
@@ -1232,20 +1245,38 @@ async fn copy_files_with_progress(
         .collect();
 
     let mut completed: u64 = 0;
+    let mut first_error = None;
     while let Some(result) = copy_tasks.next().await {
-        result?;
-        completed += 1;
-        reporter
-            .update(
-                InstallPhaseId::PreparingInstance,
-                Some(InstallProgress {
-                    current: completed,
-                    total,
-                    secondary: None,
-                }),
-                details.clone(),
-            )
-            .await?;
+        match result {
+            Ok(()) => {
+                completed += 1;
+                if first_error.is_none() {
+                    if let Err(error) = reporter
+                        .update(
+                            InstallPhaseId::PreparingInstance,
+                            Some(InstallProgress {
+                                current: completed,
+                                total,
+                                secondary: None,
+                            }),
+                            details.clone(),
+                        )
+                        .await
+                    {
+                        first_error = Some(error);
+                    }
+                }
+            }
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
+
+    if let Some(error) = first_error {
+        return Err(error);
     }
 
     // Final 100% report (ensures the bar fills even if reporter throttles the last update)

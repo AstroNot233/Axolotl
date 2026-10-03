@@ -1358,6 +1358,7 @@ fn extract_zip_to_dir_with_cancellation(
         .collect();
 
     let mut skipped = 0usize;
+    let mut extracted_entries = 0usize;
     let mut failed_entries = Vec::new();
     for (index, name, is_dir) in entries {
         if is_cancelled(cancellation) {
@@ -1421,6 +1422,8 @@ fn extract_zip_to_dir_with_cancellation(
             );
             skipped += 1;
             failed_entries.push(name);
+        } else {
+            extracted_entries += 1;
         }
     }
     if skipped > 0 {
@@ -1439,6 +1442,11 @@ fn extract_zip_to_dir_with_cancellation(
                 "ies"
             },
             failed_entries.join(", ")
+        ));
+    }
+    if archive.len() > 0 && extracted_entries == 0 {
+        return Err(format!(
+            "No ZIP entries could be extracted ({skipped} skipped)"
         ));
     }
     Ok(())
@@ -3926,6 +3934,27 @@ mod tests {
             !enc_out.path().join("secret.bin").exists(),
             "encrypted entries are skipped"
         );
+    }
+
+    #[test]
+    fn extract_zip_to_dir_rejects_archive_with_only_unsafe_entries() {
+        let dir = tempdir().expect("temp dir");
+        let zip_path = dir.path().join("unsafe-only.zip");
+        let file = std::fs::File::create(&zip_path).expect("create zip");
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file(
+            "../../evil.txt",
+            zip::write::FileOptions::<()>::default(),
+        )
+        .expect("start entry");
+        zip.write_all(b"e").expect("write");
+        zip.finish().expect("finish");
+
+        let out_dir = tempdir().expect("temp out dir");
+        let error = extract_zip_to_dir(&zip_path, out_dir.path())
+            .expect_err("an archive with no safe entries must fail");
+        assert!(error.contains("No ZIP entries could be extracted"));
+        assert!(!out_dir.path().join("evil.txt").exists());
     }
 
     #[test]

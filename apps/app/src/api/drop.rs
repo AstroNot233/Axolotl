@@ -70,6 +70,43 @@ fn remove_dir_all(path: &std::path::Path) -> Result<(), String> {
     })
 }
 
+fn remove_dir_all_cancellable(
+    path: &std::path::Path,
+    cancellation: &CancellationToken,
+) -> Result<(), String> {
+    if cancellation.is_cancelled() {
+        return Err("Operation cancelled".to_string());
+    }
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        format!("Failed to inspect '{}': {error}", path.display())
+    })?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        std::fs::remove_file(path).map_err(|error| {
+            format!("Failed to remove '{}': {error}", path.display())
+        })?;
+        return Ok(());
+    }
+
+    let mut entries = std::fs::read_dir(path).map_err(|error| {
+        format!("Failed to read '{}': {error}", path.display())
+    })?;
+    while let Some(entry) = entries.next() {
+        if cancellation.is_cancelled() {
+            return Err("Operation cancelled".to_string());
+        }
+        let entry = entry.map_err(|error| {
+            format!("Failed to enumerate '{}': {error}", path.display())
+        })?;
+        remove_dir_all_cancellable(&entry.path(), cancellation)?;
+    }
+    if cancellation.is_cancelled() {
+        return Err("Operation cancelled".to_string());
+    }
+    std::fs::remove_dir(path).map_err(|error| {
+        format!("Failed to remove '{}': {error}", path.display())
+    })
+}
+
 fn read_file_cancellable(
     path: &std::path::Path,
     cancellation: &CancellationToken,
@@ -544,7 +581,7 @@ pub async fn drop_remove_temp_dir(path: String) -> Result<(), String> {
     run_cancellable_blocking(
         "Temp directory cleanup",
         DROP_CLEANUP_TIMEOUT,
-        move |_| remove_dir_all(&target),
+        move |cancellation| remove_dir_all_cancellable(&target, &cancellation),
     )
     .await
 }
