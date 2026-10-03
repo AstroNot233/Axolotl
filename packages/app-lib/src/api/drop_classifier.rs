@@ -445,7 +445,8 @@ impl ZipEntrySet {
                 continue;
             };
             let first = rest.split('/').next().unwrap_or_default();
-            if !first.is_empty() && !is_noise_entry(first) && seen.insert(first) {
+            if !first.is_empty() && !is_noise_entry(first) && seen.insert(first)
+            {
                 children.push(first.to_string());
             }
         }
@@ -456,7 +457,8 @@ impl ZipEntrySet {
             let Some((first, _)) = rest.split_once('/') else {
                 continue;
             };
-            if !first.is_empty() && !is_noise_entry(first) && seen.insert(first) {
+            if !first.is_empty() && !is_noise_entry(first) && seen.insert(first)
+            {
                 children.push(first.to_string());
             }
         }
@@ -1157,7 +1159,11 @@ pub fn extract_zip_to_dir(
         return Err(format!(
             "ZIP extraction failed for {} entr{}: {}",
             failed_entries.len(),
-            if failed_entries.len() == 1 { "y" } else { "ies" },
+            if failed_entries.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            },
             failed_entries.join(", ")
         ));
     }

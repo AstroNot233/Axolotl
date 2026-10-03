@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tauri::Emitter;
 use theseus::drop_classifier::{
     DroppedCandidate, DroppedItemType, ModrinthLookupResult,
@@ -8,6 +9,12 @@ use theseus::drop_classifier::{
 use theseus::pack::import::{ImportLauncherType, get_importable_instances};
 use theseus::{LockingProcess, get_locking_processes};
 use tracing::{debug, info, warn};
+
+const DROP_CLASSIFY_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+const DROP_EXTRACT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const DROP_SCAN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const DROP_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const DROP_METADATA_TIMEOUT: Duration = Duration::from_secs(2 * 60);
 
 /// A scanned importable instance: name plus the resolved filesystem path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,14 +244,23 @@ pub async fn drop_classify<R: tauri::Runtime>(
     // confirm the potentially slow unpack with the user before retrying.
     // Batch drops classify several files concurrently, so the classifier must
     // run on a blocking thread instead of occupying the async runtime.
-    let result = tokio::task::spawn_blocking(move || {
-        if allow_nested_extraction.unwrap_or(false) {
-            classify_dropped_item_with_candidates(&path, true)
-        } else {
-            classify_dropped_item_with_candidates(&path, false)
-        }
-    })
+    let result = tokio::time::timeout(
+        DROP_CLASSIFY_TIMEOUT,
+        tokio::task::spawn_blocking(move || {
+            if allow_nested_extraction.unwrap_or(false) {
+                classify_dropped_item_with_candidates(&path, true)
+            } else {
+                classify_dropped_item_with_candidates(&path, false)
+            }
+        }),
+    )
     .await
+    .map_err(|_| {
+        format!(
+            "Classification timed out after {} minutes",
+            DROP_CLASSIFY_TIMEOUT.as_secs() / 60
+        )
+    })?
     .map_err(|e| format!("Classification task panicked: {e}"))?;
     let _ = app.emit(
         "drop_classify_progress",
@@ -279,10 +295,19 @@ pub async fn drop_classify_extract<R: tauri::Runtime>(
             "total": null,
         }),
     );
-    let result = tokio::task::spawn_blocking(move || {
-        classify_zip_with_extraction(&path)
-    })
+    let result = tokio::time::timeout(
+        DROP_EXTRACT_TIMEOUT,
+        tokio::task::spawn_blocking(move || {
+            classify_zip_with_extraction(&path)
+        }),
+    )
     .await
+    .map_err(|_| {
+        format!(
+            "ZIP analysis timed out after {} minutes",
+            DROP_EXTRACT_TIMEOUT.as_secs() / 60
+        )
+    })?
     .map_err(|e| format!("Extraction task panicked: {e}"))?;
     let _ = app.emit(
         "drop_classify_progress",
@@ -362,7 +387,8 @@ pub async fn drop_extract_zip_to_temp<R: tauri::Runtime>(
 
     let base = launcher_import_temp_base();
     let zip_path_label = zip_path.to_string_lossy().to_string();
-    let extracted =
+    let extracted = tokio::time::timeout(
+        DROP_EXTRACT_TIMEOUT,
         tokio::task::spawn_blocking(move || -> Result<String, String> {
             std::fs::create_dir_all(&base).map_err(|e| {
                 format!("Failed to create temp base '{}': {e}", base.display())
@@ -388,12 +414,19 @@ pub async fn drop_extract_zip_to_temp<R: tauri::Runtime>(
                     e
                 })?;
             Ok(dir.to_string_lossy().to_string())
-        })
-        .await
-        .map_err(|e| {
-            tracing::warn!("Launcher ZIP extraction task panicked: {e}");
-            format!("Extraction task panicked: {e}")
-        })??;
+        }),
+    )
+    .await
+    .map_err(|_| {
+        format!(
+            "Launcher ZIP extraction timed out after {} minutes",
+            DROP_EXTRACT_TIMEOUT.as_secs() / 60
+        )
+    })?
+    .map_err(|e| {
+        tracing::warn!("Launcher ZIP extraction task panicked: {e}");
+        format!("Extraction task panicked: {e}")
+    })??;
 
     info!("Extracted launcher ZIP to: {extracted}");
     let _ = app.emit(
@@ -429,12 +462,21 @@ pub async fn drop_remove_temp_dir(path: String) -> Result<(), String> {
             target.display()
         ));
     }
-    tokio::task::spawn_blocking(move || {
-        std::fs::remove_dir_all(&target).map_err(|e| {
-            format!("Failed to remove temp dir '{}': {e}", target.display())
-        })
-    })
+    tokio::time::timeout(
+        DROP_CLEANUP_TIMEOUT,
+        tokio::task::spawn_blocking(move || {
+            std::fs::remove_dir_all(&target).map_err(|e| {
+                format!("Failed to remove temp dir '{}': {e}", target.display())
+            })
+        }),
+    )
     .await
+    .map_err(|_| {
+        format!(
+            "Temp directory cleanup timed out after {} minutes",
+            DROP_CLEANUP_TIMEOUT.as_secs() / 60
+        )
+    })?
     .map_err(|e| format!("Cleanup task panicked: {e}"))?
 }
 
@@ -466,9 +508,18 @@ pub async fn drop_scan_launcher_instances<R: tauri::Runtime>(
             format!("Invalid launcher type '{launcher_type}': {e}")
         })?;
     let base = std::path::PathBuf::from(&base_path);
-    let instances = get_importable_instances(lt, base)
-        .await
-        .map_err(|e| e.to_string())?;
+    let instances = tokio::time::timeout(
+        DROP_SCAN_TIMEOUT,
+        get_importable_instances(lt, base),
+    )
+    .await
+    .map_err(|_| {
+        format!(
+            "Launcher scan timed out after {} minutes",
+            DROP_SCAN_TIMEOUT.as_secs() / 60
+        )
+    })?
+    .map_err(|e| e.to_string())?;
     info!("Scan complete — found {} instance(s)", instances.len());
     for inst in &instances {
         debug!(
@@ -522,14 +573,23 @@ pub async fn drop_detect_file_lock(
 pub async fn drop_extract_mod_metadata(path: String) -> Result<String, String> {
     let path = std::path::PathBuf::from(&path);
 
-    let meta = tokio::task::spawn_blocking(move || {
-        let file_bytes = std::fs::read(&path)
-            .map_err(|e| format!("Failed to read file: {e}"))?;
-        let bytes = bytes::Bytes::from(file_bytes);
-        theseus::mod_metadata::extract_mod_metadata(&bytes)
-            .ok_or_else(|| "No mod metadata found in file".to_string())
-    })
+    let meta = tokio::time::timeout(
+        DROP_METADATA_TIMEOUT,
+        tokio::task::spawn_blocking(move || {
+            let file_bytes = std::fs::read(&path)
+                .map_err(|e| format!("Failed to read file: {e}"))?;
+            let bytes = bytes::Bytes::from(file_bytes);
+            theseus::mod_metadata::extract_mod_metadata(&bytes)
+                .ok_or_else(|| "No mod metadata found in file".to_string())
+        }),
+    )
     .await
+    .map_err(|_| {
+        format!(
+            "Mod metadata extraction timed out after {} minutes",
+            DROP_METADATA_TIMEOUT.as_secs() / 60
+        )
+    })?
     .map_err(|e| format!("Metadata extraction task panicked: {e}"))??;
     serde_json::to_string(&meta)
         .map_err(|e| format!("Failed to serialize metadata: {e}"))

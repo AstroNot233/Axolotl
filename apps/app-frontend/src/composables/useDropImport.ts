@@ -30,7 +30,11 @@ import {
 	type ScanResult,
 } from '@/helpers/drop'
 import { import_instance } from '@/helpers/import.js'
-import { wait_for_install_job } from '@/helpers/install'
+import {
+	install_create_modpack_instance,
+	install_job_cancel,
+	wait_for_install_job,
+} from '@/helpers/install'
 import {
 	add_project_from_path,
 	check_symlink_capability,
@@ -249,6 +253,7 @@ export function useDropImport(options: DropImportOptions) {
 	const batchGroupKey = ref(0)
 	const incompatWarningKey = ref(0)
 	let batchCompatResolve: ((installed: boolean) => void) | null = null
+	let batchCurrentInstallJobId: string | null = null
 
 	// ── Content install incompatibility state ─────────────────────────────
 	const contentInstallIncompatibilityWarningVersions = ref([])
@@ -2047,6 +2052,21 @@ export function useDropImport(options: DropImportOptions) {
 		void cancelBatch('scan-button')
 	}
 
+	async function cancelBatchInstallJob() {
+		const jobId = batchCurrentInstallJobId
+		if (!jobId) return
+		try {
+			await install_job_cancel(jobId)
+		} catch (error) {
+			console.warn('[BatchDrop] failed to cancel active install job', jobId, error)
+		}
+		try {
+			await wait_for_install_job(jobId)
+		} catch {
+			// A canceled job is expected to reject from wait_for_install_job.
+		}
+	}
+
 	async function cancelBatch(source = 'unknown') {
 		console.log(
 			`[BatchDrop] cancelBatch INVOKED source=${source} phase=${batchPhase.value}`,
@@ -2059,10 +2079,18 @@ export function useDropImport(options: DropImportOptions) {
 		batchTargetPickMode = false
 		batchWorldMode = false
 		batchGroupMode = false
+		const compatResolve = batchCompatResolve
+		batchCompatResolve = null
+		pendingDropIncompatibility.value = null
+		compatResolve?.(false)
 		confirmDropModal.value?.hide()
 		symlinkCardsModal.value?.hide()
 		if (batchPhase.value === 'scanning' && batchScanPromise) {
 			await batchScanPromise
+			return
+		}
+		if (batchPhase.value === 'installing') {
+			await cancelBatchInstallJob()
 			return
 		}
 		await finishBatchCancellation()
@@ -2199,6 +2227,10 @@ export function useDropImport(options: DropImportOptions) {
 		console.log(
 			`[BatchDrop] runBatchInstall finished queue=${queue.length} success=${succeeded} failed=${failed} skipped=${skipped}`,
 		)
+		if (batchInstallCancelled) {
+			await finishBatchCancellation()
+			return
+		}
 
 		addNotification({
 			title: formatMessage(messages.dropBatchCompletedTitle),
@@ -2218,9 +2250,20 @@ export function useDropImport(options: DropImportOptions) {
 			`[BatchDrop] installBatchItem type=${item.itemType} name=${item.name} path=${item.sourcePath}`,
 		)
 		switch (item.itemType) {
-			case 'modpack':
-				await installModpackFromPath(item.sourcePath, item.name, { persistUntilDone: false })
+			case 'modpack': {
+				const job = await install_create_modpack_instance({
+					type: 'fromFile',
+					path: item.sourcePath,
+				})
+				batchCurrentInstallJobId = job.job_id
+				try {
+					if (batchInstallCancelled) await cancelBatchInstallJob()
+					else await wait_for_install_job(job.job_id)
+				} finally {
+					if (batchCurrentInstallJobId === job.job_id) batchCurrentInstallJobId = null
+				}
 				return
+			}
 			case 'instance': {
 				const job = await import_instance(
 					item.launcherType,
@@ -2233,7 +2276,13 @@ export function useDropImport(options: DropImportOptions) {
 					item.loaderVersion ?? undefined,
 					item.gameDirOverride ?? null,
 				)
-				await wait_for_install_job(job.job_id)
+				batchCurrentInstallJobId = job.job_id
+				try {
+					if (batchInstallCancelled) await cancelBatchInstallJob()
+					else await wait_for_install_job(job.job_id)
+				} finally {
+					if (batchCurrentInstallJobId === job.job_id) batchCurrentInstallJobId = null
+				}
 				return
 			}
 			case 'data_pack':
