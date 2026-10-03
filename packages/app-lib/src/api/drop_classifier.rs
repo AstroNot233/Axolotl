@@ -1098,6 +1098,7 @@ pub fn extract_zip_to_dir(
         .collect();
 
     let mut skipped = 0usize;
+    let mut failed_entries = Vec::new();
     for (index, name, is_dir) in entries {
         if archive
             .by_index_raw(index)
@@ -1108,6 +1109,7 @@ pub fn extract_zip_to_dir(
                 "extract_zip_to_dir: skipping encrypted ZIP entry '{name}'"
             );
             skipped += 1;
+            failed_entries.push(name);
             continue;
         }
         let Some(safe_name) = sanitize_zip_entry_name(&name) else {
@@ -1142,6 +1144,7 @@ pub fn extract_zip_to_dir(
                 "extract_zip_to_dir: skipping unextractable entry '{name}': {error}"
             );
             skipped += 1;
+            failed_entries.push(name);
         }
     }
     if skipped > 0 {
@@ -1150,9 +1153,12 @@ pub fn extract_zip_to_dir(
             archive.len()
         );
     }
-    if skipped == archive.len() && !archive.is_empty() {
+    if !failed_entries.is_empty() {
         return Err(format!(
-            "No ZIP entries could be extracted ({skipped} failed)"
+            "ZIP extraction failed for {} entr{}: {}",
+            failed_entries.len(),
+            if failed_entries.len() == 1 { "y" } else { "ies" },
+            failed_entries.join(", ")
         ));
     }
     Ok(())
@@ -3503,7 +3509,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_zip_to_dir_skips_unsafe_and_encrypted_entries() {
+    fn extract_zip_to_dir_skips_unsafe_entries_and_rejects_encrypted_entries() {
         let dir = tempdir().expect("temp dir");
         let zip_path = dir.path().join("mixed.zip");
         let file = std::fs::File::create(&zip_path).expect("create zip");
@@ -3529,8 +3535,9 @@ mod tests {
         let enc_path = enc_dir.path().join("enc.zip");
         write_encrypted_entry_zip(&enc_path);
         let enc_out = tempdir().expect("temp out dir");
-        extract_zip_to_dir(&enc_path, enc_out.path())
-            .expect("extract encrypted zip");
+        let error = extract_zip_to_dir(&enc_path, enc_out.path())
+            .expect_err("encrypted entries must fail extraction");
+        assert!(error.contains("secret.bin"));
         assert!(
             enc_out.path().join("level.dat").exists(),
             "plain entries survive"

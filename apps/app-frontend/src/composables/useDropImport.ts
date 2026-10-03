@@ -240,6 +240,7 @@ export function useDropImport(options: DropImportOptions) {
 
 	let batchScanCancelled = false
 	let batchInstallCancelled = false
+	let batchScanPromise: Promise<void> | null = null
 	let batchConfirmIndex = 0
 	let batchSymlinkMode = false
 	let batchTargetPickMode = false
@@ -986,6 +987,7 @@ export function useDropImport(options: DropImportOptions) {
 		filePath: string,
 		instId: string,
 		innerBase?: string,
+		throwOnError = false,
 	) {
 		try {
 			if (type === 'world_save') {
@@ -1123,6 +1125,7 @@ export function useDropImport(options: DropImportOptions) {
 				text: errMsg,
 				type: 'error',
 			})
+			if (throwOnError) throw e
 		}
 	}
 
@@ -1619,10 +1622,14 @@ export function useDropImport(options: DropImportOptions) {
 			scanState: 'pending',
 			selected: true,
 		}))
+		const scanPromise = runBatchScan()
+		batchScanPromise = scanPromise
 		try {
-			await runBatchScan()
+			await scanPromise
 		} catch (error) {
 			await failBatch(error)
+		} finally {
+			if (batchScanPromise === scanPromise) batchScanPromise = null
 		}
 	}
 
@@ -1661,7 +1668,7 @@ export function useDropImport(options: DropImportOptions) {
 		})
 		await Promise.all(workers)
 		if (batchScanCancelled) {
-			await cancelBatch('scan-cancelled-flag')
+			await finishBatchCancellation()
 			return
 		}
 		await finishBatchScan()
@@ -1781,7 +1788,7 @@ export function useDropImport(options: DropImportOptions) {
 					launcherType,
 					basePath: compatible ? inst.path : scanBasePath,
 					instanceFolder: inst.name,
-					instancePath: compatible ? inst.versionPath : undefined,
+					instancePath: compatible ? inst.versionPath : inst.path,
 					fromZip: fromZip || undefined,
 					selected: true,
 				})
@@ -2043,6 +2050,14 @@ export function useDropImport(options: DropImportOptions) {
 		batchGroupMode = false
 		confirmDropModal.value?.hide()
 		symlinkCardsModal.value?.hide()
+		if (batchPhase.value === 'scanning' && batchScanPromise) {
+			await batchScanPromise
+			return
+		}
+		await finishBatchCancellation()
+	}
+
+	async function finishBatchCancellation() {
 		await cleanupBatchTempDirs()
 		addNotification({
 			title: formatMessage(messages.dropImportCancelledTitle),
@@ -2232,6 +2247,7 @@ export function useDropImport(options: DropImportOptions) {
 					item.sourcePath,
 					batchTargetInstanceId.value,
 					item.innerBase,
+					true,
 				)
 				return
 			default:
