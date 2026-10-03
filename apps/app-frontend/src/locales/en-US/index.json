@@ -7850,11 +7850,11 @@
   "app.settings.about.run.tap-to-start": {
     "message": "Press Space or click to start"
   },
-  "app.settings.about.run.tnt": {
-    "message": "TNT"
-  },
   "app.settings.about.run.title": {
     "message": "Axolotl run"
+  },
+  "app.settings.about.run.tnt": {
+    "message": "TNT"
   },
   "app.settings.about.run.totem": {
     "message": "Totem of Undying"
