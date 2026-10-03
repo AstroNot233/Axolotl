@@ -16,6 +16,8 @@ use crate::state::{ModrinthProjectId, ModrinthVersionId};
 /// Maximum number of items allowed in a ZIP before we classify it as "ZIP
 /// with many items" rather than "single file/folder wrapped in ZIP".
 const ZIP_TOP_LEVEL_LIMIT: usize = 200;
+const MAX_ZIP_EXTRACTION_ENTRIES: usize = 100_000;
+const MAX_ZIP_EXTRACTION_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 
 /// Entry-name segments that are never descended into during classification.
 /// They are operating-system noise, not Minecraft content.
@@ -999,7 +1001,11 @@ pub fn classify_zip_with_extraction(path: &Path) -> DroppedItemType {
     };
 
     // Extract everything.
-    extract_all(&mut archive, temp_dir.path());
+    if let Err(reason) = extract_all(&mut archive, temp_dir.path()) {
+        return DroppedItemType::Unknown {
+            reason: format!("ZIP extraction failed: {reason}"),
+        };
+    }
 
     tracing::debug!(
         "classify_zip_with_extraction: extracted {} top-level items for {}",
@@ -1019,7 +1025,49 @@ pub fn classify_zip_with_extraction(path: &Path) -> DroppedItemType {
     // temp_dir is dropped here, cleaning up the extracted files automatically.
 }
 
-fn extract_all(archive: &mut zip::ZipArchive<std::fs::File>, base_dir: &Path) {
+fn validate_zip_extraction_budget<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<u64, String> {
+    let mut total_bytes = 0u64;
+    let mut entries = 0usize;
+    for index in 0..archive.len() {
+        let entry = archive.by_index_raw(index).map_err(|error| {
+            format!("Cannot inspect ZIP entry {index}: {error}")
+        })?;
+        if entry.name().is_empty() {
+            continue;
+        }
+        entries += 1;
+        if entries > MAX_ZIP_EXTRACTION_ENTRIES {
+            return Err(format!(
+                "ZIP contains more than {MAX_ZIP_EXTRACTION_ENTRIES} entries"
+            ));
+        }
+        total_bytes =
+            total_bytes.checked_add(entry.size()).ok_or_else(|| {
+                "ZIP uncompressed size exceeds supported limits".to_string()
+            })?;
+        if total_bytes > MAX_ZIP_EXTRACTION_BYTES {
+            return Err(format!(
+                "ZIP uncompressed size exceeds {} GiB",
+                MAX_ZIP_EXTRACTION_BYTES / (1024 * 1024 * 1024)
+            ));
+        }
+    }
+    Ok(total_bytes)
+}
+
+fn extract_all(
+    archive: &mut zip::ZipArchive<std::fs::File>,
+    base_dir: &Path,
+) -> Result<(), String> {
+    let total_bytes = validate_zip_extraction_budget(archive)?;
+    if !temp_dir_has_space(base_dir, total_bytes) {
+        return Err(format!(
+            "Not enough free disk space to extract ZIP (requires {total_bytes} bytes)"
+        ));
+    }
+
     // First pass: collect entry metadata while the archive is mutable-borrowed.
     let entries: Vec<(usize, String, bool)> = (0..archive.len())
         .filter_map(|i| {
@@ -1041,10 +1089,9 @@ fn extract_all(archive: &mut zip::ZipArchive<std::fs::File>, base_dir: &Path) {
             .ok()
             .is_some_and(|e| e.encrypted())
         {
-            tracing::warn!(
-                "extract_all: skipping encrypted ZIP entry '{name}'"
-            );
-            continue;
+            return Err(format!(
+                "Encrypted ZIP entry cannot be extracted: {name}"
+            ));
         }
         // Reject entries that would escape the extraction directory.
         let Some(safe_name) = sanitize_zip_entry_name(name) else {
@@ -1056,16 +1103,26 @@ fn extract_all(archive: &mut zip::ZipArchive<std::fs::File>, base_dir: &Path) {
         };
         let out_path = base_dir.join(&safe_name);
         if *is_dir {
-            let _ = std::fs::create_dir_all(&out_path);
+            std::fs::create_dir_all(&out_path).map_err(|error| {
+                format!("Failed to create ZIP directory '{name}': {error}")
+            })?;
         } else if let Some(parent) = out_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-            if let Ok(mut reader) = archive.by_index(*index)
-                && let Ok(mut writer) = std::fs::File::create(&out_path)
-            {
-                let _ = std::io::copy(&mut reader, &mut writer);
-            }
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("Failed to create ZIP parent for '{name}': {error}")
+            })?;
+            let mut reader = archive.by_index(*index).map_err(|error| {
+                format!("Failed to read ZIP entry '{name}': {error}")
+            })?;
+            let mut writer =
+                std::fs::File::create(&out_path).map_err(|error| {
+                    format!("Failed to create extracted file '{name}': {error}")
+                })?;
+            std::io::copy(&mut reader, &mut writer).map_err(|error| {
+                format!("Failed to extract ZIP entry '{name}': {error}")
+            })?;
         }
     }
+    Ok(())
 }
 
 /// Extract a ZIP archive into `dest_dir`, skipping unsafe entries (path
@@ -1084,31 +1141,44 @@ pub fn extract_zip_to_dir(
     let mut archive = zip::ZipArchive::new(file).map_err(|e| {
         format!("Invalid ZIP archive '{}': {e}", zip_path.display())
     })?;
+    let total_bytes = validate_zip_extraction_budget(&mut archive)?;
+    if !temp_dir_has_space(dest_dir, total_bytes) {
+        return Err(format!(
+            "Not enough free disk space to extract ZIP (requires {total_bytes} bytes)"
+        ));
+    }
 
     let entries: Vec<(usize, String, bool)> = (0..archive.len())
-        .filter_map(|i| {
-            let entry = archive.by_index_raw(i).ok()?;
+        .map(|i| {
+            let entry = archive.by_index_raw(i).map_err(|error| {
+                format!("Cannot inspect ZIP entry {i}: {error}")
+            })?;
             let name = crate::api::pack::detect::decode_zip_entry_name(
                 entry.name_raw(),
             )
             .replace('\\', "/");
             if name.is_empty() || name.starts_with("__MACOSX") {
-                return None;
+                return Ok(None);
             }
-            Some((i, name.clone(), name.ends_with('/')))
+            Ok(Some((i, name.clone(), name.ends_with('/'))))
         })
+        .collect::<Result<Vec<_>, String>>()?
+        .into_iter()
+        .flatten()
         .collect();
 
     let mut skipped = 0usize;
     let mut failed_entries = Vec::new();
     for (index, name, is_dir) in entries {
-        if archive
+        let encrypted = archive
             .by_index_raw(index)
-            .ok()
-            .is_some_and(|e| e.encrypted())
-        {
+            .map_err(|error| {
+                format!("Cannot inspect ZIP entry '{name}': {error}")
+            })?
+            .encrypted();
+        if encrypted {
             tracing::warn!(
-                "extract_zip_to_dir: skipping encrypted ZIP entry '{name}'"
+                "extract_zip_to_dir: cannot extract encrypted ZIP entry '{name}'"
             );
             skipped += 1;
             failed_entries.push(name);
@@ -1126,9 +1196,6 @@ pub fn extract_zip_to_dir(
             continue;
         }
         let out_path = dest_dir.join(&safe_name);
-        // A single unreadable, locked or oddly-named entry must not abort the
-        // whole import; skip it and keep going so the rest of the launcher
-        // folder still lands on disk.
         let result = if is_dir {
             std::fs::create_dir_all(&out_path).map(|_| ())
         } else if let Some(parent) = out_path.parent() {
@@ -2615,7 +2682,8 @@ mod tests {
         ) else {
             panic!("zip should open");
         };
-        extract_all(&mut archive, out_dir.path());
+        extract_all(&mut archive, out_dir.path())
+            .expect("safe ZIP should extract");
 
         assert!(
             !out_dir.path().join("evil.txt").exists()
