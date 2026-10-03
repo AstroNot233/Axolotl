@@ -1168,8 +1168,28 @@ async fn copy_import_file_atomically(
     };
 
     if let Err(error) = tokio::fs::rename(&temporary, dest).await {
-        if let Some(backup) = &backup {
-            let _ = tokio::fs::rename(backup, dest).await;
+        if let Some(backup) = backup {
+            let backup_path = backup.to_path_buf();
+            if let Err(recovery_error) = tokio::fs::rename(&backup, dest).await
+            {
+                let retained_path = match backup.keep() {
+                    Ok(path) => path,
+                    Err(keep_error) => {
+                        return Err(crate::ErrorKind::FSError(format!(
+                            "Failed to replace '{}' ({error}) and restore the original file ({recovery_error}); preserving backup '{}' also failed ({keep_error})",
+                            dest.display(),
+                            backup_path.display(),
+                        ))
+                        .into());
+                    }
+                };
+                return Err(crate::ErrorKind::FSError(format!(
+                    "Failed to replace '{}' ({error}) and restore the original file ({recovery_error}); backup retained at '{}'",
+                    dest.display(),
+                    retained_path.display(),
+                ))
+                .into());
+            }
         }
         return Err(
             crate::ErrorKind::IOError(IOError::with_path(error, dest)).into()

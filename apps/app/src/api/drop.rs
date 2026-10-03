@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::time::Duration;
 use tauri::Emitter;
 use theseus::drop_classifier::{
-    DroppedCandidate, DroppedItemType, ModrinthLookupResult,
-    classify_dropped_item_with_candidates, classify_zip_with_extraction,
-    lookup_mod_hash,
+    DroppedCandidate, DroppedItemType, ModrinthLookupResult, lookup_mod_hash,
 };
 use theseus::pack::import::{ImportLauncherType, get_importable_instances};
 use theseus::{LockingProcess, get_locking_processes};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 const DROP_CLASSIFY_TIMEOUT: Duration = Duration::from_secs(2 * 60);
@@ -15,6 +15,97 @@ const DROP_EXTRACT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const DROP_SCAN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const DROP_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const DROP_METADATA_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+const DROP_METADATA_MAX_BYTES: u64 = 512 * 1024 * 1024;
+
+async fn run_cancellable_blocking<T, F>(
+    operation: &'static str,
+    timeout_duration: Duration,
+    operation_fn: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(CancellationToken) -> Result<T, String> + Send + 'static,
+{
+    let cancellation = CancellationToken::new();
+    let worker_cancellation = cancellation.clone();
+    let mut worker =
+        tokio::task::spawn_blocking(move || operation_fn(worker_cancellation));
+
+    match tokio::time::timeout(timeout_duration, &mut worker).await {
+        Ok(result) => result
+            .map_err(|error| format!("{operation} task panicked: {error}"))?,
+        Err(_) => {
+            cancellation.cancel();
+            let _ = worker.await;
+            Err(format!(
+                "{operation} timed out after {} minutes",
+                timeout_duration.as_secs() / 60
+            ))
+        }
+    }
+}
+
+fn remove_dir_all(path: &std::path::Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        format!("Failed to inspect '{}': {error}", path.display())
+    })?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        std::fs::remove_file(path).map_err(|error| {
+            format!("Failed to remove '{}': {error}", path.display())
+        })?;
+        return Ok(());
+    }
+
+    let mut entries = std::fs::read_dir(path).map_err(|error| {
+        format!("Failed to read '{}': {error}", path.display())
+    })?;
+    while let Some(entry) = entries.next() {
+        let entry = entry.map_err(|error| {
+            format!("Failed to enumerate '{}': {error}", path.display())
+        })?;
+        remove_dir_all(&entry.path())?;
+    }
+    std::fs::remove_dir(path).map_err(|error| {
+        format!("Failed to remove '{}': {error}", path.display())
+    })
+}
+
+fn read_file_cancellable(
+    path: &std::path::Path,
+    cancellation: &CancellationToken,
+) -> Result<Vec<u8>, String> {
+    let mut file = std::fs::File::open(path).map_err(|error| {
+        format!("Failed to read '{}': {error}", path.display())
+    })?;
+    let length = file
+        .metadata()
+        .map_err(|error| {
+            format!("Failed to inspect '{}': {error}", path.display())
+        })?
+        .len();
+    if length > DROP_METADATA_MAX_BYTES {
+        return Err(format!(
+            "Metadata file is too large (maximum {} MiB)",
+            DROP_METADATA_MAX_BYTES / (1024 * 1024)
+        ));
+    }
+
+    let mut bytes = Vec::with_capacity(length as usize);
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        if cancellation.is_cancelled() {
+            return Err("Operation cancelled".to_string());
+        }
+        let read = file.read(&mut buffer).map_err(|error| {
+            format!("Failed to read '{}': {error}", path.display())
+        })?;
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+    }
+    Ok(bytes)
+}
 
 /// A scanned importable instance: name plus the resolved filesystem path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,24 +335,19 @@ pub async fn drop_classify<R: tauri::Runtime>(
     // confirm the potentially slow unpack with the user before retrying.
     // Batch drops classify several files concurrently, so the classifier must
     // run on a blocking thread instead of occupying the async runtime.
-    let result = tokio::time::timeout(
+    let allow_nested_extraction = allow_nested_extraction.unwrap_or(false);
+    let result = run_cancellable_blocking(
+        "Classification",
         DROP_CLASSIFY_TIMEOUT,
-        tokio::task::spawn_blocking(move || {
-            if allow_nested_extraction.unwrap_or(false) {
-                classify_dropped_item_with_candidates(&path, true)
-            } else {
-                classify_dropped_item_with_candidates(&path, false)
-            }
-        }),
+        move |cancellation| {
+            Ok(theseus::drop_classifier::classify_dropped_item_with_candidates_cancellable(
+                &path,
+                allow_nested_extraction,
+                &cancellation,
+            ))
+        },
     )
-    .await
-    .map_err(|_| {
-        format!(
-            "Classification timed out after {} minutes",
-            DROP_CLASSIFY_TIMEOUT.as_secs() / 60
-        )
-    })?
-    .map_err(|e| format!("Classification task panicked: {e}"))?;
+    .await?;
     let _ = app.emit(
         "drop_classify_progress",
         serde_json::json!({
@@ -295,20 +381,17 @@ pub async fn drop_classify_extract<R: tauri::Runtime>(
             "total": null,
         }),
     );
-    let result = tokio::time::timeout(
+    let result = run_cancellable_blocking(
+        "ZIP analysis",
         DROP_EXTRACT_TIMEOUT,
-        tokio::task::spawn_blocking(move || {
-            classify_zip_with_extraction(&path)
-        }),
+        move |cancellation| {
+            Ok(theseus::drop_classifier::classify_zip_with_extraction_cancellable(
+                &path,
+                &cancellation,
+            ))
+        },
     )
-    .await
-    .map_err(|_| {
-        format!(
-            "ZIP analysis timed out after {} minutes",
-            DROP_EXTRACT_TIMEOUT.as_secs() / 60
-        )
-    })?
-    .map_err(|e| format!("Extraction task panicked: {e}"))?;
+    .await?;
     let _ = app.emit(
         "drop_classify_progress",
         serde_json::json!({
@@ -387,9 +470,10 @@ pub async fn drop_extract_zip_to_temp<R: tauri::Runtime>(
 
     let base = launcher_import_temp_base();
     let zip_path_label = zip_path.to_string_lossy().to_string();
-    let extracted = tokio::time::timeout(
+    let extracted = run_cancellable_blocking(
+        "Launcher ZIP extraction",
         DROP_EXTRACT_TIMEOUT,
-        tokio::task::spawn_blocking(move || -> Result<String, String> {
+        move |cancellation| -> Result<String, String> {
             std::fs::create_dir_all(&base).map_err(|e| {
                 format!("Failed to create temp base '{}': {e}", base.display())
             })?;
@@ -404,29 +488,24 @@ pub async fn drop_extract_zip_to_temp<R: tauri::Runtime>(
             ));
             std::fs::create_dir(&dir)
                 .map_err(|e| format!("Failed to create temp directory: {e}"))?;
-            theseus::drop_classifier::extract_zip_to_dir(&zip_path, &dir)
-                .map_err(|e| {
-                    let _ = std::fs::remove_dir_all(&dir);
-                    tracing::warn!(
-                        "Launcher ZIP extraction failed for '{}': {e}",
-                        zip_path.display()
-                    );
-                    e
-                })?;
+            if let Err(error) =
+                theseus::drop_classifier::extract_zip_to_dir_cancellable(
+                    &zip_path,
+                    &dir,
+                    &cancellation,
+                )
+            {
+                let _ = remove_dir_all(&dir);
+                tracing::warn!(
+                    "Launcher ZIP extraction failed for '{}': {error}",
+                    zip_path.display()
+                );
+                return Err(error);
+            }
             Ok(dir.to_string_lossy().to_string())
-        }),
+        },
     )
-    .await
-    .map_err(|_| {
-        format!(
-            "Launcher ZIP extraction timed out after {} minutes",
-            DROP_EXTRACT_TIMEOUT.as_secs() / 60
-        )
-    })?
-    .map_err(|e| {
-        tracing::warn!("Launcher ZIP extraction task panicked: {e}");
-        format!("Extraction task panicked: {e}")
-    })??;
+    .await?;
 
     info!("Extracted launcher ZIP to: {extracted}");
     let _ = app.emit(
@@ -462,22 +541,12 @@ pub async fn drop_remove_temp_dir(path: String) -> Result<(), String> {
             target.display()
         ));
     }
-    tokio::time::timeout(
+    run_cancellable_blocking(
+        "Temp directory cleanup",
         DROP_CLEANUP_TIMEOUT,
-        tokio::task::spawn_blocking(move || {
-            std::fs::remove_dir_all(&target).map_err(|e| {
-                format!("Failed to remove temp dir '{}': {e}", target.display())
-            })
-        }),
+        move |_| remove_dir_all(&target),
     )
     .await
-    .map_err(|_| {
-        format!(
-            "Temp directory cleanup timed out after {} minutes",
-            DROP_CLEANUP_TIMEOUT.as_secs() / 60
-        )
-    })?
-    .map_err(|e| format!("Cleanup task panicked: {e}"))?
 }
 
 /// Scan for importable instances in a launcher's data directory.
@@ -573,24 +642,17 @@ pub async fn drop_detect_file_lock(
 pub async fn drop_extract_mod_metadata(path: String) -> Result<String, String> {
     let path = std::path::PathBuf::from(&path);
 
-    let meta = tokio::time::timeout(
+    let meta = run_cancellable_blocking(
+        "Metadata extraction",
         DROP_METADATA_TIMEOUT,
-        tokio::task::spawn_blocking(move || {
-            let file_bytes = std::fs::read(&path)
-                .map_err(|e| format!("Failed to read file: {e}"))?;
+        move |cancellation| {
+            let file_bytes = read_file_cancellable(&path, &cancellation)?;
             let bytes = bytes::Bytes::from(file_bytes);
             theseus::mod_metadata::extract_mod_metadata(&bytes)
                 .ok_or_else(|| "No mod metadata found in file".to_string())
-        }),
+        },
     )
-    .await
-    .map_err(|_| {
-        format!(
-            "Mod metadata extraction timed out after {} minutes",
-            DROP_METADATA_TIMEOUT.as_secs() / 60
-        )
-    })?
-    .map_err(|e| format!("Metadata extraction task panicked: {e}"))??;
+    .await?;
     serde_json::to_string(&meta)
         .map_err(|e| format!("Failed to serialize metadata: {e}"))
 }
