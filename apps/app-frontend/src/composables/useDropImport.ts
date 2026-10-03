@@ -1925,13 +1925,24 @@ export function useDropImport(options: DropImportOptions) {
 			if (item.selected === false || !item.itemType || item.itemType === 'launcher_container')
 				continue
 			if (item.scanState !== 'done') continue
-			const list = byType.get(item.itemType) ?? []
+			const groupKey =
+				item.itemType === 'ambiguous'
+					? `${item.itemType}:${JSON.stringify(
+							(item.choices ?? (item.candidates ?? []).map((itemType) => ({ itemType })))
+								.slice()
+								.sort((left, right) => left.itemType.localeCompare(right.itemType)),
+						)}`
+					: item.itemType
+			const list = byType.get(groupKey) ?? []
 			list.push(item)
-			byType.set(item.itemType, list)
+			byType.set(groupKey, list)
 		}
 		for (const type of typeOrder) {
-			const list = byType.get(type)
-			if (list?.length) groups.push({ id: type, type, items: list })
+			for (const [groupKey, list] of byType) {
+				if (list[0]?.itemType === type && list.length) {
+					groups.push({ id: groupKey, type, items: list })
+				}
+			}
 		}
 		batchGroups.value = groups
 		batchConfirmIndex = 0

@@ -552,6 +552,9 @@ function settleInstallJob(job: InstallJobSnapshot) {
 	throw new Error(job.error?.message ?? `Install job ${job.job_id} ${job.status}`)
 }
 
+const INSTALL_JOB_POLL_INTERVAL_MS = 1000
+const INSTALL_JOB_TIMEOUT_MS = 30 * 60 * 1000
+
 export async function wait_for_install_job(jobId: string) {
 	const current = await install_job_get(jobId)
 	if (isInstallJobFinished(current.status)) return settleInstallJob(current)
@@ -559,11 +562,21 @@ export async function wait_for_install_job(jobId: string) {
 	return await new Promise<InstallJobSnapshot>((resolve, reject) => {
 		let finished = false
 		let unlisten: (() => void) | null = null
+		let pollTimer: ReturnType<typeof setInterval> | null = null
+		let timeoutTimer: ReturnType<typeof setTimeout> | null = null
 
 		const cleanup = () => {
 			if (unlisten) {
 				unlisten()
 				unlisten = null
+			}
+			if (pollTimer) {
+				clearInterval(pollTimer)
+				pollTimer = null
+			}
+			if (timeoutTimer) {
+				clearTimeout(timeoutTimer)
+				timeoutTimer = null
 			}
 		}
 
@@ -587,6 +600,19 @@ export async function wait_for_install_job(jobId: string) {
 			reject(err)
 		}
 
+		const poll = () => {
+			install_job_get(jobId).then(resolveJob).catch(rejectWait)
+		}
+
+		pollTimer = setInterval(poll, INSTALL_JOB_POLL_INTERVAL_MS)
+		timeoutTimer = setTimeout(() => {
+			rejectWait(
+				new Error(
+					`Install job ${jobId} did not reach a terminal state within ${INSTALL_JOB_TIMEOUT_MS / 60000} minutes`,
+				),
+			)
+		}, INSTALL_JOB_TIMEOUT_MS)
+
 		install_job_listener(resolveJob)
 			.then((listener) => {
 				if (finished) {
@@ -595,7 +621,7 @@ export async function wait_for_install_job(jobId: string) {
 				}
 
 				unlisten = listener
-				install_job_get(jobId).then(resolveJob).catch(rejectWait)
+				poll()
 			})
 			.catch(rejectWait)
 	})

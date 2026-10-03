@@ -1147,24 +1147,11 @@ async fn copy_files_with_progress(
         })
         .map(|(src, dst)| {
             async move {
-                // Skip copying if destination file exists and is identical
-                if tokio::fs::metadata(&dst).await.is_ok()
-                    && let (Ok(src_meta), Ok(dst_meta)) = (
-                        tokio::fs::metadata(&src).await,
-                        tokio::fs::metadata(&dst).await,
-                    )
-                {
-                    // If files have identical size and modification time, skip copying
-                    if src_meta.len() == dst_meta.len()
-                        && src_meta.modified().ok() == dst_meta.modified().ok()
-                    {
-                        return Ok::<_, crate::Error>(());
-                    }
-                }
-
-                // Proceed with copy
+                // Always copy the source file. Size and modification time are not
+                // a content identity, so using them to skip a copy can preserve
+                // stale bytes in an existing managed instance.
                 fetch::copy(&src, &dst, io_semaphore).await?;
-                Ok(())
+                Ok::<(), crate::Error>(())
             }
         })
         .collect();
