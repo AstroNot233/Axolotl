@@ -553,10 +553,33 @@ function settleInstallJob(job: InstallJobSnapshot) {
 }
 
 const INSTALL_JOB_POLL_INTERVAL_MS = 1000
+const INSTALL_JOB_QUERY_TIMEOUT_MS = 10 * 1000
 const INSTALL_JOB_TIMEOUT_MS = 30 * 60 * 1000
 
+async function queryInstallJob(jobId: string) {
+	return await new Promise<InstallJobSnapshot>((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			reject(
+				new Error(
+					`Install job ${jobId} query timed out after ${INSTALL_JOB_QUERY_TIMEOUT_MS / 1000} seconds`,
+				),
+			)
+		}, INSTALL_JOB_QUERY_TIMEOUT_MS)
+		install_job_get(jobId).then(
+			(job) => {
+				clearTimeout(timeout)
+				resolve(job)
+			},
+			(error) => {
+				clearTimeout(timeout)
+				reject(error)
+			},
+		)
+	})
+}
+
 export async function wait_for_install_job(jobId: string) {
-	const current = await install_job_get(jobId)
+	const current = await queryInstallJob(jobId)
 	if (isInstallJobFinished(current.status)) return settleInstallJob(current)
 
 	return await new Promise<InstallJobSnapshot>((resolve, reject) => {
@@ -564,6 +587,7 @@ export async function wait_for_install_job(jobId: string) {
 		let unlisten: (() => void) | null = null
 		let pollTimer: ReturnType<typeof setInterval> | null = null
 		let timeoutTimer: ReturnType<typeof setTimeout> | null = null
+		let pollInFlight = false
 
 		const cleanup = () => {
 			if (unlisten) {
@@ -601,7 +625,17 @@ export async function wait_for_install_job(jobId: string) {
 		}
 
 		const poll = () => {
-			install_job_get(jobId).then(resolveJob).catch(rejectWait)
+			if (finished || pollInFlight) return
+			pollInFlight = true
+			queryInstallJob(jobId)
+				.then(resolveJob)
+				.catch(() => {
+					// The terminal timeout remains the source of truth when a
+					// transient query fails or the backend is temporarily busy.
+				})
+				.finally(() => {
+					pollInFlight = false
+				})
 		}
 
 		pollTimer = setInterval(poll, INSTALL_JOB_POLL_INTERVAL_MS)

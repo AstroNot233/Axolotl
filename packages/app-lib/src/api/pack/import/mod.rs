@@ -6,6 +6,7 @@ use std::{
 use futures::stream::{FuturesUnordered, StreamExt};
 use io::IOError;
 use serde::{Deserialize, Serialize};
+use tempfile::Builder as TempFileBuilder;
 
 use crate::{
     install::{
@@ -1127,6 +1128,60 @@ async fn collect_dotminecraft_files(
     Ok(collected)
 }
 
+async fn copy_import_file_atomically(
+    src: &Path,
+    dest: &Path,
+    io_semaphore: &IoSemaphore,
+) -> crate::Result<()> {
+    let parent = dest.parent().ok_or_else(|| {
+        crate::ErrorKind::InputError(format!(
+            "Import destination has no parent directory: {}",
+            dest.display()
+        ))
+    })?;
+    io::create_dir_all(parent).await?;
+
+    let temporary = TempFileBuilder::new()
+        .prefix(".axolotl-import-")
+        .tempfile_in(parent)
+        .map_err(|error| {
+            crate::ErrorKind::IOError(IOError::with_path(error, parent))
+        })?
+        .into_temp_path();
+    fetch::copy(src, &temporary, io_semaphore).await?;
+
+    let backup = if tokio::fs::try_exists(dest).await? {
+        let backup = TempFileBuilder::new()
+            .prefix(".axolotl-import-backup-")
+            .tempfile_in(parent)
+            .map_err(|error| {
+                crate::ErrorKind::IOError(IOError::with_path(error, parent))
+            })?
+            .into_temp_path();
+        tokio::fs::remove_file(&backup).await?;
+        tokio::fs::rename(dest, &backup).await.map_err(|error| {
+            crate::ErrorKind::IOError(IOError::with_path(error, dest))
+        })?;
+        Some(backup)
+    } else {
+        None
+    };
+
+    if let Err(error) = tokio::fs::rename(&temporary, dest).await {
+        if let Some(backup) = &backup {
+            let _ = tokio::fs::rename(backup, dest).await;
+        }
+        return Err(
+            crate::ErrorKind::IOError(IOError::with_path(error, dest)).into()
+        );
+    }
+
+    if let Some(backup) = backup {
+        let _ = tokio::fs::remove_file(backup).await;
+    }
+    Ok(())
+}
+
 /// Copies the collected files into the instance profile concurrently, bounded
 /// by the I/O semaphore, reporting progress after every completed file.
 async fn copy_files_with_progress(
@@ -1148,9 +1203,9 @@ async fn copy_files_with_progress(
         .map(|(src, dst)| {
             async move {
                 // Always copy the source file. Size and modification time are not
-                // a content identity, so using them to skip a copy can preserve
-                // stale bytes in an existing managed instance.
-                fetch::copy(&src, &dst, io_semaphore).await?;
+                // a content identity, and the temporary-file swap prevents a
+                // failed copy from leaving a partial destination behind.
+                copy_import_file_atomically(&src, &dst, io_semaphore).await?;
                 Ok::<(), crate::Error>(())
             }
         })
@@ -1187,6 +1242,42 @@ async fn copy_files_with_progress(
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod import_copy_tests {
+    use super::{IoSemaphore, copy_import_file_atomically};
+    use std::fs;
+    use tempfile::tempdir;
+    use tokio::sync::Semaphore;
+
+    #[tokio::test]
+    async fn replaces_existing_file_without_leaving_staging_files() {
+        let root = tempdir().unwrap();
+        let source = root.path().join("source.bin");
+        let destination = root.path().join("instance").join("config.bin");
+        fs::write(&source, b"new contents").unwrap();
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        fs::write(&destination, b"stale contents").unwrap();
+
+        copy_import_file_atomically(
+            &source,
+            &destination,
+            &IoSemaphore(Semaphore::new(1)),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(fs::read(&destination).unwrap(), b"new contents");
+        let leftovers: Vec<_> = fs::read_dir(destination.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| {
+                name.to_string_lossy().starts_with(".axolotl-import-")
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "staging files remain: {leftovers:?}");
+    }
 }
 
 /// Determines the real game working directory for an import whose source is a

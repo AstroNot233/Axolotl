@@ -2086,10 +2086,11 @@ export function useDropImport(options: DropImportOptions) {
 		confirmDropModal.value?.hide()
 		symlinkCardsModal.value?.hide()
 		if (batchPhase.value === 'scanning' && batchScanPromise) {
-			await batchScanPromise
+			batchPhase.value = 'cancelled'
 			return
 		}
 		if (batchPhase.value === 'installing') {
+			batchPhase.value = 'cancelled'
 			await cancelBatchInstallJob()
 			return
 		}
