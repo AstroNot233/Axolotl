@@ -2,20 +2,6 @@ import type { AppSettings } from './settings'
 
 export type PrivilegedSettingChange = { key: string; value: string }
 
-export type PrivilegedActionRequest = {
-	event: 'UpdateSettings' | 'StopInstance'
-	source: string
-	rows?: SettingsDiffRow[]
-	instanceId?: string
-	processCount?: number
-}
-
-export type SettingsDiffRow = {
-	key: string
-	before: string
-	after: string
-}
-
 type AbilityKind = 'bool' | 'int' | 'text'
 
 type SettingAbility = {
@@ -156,17 +142,6 @@ const abilities: Record<string, SettingAbility> = {
 
 export function hasSettingAbility(key: string): boolean {
 	return Object.prototype.hasOwnProperty.call(abilities, key)
-}
-
-export function diffSettings(
-	settings: AppSettings,
-	changes: PrivilegedSettingChange[],
-): SettingsDiffRow[] {
-	return changes.map((change) => ({
-		key: change.key,
-		before: hasSettingAbility(change.key) ? abilities[change.key].read(settings) : '',
-		after: change.value,
-	}))
 }
 
 // 全部键合法才应用

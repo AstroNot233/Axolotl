@@ -23,11 +23,7 @@ const messages = defineMessages({
 	danger: {
 		id: 'app.privileged-consent.danger',
 		defaultMessage:
-			'Links from websites, chat messages or other apps will be able to request settings changes, including launch commands, directories and network options, and to stop a running game. Every request still shows a confirmation dialog that you can decline.',
-	},
-	countdown: {
-		id: 'app.privileged-consent.countdown',
-		defaultMessage: 'You can enable this in {seconds}s',
+			'External links will be able to change settings (theme, launch commands, directories, network options, etc.) and stop running games. You will still confirm each action before it executes.',
 	},
 	acknowledge: {
 		id: 'app.privileged-consent.acknowledge',
@@ -46,6 +42,12 @@ let countdownTimer: ReturnType<typeof setInterval> | undefined
 
 const title = computed(() => formatMessage(messages.title))
 const confirmDisabled = computed(() => secondsLeft.value > 0 || !acknowledged.value)
+const confirmLabel = computed(() => {
+	if (secondsLeft.value > 0) {
+		return `${formatMessage(messages.confirm)} (${secondsLeft.value})`
+	}
+	return formatMessage(messages.confirm)
+})
 
 function stopCountdown() {
 	if (countdownTimer) {
@@ -98,15 +100,12 @@ defineExpose({ request })
 				{{ formatMessage(messages.danger) }}
 			</Admonition>
 			<Checkbox v-model="acknowledged" :label="formatMessage(messages.acknowledge)" />
-			<span class="text-xs text-[var(--color-text-tertiary)]">
-				{{ secondsLeft > 0 ? formatMessage(messages.countdown, { seconds: secondsLeft }) : '' }}
-			</span>
 		</div>
 		<template #actions>
 			<div ref="cancelWrap" class="flex w-full flex-row justify-end gap-2">
 				<Button @click="finish(false)">{{ formatMessage(commonMessages.cancelButton) }}</Button>
 				<Button type="colored" color="red" :disabled="confirmDisabled" @click="finish(true)">
-					{{ formatMessage(messages.confirm) }}
+					{{ confirmLabel }}
 				</Button>
 			</div>
 		</template>

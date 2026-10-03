@@ -9,7 +9,7 @@ axolotl://<命名空间>[/<动作>/<标识>][?<参数>]
 - 命名空间小写；标识保持原样（URL 编码）；参数 UTF-8 编码
 - 未知参数忽略；缺必填参数拒绝并提示
 - **副作用类**走 `launch` / `install` / `join`（需用户确认）
-- **特权写操作**走 `settings/set` / `stop`（双闸开关 + 启用时 10 秒强制阅读 + 每次执行确认，见 §6）
+- **特权写操作**走 `settings/set` / `stop`（双闸开关 + 启用时 10 秒强制阅读授权，之后直接执行，见 §6）
 - **纯导航**走各命名空间或通用 `open`（仅白名单路径）
 - 关闭“允许外部链接”开关后，所有 axolotl:// 仅提示不执行
 
@@ -81,7 +81,7 @@ axolotl://<命名空间>[/<动作>/<标识>][?<参数>]
 - 离线时浏览类（browse/project）自动回落 `/library`
 - 文件/Studio 等页只导航不自动连接/执行
 - 关闭“允许外部链接”开关后，所有 axolotl:// 仅弹警告不执行
-- 特权动作（`settings/set`、`stop`）需“允许外部链接”与“允许特权链接操作”双开关同时开启，且每次执行都必须通过确认弹窗（可拒绝）；确认前不产生任何写操作
+- 特权动作（`settings/set`、`stop`）需“允许外部链接”与“允许特权链接操作”双开关同时开启；执行直接生效、不再逐次确认（授权在开关启用时一次性完成）
 - 特权写操作只允许白名单键，未知键、非法值整单拒绝并提示
 - `file://` `javascript:` 等伪协议直接拒绝
 
@@ -92,32 +92,30 @@ axolotl://<命名空间>[/<动作>/<标识>][?<参数>]
 - 解析入口：`packages/app-lib/src/api/handler.rs::handle_url`
 - 语义命令函数：`launch_payload` / `join_payload` / `install_payload`
 - 导航归一：`open_route(path, query)` → 前端 `resolveOpenRoute` 白名单校验
-- 前端分发：`apps/app-frontend/src/App.vue::handleCommand` 仅处理 `OpenRoute` / `OpenSettings` / `LaunchInstance` / `InstallVersion` / `InstallMod/Modpack/Server` / `RunMRPack` / `UpdateSettings` / `StopInstance`（后两者走特权确认弹窗）
+- 前端分发：`apps/app-frontend/src/App.vue::handleCommand` 仅处理 `OpenRoute` / `OpenSettings` / `LaunchInstance` / `InstallVersion` / `InstallMod/Modpack/Server` / `RunMRPack` / `UpdateSettings` / `StopInstance`（后两者授权后直接执行）
 - 设置开关：`PrivacySettings.vue` `allow_external_scheme`（默认 true）、`allow_privileged_scheme`（默认 false，双闸）
 - 特权载荷：`CommandPayload::UpdateSettings` / `StopInstance`（`event/mod.rs`），后端只解析校验、不直接写
 - 特权键表：`apps/app-frontend/src/helpers/deep-link-settings.ts`（与 `handler.rs` 白名单同步）
-- 特权确认弹窗：`apps/app-frontend/src/components/ui/modal/PrivilegedActionConfirmModal.vue`（红色最高警告 + 旧值/新值 diff + 默认焦点取消；确认后才调用 `settings_set` / `process_kill`）
-- 启用确认弹窗：`apps/app-frontend/src/components/ui/modal/PrivilegedConsentModal.vue`（开启开关时强制 10 秒阅读 + 勾选已了解风险；取消则开关保持关闭）
+- 启用授权弹窗：`apps/app-frontend/src/components/ui/modal/PrivilegedConsentModal.vue`（开启开关时红色最高警告 + 10 秒倒计时锁死按钮（显示“启用(N)”）+ 勾选已了解风险；取消则开关保持关闭）
 - 种子地图分享：`LabSeedMap.vue` 生成 `axolotl://lab/seed-map?...`
 - 桌面快捷方式：`shortcuts/mod.rs` 生成 `axolotl://launch?instance_id=...`
 
 ---
 
-## 6. 特权动作（写操作，需强制确认）
+## 6. 特权动作（写操作，启用时一次性授权）
 
 | 链接 | 说明 | 必填 | 可选 |
 |---|---|---|---|
 | `axolotl://settings/set?<key>=<value>[&...]` | 修改设置（白名单键） | 至少一组键值 | 一次可传多键；重复键拒绝 |
 | `axolotl://stop?instance_id=<id>` | 停止实例正在运行的游戏进程 | `instance_id` | 也支持路径式 `axolotl://stop/<id>` |
 
-### 门禁与确认（不可绕过）
+### 门禁（启用开关时强制阅读授权）
 
 - **双闸**：`allow_external_scheme` 与 `allow_privileged_scheme` 同时开启才受理（后者默认关闭，入口：设置 > 隐私与数据 > 安全）
-- 后端只解析校验并生成载荷，**不直接写入**；前端唯一执行出口是特权确认弹窗
-- 弹窗内容：红色最高警告 + 原始链接全文 + 逐键“当前值 → 新值”对照 + 默认焦点在取消（可拒绝，无倒计时）
-- 强制 10 秒阅读只发生在**启用开关时**（需勾选“我已了解风险”才能开启）；此后每次执行仅需一次确认
-- 取消 / Esc / 点遮罩均中止；只有点击确认后才调用 `settings_set` / `process_kill`
-- 离线可用（本地写库），多条命令逐条弹窗、不叠加
+- **强制阅读只发生在启用开关时**：红色最高警告 + 10 秒倒计时锁死“启用”按钮（按钮显示 `启用(N)`）+ 勾选“我已了解风险”；取消则开关保持关闭
+- 启用后每次执行**不再逐次确认**，直接生效并弹通知（改设置后立即刷新主题/外观/语言；`stop` 立即停止进程）
+- 后端只解析校验并生成载荷，**不直接写入**；前端 `handleCommand` 直接执行 `settings_set` / `process_kill`
+- 离线可用（本地写库）
 
 ### settings/set 白名单键
 

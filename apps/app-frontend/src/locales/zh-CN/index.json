@@ -2675,9 +2675,6 @@
   "app.home.widgets.music-description": {
     "message": "播放本地音乐，玩游戏时也能继续播放。"
   },
-  "app.home.widgets.music.hide-list": {
-    "message": "隐藏歌曲列表"
-  },
   "app.home.widgets.music.mode.loop-all": {
     "message": "列表循环"
   },
@@ -2707,12 +2704,6 @@
   },
   "app.home.widgets.music.prev": {
     "message": "上一首"
-  },
-  "app.home.widgets.music.remove": {
-    "message": "移除歌曲"
-  },
-  "app.home.widgets.music.show-list": {
-    "message": "显示歌曲列表"
   },
   "app.home.widgets.music.unknown-track": {
     "message": "未在播放"
@@ -6930,16 +6921,13 @@
     "message": "隐私与安全"
   },
   "app.privileged-consent.acknowledge": {
-    "message": "我了解风险，仍要启用特权链接操作"
+    "message": "我了解风险，仍要启用敏感scheme操作"
   },
   "app.privileged-consent.confirm": {
     "message": "启用"
   },
-  "app.privileged-consent.countdown": {
-    "message": "{seconds} 秒后可启用"
-  },
   "app.privileged-consent.danger": {
-    "message": "来自网页、聊天消息或其他应用的外部链接将可以请求修改设置（包括启动命令、目录与网络选项），并可停止正在运行的游戏。每次请求仍会弹出确认框，你可以拒绝。"
+    "message": "外部链接将可以修改设置（主题、启动命令、目录、网络选项等）并停止正在运行的游戏。每次执行前仍会要求确认。"
   },
   "app.privileged-consent.title": {
     "message": "启用特权链接操作？"
@@ -6948,46 +6936,13 @@
     "message": "这类操作会修改安全敏感设置并停止游戏"
   },
   "app.privileged-modal.applied": {
-    "message": "特权链接已执行"
-  },
-  "app.privileged-modal.changes-label": {
-    "message": "设置变更"
-  },
-  "app.privileged-modal.column-after": {
-    "message": "新值"
-  },
-  "app.privileged-modal.column-before": {
-    "message": "当前值"
-  },
-  "app.privileged-modal.column-setting": {
-    "message": "设置项"
-  },
-  "app.privileged-modal.confirm": {
-    "message": "确认并执行"
-  },
-  "app.privileged-modal.danger-settings": {
-    "message": "以下修改涉及启动命令、目录、网络等安全敏感设置，确认前请逐项核对。"
-  },
-  "app.privileged-modal.danger-stop": {
-    "message": "将强制停止实例 {instance} 正在运行的游戏，未保存的世界进度可能丢失。"
-  },
-  "app.privileged-modal.link-label": {
-    "message": "请求链接"
+    "message": "scheme操作已执行"
   },
   "app.privileged-modal.no-processes": {
     "message": "该实例没有正在运行的游戏进程"
   },
-  "app.privileged-modal.process-count": {
-    "message": "{count, plural, other {将停止 # 个正在运行的进程}}"
-  },
   "app.privileged-modal.stopped": {
     "message": "已发送停止请求"
-  },
-  "app.privileged-modal.title": {
-    "message": "特权操作请求"
-  },
-  "app.privileged-modal.warning": {
-    "message": "此链接来自 Axolotl 启动器外部。如非你本人发起，请点击取消。"
   },
   "app.project.curseforge.unavailable-description": {
     "message": "该 CurseForge 项目没有返回任何数据。"
@@ -13533,7 +13488,7 @@
     "message": "允许 axolotl:// 链接修改设置与停止游戏进程。开启时需阅读风险警告，每次执行仍需你确认。"
   },
   "app.settings.privacy.privileged-scheme": {
-    "message": "允许特权链接操作"
+    "message": "允许敏感scheme操作"
   },
   "app.notification.error-occurred": {
     "message": "发生错误"

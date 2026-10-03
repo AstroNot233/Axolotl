@@ -2684,9 +2684,6 @@
   "app.home.widgets.music.autoplay-on": {
     "message": "Autoplay: on"
   },
-  "app.home.widgets.music.hide-list": {
-    "message": "Hide track list"
-  },
   "app.home.widgets.music.mode.loop-all": {
     "message": "Loop all"
   },
@@ -2716,12 +2713,6 @@
   },
   "app.home.widgets.music.prev": {
     "message": "Previous track"
-  },
-  "app.home.widgets.music.remove": {
-    "message": "Remove song"
-  },
-  "app.home.widgets.music.show-list": {
-    "message": "Show track list"
   },
   "app.home.widgets.music.unknown-track": {
     "message": "Nothing playing"
@@ -6986,11 +6977,8 @@
   "app.privileged-consent.confirm": {
     "message": "Enable"
   },
-  "app.privileged-consent.countdown": {
-    "message": "You can enable this in {seconds}s"
-  },
   "app.privileged-consent.danger": {
-    "message": "Links from websites, chat messages or other apps will be able to request settings changes, including launch commands, directories and network options, and to stop a running game. Every request still shows a confirmation dialog that you can decline."
+    "message": "External links will be able to change settings (theme, launch commands, directories, network options, etc.) and stop running games. You will still confirm each action before it executes."
   },
   "app.privileged-consent.title": {
     "message": "Enable privileged link actions?"
@@ -7001,44 +6989,11 @@
   "app.privileged-modal.applied": {
     "message": "Privileged link applied"
   },
-  "app.privileged-modal.changes-label": {
-    "message": "Setting changes"
-  },
-  "app.privileged-modal.column-after": {
-    "message": "New value"
-  },
-  "app.privileged-modal.column-before": {
-    "message": "Current value"
-  },
-  "app.privileged-modal.column-setting": {
-    "message": "Setting"
-  },
-  "app.privileged-modal.confirm": {
-    "message": "Confirm and apply"
-  },
-  "app.privileged-modal.danger-settings": {
-    "message": "These changes can alter security-sensitive settings such as launch commands, directories and the network. Review every row before confirming."
-  },
-  "app.privileged-modal.danger-stop": {
-    "message": "This force-stops the running game of instance {instance}. Unsaved world progress may be lost."
-  },
-  "app.privileged-modal.link-label": {
-    "message": "Requested link"
-  },
   "app.privileged-modal.no-processes": {
     "message": "No running game processes for this instance"
   },
-  "app.privileged-modal.process-count": {
-    "message": "{count, plural, one {# running process} other {# running processes}} will be stopped."
-  },
   "app.privileged-modal.stopped": {
     "message": "Stop request sent"
-  },
-  "app.privileged-modal.title": {
-    "message": "Privileged action request"
-  },
-  "app.privileged-modal.warning": {
-    "message": "This link was sent from outside Axolotl Launcher. If you did not create it yourself, choose Cancel."
   },
   "app.project.curseforge.unavailable-description": {
     "message": "The CurseForge project did not return any data."

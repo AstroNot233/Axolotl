@@ -94,7 +94,6 @@ import JavaDownloadConfirmationModal from '@/components/ui/modal/JavaDownloadCon
 import ModpackAlreadyInstalledModal from '@/components/ui/modal/ModpackAlreadyInstalledModal.vue'
 import ModpackInstallModal from '@/components/ui/modal/ModpackInstallModal.vue'
 import PrivacyConsentModal from '@/components/ui/modal/PrivacyConsentModal.vue'
-import PrivilegedActionConfirmModal from '@/components/ui/modal/PrivilegedActionConfirmModal.vue'
 import NavButton from '@/components/ui/NavButton.vue'
 import NavRail from '@/components/ui/NavRail.vue'
 import OfflineAccountRestrictionModal from '@/components/ui/OfflineAccountRestrictionModal.vue'
@@ -113,7 +112,7 @@ import { trackEvent } from '@/helpers/analytics'
 import { check_reachable } from '@/helpers/auth.js'
 import { get_user, get_version } from '@/helpers/cache.js'
 import { configureCurseForgeManualDownloadWatcher } from '@/helpers/curseforge'
-import { applySettingChanges, diffSettings } from '@/helpers/deep-link-settings.ts'
+import { applySettingChanges } from '@/helpers/deep-link-settings.ts'
 import { resolveOpenRoute, resolveSettingsRoute } from '@/helpers/deep-links.ts'
 import { DIRECT_LINKS_SYNCED_EVENT, syncConfiguredDirectLinks } from '@/helpers/direct-link-sync'
 import { getMissingContentScannerSettings } from '@/helpers/downloads-scanner'
@@ -2427,8 +2426,6 @@ async function handleCommand(e) {
 	}
 }
 
-const privilegedActionModal = ref<InstanceType<typeof PrivilegedActionConfirmModal> | null>(null)
-
 const privilegedMessages = defineMessages({
 	applied: {
 		id: 'app.privileged-modal.applied',
@@ -2444,18 +2441,9 @@ const privilegedMessages = defineMessages({
 	},
 })
 
-// 确认弹窗通过后才执行
+// 启用开关时已强制阅读确认，执行不再逐次确认
 async function handlePrivilegedCommand(e) {
 	if (e.event === 'UpdateSettings') {
-		const current = await getSettings().catch(handleError)
-		if (!current) return
-		const rows = diffSettings(current, e.changes ?? [])
-		const confirmed = await privilegedActionModal.value?.request({
-			event: 'UpdateSettings',
-			source: e.source ?? '',
-			rows,
-		})
-		if (!confirmed) return
 		const latest = await getSettings().catch(handleError)
 		if (!latest || !applySettingChanges(latest, e.changes ?? [])) return
 		await setSettings(latest).catch(handleError)
@@ -2469,13 +2457,6 @@ async function handlePrivilegedCommand(e) {
 		return
 	}
 	const processes = await get_by_instance_id(e.instance_id).catch(() => [])
-	const confirmed = await privilegedActionModal.value?.request({
-		event: 'StopInstance',
-		source: e.source ?? '',
-		instanceId: e.instance_id,
-		processCount: processes.length,
-	})
-	if (!confirmed) return
 	if (!processes.length) {
 		addNotification({
 			title: formatMessage(privilegedMessages.noProcesses),
@@ -3260,7 +3241,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		:error-action-label="formatMessage(messages.exportErrorLogs)"
 	/>
 	<MinecraftCrashModal ref="minecraftCrashModal" />
-	<PrivilegedActionConfirmModal ref="privilegedActionModal" />
 	<JavaDownloadConfirmationModal ref="javaDownloadConfirmationModal" />
 	<PrivacyConsentModal ref="privacyConsentModal" @saved="handlePrivacyConsentSaved" />
 	<RemoteAnnouncements
