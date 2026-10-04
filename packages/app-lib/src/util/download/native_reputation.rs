@@ -10,7 +10,7 @@ use std::sync::{LazyLock, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const FILE_NAME: &str = "native-download-reputation.json";
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const MAX_ENTRIES: usize = 256;
 const MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
 const WRITE_DELAY: Duration = Duration::from_secs(5);
@@ -150,7 +150,7 @@ pub(crate) fn get_transport(
     TRANSPORT_REPUTATION
         .lock()
         .get(&TransportKey {
-            authority: authority.to_string(),
+            authority: super::proxy_context::authority_key(authority, proxy),
             proxy,
             transport,
         })
@@ -169,7 +169,7 @@ pub(crate) fn record_transport_success(
     let mut reputation = TRANSPORT_REPUTATION.lock();
     let entry = reputation
         .entry(TransportKey {
-            authority: authority.to_string(),
+            authority: super::proxy_context::authority_key(authority, proxy),
             proxy,
             transport,
         })
@@ -191,7 +191,7 @@ pub(crate) fn get(
         .lock()
         .get(&ReputationKey {
             family: family.to_string(),
-            authority: authority.to_string(),
+            authority: super::proxy_context::authority_key(authority, proxy),
             proxy,
         })
         .copied()
@@ -208,7 +208,7 @@ pub(crate) fn record_success(
     let entry = reputation
         .entry(ReputationKey {
             family: family.to_string(),
-            authority: authority.to_string(),
+            authority: super::proxy_context::authority_key(authority, proxy),
             proxy,
         })
         .or_default();
@@ -237,7 +237,7 @@ pub(crate) fn record_transfer_success(
     let entry = reputation
         .entry(ReputationKey {
             family: family.to_string(),
-            authority: authority.to_string(),
+            authority: super::proxy_context::authority_key(authority, proxy),
             proxy,
         })
         .or_default();
@@ -259,7 +259,7 @@ pub(crate) fn record_failure(
     let entry = reputation
         .entry(ReputationKey {
             family: family.to_string(),
-            authority: authority.to_string(),
+            authority: super::proxy_context::authority_key(authority, proxy),
             proxy,
         })
         .or_default();

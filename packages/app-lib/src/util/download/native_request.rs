@@ -3,9 +3,9 @@
 use super::modrinth_redirect::repair_official_redirect as repair_official_cdn_redirect;
 use crate::ErrorKind;
 use crate::util::fetch::{
-    DIRECT_REQWEST_CLIENT, DOWNLOAD_DNS_RESOLVER, DOWNLOAD_META_HEADER,
-    DownloadClients, DownloadMeta, DownloadRoute, MAX_REDIRECT_LOCATION_BYTES,
-    NO_REDIRECT_REQWEST_CLIENT, ProxyPolicy, authority_uses_http1_fallback,
+    DIRECT_REQWEST_CLIENT, DOWNLOAD_META_HEADER, DownloadClients, DownloadMeta,
+    DownloadRoute, MAX_REDIRECT_LOCATION_BYTES, NO_REDIRECT_REQWEST_CLIENT,
+    ProxyPolicy, authority_uses_http1_fallback,
     forget_effective_route_authority, is_allowed_download_redirect,
     is_h2_protocol_failure, is_official_modrinth_download_url,
     is_sensitive_header, record_authority_h2_failure,
@@ -95,7 +95,9 @@ pub(crate) async fn send_path_request_with_clients(
             Err(error) => {
                 if let Some(host) = record_dns_connection_failure(route, &error)
                 {
-                    DOWNLOAD_DNS_RESOLVER.pre_resolve(&host).await;
+                    super::proxy_context::resolver(route.proxy)
+                        .pre_resolve(&host)
+                        .await;
                 }
                 if !fallback_to_http1
                     && redirect_count < 5

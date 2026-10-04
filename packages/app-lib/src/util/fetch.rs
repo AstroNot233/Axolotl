@@ -1018,11 +1018,15 @@ static H2_FALLBACK_AUTHORITIES: LazyLock<Mutex<HashMap<String, Instant>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub(crate) fn authority_uses_http1_fallback(authority: &str) -> bool {
+    let authority = super::download::proxy_context::authority_key(
+        authority,
+        ProxyPolicy::System,
+    );
     let mut fallbacks = H2_FALLBACK_AUTHORITIES.lock();
-    match fallbacks.get(authority) {
+    match fallbacks.get(&authority) {
         Some(until) if *until > Instant::now() => true,
         Some(_) => {
-            fallbacks.remove(authority);
+            fallbacks.remove(&authority);
             false
         }
         None => false,
@@ -1033,7 +1037,13 @@ pub(crate) fn record_authority_h2_failure(authority: &str) {
     let now = Instant::now();
     let mut fallbacks = H2_FALLBACK_AUTHORITIES.lock();
     fallbacks.retain(|_, until| *until > now);
-    fallbacks.insert(authority.to_string(), now + H2_FALLBACK_TTL);
+    fallbacks.insert(
+        super::download::proxy_context::authority_key(
+            authority,
+            ProxyPolicy::System,
+        ),
+        now + H2_FALLBACK_TTL,
+    );
 }
 
 pub(crate) fn is_h2_protocol_failure(error: &reqwest::Error) -> bool {
@@ -1113,6 +1123,9 @@ pub(crate) struct DownloadClients {
     pub(crate) http1_direct: reqwest::Client,
     pub(crate) proxy: crate::util::proxy::ProxyConfig,
     pub(crate) ignore_ssl_errors: bool,
+    pub(crate) scope: String,
+    pub(crate) system_dns: Arc<DownloadDnsResolver>,
+    pub(crate) direct_dns: Arc<DownloadDnsResolver>,
 }
 
 impl DownloadClients {
@@ -1120,11 +1133,25 @@ impl DownloadClients {
         proxy: &crate::util::proxy::ProxyConfig,
         ignore_ssl_errors: bool,
     ) -> crate::Result<Self> {
+        let system_dns = Arc::new(DownloadDnsResolver::default());
+        let direct_dns = Arc::new(DownloadDnsResolver::default());
         let build = |direct: bool, http1: bool| {
             let builder = file_reqwest_client_builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .danger_accept_invalid_certs(ignore_ssl_errors);
-            let builder = if http1 { builder.http1_only() } else { builder };
+            let builder = builder.dns_resolver(if direct {
+                Arc::clone(&direct_dns)
+            } else {
+                Arc::clone(&system_dns)
+            });
+            let builder = if http1
+                || !direct
+                    && proxy.mode == crate::util::proxy::ProxyMode::Custom
+            {
+                builder.http1_only()
+            } else {
+                builder
+            };
             let builder = if direct {
                 builder.no_proxy()
             } else {
@@ -1135,13 +1162,25 @@ impl DownloadClients {
             builder.build().map_err(crate::Error::from)
         };
         Ok(Self {
-            metadata: build_configured_client(proxy, ignore_ssl_errors)?,
+            metadata: proxy
+                .apply(
+                    reqwest_client_builder()
+                        .dns_resolver(Arc::clone(&system_dns))
+                        .danger_accept_invalid_certs(ignore_ssl_errors),
+                )?
+                .build()?,
             system: build(false, false)?,
             direct: build(true, false)?,
             http1_system: build(false, true)?,
             http1_direct: build(true, true)?,
             proxy: proxy.clone(),
             ignore_ssl_errors,
+            scope: super::download::proxy_context::fingerprint(
+                proxy,
+                ignore_ssl_errors,
+            ),
+            system_dns,
+            direct_dns,
         })
     }
 
@@ -1149,8 +1188,7 @@ impl DownloadClients {
         system: &reqwest::Client,
         direct: &reqwest::Client,
     ) -> Self {
-        if let Some(state) = crate::State::get_if_initialized() {
-            let mut clients = state.download_clients();
+        if let Some(mut clients) = super::download::proxy_context::clients() {
             if std::ptr::eq(system, &*HTTP1_NO_REDIRECT_REQWEST_CLIENT) {
                 clients.system = clients.http1_system.clone();
                 clients.direct = clients.http1_direct.clone();
@@ -1165,6 +1203,9 @@ impl DownloadClients {
             http1_direct: HTTP1_DIRECT_REQWEST_CLIENT.clone(),
             proxy: Default::default(),
             ignore_ssl_errors: false,
+            scope: "unconfigured".into(),
+            system_dns: Arc::clone(&DOWNLOAD_DNS_RESOLVER),
+            direct_dns: Arc::clone(&DOWNLOAD_DNS_RESOLVER),
         }
     }
 }
@@ -1230,15 +1271,6 @@ pub(crate) static HTTP1_DIRECT_REQWEST_CLIENT: LazyLock<reqwest::Client> =
             .build()
             .expect("client configuration should be valid")
     });
-
-static DIRECT_FETCH_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    let builder = reqwest_client_builder().no_proxy();
-    #[cfg(not(test))]
-    let builder = builder.https_only(true);
-    builder
-        .build()
-        .expect("client configuration should be valid")
-});
 
 const FETCH_RETRY_DELAYS: [time::Duration; 3] = [
     time::Duration::from_millis(100),
@@ -1317,7 +1349,8 @@ fn record_route_success(
     remote_addr: Option<std::net::SocketAddr>,
 ) {
     if let (Some(host), Some(remote_addr)) = (route_host(route), remote_addr) {
-        DOWNLOAD_DNS_RESOLVER.record_host_success(&host, remote_addr.ip());
+        super::download::proxy_context::resolver(route.proxy)
+            .record_host_success(&host, remote_addr.ip());
     }
     if let Some(key) = route_health_key(route, resource) {
         let baseline = persisted_route_health(&key, route.proxy);
@@ -1396,7 +1429,7 @@ pub(crate) fn record_dns_connection_failure(
         return None;
     }
     let host = route_host(route)?;
-    DOWNLOAD_DNS_RESOLVER
+    super::download::proxy_context::resolver(route.proxy)
         .record_connection_failure(&host)
         .then_some(host)
 }
@@ -1512,9 +1545,13 @@ async fn fetch_validated_metadata_route(
     client: &reqwest::Client,
     response_validator: &(dyn Fn(&Bytes) -> crate::Result<()> + Send + Sync),
 ) -> crate::Result<Bytes> {
+    let download_clients = DownloadClients::for_request(
+        &NO_REDIRECT_REQWEST_CLIENT,
+        &DIRECT_REQWEST_CLIENT,
+    );
     let route_client = match route.proxy {
         ProxyPolicy::System => client,
-        ProxyPolicy::Direct => &DIRECT_FETCH_CLIENT,
+        ProxyPolicy::Direct => &download_clients.direct,
     };
     let mut request = route_client.get(&route.url);
     if let Some((name, value)) = header {
@@ -1526,7 +1563,9 @@ async fn fetch_validated_metadata_route(
         Ok(response) => response,
         Err(error) => {
             if let Some(host) = record_dns_connection_failure(route, &error) {
-                DOWNLOAD_DNS_RESOLVER.pre_resolve(&host).await;
+                super::download::proxy_context::resolver(route.proxy)
+                    .pre_resolve(&host)
+                    .await;
             }
             return Err(error.into());
         }
@@ -1893,6 +1932,46 @@ async fn fetch_advanced_with_client_and_progress(
     exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     client: &reqwest::Client,
     source_mode: Option<crate::state::DownloadSourceMode>,
+    progress: Option<&mut FetchProgressFn<'_>>,
+    response_validator: Option<
+        &(dyn Fn(&Bytes) -> crate::Result<()> + Send + Sync),
+    >,
+    attempt_budget: usize,
+) -> crate::Result<Bytes> {
+    super::download::proxy_context::with_clients(fetch_advanced_inner(
+        method,
+        url,
+        sha1,
+        json_body,
+        header,
+        download_meta,
+        loading_bar,
+        uri_path,
+        semaphore,
+        exec,
+        client,
+        source_mode,
+        progress,
+        response_validator,
+        attempt_budget,
+    ))
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn fetch_advanced_inner(
+    method: Method,
+    url: &str,
+    sha1: Option<&str>,
+    json_body: Option<serde_json::Value>,
+    header: Option<(&str, &str)>,
+    download_meta: Option<&DownloadMeta>,
+    loading_bar: Option<(&LoadingBarId, f64)>,
+    uri_path: Option<&'static str>,
+    semaphore: &FetchSemaphore,
+    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    client: &reqwest::Client,
+    source_mode: Option<crate::state::DownloadSourceMode>,
     mut progress: Option<&mut FetchProgressFn<'_>>,
     response_validator: Option<
         &(dyn Fn(&Bytes) -> crate::Result<()> + Send + Sync),
@@ -2021,16 +2100,20 @@ async fn fetch_advanced_with_client_and_progress(
             let protected_headers = creds.is_some()
                 || download_meta_header.is_some()
                 || header.is_some_and(|header| is_sensitive_header(header.0));
+            let download_clients = DownloadClients::for_request(
+                &NO_REDIRECT_REQWEST_CLIENT,
+                &DIRECT_REQWEST_CLIENT,
+            );
             let route_client = match (route.proxy, protected_headers) {
                 (ProxyPolicy::System, false)
                     if is_mirror && modrinth_request_kind.is_some() =>
                 {
-                    &*NO_REDIRECT_REQWEST_CLIENT
+                    &download_clients.system
                 }
                 (ProxyPolicy::System, false) => client,
-                (ProxyPolicy::System, true) => &*NO_REDIRECT_REQWEST_CLIENT,
-                (ProxyPolicy::Direct, false) => &*DIRECT_FETCH_CLIENT,
-                (ProxyPolicy::Direct, true) => &*DIRECT_REQWEST_CLIENT,
+                (ProxyPolicy::System, true) => &download_clients.system,
+                (ProxyPolicy::Direct, false) => &download_clients.direct,
+                (ProxyPolicy::Direct, true) => &download_clients.direct,
             };
             let mut req = route_client.request(method.clone(), request_url);
             if modrinth_request_kind == Some("CDN") && !is_mrpack_download {
@@ -2461,7 +2544,7 @@ async fn fetch_advanced_with_client_and_progress(
                             remote_addr = ?remote_addr,
                             http_version = ?http_version,
                             dns_candidates = ?route_host(route).map(|host| {
-                                DOWNLOAD_DNS_RESOLVER.resolved_addresses(&host)
+                                super::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
                             }),
                             ttfb_ms = ttfb.as_millis(),
                             "Recorded download route connection details"
@@ -2538,7 +2621,9 @@ async fn fetch_advanced_with_client_and_progress(
                     if let Some(host) =
                         record_dns_connection_failure(route, &err)
                     {
-                        DOWNLOAD_DNS_RESOLVER.pre_resolve(&host).await;
+                        super::download::proxy_context::resolver(route.proxy)
+                            .pre_resolve(&host)
+                            .await;
                     }
                     record_route_failure(route, resource, None);
                     let error_message = err.to_string();
@@ -3649,8 +3734,12 @@ fn build_task_probe_plan(
     let mut probe_authorities = candidates
         .iter()
         .filter_map(|route| {
-            effective_route_authority(route)
-                .map(|authority| format!("{authority}:{:?}", route.proxy))
+            effective_route_authority(route).map(|authority| {
+                super::download::proxy_context::authority_key(
+                    &authority,
+                    route.proxy,
+                )
+            })
         })
         .collect::<Vec<_>>();
     let scope = super::download::route_health::probe_scope(
@@ -3769,14 +3858,19 @@ async fn ensure_task_routes_probed(
             let request = request.clone();
             let system_client = system_client.clone();
             let direct_client = direct_client.clone();
+            let clients =
+                DownloadClients::for_request(&system_client, &direct_client);
             tokio::spawn(async move {
-                run_task_probe(
-                    &request,
-                    &ROUTE_PROBE_SEMAPHORE,
-                    &system_client,
-                    &direct_client,
-                    &plan,
-                    notify,
+                super::download::proxy_context::with_snapshot(
+                    clients,
+                    run_task_probe(
+                        &request,
+                        &ROUTE_PROBE_SEMAPHORE,
+                        &system_client,
+                        &direct_client,
+                        &plan,
+                        notify,
+                    ),
                 )
                 .await;
             });
@@ -4976,13 +5070,15 @@ pub(crate) async fn record_install_download_finished(
 /// Resolves hosts ahead of the first request so every file shares one ordered
 /// address list instead of racing the same DNS queries.
 pub(crate) async fn prewarm_download_dns(hosts: &[&str]) {
+    let resolver =
+        super::download::proxy_context::resolver(ProxyPolicy::System);
     let hosts = hosts
         .iter()
         .map(|host| (*host).to_string())
         .collect::<Vec<_>>();
     tokio::spawn(async move {
         let requests = hosts.into_iter().map(|host| {
-            let resolver = Arc::clone(&DOWNLOAD_DNS_RESOLVER);
+            let resolver = Arc::clone(&resolver);
             async move {
                 let _ = tokio::time::timeout(
                     time::Duration::from_secs(10),
@@ -5023,7 +5119,7 @@ pub async fn download_to_path(
     let request_url = request.url.clone();
     let destination_path = destination.as_ref();
     let integrity = request.integrity.clone();
-    let result =
+    let result = super::download::proxy_context::with_clients(
         crate::util::single_flight::run(destination_path, &integrity, || {
             download_to_path_inner(
                 request,
@@ -5031,8 +5127,9 @@ pub async fn download_to_path(
                 semaphore,
                 progress,
             )
-        })
-        .await;
+        }),
+    )
+    .await;
     if let Err(error) = &result {
         if let Some(state) = crate::State::get_if_initialized() {
             state.record_download_error();
@@ -5443,7 +5540,7 @@ async fn try_segmented_native_attempt(
                     remote_addr = ?result.remote_addr,
                     http_version = ?result.http_version,
                     dns_candidates = ?route_host(route).map(|host| {
-                        DOWNLOAD_DNS_RESOLVER.resolved_addresses(&host)
+                        super::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
                     }),
                     attempt = session.attempts,
                     max_attempts = session.file_attempt_budget,
@@ -8684,7 +8781,7 @@ async fn run_native_route_attempts(
             remote_addr = ?remote_addr,
             http_version = ?http_version,
             dns_candidates = ?route_host(route).map(|host| {
-                DOWNLOAD_DNS_RESOLVER.resolved_addresses(&host)
+                super::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
             }),
             "Received file download response"
         );
@@ -9282,7 +9379,7 @@ async fn run_native_route_attempts(
             remote_addr = ?remote_addr,
             http_version = ?http_version,
             dns_candidates = ?route_host(route).map(|host| {
-                DOWNLOAD_DNS_RESOLVER.resolved_addresses(&host)
+                super::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
             }),
             "Completed file download"
         );

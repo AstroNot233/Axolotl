@@ -45,8 +45,7 @@ pub(crate) fn h2_ineligible_reason(
     if crate::util::fetch::authority_uses_http1_fallback(&authority) {
         return Some(NativeH2IneligibleReason::Http1Fallback);
     }
-    if let Some(state) = crate::State::get_if_initialized() {
-        let clients = state.download_clients();
+    if let Some(clients) = super::proxy_context::clients() {
         if clients.ignore_ssl_errors {
             return Some(NativeH2IneligibleReason::CertificatePolicy);
         }
@@ -123,7 +122,7 @@ pub(crate) async fn h2_policy(
             expected_speed,
         });
     }
-    if !super::h2_pool::has_live_connection(&authority).await {
+    if !super::h2_pool::has_live_connection(route).await {
         return None;
     }
     let h2 = h2.filter(|health| health.success_samples >= 2)?;

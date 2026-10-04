@@ -30,7 +30,7 @@ pub(crate) struct NativeBudgetPermit {
 fn budget(route: &DownloadRoute) -> Option<Arc<Semaphore>> {
     let authority = crate::util::fetch::url_authority(&route.url)?;
     let key = AuthorityKey {
-        authority,
+        authority: super::proxy_context::authority_key(&authority, route.proxy),
         proxy: route.proxy,
     };
     let mut budgets = AUTHORITY_BUDGETS.lock();

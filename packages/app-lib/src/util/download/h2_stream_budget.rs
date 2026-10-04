@@ -67,7 +67,7 @@ pub(crate) async fn acquire_download<'a>(
 fn budget(route: &DownloadRoute) -> Option<Arc<Semaphore>> {
     let authority = crate::util::fetch::url_authority(&route.url)?;
     let key = AuthorityKey {
-        authority,
+        authority: super::proxy_context::authority_key(&authority, route.proxy),
         proxy: route.proxy,
     };
     let mut budgets = AUTHORITY_BUDGETS.lock();
@@ -87,7 +87,7 @@ fn budget(route: &DownloadRoute) -> Option<Arc<Semaphore>> {
 fn asset_budget(route: &DownloadRoute) -> Option<Arc<Semaphore>> {
     let authority = crate::util::fetch::url_authority(&route.url)?;
     let key = AuthorityKey {
-        authority,
+        authority: super::proxy_context::authority_key(&authority, route.proxy),
         proxy: route.proxy,
     };
     let mut budgets = ASSET_AUTHORITY_BUDGETS.lock();

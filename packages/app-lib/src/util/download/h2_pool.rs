@@ -266,6 +266,7 @@ async fn connect_addresses(
     host: &str,
     port: u16,
     addresses: &[IpAddr],
+    resolver: &crate::util::download_dns::DownloadDnsResolver,
 ) -> std::io::Result<TcpStream> {
     let attempts = interleaved_addresses(addresses)
         .into_iter()
@@ -285,8 +286,7 @@ async fn connect_addresses(
                 Ok(stream) => {
                     stream.set_nodelay(true).ok();
                     if let Ok(address) = stream.peer_addr() {
-                        crate::util::fetch::DOWNLOAD_DNS_RESOLVER
-                            .record_host_success(host, address.ip());
+                        resolver.record_host_success(host, address.ip());
                     }
                     return Ok(stream);
                 }
@@ -348,15 +348,19 @@ mod address_tests {
     }
 }
 
-async fn connect_tcp(host: &str, port: u16) -> std::io::Result<TcpStream> {
+async fn connect_tcp(
+    host: &str,
+    port: u16,
+    proxy: crate::util::fetch::ProxyPolicy,
+) -> std::io::Result<TcpStream> {
     // Prefer the ordered address list from the shared download resolver
     // (IPv4/IPv6 preference and per-IP reliability), falling back to the
     // system resolver when no list is cached yet.
-    let resolver = &crate::util::fetch::DOWNLOAD_DNS_RESOLVER;
+    let resolver = super::proxy_context::resolver(proxy);
     let addresses = resolver.resolved_addresses(host);
     let mut last_error = None;
     if !addresses.is_empty() {
-        match connect_addresses(host, port, &addresses).await {
+        match connect_addresses(host, port, &addresses, &resolver).await {
             Ok(stream) => return Ok(stream),
             Err(error) => last_error = Some(error),
         }
@@ -368,7 +372,8 @@ async fn connect_tcp(host: &str, port: u16) -> std::io::Result<TcpStream> {
             .await;
             let refreshed = resolver.resolved_addresses(host);
             if !refreshed.is_empty() && refreshed != addresses {
-                match connect_addresses(host, port, &refreshed).await {
+                match connect_addresses(host, port, &refreshed, &resolver).await
+                {
                     Ok(stream) => return Ok(stream),
                     Err(error) => last_error = Some(error),
                 }
@@ -405,6 +410,12 @@ async fn establish(
     route: &DownloadRoute,
     reserve_native_budget: bool,
 ) -> Result<Arc<SharedH2Connection>, H2ConnectError> {
+    if let Some(reason) = super::native::h2_ineligible_reason(route) {
+        return Err(H2ConnectError::new(
+            H2ConnectFailureKind::Protocol,
+            reason.as_str().to_string(),
+        ));
+    }
     let authority =
         crate::util::fetch::url_authority(&route.url).ok_or_else(|| {
             H2ConnectError::new(
@@ -427,7 +438,7 @@ async fn establish(
         .map(|(host, port)| (host, port.parse::<u16>().unwrap_or(443)))
         .unwrap_or((&authority, 443));
 
-    let tcp = connect_tcp(host, port).await.map_err(|error| {
+    let tcp = connect_tcp(host, port, route.proxy).await.map_err(|error| {
 		H2ConnectError::new(
 			H2ConnectFailureKind::Tcp,
 			format!(
@@ -515,6 +526,12 @@ pub(crate) async fn shared_connection(
     reserve_native_budget: bool,
     allow_cold_connection: bool,
 ) -> Result<Arc<SharedH2Connection>, H2ConnectError> {
+    if let Some(reason) = super::native::h2_ineligible_reason(route) {
+        return Err(H2ConnectError::new(
+            H2ConnectFailureKind::Protocol,
+            reason.as_str().to_string(),
+        ));
+    }
     let authority =
         crate::util::fetch::url_authority(&route.url).ok_or_else(|| {
             H2ConnectError::new(
@@ -522,7 +539,11 @@ pub(crate) async fn shared_connection(
                 "HTTP/2 route has no authority".to_string(),
             )
         })?;
-    let slot = connection_slot(&authority).await;
+    let slot = connection_slot(&super::proxy_context::authority_key(
+        &authority,
+        route.proxy,
+    ))
+    .await;
     let mut cached = tokio::time::timeout(CONNECTION_WAIT_TIMEOUT, slot.lock())
         .await
         .map_err(|_| {
@@ -583,6 +604,12 @@ pub(crate) async fn shared_batch_connection(
     route: &DownloadRoute,
     reserve_native_budget: bool,
 ) -> Result<Arc<SharedH2Connection>, H2ConnectError> {
+    if let Some(reason) = super::native::h2_ineligible_reason(route) {
+        return Err(H2ConnectError::new(
+            H2ConnectFailureKind::Protocol,
+            reason.as_str().to_string(),
+        ));
+    }
     let authority =
         crate::util::fetch::url_authority(&route.url).ok_or_else(|| {
             H2ConnectError::new(
@@ -590,7 +617,11 @@ pub(crate) async fn shared_batch_connection(
                 "HTTP/2 route has no authority".to_string(),
             )
         })?;
-    let slot = batch_connection_slot(&authority).await;
+    let slot = batch_connection_slot(&super::proxy_context::authority_key(
+        &authority,
+        route.proxy,
+    ))
+    .await;
     let mut cached = tokio::time::timeout(
         CONNECTION_WAIT_TIMEOUT,
         slot.lock(),
@@ -644,9 +675,18 @@ pub(crate) async fn shared_batch_connection(
     Ok(connection)
 }
 
-pub(crate) async fn has_live_connection(authority: &str) -> bool {
+pub(crate) async fn has_live_connection(route: &DownloadRoute) -> bool {
     let connections = CONNECTIONS.lock().await;
-    let Some(slot) = connections.get(authority).cloned() else {
+    let Some(authority) = crate::util::fetch::url_authority(&route.url) else {
+        return false;
+    };
+    let Some(slot) = connections
+        .get(&super::proxy_context::authority_key(
+            &authority,
+            route.proxy,
+        ))
+        .cloned()
+    else {
         return false;
     };
     drop(connections);
