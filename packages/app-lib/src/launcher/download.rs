@@ -1872,7 +1872,7 @@ pub async fn download_assets(
             prepare_native_download_routes(
                 &probe_request,
                 &mut routes,
-                &st.fetch_semaphore,
+                &st.download_semaphore,
             )
             .await;
         }
@@ -1998,7 +1998,6 @@ pub async fn download_assets(
     let fallback_assets = coalesce_fallback_assets(fallback_assets);
     if !fallback_assets.is_empty() {
         let limit = crate::util::download::task_concurrency_limit(st)
-            .map(|limit| limit.saturating_mul(2))
             .unwrap_or(ASSET_BATCH_CONCURRENCY);
         futures::stream::iter(fallback_assets)
             .map(Ok::<FallbackAsset, crate::Error>)
