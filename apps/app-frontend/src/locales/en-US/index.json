@@ -9407,6 +9407,9 @@
   "app.settings.resources.minecraft-directory-mode.shared": {
     "message": "Shared .minecraft directory"
   },
+	"app.settings.resources.minecraft-directory-mode.automatic": {
+		"message": "Automatic"
+	},
   "app.settings.resources.minecraft-directory-must-end-with": {
     "message": "The selected folder must be named .minecraft."
   },

@@ -105,7 +105,7 @@ function handleImportExisting() {
 				/>
 			</div>
 
-			<p class="m-0 text-sm text-[var(--color-text-tertiary)]">
+<!--			<p class="m-0 text-sm text-[var(&#45;&#45;color-text-tertiary)]">
 				{{ formatMessage(messages.pclHmclHint) }}
 				{{ ' ' }}
 				<RouterLink
@@ -114,7 +114,7 @@ function handleImportExisting() {
 				>
 					{{ formatMessage(messages.addMinecraftFolder) }}
 				</RouterLink>
-			</p>
+			</p>-->
 
 			<Button type="quiet" class="self-start" @click="navigateBack">
 				<LeftArrowIcon class="size-4" stroke-width="2" />

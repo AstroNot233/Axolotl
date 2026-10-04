@@ -1690,6 +1690,22 @@ fn classify_folder_content_inner(
         };
     }
 
+    // A directly dropped `.minecraft` directory is an external game
+    // directory, even when it does not contain a complete launcher instance
+    // manifest yet. Route it through the GameDir import flow so it is not
+    // mistaken for a normal instance folder.
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case(".minecraft"))
+    {
+        return DroppedItemType::Launcher {
+            launcher_type: ImportLauncherType::Generic,
+            base_path: path.to_path_buf(),
+            inner_base: None,
+        };
+    }
+
     // Step 7: Content-type detection for folders.
     if let Some(result) = classify_world_save_folder(path) {
         return result;

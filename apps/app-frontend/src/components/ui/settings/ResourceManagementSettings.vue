@@ -167,10 +167,6 @@ const messages = defineMessages({
 		id: 'app.settings.resources.remove-minecraft-directory',
 		defaultMessage: 'Remove .minecraft directory',
 	},
-	minecraftDirectoryMustEndWith: {
-		id: 'app.settings.resources.minecraft-directory-must-end-with',
-		defaultMessage: 'The selected folder must be named .minecraft.',
-	},
 	minecraftDirectoryMode: {
 		id: 'app.settings.resources.minecraft-directory-mode',
 		defaultMessage: 'Game directory mode',
@@ -463,11 +459,6 @@ const MINECRAFT_DIRECTORIES_STORAGE_KEY = 'axolotl-minecraft-directories'
 
 /** @typedef {import('@/helpers/instance').ExternalMinecraftRoot} ExternalMinecraftRoot */
 
-function isMinecraftDirectoryPath(value) {
-	const normalized = value.trim().replace(/[\\/]+$/, '')
-	return normalized.length > 0 && normalized.split(/[\\/]/).at(-1)?.toLowerCase() === '.minecraft'
-}
-
 /** @returns {ExternalMinecraftRoot[]} */
 function loadMinecraftDirectories() {
 	try {
@@ -495,7 +486,6 @@ function loadMinecraftDirectories() {
 		return [
 			...new Map(
 				directories
-					.filter((directory) => isMinecraftDirectoryPath(directory.path))
 					.map((directory) => [directory.path.trim(), directory]),
 			).values(),
 		]
@@ -519,7 +509,6 @@ function persistMinecraftDirectories(values) {
 									? 'automatic'
 									: 'isolated',
 					}))
-					.filter((value) => isMinecraftDirectoryPath(value.path))
 					.map((value) => [value.path, value]),
 			).values(),
 		]
@@ -763,10 +752,7 @@ async function addMinecraftDirectory() {
 	if (typeof directory !== 'string') return
 
 	const normalized = directory.trim().replace(/[\\/]+$/, '')
-	if (!isMinecraftDirectoryPath(normalized)) {
-		minecraftDirectoryError.value = formatMessage(messages.minecraftDirectoryMustEndWith)
-		return
-	}
+	if (!normalized) return
 	if (!minecraftDirectories.value.some((entry) => entry.path === normalized)) {
 		minecraftDirectories.value.push({ path: normalized, mode: 'isolated' })
 	}
@@ -778,10 +764,7 @@ function removeMinecraftDirectory(index) {
 }
 
 function validateMinecraftDirectory(value) {
-	minecraftDirectoryError.value =
-		value.trim() && !isMinecraftDirectoryPath(value)
-			? formatMessage(messages.minecraftDirectoryMustEndWith)
-			: null
+	minecraftDirectoryError.value = null
 }
 </script>
 

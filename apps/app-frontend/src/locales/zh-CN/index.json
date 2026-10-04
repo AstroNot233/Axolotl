@@ -9398,6 +9398,9 @@
   "app.settings.resources.minecraft-directory-mode.shared": {
     "message": "共享 .minecraft 目录"
   },
+	"app.settings.resources.minecraft-directory-mode.automatic": {
+		"message": "自动"
+	},
   "app.settings.resources.minecraft-directory-must-end-with": {
     "message": "所选文件夹名称必须是 .minecraft。"
   },
