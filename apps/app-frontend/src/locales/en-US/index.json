@@ -2486,72 +2486,6 @@
   "app.home.shortcut.server.players-online": {
     "message": "{count} online"
   },
-  "app.home.source.acknowledge": {
-    "message": "I understand the risks"
-  },
-  "app.home.source.choose-file": {
-    "message": "Choose file"
-  },
-  "app.home.source.file-chosen": {
-    "message": "Selected: {name}"
-  },
-  "app.home.source.fit-label": {
-    "message": "Display"
-  },
-  "app.home.source.fit.contain": {
-    "message": "Fit inside"
-  },
-  "app.home.source.fit.cover": {
-    "message": "Fill the widget"
-  },
-  "app.home.source.fit.fill": {
-    "message": "Stretch"
-  },
-  "app.home.source.html.title": {
-    "message": "Local HTML widget"
-  },
-  "app.home.source.image.title": {
-    "message": "Image widget"
-  },
-  "app.home.source.local": {
-    "message": "Local file"
-  },
-  "app.home.source.remote": {
-    "message": "Online image"
-  },
-  "app.home.source.scripts-description": {
-    "message": "Scripts run in a sandbox. Turn off to only show static content."
-  },
-  "app.home.source.scripts-label": {
-    "message": "Allow page scripts"
-  },
-  "app.home.source.source-label": {
-    "message": "Source"
-  },
-  "app.home.source.url-invalid": {
-    "message": "Enter a valid http(s) address."
-  },
-  "app.home.source.url-label": {
-    "message": "URL"
-  },
-  "app.home.source.url-placeholder": {
-    "message": "https://example.com/pic.png"
-  },
-  "app.home.source.warn-html": {
-    "message": "Only open HTML files you trust. A malicious page could try to trick you or waste resources. It cannot reach your files or control the launcher, but never enter passwords in it."
-  },
-  "app.home.source.warn-title": {
-    "message": "Warning: stranger content"
-  },
-  "app.home.source.warn-web": {
-    "message": "Only open pages you trust. A malicious page could try to trick you into signing in or downloading something. Never enter passwords in it."
-  },
-  "app.home.source.web.title": {
-    "message": "Web widget"
-  },
-  "app.home.source.widget-title": {
-    "message": "Title (optional)"
-  },
   "app.home.widgets.add": {
     "message": "Add widget"
   },
@@ -2597,53 +2531,11 @@
   "app.home.widgets.group.collections": {
     "message": "Pinned collections"
   },
-  "app.home.widgets.group.custom": {
-    "message": "Media & custom"
-  },
   "app.home.widgets.group.overview": {
     "message": "Overview"
   },
   "app.home.widgets.group.shortcuts": {
     "message": "Single-item shortcuts"
-  },
-  "app.home.widgets.html": {
-    "message": "Local HTML page"
-  },
-  "app.home.widgets.html-description": {
-    "message": "Run a local single-file HTML page in a sandbox."
-  },
-  "app.home.widgets.html.broken": {
-    "message": "HTML file could not be read"
-  },
-  "app.home.widgets.html.configure": {
-    "message": "Choose file"
-  },
-  "app.home.widgets.html.confirm-open": {
-    "message": "The page wants to open {path} inside the launcher. Continue?"
-  },
-  "app.home.widgets.html.empty": {
-    "message": "No HTML file selected"
-  },
-  "app.home.widgets.html.retry": {
-    "message": "Try again"
-  },
-  "app.home.widgets.html.unsupported-link": {
-    "message": "That link is not allowed inside a widget."
-  },
-  "app.home.widgets.image": {
-    "message": "Image"
-  },
-  "app.home.widgets.image-description": {
-    "message": "Show a local picture or an online image on Home."
-  },
-  "app.home.widgets.image.broken": {
-    "message": "Image unavailable"
-  },
-  "app.home.widgets.image.configure": {
-    "message": "Choose image"
-  },
-  "app.home.widgets.image.empty": {
-    "message": "No image selected"
   },
   "app.home.widgets.instance": {
     "message": "Single instance"
@@ -2668,60 +2560,6 @@
   },
   "app.home.widgets.move-later": {
     "message": "Move later"
-  },
-  "app.home.widgets.music": {
-    "message": "Music player"
-  },
-  "app.home.widgets.music-description": {
-    "message": "Play local music, even while you are in a game."
-  },
-  "app.home.widgets.music.add": {
-    "message": "Add songs"
-  },
-  "app.home.widgets.music.autoplay-off": {
-    "message": "Autoplay: off"
-  },
-  "app.home.widgets.music.autoplay-on": {
-    "message": "Autoplay: on"
-  },
-  "app.home.widgets.music.mode.loop-all": {
-    "message": "Loop all"
-  },
-  "app.home.widgets.music.mode.loop-one": {
-    "message": "Loop this song"
-  },
-  "app.home.widgets.music.mode.sequence": {
-    "message": "Play in order"
-  },
-  "app.home.widgets.music.mode.shuffle": {
-    "message": "Shuffle"
-  },
-  "app.home.widgets.music.mute": {
-    "message": "Mute"
-  },
-  "app.home.widgets.music.next": {
-    "message": "Next track"
-  },
-  "app.home.widgets.music.options": {
-    "message": "Player options"
-  },
-  "app.home.widgets.music.pause": {
-    "message": "Pause"
-  },
-  "app.home.widgets.music.play": {
-    "message": "Play"
-  },
-  "app.home.widgets.music.prev": {
-    "message": "Previous track"
-  },
-  "app.home.widgets.music.unknown-track": {
-    "message": "Nothing playing"
-  },
-  "app.home.widgets.music.unmute": {
-    "message": "Unmute"
-  },
-  "app.home.widgets.music.volume": {
-    "message": "Volume"
   },
   "app.home.widgets.no-results": {
     "message": "No matching items"
@@ -2780,38 +2618,8 @@
   "app.home.widgets.size": {
     "message": "Size {size}"
   },
-  "app.home.widgets.source-settings": {
-    "message": "Widget settings"
-  },
   "app.home.widgets.unavailable": {
     "message": "Content unavailable"
-  },
-  "app.home.widgets.web": {
-    "message": "Web page"
-  },
-  "app.home.widgets.web-description": {
-    "message": "Embed an online page. Be careful with pages from strangers."
-  },
-  "app.home.widgets.web.broken": {
-    "message": "The page could not be embedded. Try opening it in the browser."
-  },
-  "app.home.widgets.web.open-external": {
-    "message": "Open in browser"
-  },
-  "app.home.widgets.web.reload": {
-    "message": "Reload"
-  },
-  "app.home.widgets.web.warn-accept": {
-    "message": "I understand, load it"
-  },
-  "app.home.widgets.web.warn-body": {
-    "message": "This page comes from the internet. It runs inside a sandbox, but it could still try to trick you into signing in or downloading something. Never enter passwords here."
-  },
-  "app.home.widgets.web.warn-remove": {
-    "message": "Remove widget"
-  },
-  "app.home.widgets.web.warn-title": {
-    "message": "Stranger content warning"
   },
   "app.home.widgets.world": {
     "message": "Single world"
@@ -3785,45 +3593,6 @@
   "app.instances.view-instance": {
     "message": "View instance"
   },
-  "app.java-arguments.gc.reason.ample-memory-high-cores": {
-    "message": "Ample memory and high CPU core count"
-  },
-  "app.java-arguments.gc.reason.below-zgc-recommendation": {
-    "message": "Resources below ZGC recommendation"
-  },
-  "app.java-arguments.gc.reason.heavy-instance": {
-    "message": "Heavy instance ({loader}, {mods} mods)"
-  },
-  "app.java-arguments.gc.reason.high-resources": {
-    "message": "High resources ({memory}GB, {cores} cores)"
-  },
-  "app.java-arguments.gc.reason.insufficient-cpu": {
-    "message": "Insufficient CPU ({cores} cores / {threads} threads)"
-  },
-  "app.java-arguments.gc.reason.insufficient-memory": {
-    "message": "Insufficient memory ({allocated}GB < 4GB)"
-  },
-  "app.java-arguments.gc.reason.java-too-old": {
-    "message": "Java too old; Shenandoah/ZGC unreliable"
-  },
-  "app.java-arguments.gc.reason.java-version-unknown": {
-    "message": "Java version unknown"
-  },
-  "app.java-arguments.gc.reason.large-modpack-low-memory": {
-    "message": "Large modpack ({mods} mods) but insufficient memory ({allocated}GB < 8GB)"
-  },
-  "app.java-arguments.gc.reason.lightweight-instance": {
-    "message": "Lightweight instance ({loader}, {mods} mods)"
-  },
-  "app.java-arguments.gc.reason.low-resources": {
-    "message": "Low resources ({memory}GB, {cores} cores)"
-  },
-  "app.java-arguments.gc.reason.medium-resources": {
-    "message": "Medium resources ({memory}GB, {cores} cores)"
-  },
-  "app.java-arguments.gc.reason.zgc-non-generational": {
-    "message": "Java < 21; non-generational ZGC performs poorly"
-  },
   "app.java-arguments.presets.applied": {
     "message": "Applied"
   },
@@ -4208,12 +3977,6 @@
   "app.lab.mod-translation.completed-count": {
     "message": "{count} completed"
   },
-  "app.lab.mod-translation.copy-diagnostics": {
-    "message": "Copy diagnostics"
-  },
-  "app.lab.mod-translation.copy-diagnostics-info": {
-    "message": "Copy diagnostic information"
-  },
   "app.lab.mod-translation.description": {
     "message": "Translate any Minecraft mod JAR into Simplified Chinese."
   },
@@ -4301,38 +4064,11 @@
   "app.lab.mod-translation.preparing": {
     "message": "Preparing…"
   },
-  "app.lab.mod-translation.progress.current-batch": {
-    "message": "Batch {completed} / {total}"
-  },
-  "app.lab.mod-translation.progress.recently-written": {
-    "message": "Recently written"
-  },
-  "app.lab.mod-translation.progress.verified-weights": {
-    "message": "Verified {verified} / {total}"
-  },
-  "app.lab.mod-translation.progress.workload-measuring": {
-    "message": "Establishing a verifiable workload…"
-  },
   "app.lab.mod-translation.provider": {
     "message": "AI provider"
   },
   "app.lab.mod-translation.repair-enabled": {
     "message": "Repair difficult translations after verification"
-  },
-  "app.lab.mod-translation.result.changed-files": {
-    "message": "Changed files: {files}"
-  },
-  "app.lab.mod-translation.result.class-text": {
-    "message": "Class text"
-  },
-  "app.lab.mod-translation.result.completed": {
-    "message": "Translation complete"
-  },
-  "app.lab.mod-translation.result.completed-warnings": {
-    "message": "Generated, but some text is still uncovered"
-  },
-  "app.lab.mod-translation.result.mod-label": {
-    "message": "Mod"
   },
   "app.lab.mod-translation.select-file": {
     "message": "Choose a mod JAR"
@@ -4345,15 +4081,6 @@
   },
   "app.lab.mod-translation.start-hint": {
     "message": "Choose a JAR and an AI model to start."
-  },
-  "app.lab.mod-translation.technical-details": {
-    "message": "Technical details"
-  },
-  "app.lab.mod-translation.timeline.empty": {
-    "message": "Waiting for processing events…"
-  },
-  "app.lab.mod-translation.timeline.title": {
-    "message": "Processing timeline ({count})"
   },
   "app.lab.mod-translation.title": {
     "message": "Mod translation"
@@ -6632,9 +6359,6 @@
   "app.navigation.worlds": {
     "message": "Worlds"
   },
-  "app.notification.error-occurred": {
-    "message": "An error occurred"
-  },
   "app.notification.export-error-logs": {
     "message": "Export error logs"
   },
@@ -6941,12 +6665,6 @@
   "app.onboarding.welcome.title": {
     "message": "Everything is ready"
   },
-  "app.page-path.copied": {
-    "message": "Copied"
-  },
-  "app.page-path.copy": {
-    "message": "Copy page path"
-  },
   "app.privacy-consent.continue": {
     "message": "Save and continue"
   },
@@ -6970,30 +6688,6 @@
   },
   "app.privacy-consent.title": {
     "message": "Privacy & security"
-  },
-  "app.privileged-consent.acknowledge": {
-    "message": "I understand the risks and want to enable privileged link actions"
-  },
-  "app.privileged-consent.confirm": {
-    "message": "Enable"
-  },
-  "app.privileged-consent.danger": {
-    "message": "External links will be able to change settings (theme, launch commands, directories, network options, etc.) and stop running games. You will still confirm each action before it executes."
-  },
-  "app.privileged-consent.title": {
-    "message": "Enable privileged link actions?"
-  },
-  "app.privileged-consent.warning": {
-    "message": "These actions can change security-sensitive settings and stop games"
-  },
-  "app.privileged-modal.applied": {
-    "message": "Privileged link applied"
-  },
-  "app.privileged-modal.no-processes": {
-    "message": "No running game processes for this instance"
-  },
-  "app.privileged-modal.stopped": {
-    "message": "Stop request sent"
   },
   "app.project.curseforge.unavailable-description": {
     "message": "The CurseForge project did not return any data."
@@ -8156,11 +7850,11 @@
   "app.settings.about.run.tap-to-start": {
     "message": "Press Space or click to start"
   },
-  "app.settings.about.run.title": {
-    "message": "Axolotl run"
-  },
   "app.settings.about.run.tnt": {
     "message": "TNT"
+  },
+  "app.settings.about.run.title": {
+    "message": "Axolotl run"
   },
   "app.settings.about.run.totem": {
     "message": "Totem of Undying"
@@ -9611,23 +9305,8 @@
   "app.settings.privacy.discord-rpc-description": {
     "message": "Show your current launcher or game activity in Discord."
   },
-  "app.settings.privacy.external-scheme": {
-    "message": "Allow external links"
-  },
-  "app.settings.privacy.external-scheme-description": {
-    "message": "Respond to axolotl:// links from browsers and other apps. Turning this off blocks launches, installs and page jumps from outside."
-  },
-  "app.settings.privacy.privileged-scheme": {
-    "message": "Allow privileged link actions"
-  },
-  "app.settings.privacy.privileged-scheme-description": {
-    "message": "Let axolotl:// links change settings and stop game processes. Turning this on requires reading a risk warning; every action still asks for your confirmation."
-  },
   "app.settings.privacy.section-title": {
     "message": "Privacy & data sharing"
-  },
-  "app.settings.privacy.security-title": {
-    "message": "Security"
   },
   "app.settings.privacy.telemetry": {
     "message": "Allow telemetry"
@@ -13522,5 +13201,326 @@
   },
   "unknown-pack-warning-modal.warning.title": {
     "message": "Unknown file warning"
+  },
+  "app.settings.privacy.security-title": {
+    "message": "Security"
+  },
+  "app.settings.privacy.privileged-scheme-description": {
+    "message": "Let axolotl:// links change settings and stop game processes. Turning this on requires reading a risk warning; every action still asks for your confirmation."
+  },
+  "app.settings.privacy.privileged-scheme": {
+    "message": "Allow privileged link actions"
+  },
+  "app.settings.privacy.external-scheme-description": {
+    "message": "Respond to axolotl:// links from browsers and other apps. Turning this off blocks launches, installs and page jumps from outside."
+  },
+  "app.settings.privacy.external-scheme": {
+    "message": "Allow external links"
+  },
+  "app.privileged-modal.stopped": {
+    "message": "Stop request sent"
+  },
+  "app.privileged-modal.no-processes": {
+    "message": "No running game processes for this instance"
+  },
+  "app.privileged-modal.applied": {
+    "message": "Privileged link applied"
+  },
+  "app.privileged-consent.warning": {
+    "message": "These actions can change security-sensitive settings and stop games"
+  },
+  "app.privileged-consent.title": {
+    "message": "Enable privileged link actions?"
+  },
+  "app.privileged-consent.danger": {
+    "message": "External links will be able to change settings (theme, launch commands, directories, network options, etc.) and stop running games. You will still confirm each action before it executes."
+  },
+  "app.privileged-consent.confirm": {
+    "message": "Enable"
+  },
+  "app.privileged-consent.acknowledge": {
+    "message": "I understand the risks and want to enable privileged link actions"
+  },
+  "app.page-path.copy": {
+    "message": "Copy page path"
+  },
+  "app.page-path.copied": {
+    "message": "Copied"
+  },
+  "app.notification.error-occurred": {
+    "message": "An error occurred"
+  },
+  "app.lab.mod-translation.timeline.title": {
+    "message": "Processing timeline ({count})"
+  },
+  "app.lab.mod-translation.timeline.empty": {
+    "message": "Waiting for processing events…"
+  },
+  "app.lab.mod-translation.technical-details": {
+    "message": "Technical details"
+  },
+  "app.lab.mod-translation.result.mod-label": {
+    "message": "Mod"
+  },
+  "app.lab.mod-translation.result.completed-warnings": {
+    "message": "Generated, but some text is still uncovered"
+  },
+  "app.lab.mod-translation.result.completed": {
+    "message": "Translation complete"
+  },
+  "app.lab.mod-translation.result.class-text": {
+    "message": "Class text"
+  },
+  "app.lab.mod-translation.result.changed-files": {
+    "message": "Changed files: {files}"
+  },
+  "app.lab.mod-translation.progress.workload-measuring": {
+    "message": "Establishing a verifiable workload…"
+  },
+  "app.lab.mod-translation.progress.verified-weights": {
+    "message": "Verified {verified} / {total}"
+  },
+  "app.lab.mod-translation.progress.recently-written": {
+    "message": "Recently written"
+  },
+  "app.lab.mod-translation.progress.current-batch": {
+    "message": "Batch {completed} / {total}"
+  },
+  "app.lab.mod-translation.copy-diagnostics-info": {
+    "message": "Copy diagnostic information"
+  },
+  "app.lab.mod-translation.copy-diagnostics": {
+    "message": "Copy diagnostics"
+  },
+  "app.java-arguments.gc.reason.zgc-non-generational": {
+    "message": "Java < 21; non-generational ZGC performs poorly"
+  },
+  "app.java-arguments.gc.reason.medium-resources": {
+    "message": "Medium resources ({memory}GB, {cores} cores)"
+  },
+  "app.java-arguments.gc.reason.low-resources": {
+    "message": "Low resources ({memory}GB, {cores} cores)"
+  },
+  "app.java-arguments.gc.reason.lightweight-instance": {
+    "message": "Lightweight instance ({loader}, {mods} mods)"
+  },
+  "app.java-arguments.gc.reason.large-modpack-low-memory": {
+    "message": "Large modpack ({mods} mods) but insufficient memory ({allocated}GB < 8GB)"
+  },
+  "app.java-arguments.gc.reason.java-version-unknown": {
+    "message": "Java version unknown"
+  },
+  "app.java-arguments.gc.reason.java-too-old": {
+    "message": "Java too old; Shenandoah/ZGC unreliable"
+  },
+  "app.java-arguments.gc.reason.insufficient-memory": {
+    "message": "Insufficient memory ({allocated}GB < 4GB)"
+  },
+  "app.java-arguments.gc.reason.insufficient-cpu": {
+    "message": "Insufficient CPU ({cores} cores / {threads} threads)"
+  },
+  "app.java-arguments.gc.reason.high-resources": {
+    "message": "High resources ({memory}GB, {cores} cores)"
+  },
+  "app.java-arguments.gc.reason.heavy-instance": {
+    "message": "Heavy instance ({loader}, {mods} mods)"
+  },
+  "app.java-arguments.gc.reason.below-zgc-recommendation": {
+    "message": "Resources below ZGC recommendation"
+  },
+  "app.java-arguments.gc.reason.ample-memory-high-cores": {
+    "message": "Ample memory and high CPU core count"
+  },
+  "app.home.widgets.web.warn-title": {
+    "message": "Stranger content warning"
+  },
+  "app.home.widgets.web.warn-remove": {
+    "message": "Remove widget"
+  },
+  "app.home.widgets.web.warn-body": {
+    "message": "This page comes from the internet. It runs inside a sandbox, but it could still try to trick you into signing in or downloading something. Never enter passwords here."
+  },
+  "app.home.widgets.web.warn-accept": {
+    "message": "I understand, load it"
+  },
+  "app.home.widgets.web.reload": {
+    "message": "Reload"
+  },
+  "app.home.widgets.web.open-external": {
+    "message": "Open in browser"
+  },
+  "app.home.widgets.web.broken": {
+    "message": "The page could not be embedded. Try opening it in the browser."
+  },
+  "app.home.widgets.web-description": {
+    "message": "Embed an online page. Be careful with pages from strangers."
+  },
+  "app.home.widgets.web": {
+    "message": "Web page"
+  },
+  "app.home.widgets.source-settings": {
+    "message": "Widget settings"
+  },
+  "app.home.widgets.music.volume": {
+    "message": "Volume"
+  },
+  "app.home.widgets.music.unmute": {
+    "message": "Unmute"
+  },
+  "app.home.widgets.music.unknown-track": {
+    "message": "Nothing playing"
+  },
+  "app.home.widgets.music.prev": {
+    "message": "Previous track"
+  },
+  "app.home.widgets.music.play": {
+    "message": "Play"
+  },
+  "app.home.widgets.music.pause": {
+    "message": "Pause"
+  },
+  "app.home.widgets.music.options": {
+    "message": "Player options"
+  },
+  "app.home.widgets.music.next": {
+    "message": "Next track"
+  },
+  "app.home.widgets.music.mute": {
+    "message": "Mute"
+  },
+  "app.home.widgets.music.mode.shuffle": {
+    "message": "Shuffle"
+  },
+  "app.home.widgets.music.mode.sequence": {
+    "message": "Play in order"
+  },
+  "app.home.widgets.music.mode.loop-one": {
+    "message": "Loop this song"
+  },
+  "app.home.widgets.music.mode.loop-all": {
+    "message": "Loop all"
+  },
+  "app.home.widgets.music.autoplay-on": {
+    "message": "Autoplay: on"
+  },
+  "app.home.widgets.music.autoplay-off": {
+    "message": "Autoplay: off"
+  },
+  "app.home.widgets.music.add": {
+    "message": "Add songs"
+  },
+  "app.home.widgets.music-description": {
+    "message": "Play local music, even while you are in a game."
+  },
+  "app.home.widgets.music": {
+    "message": "Music player"
+  },
+  "app.home.widgets.image.empty": {
+    "message": "No image selected"
+  },
+  "app.home.widgets.image.configure": {
+    "message": "Choose image"
+  },
+  "app.home.widgets.image.broken": {
+    "message": "Image unavailable"
+  },
+  "app.home.widgets.image-description": {
+    "message": "Show a local picture or an online image on Home."
+  },
+  "app.home.widgets.image": {
+    "message": "Image"
+  },
+  "app.home.widgets.html.unsupported-link": {
+    "message": "That link is not allowed inside a widget."
+  },
+  "app.home.widgets.html.retry": {
+    "message": "Try again"
+  },
+  "app.home.widgets.html.empty": {
+    "message": "No HTML file selected"
+  },
+  "app.home.widgets.html.confirm-open": {
+    "message": "The page wants to open {path} inside the launcher. Continue?"
+  },
+  "app.home.widgets.html.configure": {
+    "message": "Choose file"
+  },
+  "app.home.widgets.html.broken": {
+    "message": "HTML file could not be read"
+  },
+  "app.home.widgets.html-description": {
+    "message": "Run a local single-file HTML page in a sandbox."
+  },
+  "app.home.widgets.html": {
+    "message": "Local HTML page"
+  },
+  "app.home.widgets.group.custom": {
+    "message": "Media & custom"
+  },
+  "app.home.source.widget-title": {
+    "message": "Title (optional)"
+  },
+  "app.home.source.web.title": {
+    "message": "Web widget"
+  },
+  "app.home.source.warn-web": {
+    "message": "Only open pages you trust. A malicious page could try to trick you into signing in or downloading something. Never enter passwords in it."
+  },
+  "app.home.source.warn-title": {
+    "message": "Warning: stranger content"
+  },
+  "app.home.source.warn-html": {
+    "message": "Only open HTML files you trust. A malicious page could try to trick you or waste resources. It cannot reach your files or control the launcher, but never enter passwords in it."
+  },
+  "app.home.source.url-placeholder": {
+    "message": "https://example.com/pic.png"
+  },
+  "app.home.source.url-label": {
+    "message": "URL"
+  },
+  "app.home.source.url-invalid": {
+    "message": "Enter a valid http(s) address."
+  },
+  "app.home.source.source-label": {
+    "message": "Source"
+  },
+  "app.home.source.scripts-label": {
+    "message": "Allow page scripts"
+  },
+  "app.home.source.scripts-description": {
+    "message": "Scripts run in a sandbox. Turn off to only show static content."
+  },
+  "app.home.source.remote": {
+    "message": "Online image"
+  },
+  "app.home.source.local": {
+    "message": "Local file"
+  },
+  "app.home.source.image.title": {
+    "message": "Image widget"
+  },
+  "app.home.source.html.title": {
+    "message": "Local HTML widget"
+  },
+  "app.home.source.fit.fill": {
+    "message": "Stretch"
+  },
+  "app.home.source.fit.cover": {
+    "message": "Fill the widget"
+  },
+  "app.home.source.fit.contain": {
+    "message": "Fit inside"
+  },
+  "app.home.source.fit-label": {
+    "message": "Display"
+  },
+  "app.home.source.file-chosen": {
+    "message": "Selected: {name}"
+  },
+  "app.home.source.choose-file": {
+    "message": "Choose file"
+  },
+  "app.home.source.acknowledge": {
+    "message": "I understand the risks"
   }
 }
