@@ -21,6 +21,7 @@ pub(crate) mod native_reputation;
 pub(crate) mod native_request;
 pub(crate) mod native_slow;
 pub(crate) mod proxy_context;
+pub(crate) mod range_journal;
 pub(crate) mod range_output;
 pub(crate) mod route_health;
 pub(crate) mod route_policy;

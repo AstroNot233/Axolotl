@@ -212,6 +212,10 @@ pub(crate) async fn try_download_via_h2(
     };
 
     if let Some(concurrency) = request.h2_range_concurrency {
+        let configured = fetch::configured_semaphore_limit(semaphore);
+        let disk_limit = super::local_resources::range_limit(part_path).await;
+        let concurrency =
+            h2_range_limit(total_size, concurrency, configured, disk_limit);
         return super::h2_range::download(
             &connection,
             &uri,
@@ -297,6 +301,33 @@ pub(crate) async fn try_download_via_h2(
                     && matches!(failure, H2DownloadFailure::Protocol),
             }
         }
+    }
+}
+
+fn h2_range_limit(
+    size: u64,
+    requested: usize,
+    global_limit: usize,
+    disk_limit: usize,
+) -> usize {
+    let size_limit = if size >= 64 * 1024 * 1024 { 4 } else { 1 };
+    requested
+        .max(1)
+        .min(size_limit)
+        .min((global_limit / 2).max(1))
+        .min(disk_limit.max(1))
+}
+
+#[cfg(test)]
+mod range_policy_tests {
+    use super::*;
+
+    #[test]
+    fn large_ranges_reserve_global_capacity_and_respect_disk_limit() {
+        assert_eq!(h2_range_limit(128 * 1024 * 1024, 16, 64, 8), 4);
+        assert_eq!(h2_range_limit(128 * 1024 * 1024, 16, 4, 8), 2);
+        assert_eq!(h2_range_limit(128 * 1024 * 1024, 16, 64, 1), 1);
+        assert_eq!(h2_range_limit(1024 * 1024, 16, 64, 8), 1);
     }
 }
 
@@ -849,7 +880,7 @@ mod tests {
 
 /// Downloads a batch of small files over a shared HTTP/2 connection group,
 /// multiplexing up to `concurrency` logical workers. Physical H2 streams are
-/// governed by the dedicated asset stream budget. The group begins with one
+/// governed by the shared authority stream and global transfer budgets. The group begins with one
 /// connection and may add one sibling only for a sustained saturated batch;
 /// it never creates one connection per file. Items that cannot be downloaded
 /// after internal retries are returned so the caller can retry them through
@@ -857,6 +888,31 @@ mod tests {
 /// Returned items have exhausted every batch pass, so downstream can treat
 /// them as persistently failing against the chosen route.
 pub(crate) async fn download_asset_batch_via_h2<F>(
+    route: &DownloadRoute,
+    items: Vec<H2BatchAsset>,
+    concurrency: usize,
+    apply_native_policy: bool,
+    native_semaphore: Option<&fetch::FetchSemaphore>,
+    on_completed: F,
+) -> crate::Result<Vec<H2BatchAsset>>
+where
+    F: Fn(H2BatchAsset) -> Pin<Box<dyn Future<Output = ()> + Send>>
+        + Send
+        + Sync
+        + 'static,
+{
+    super::proxy_context::with_clients(download_asset_batch_inner(
+        route,
+        items,
+        concurrency,
+        apply_native_policy,
+        native_semaphore,
+        on_completed,
+    ))
+    .await
+}
+
+async fn download_asset_batch_inner<F>(
     route: &DownloadRoute,
     items: Vec<H2BatchAsset>,
     concurrency: usize,
@@ -880,27 +936,28 @@ where
     // first one and keep draining the batch so siblings already in flight or
     // still queued are not abandoned, then surface the error to the caller.
     let mut local_object_error: Option<crate::Error> = None;
-    let connection =
-        match connect_authority(route, apply_native_policy, true).await {
-            Ok(connection) => connection,
-            Err(failure) => {
-                if apply_native_policy
-                    && failure.should_cooldown_authority()
-                    && let Some(authority) = fetch::url_authority(&route.url)
-                {
-                    fetch::record_authority_h2_failure(&authority);
-                }
-                if apply_native_policy && failure.is_transfer_failure() {
-                    super::native_breaker::record_failure(route);
-                    fetch::record_route_health_failure(
-                        route,
-                        fetch::ResourceClass::MinecraftAsset,
-                        None,
-                    );
-                }
-                return Ok(items);
+    let connection = match connect_authority(route, apply_native_policy, true)
+        .await
+    {
+        Ok(connection) => connection,
+        Err(failure) => {
+            if apply_native_policy
+                && failure.should_cooldown_authority()
+                && let Some(authority) = fetch::url_authority(&route.url)
+            {
+                fetch::record_authority_h2_failure_for(&authority, route.proxy);
             }
-        };
+            if apply_native_policy && failure.is_transfer_failure() {
+                super::native_breaker::record_failure(route);
+                fetch::record_route_health_failure(
+                    route,
+                    fetch::ResourceClass::MinecraftAsset,
+                    None,
+                );
+            }
+            return Ok(items);
+        }
+    };
     let connections = Arc::new(AssetBatchConnectionGroup::new(
         connection,
         route,

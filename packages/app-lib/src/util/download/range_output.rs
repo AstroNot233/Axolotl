@@ -36,6 +36,24 @@ pub(crate) struct RangeWriter {
 }
 
 impl RangeOutput {
+    pub(crate) async fn reopen(
+        path: &Path,
+        size: u64,
+    ) -> Result<Arc<Self>, IOError> {
+        let metadata = tokio::fs::metadata(path)
+            .await
+            .map_err(|error| IOError::with_path(error, path))?;
+        if !metadata.is_file() || metadata.len() != size {
+            return Err(IOError::with_path(
+                std::io::Error::other("range output length changed"),
+                path,
+            ));
+        }
+        Ok(Arc::new(Self {
+            path: path.to_path_buf(),
+            size,
+        }))
+    }
     pub(crate) async fn create(
         path: &Path,
         size: u64,

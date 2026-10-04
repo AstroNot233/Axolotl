@@ -8678,8 +8678,12 @@ fn curseforge_integrity(
     }
 }
 
-const fn curseforge_modpack_h2_range_concurrency() -> Option<usize> {
-    Some(16)
+const fn curseforge_modpack_h2_range_concurrency(size: u64) -> Option<usize> {
+    if size >= 64 * 1024 * 1024 {
+        Some(4)
+    } else {
+        None
+    }
 }
 
 fn curseforge_candidate_urls(url: &str) -> crate::Result<Vec<String>> {
@@ -8781,7 +8785,7 @@ async fn download_curseforge_archive(
         ContentValidation::Jar,
         progress,
         reporter.map(|reporter| (reporter, tracking_item_id.as_str())),
-        curseforge_modpack_h2_range_concurrency(),
+        curseforge_modpack_h2_range_concurrency(file.file_length),
         true,
     )
     .await
@@ -10150,8 +10154,12 @@ mod tests {
     }
 
     #[test]
-    fn modpack_archives_use_sixteen_h2_range_streams() {
-        assert_eq!(curseforge_modpack_h2_range_concurrency(), Some(16));
+    fn modpack_archives_use_bounded_ranges_only_for_large_files() {
+        assert_eq!(
+            curseforge_modpack_h2_range_concurrency(128 * 1024 * 1024),
+            Some(4)
+        );
+        assert_eq!(curseforge_modpack_h2_range_concurrency(1024 * 1024), None);
     }
 
     #[test]

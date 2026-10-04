@@ -62,6 +62,12 @@ struct PersistedRoute {
 pub(crate) struct NativeTransportReputation {
     pub(crate) success_samples: u32,
     pub(crate) throughput_bps: Option<f64>,
+    #[serde(default)]
+    pub(crate) failure_samples: u32,
+    #[serde(default)]
+    pub(crate) consecutive_failures: u32,
+    #[serde(default)]
+    disabled_until: u64,
     updated_at: u64,
 }
 
@@ -175,9 +181,43 @@ pub(crate) fn record_transport_success(
         })
         .or_default();
     entry.success_samples = entry.success_samples.saturating_add(1);
+    entry.consecutive_failures = 0;
+    entry.disabled_until = 0;
     entry.throughput_bps =
         Some(update_ewma(entry.throughput_bps, throughput_bps));
     entry.updated_at = now_secs();
+    drop(reputation);
+    schedule_write();
+}
+
+pub(crate) fn transport_enabled(
+    authority: &str,
+    proxy: ProxyPolicy,
+    transport: NativeTransport,
+) -> bool {
+    get_transport(authority, proxy, transport)
+        .is_none_or(|health| health.disabled_until <= now_secs())
+}
+
+pub(crate) fn record_transport_failure(
+    authority: &str,
+    proxy: ProxyPolicy,
+    transport: NativeTransport,
+) {
+    let mut reputation = TRANSPORT_REPUTATION.lock();
+    let entry = reputation
+        .entry(TransportKey {
+            authority: super::proxy_context::authority_key(authority, proxy),
+            proxy,
+            transport,
+        })
+        .or_default();
+    entry.failure_samples = entry.failure_samples.saturating_add(1);
+    entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
+    entry.updated_at = now_secs();
+    if entry.consecutive_failures >= 3 {
+        entry.disabled_until = now_secs().saturating_add(120);
+    }
     drop(reputation);
     schedule_write();
 }
@@ -376,6 +416,39 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn range_failures_disable_only_range_transport_until_success() {
+        let authority = "range-failure-memory.invalid:443";
+        for _ in 0..3 {
+            record_transport_failure(
+                authority,
+                ProxyPolicy::Direct,
+                NativeTransport::H2MultiRange,
+            );
+        }
+        assert!(!transport_enabled(
+            authority,
+            ProxyPolicy::Direct,
+            NativeTransport::H2MultiRange
+        ));
+        assert!(transport_enabled(
+            authority,
+            ProxyPolicy::Direct,
+            NativeTransport::H2Single
+        ));
+        record_transport_success(
+            authority,
+            ProxyPolicy::Direct,
+            NativeTransport::H2MultiRange,
+            1024.0,
+        );
+        assert!(transport_enabled(
+            authority,
+            ProxyPolicy::Direct,
+            NativeTransport::H2MultiRange
+        ));
+    }
 
     #[test]
     fn transport_reputation_is_independent() {

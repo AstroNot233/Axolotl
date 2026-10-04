@@ -1018,10 +1018,15 @@ static H2_FALLBACK_AUTHORITIES: LazyLock<Mutex<HashMap<String, Instant>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub(crate) fn authority_uses_http1_fallback(authority: &str) -> bool {
-    let authority = super::download::proxy_context::authority_key(
-        authority,
-        ProxyPolicy::System,
-    );
+    authority_uses_http1_fallback_for(authority, ProxyPolicy::System)
+}
+
+pub(crate) fn authority_uses_http1_fallback_for(
+    authority: &str,
+    proxy: ProxyPolicy,
+) -> bool {
+    let authority =
+        super::download::proxy_context::authority_key(authority, proxy);
     let mut fallbacks = H2_FALLBACK_AUTHORITIES.lock();
     match fallbacks.get(&authority) {
         Some(until) if *until > Instant::now() => true,
@@ -1034,14 +1039,18 @@ pub(crate) fn authority_uses_http1_fallback(authority: &str) -> bool {
 }
 
 pub(crate) fn record_authority_h2_failure(authority: &str) {
+    record_authority_h2_failure_for(authority, ProxyPolicy::System);
+}
+
+pub(crate) fn record_authority_h2_failure_for(
+    authority: &str,
+    proxy: ProxyPolicy,
+) {
     let now = Instant::now();
     let mut fallbacks = H2_FALLBACK_AUTHORITIES.lock();
     fallbacks.retain(|_, until| *until > now);
     fallbacks.insert(
-        super::download::proxy_context::authority_key(
-            authority,
-            ProxyPolicy::System,
-        ),
+        super::download::proxy_context::authority_key(authority, proxy),
         now + H2_FALLBACK_TTL,
     );
 }
@@ -1494,6 +1503,10 @@ fn range_splitting_allowed(route: &DownloadRoute) -> bool {
     }
 
     range_splitting_authority(route).is_none_or(|authority| {
+        let authority = super::download::proxy_context::authority_key(
+            &authority,
+            route.proxy,
+        );
         RANGE_SPLITTING_PROTOCOL_FAILURES
             .lock()
             .get(&authority)
@@ -1511,6 +1524,8 @@ fn disable_range_splitting(route: &DownloadRoute) {
     let Some(authority) = range_splitting_authority(route) else {
         return;
     };
+    let authority =
+        super::download::proxy_context::authority_key(&authority, route.proxy);
     let mut failures = RANGE_SPLITTING_PROTOCOL_FAILURES.lock();
     let count = failures.entry(authority.clone()).or_insert(0);
     *count += 1;
@@ -1525,7 +1540,12 @@ fn disable_range_splitting(route: &DownloadRoute) {
 
 fn record_range_splitting_success(route: &DownloadRoute) {
     if let Some(authority) = range_splitting_authority(route) {
-        RANGE_SPLITTING_SUPPORTED.lock().insert(authority);
+        RANGE_SPLITTING_SUPPORTED.lock().insert(
+            super::download::proxy_context::authority_key(
+                &authority,
+                route.proxy,
+            ),
+        );
     }
 }
 
@@ -3029,14 +3049,6 @@ pub(crate) async fn finalize_download(
     part_path: &Path,
     destination: &Path,
 ) -> crate::Result<()> {
-    if io::retry_windows_sharing_violation(destination, "checking", || {
-        tokio::fs::try_exists(destination)
-    })
-    .await
-    .map_err(|error| io::io_error_with_lock_info(error, destination))?
-    {
-        remove_if_exists(destination).await?;
-    }
     io::retry_windows_sharing_violation(
         destination,
         "finalizing download",
@@ -3315,7 +3327,7 @@ fn route_segmented_concurrency_cap(
     }
 }
 
-fn configured_semaphore_limit(semaphore: &FetchSemaphore) -> usize {
+pub(crate) fn configured_semaphore_limit(semaphore: &FetchSemaphore) -> usize {
     if let Some(state) = crate::State::get_if_initialized()
         && (std::ptr::eq(
             &raw const state.fetch_semaphore.0,
@@ -3361,12 +3373,12 @@ async fn acquire_initial_segment_permits<'a>(
     Ok(permits)
 }
 
-struct NativeConnectionPermit<'a> {
+pub(crate) struct NativeConnectionPermit<'a> {
     _global: SemaphorePermit<'a>,
     _native: crate::util::download::native_budget::NativeBudgetPermit,
 }
 
-async fn acquire_native_connection<'a>(
+pub(crate) async fn acquire_native_connection<'a>(
     route: &DownloadRoute,
     semaphore: &'a FetchSemaphore,
 ) -> crate::Result<NativeConnectionPermit<'a>> {
@@ -4068,7 +4080,7 @@ async fn download_tail_candidate(
                 if is_h2_protocol_failure(&error)
                     && let Some(authority) = url_authority(&final_url)
                 {
-                    record_authority_h2_failure(&authority);
+                    record_authority_h2_failure_for(&authority, route.proxy);
                 }
                 return Err(SegmentDownloadError::Transport);
             }
@@ -4469,7 +4481,10 @@ async fn download_segment(
                     if is_h2_protocol_failure(&error)
                         && let Some(authority) = url_authority(&final_url)
                     {
-                        record_authority_h2_failure(&authority);
+                        record_authority_h2_failure_for(
+                            &authority,
+                            route.proxy,
+                        );
                     }
                     stream_end_reason = Some(error.to_string());
                     break;
@@ -5256,6 +5271,9 @@ async fn select_h2_download_route(
     }
     let h2_route = first_h2_route(routes)?;
     let policy = if request.h2_range_concurrency.is_some() {
+        if !super::download::h2_pool::has_live_connection(&h2_route).await {
+            return None;
+        }
         crate::util::download::native::explicit_h2_policy(&h2_route)
     } else {
         crate::util::download::native::h2_policy(
@@ -5288,6 +5306,7 @@ async fn reuse_existing_download(
         .cloned()
         .unwrap_or_else(|| official_route(&request.url, request.resource));
     remove_if_exists(part_path).await?;
+    remove_if_exists(&super::download::range_journal::path(part_path)).await?;
     Ok(Some(DownloadResult {
         path: destination.to_path_buf(),
         url: route.url,
@@ -5350,7 +5369,9 @@ async fn try_h2_download(
                 result.size,
                 started.elapsed(),
             );
-            if let Some(authority) = original_route_authority(&route) {
+            if request.h2_range_concurrency.is_none()
+                && let Some(authority) = original_route_authority(&route)
+            {
                 crate::util::download::native_reputation::record_transport_success(
                     &authority,
                     route.proxy,
@@ -5391,7 +5412,7 @@ async fn try_h2_download(
             } else if failure.should_cooldown_authority()
                 && let Some(authority) = url_authority(&route.url)
             {
-                record_authority_h2_failure(&authority);
+                record_authority_h2_failure_for(&authority, route.proxy);
             }
             if failure.is_transfer_failure() {
                 record_native_transfer_failure(&route, None);
@@ -5399,6 +5420,17 @@ async fn try_h2_download(
             }
             if !preserve_partial {
                 remove_if_exists(part_path).await?;
+            }
+            if preserve_partial
+                && tokio::fs::try_exists(super::download::range_journal::path(
+                    part_path,
+                ))
+                .await?
+            {
+                return Err(ErrorKind::NetworkError(format!(
+                    "range transfer failed; checkpoints retained: {failure:?}"
+                ))
+                .into());
             }
             cleanup_segment_files(part_path, MAX_SEGMENT_CONCURRENCY).await?;
             Ok(H2AttemptResult::Fallback { failed_nonofficial })
@@ -5444,6 +5476,43 @@ async fn download_to_path_inner(
             .await?
     {
         return Ok(attach_verified_integrity(result, &request.integrity));
+    }
+    if let Some(route) = routes.first() {
+        if let Some(outcome) = super::download::h2_range::resume_http1(
+            &request,
+            route,
+            destination,
+            &part_path,
+            semaphore,
+        )
+        .await?
+        {
+            match outcome {
+                super::download::h2_download::H2DownloadOutcome::Completed(
+                    result,
+                ) => {
+                    return Ok(attach_verified_integrity(
+                        result,
+                        &request.integrity,
+                    ));
+                }
+                super::download::h2_download::H2DownloadOutcome::Canceled => {
+                    return Err(ErrorKind::OtherError(
+                        "download canceled".into(),
+                    )
+                    .into());
+                }
+                super::download::h2_download::H2DownloadOutcome::Fallback {
+                    failure,
+                    ..
+                } => {
+                    return Err(ErrorKind::NetworkError(format!(
+                        "range resume failed: {failure:?}"
+                    ))
+                    .into());
+                }
+            }
+        }
     }
     prepare_partial_download(&routes, &part_path, &request.integrity).await?;
     prepare_native_download_routes(&request, &mut routes, semaphore).await;
@@ -9073,7 +9142,7 @@ async fn run_native_route_attempts(
                                 && let Some(authority) =
                                     url_authority(&final_url)
                             {
-                                record_authority_h2_failure(&authority);
+                                record_authority_h2_failure_for(&authority, route.proxy);
                             }
                             transfer_error = Some(error.into());
                             break;
@@ -9260,7 +9329,7 @@ async fn run_native_route_attempts(
                     authority,
                     "Truncated HTTP/2 response; retrying over HTTP/1.1"
                 );
-                record_authority_h2_failure(&authority);
+                record_authority_h2_failure_for(&authority, route.proxy);
             }
             record_route_failure(route, request.resource, None);
             preserve_or_remove_partial(
@@ -9306,7 +9375,7 @@ async fn run_native_route_attempts(
                     authority,
                     "Integrity failure on an HTTP/2 response; retrying over HTTP/1.1"
                 );
-                record_authority_h2_failure(&authority);
+                record_authority_h2_failure_for(&authority, route.proxy);
             }
             // A short body is kept as a resumable partial; a body that
             // arrived in full is discarded so the retry restarts.
@@ -9382,7 +9451,7 @@ async fn run_native_route_attempts(
                     authority,
                     "Content validation failed on an HTTP/2 response; retrying over HTTP/1.1"
                 );
-                record_authority_h2_failure(&authority);
+                record_authority_h2_failure_for(&authority, route.proxy);
             }
             if downloaded < expected_size.unwrap_or(0) {
                 preserve_or_remove_partial(

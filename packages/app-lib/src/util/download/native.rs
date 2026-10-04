@@ -42,7 +42,10 @@ pub(crate) fn h2_ineligible_reason(
     route: &DownloadRoute,
 ) -> Option<NativeH2IneligibleReason> {
     let authority = crate::util::fetch::url_authority(&route.url)?;
-    if crate::util::fetch::authority_uses_http1_fallback(&authority) {
+    if crate::util::fetch::authority_uses_http1_fallback_for(
+        &authority,
+        route.proxy,
+    ) {
         return Some(NativeH2IneligibleReason::Http1Fallback);
     }
     if let Some(clients) = super::proxy_context::clients() {
@@ -68,10 +71,18 @@ pub(crate) fn h2_ineligible_reason(
 pub(crate) fn explicit_h2_policy(
     route: &DownloadRoute,
 ) -> Option<NativeH2Policy> {
+    let authority = crate::util::fetch::url_authority(&route.url)?;
+    if !super::native_reputation::transport_enabled(
+        &authority,
+        route.proxy,
+        super::native_reputation::NativeTransport::H2MultiRange,
+    ) {
+        return None;
+    }
     h2_ineligible_reason(route)
         .is_none()
         .then_some(NativeH2Policy {
-            allow_cold_connection: true,
+            allow_cold_connection: false,
             abort_if_slow: true,
             expected_speed: None,
         })
@@ -209,6 +220,12 @@ mod tests {
             h2_ineligible_reason(&route(ProxyPolicy::Direct)),
             Some(NativeH2IneligibleReason::SystemProxy)
         );
+    }
+
+    #[test]
+    fn explicit_range_policy_requires_warm_connection() {
+        let policy = explicit_h2_policy(&route(ProxyPolicy::Direct)).unwrap();
+        assert!(!policy.allow_cold_connection);
     }
 
     #[tokio::test]

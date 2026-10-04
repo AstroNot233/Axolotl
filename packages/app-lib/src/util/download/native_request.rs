@@ -5,10 +5,10 @@ use crate::ErrorKind;
 use crate::util::fetch::{
     DIRECT_REQWEST_CLIENT, DOWNLOAD_META_HEADER, DownloadClients, DownloadMeta,
     DownloadRoute, MAX_REDIRECT_LOCATION_BYTES, NO_REDIRECT_REQWEST_CLIENT,
-    ProxyPolicy, authority_uses_http1_fallback,
+    ProxyPolicy, authority_uses_http1_fallback_for,
     forget_effective_route_authority, is_allowed_download_redirect,
     is_h2_protocol_failure, is_official_modrinth_download_url,
-    is_sensitive_header, record_authority_h2_failure,
+    is_sensitive_header, record_authority_h2_failure_for,
     record_dns_connection_failure, remember_effective_route_authority,
     same_origin, sanitize_url_for_log, url_authority,
 };
@@ -49,8 +49,10 @@ pub(crate) async fn send_path_request_with_clients(
     };
     let mut reused_redirect_target = current != original;
     for redirect_count in 0..=5 {
-        let fallback_to_http1 = url_authority(current.as_str())
-            .is_some_and(|authority| authority_uses_http1_fallback(&authority));
+        let fallback_to_http1 =
+            url_authority(current.as_str()).is_some_and(|authority| {
+                authority_uses_http1_fallback_for(&authority, route.proxy)
+            });
         let (system_client_for_hop, direct_client_for_hop): (
             &reqwest::Client,
             &reqwest::Client,
@@ -109,7 +111,7 @@ pub(crate) async fn send_path_request_with_clients(
                         error = %error.without_url(),
                         "HTTP/2 download request failed; retrying over HTTP/1.1"
                     );
-                    record_authority_h2_failure(&authority);
+                    record_authority_h2_failure_for(&authority, route.proxy);
                     continue;
                 }
                 return Err(error.into());
