@@ -483,12 +483,7 @@ function loadMinecraftDirectories() {
 			}
 			return []
 		})
-		return [
-			...new Map(
-				directories
-					.map((directory) => [directory.path.trim(), directory]),
-			).values(),
-		]
+		return [...new Map(directories.map((directory) => [directory.path.trim(), directory])).values()]
 	} catch {
 		return []
 	}
@@ -763,7 +758,7 @@ function removeMinecraftDirectory(index) {
 	if (minecraftDirectoryError.value) minecraftDirectoryError.value = null
 }
 
-function validateMinecraftDirectory(value) {
+function validateMinecraftDirectory(_value) {
 	minecraftDirectoryError.value = null
 }
 </script>

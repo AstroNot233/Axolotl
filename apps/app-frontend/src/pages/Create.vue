@@ -105,7 +105,7 @@ function handleImportExisting() {
 				/>
 			</div>
 
-<!--			<p class="m-0 text-sm text-[var(&#45;&#45;color-text-tertiary)]">
+			<!--			<p class="m-0 text-sm text-[var(&#45;&#45;color-text-tertiary)]">
 				{{ formatMessage(messages.pclHmclHint) }}
 				{{ ' ' }}
 				<RouterLink

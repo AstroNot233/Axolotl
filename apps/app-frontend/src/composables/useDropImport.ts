@@ -560,6 +560,16 @@ export function useDropImport(options: DropImportOptions) {
 		if (onSettingsPage.value && isSettingsImagePath(path)) {
 			return { item_type: 'unknown' as const, file_path: path, reason: 'skipped' }
 		}
+		const folderName = path.split(/[\\/]/).filter(Boolean).at(-1)
+		if (folderName?.toLowerCase() === '.minecraft') {
+			dropDebug('classifyDropPath: routing .minecraft folder as GameDir', { path })
+			return {
+				item_type: 'launcher',
+				launcher_type: 'Generic',
+				base_path: path,
+				innerBase: undefined,
+			}
+		}
 		return classifyDroppedItem(path)
 	}
 
