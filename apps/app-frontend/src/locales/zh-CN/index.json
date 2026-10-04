@@ -2477,71 +2477,14 @@
   "app.home.shortcut.server.players-online": {
     "message": "{count} 人在线"
   },
-  "app.home.source.acknowledge": {
-    "message": "我已了解风险"
+  "app.home.widgets.size": {
+    "message": "尺寸 {size}"
   },
-  "app.home.source.choose-file": {
-    "message": "选择文件"
+  "app.home.widgets.source-settings": {
+    "message": "小组件设置"
   },
-  "app.home.source.file-chosen": {
-    "message": "已选择：{name}"
-  },
-  "app.home.source.fit-label": {
-    "message": "显示方式"
-  },
-  "app.home.source.fit.contain": {
-    "message": "完整显示"
-  },
-  "app.home.source.fit.cover": {
-    "message": "填满格子"
-  },
-  "app.home.source.fit.fill": {
-    "message": "拉伸"
-  },
-  "app.home.source.html.title": {
-    "message": "本地 HTML 小组件"
-  },
-  "app.home.source.image.title": {
-    "message": "图片小组件"
-  },
-  "app.home.source.local": {
-    "message": "本地文件"
-  },
-  "app.home.source.remote": {
-    "message": "在线图片"
-  },
-  "app.home.source.scripts-description": {
-    "message": "脚本在沙盒中运行。关闭则只显示静态内容。"
-  },
-  "app.home.source.scripts-label": {
-    "message": "允许页面脚本"
-  },
-  "app.home.source.source-label": {
-    "message": "来源"
-  },
-  "app.home.source.url-invalid": {
-    "message": "请输入有效的 http(s) 地址。"
-  },
-  "app.home.source.url-label": {
-    "message": "网址"
-  },
-  "app.home.source.url-placeholder": {
-    "message": "https://example.com/..."
-  },
-  "app.home.source.warn-html": {
-    "message": "只打开你信任的 HTML 文件。恶意页面可能欺骗你或消耗资源。它无法读取你的文件或控制启动器，但切勿在其中输入密码。"
-  },
-  "app.home.source.warn-title": {
-    "message": "警告：警惕陌生人内容"
-  },
-  "app.home.source.warn-web": {
-    "message": "只打开你信任的页面。恶意页面可能诱骗你登录或下载文件。切勿在其中输入密码。"
-  },
-  "app.home.source.web.title": {
-    "message": "网页小组件"
-  },
-  "app.home.source.widget-title": {
-    "message": "标题（可选）"
+  "app.home.widgets.unavailable": {
+    "message": "内容已不可用"
   },
   "app.home.widgets.add": {
     "message": "添加小组件"
@@ -2588,53 +2531,11 @@
   "app.home.widgets.group.collections": {
     "message": "收藏内容集合"
   },
-  "app.home.widgets.group.custom": {
-    "message": "媒体与自定义"
-  },
   "app.home.widgets.group.overview": {
     "message": "概览"
   },
   "app.home.widgets.group.shortcuts": {
     "message": "单项快捷入口"
-  },
-  "app.home.widgets.html": {
-    "message": "本地 HTML 页面"
-  },
-  "app.home.widgets.html-description": {
-    "message": "在沙盒中运行本地单文件 HTML 页面。"
-  },
-  "app.home.widgets.html.broken": {
-    "message": "无法读取 HTML 文件"
-  },
-  "app.home.widgets.html.configure": {
-    "message": "选择文件"
-  },
-  "app.home.widgets.html.confirm-open": {
-    "message": "页面请求在启动器内打开 {path}，是否继续？"
-  },
-  "app.home.widgets.html.empty": {
-    "message": "尚未选择 HTML 文件"
-  },
-  "app.home.widgets.html.retry": {
-    "message": "重试"
-  },
-  "app.home.widgets.html.unsupported-link": {
-    "message": "该链接不允许在小组件中打开。"
-  },
-  "app.home.widgets.image": {
-    "message": "图片"
-  },
-  "app.home.widgets.image-description": {
-    "message": "在主页显示本地图片或在线图片。"
-  },
-  "app.home.widgets.image.broken": {
-    "message": "图片不可用"
-  },
-  "app.home.widgets.image.configure": {
-    "message": "选择图片"
-  },
-  "app.home.widgets.image.empty": {
-    "message": "尚未选择图片"
   },
   "app.home.widgets.instance": {
     "message": "单个实例入口"
@@ -2659,60 +2560,6 @@
   },
   "app.home.widgets.move-later": {
     "message": "向后移动"
-  },
-  "app.home.widgets.music": {
-    "message": "音乐播放器"
-  },
-  "app.home.widgets.music.add": {
-    "message": "添加歌曲"
-  },
-  "app.home.widgets.music.autoplay-off": {
-    "message": "自动播放：关"
-  },
-  "app.home.widgets.music.autoplay-on": {
-    "message": "自动播放：开"
-  },
-  "app.home.widgets.music-description": {
-    "message": "播放本地音乐，玩游戏时也能继续播放。"
-  },
-  "app.home.widgets.music.mode.loop-all": {
-    "message": "列表循环"
-  },
-  "app.home.widgets.music.mode.loop-one": {
-    "message": "单曲循环"
-  },
-  "app.home.widgets.music.mode.sequence": {
-    "message": "顺序播放"
-  },
-  "app.home.widgets.music.mode.shuffle": {
-    "message": "随机播放"
-  },
-  "app.home.widgets.music.mute": {
-    "message": "静音"
-  },
-  "app.home.widgets.music.next": {
-    "message": "下一首"
-  },
-  "app.home.widgets.music.options": {
-    "message": "播放器选项"
-  },
-  "app.home.widgets.music.pause": {
-    "message": "暂停"
-  },
-  "app.home.widgets.music.play": {
-    "message": "播放"
-  },
-  "app.home.widgets.music.prev": {
-    "message": "上一首"
-  },
-  "app.home.widgets.music.unknown-track": {
-    "message": "未在播放"
-  },
-  "app.home.widgets.music.unmute": {
-    "message": "取消静音"
-  },
-  "app.home.widgets.music.volume": {
-    "message": "音量"
   },
   "app.home.widgets.no-results": {
     "message": "没有匹配项"
@@ -2767,42 +2614,6 @@
   },
   "app.home.widgets.server-description": {
     "message": "选择一个服务器，创建独立的快速加入入口。"
-  },
-  "app.home.widgets.size": {
-    "message": "尺寸 {size}"
-  },
-  "app.home.widgets.source-settings": {
-    "message": "小组件设置"
-  },
-  "app.home.widgets.unavailable": {
-    "message": "内容已不可用"
-  },
-  "app.home.widgets.web": {
-    "message": "网页"
-  },
-  "app.home.widgets.web-description": {
-    "message": "嵌入在线页面。小心陌生人提供的页面。"
-  },
-  "app.home.widgets.web.broken": {
-    "message": "页面无法嵌入，可尝试在浏览器中打开。"
-  },
-  "app.home.widgets.web.open-external": {
-    "message": "在浏览器打开"
-  },
-  "app.home.widgets.web.reload": {
-    "message": "重新加载"
-  },
-  "app.home.widgets.web.warn-accept": {
-    "message": "我了解风险，加载页面"
-  },
-  "app.home.widgets.web.warn-body": {
-    "message": "此页面来自互联网。它运行在沙盒中，但仍可能诱骗你登录或下载文件。切勿在这里输入任何密码。"
-  },
-  "app.home.widgets.web.warn-remove": {
-    "message": "移除小组件"
-  },
-  "app.home.widgets.web.warn-title": {
-    "message": "警惕陌生人内容"
   },
   "app.home.widgets.world": {
     "message": "单个世界入口"
