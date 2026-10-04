@@ -702,6 +702,7 @@ export function useDropImport(options: DropImportOptions) {
 	}
 
 	async function routeToGamedirFlow(paths: string[]) {
+		dropDebug('gamedir flow: attempting direct-link sync', { paths })
 		const roots = paths
 			.filter((path) => path.trim())
 			.map((path) => ({ path: path.trim(), mode: 'automatic' as const }))
@@ -712,7 +713,11 @@ export function useDropImport(options: DropImportOptions) {
 			const merged = [...(Array.isArray(existing) ? existing : []), ...roots]
 			const unique = [...new Map(merged.map((root) => [root.path, root])).values()]
 			localStorage.setItem('axolotl-minecraft-directories', JSON.stringify(unique))
-			await syncConfiguredDirectLinks(unique)
+			const report = await syncConfiguredDirectLinks(unique)
+			dropDebug('gamedir flow: direct-link sync completed', { roots: unique, report })
+			if (report.errors.length > 0) {
+				throw new Error(report.errors.join('\n'))
+			}
 			addNotification({
 				title: formatMessage(messages.dropInstanceImportedTitle),
 				text: formatMessage(messages.dropInstanceImportedText, { name: paths.join(', ') }),
@@ -772,12 +777,32 @@ export function useDropImport(options: DropImportOptions) {
 					? classification!.launcher_dir!
 					: classification!.base_path!
 			dropDebug('handleDropConfirm: launcher import branch', { launcherType, basePath })
+			dropDebug('handleDropConfirm: launcher classified for gamedir routing', {
+				launcherType,
+				basePath,
+				configPath:
+					launcherType === 'HMCL'
+						? `${basePath}/.hmcl/hmcl.json`
+						: 'PCL global registry / PCL-CE config',
+			})
 			if (['Generic', 'PCL2', 'PCL2CE', 'HMCL'].includes(launcherType)) {
-				const resolved = await resolveGamedirs(
-					launcherType,
-					classification!.base_path ?? classification!.launcher_dir ?? filePath!,
-				)
-				await routeToGamedirFlow(resolved.map((entry) => entry.path))
+				try {
+					const resolved = await resolveGamedirs(
+						launcherType,
+						classification!.base_path ?? classification!.launcher_dir ?? filePath!,
+					)
+					dropDebug('handleDropConfirm: resolved launcher gamedirs', { launcherType, resolved })
+					if (resolved.length === 0) {
+						throw new Error(formatMessage(messages.dropNoInstances))
+					}
+					await routeToGamedirFlow(resolved.map((entry) => entry.path))
+				} catch (error) {
+					addNotification({
+						title: formatMessage(messages.dropScanFailed),
+						text: error instanceof Error ? error.message : String(error),
+						type: 'error',
+					})
+				}
 				return
 			}
 
