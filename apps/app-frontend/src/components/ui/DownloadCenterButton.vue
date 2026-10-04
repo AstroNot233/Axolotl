@@ -98,6 +98,13 @@
 					{{ formatMessage(messages.noActiveDownloads) }}
 				</div>
 				<button
+					v-if="!hasActivity"
+					class="mx-auto mt-1 block border-0 bg-transparent px-2 py-1 text-xs font-semibold text-brand hover:underline"
+					@click="runPopoutAction(hide, openHistory)"
+				>
+					{{ formatMessage(messages.viewHistory) }}
+				</button>
+				<button
 					v-if="hasActivity"
 					class="mt-2 w-full rounded-lg px-2 py-1.5 text-center text-sm font-semibold text-brand hover:bg-surface-4"
 					@click="runPopoutAction(hide, () => openDetails())"
@@ -135,6 +142,10 @@ const messages = defineMessages({
 	noActiveDownloads: {
 		id: 'app.action-bar.downloads.empty',
 		defaultMessage: 'No active downloads',
+	},
+	viewHistory: {
+		id: 'app.action-bar.downloads.view-history',
+		defaultMessage: 'View download history',
 	},
 	unknownPhase: { id: 'app.action-bar.downloads.phase.unknown', defaultMessage: 'Working' },
 	preparingInstance: {
@@ -219,6 +230,10 @@ function progressLabel(job: InstallJobSnapshot) {
 
 function openDetails(jobId?: string) {
 	router.push(jobId ? { path: '/downloads', query: { job: jobId } } : '/downloads')
+}
+
+function openHistory() {
+	router.push({ path: '/downloads', query: { tab: 'history' } })
 }
 
 function runPopoutAction(hide: () => void, action: () => void) {

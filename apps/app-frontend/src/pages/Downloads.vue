@@ -523,7 +523,7 @@ const router = useRouter()
 const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
 const formatBytes = useFormatBytes()
-const tab = ref<'active' | 'history'>('active')
+const tab = ref<'active' | 'history'>(route.query.tab === 'history' ? 'history' : 'active')
 const query = ref('')
 const provider = ref('all')
 const historyStatus = ref('all')
@@ -533,6 +533,13 @@ const clearHistoryModal = ref<InstanceType<typeof ConfirmModal>>()
 const missingContentModal = ref<InstanceType<typeof MissingModpackContentModal>>()
 const focusedJobId = computed(() => focusedDownloadJobId(route.query.job))
 const focusState = ref(createDownloadFocusState(focusedJobId.value))
+
+watch(
+	() => route.query.tab,
+	(value) => {
+		if (value === 'active' || value === 'history') tab.value = value
+	},
+)
 
 const messages = defineMessages({
 	newDownload: { id: 'app.downloads.new-download', defaultMessage: 'New download' },
