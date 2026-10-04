@@ -124,15 +124,6 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
 		),
 	},
 	{
-		id: 'appearance-auto-hide-downloads',
-		categoryId: 'home-navigation',
-		targetId: 'settings-target-appearance-auto-hide-downloads',
-		label: message(
-			'app.appearance-settings.auto-hide-downloads-button.title',
-			'Auto-hide downloads button',
-		),
-	},
-	{
 		id: 'defaults-window-title',
 		categoryId: 'launch-defaults',
 		targetId: 'settings-target-defaults-window-title',
