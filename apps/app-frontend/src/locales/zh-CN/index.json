@@ -9272,18 +9272,6 @@
   "app.settings.resources.database-backups-description": {
     "message": "重要应用数据的备份存储在此处，以便日后需要时恢复。"
   },
-  "app.settings.resources.download-engine": {
-    "message": "下载引擎"
-  },
-  "app.settings.resources.download-engine-description": {
-    "message": "选择启动器使用的下载引擎。"
-  },
-  "app.settings.resources.download-engine.legacy": {
-    "message": "原生引擎"
-  },
-  "app.settings.resources.download-engine.xmcl": {
-    "message": "XMCL"
-  },
   "app.settings.resources.download-mirrors": {
     "message": "下载源"
   },

@@ -1247,20 +1247,14 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
             .iter()
             .map(|&index| (index, pack_files[index].clone()))
             .collect::<Vec<_>>();
-        let native_pipeline = (crate::util::download::active_engine()
-            == crate::util::download::DownloadEngine::Legacy)
-            .then(|| {
-                (
-                    Arc::new(Semaphore::new(
-                        state
-                            .download_concurrency()
-                            .min(NATIVE_CONTENT_TASK_CONCURRENCY),
-                    )),
-                    Arc::new(Semaphore::new(
-                        NATIVE_CONTENT_FINALIZE_CONCURRENCY,
-                    )),
-                )
-            });
+        let native_pipeline = Some((
+            Arc::new(Semaphore::new(
+                state
+                    .download_concurrency()
+                    .min(NATIVE_CONTENT_TASK_CONCURRENCY),
+            )),
+            Arc::new(Semaphore::new(NATIVE_CONTENT_FINALIZE_CONCURRENCY)),
+        ));
         let (completion_tx, mut completion_rx) =
             mpsc::channel::<MrpackDatabaseTask>(128);
         let completion_instance_id = content_context.instance_id.clone();

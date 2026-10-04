@@ -294,14 +294,6 @@ const messages = defineMessages({
 		id: 'app.settings.resources.maximum-downloads',
 		defaultMessage: 'Maximum concurrent downloads',
 	},
-	downloadEngine: {
-		id: 'app.settings.resources.download-engine',
-		defaultMessage: 'Download engine',
-	},
-	downloadEngineDescription: {
-		id: 'app.settings.resources.download-engine-description',
-		defaultMessage: 'Choose which download engine the launcher uses.',
-	},
 	ignoreSslErrors: {
 		id: 'app.settings.resources.ignore-ssl-errors',
 		defaultMessage: 'Ignore SSL certificate errors',
@@ -310,14 +302,6 @@ const messages = defineMessages({
 		id: 'app.settings.resources.ignore-ssl-errors-description',
 		defaultMessage:
 			'Allows downloads through proxies or network tools that replace HTTPS certificates. This disables certificate verification and can expose downloads to tampering. Enable it only when necessary.',
-	},
-	legacyEngine: {
-		id: 'app.settings.resources.download-engine.legacy',
-		defaultMessage: 'Native engine',
-	},
-	xmclEngine: {
-		id: 'app.settings.resources.download-engine.xmcl',
-		defaultMessage: 'XMCL-compatible',
 	},
 	maximumDownloadsDescription: {
 		id: 'app.settings.resources.maximum-downloads-description',
@@ -585,23 +569,6 @@ const downloadConcurrencyOptions = computed(() => [
 		label: formatMessage(messages.manualConcurrency),
 	},
 ])
-const downloadEngine = computed({
-	get: () => settings.value.download_engine,
-	set: (engine) => {
-		settings.value.download_engine = engine
-	},
-})
-const downloadEngineOptions = computed(() => [
-	{
-		value: 'legacy',
-		label: formatMessage(messages.legacyEngine),
-	},
-	{
-		value: 'xmcl',
-		label: formatMessage(messages.xmclEngine),
-	},
-])
-
 const proxyModeOptions = computed(() => [
 	{
 		value: 'none',
@@ -964,19 +931,6 @@ function validateMinecraftDirectory(value) {
 			:title="formatMessage(messages.downloadBehaviorSectionTitle)"
 			title-id="settings-target-resources-download-behavior"
 		>
-			<SettingsRow>
-				<template #label>
-					<span id="settings-target-resources-download-engine" tabindex="-1">
-						{{ formatMessage(messages.downloadEngine) }}
-					</span>
-				</template>
-				<template #description>{{ formatMessage(messages.downloadEngineDescription) }}</template>
-				<template #control>
-					<div class="w-full">
-						<Combobox v-model="downloadEngine" :options="downloadEngineOptions" />
-					</div>
-				</template>
-			</SettingsRow>
 			<SettingsRow>
 				<template #label>
 					<span id="settings-target-resources-ignore-ssl-errors" tabindex="-1">

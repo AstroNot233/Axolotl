@@ -571,12 +571,6 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
 		keywords: [message('app.settings.tabs.resource-management', 'Resource management')],
 	},
 	{
-		id: 'resources-download-engine',
-		categoryId: 'content-downloads',
-		targetId: 'settings-target-resources-download-engine',
-		label: message('app.settings.resources.download-engine', 'Download engine'),
-	},
-	{
 		id: 'resources-data-storage',
 		categoryId: 'storage-backups',
 		targetId: 'settings-target-resources-data-storage',

@@ -52,6 +52,8 @@ const CHANNELS = ['release', 'beta']
 // Only recent migrations are listed. Dropping to a threshold before them is
 // refused rather than guessed at; --allow-unmapped accepts the risk explicitly.
 const REVERTIBLE_SCHEMA = {
+	// XMCL removal only normalizes data; keep the legacy column as a rollback tombstone.
+	20261004130000: {},
 	20261002120000: { tables: ['official_login_proof'] },
 	// settings.close_behavior
 	20260903120000: { columns: [{ table: 'settings', column: 'close_behavior' }] },

@@ -9356,18 +9356,6 @@
   "app.settings.resources.database-backups-description": {
     "message": "Backups of important app data are stored here in case you need to recover them later."
   },
-  "app.settings.resources.download-engine": {
-    "message": "Download engine"
-  },
-  "app.settings.resources.download-engine-description": {
-    "message": "Choose which download engine the launcher uses."
-  },
-  "app.settings.resources.download-engine.legacy": {
-    "message": "Native engine"
-  },
-  "app.settings.resources.download-engine.xmcl": {
-    "message": "XMCL-compatible"
-  },
   "app.settings.resources.download-mirrors": {
     "message": "Download sources"
   },

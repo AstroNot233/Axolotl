@@ -996,11 +996,6 @@ static FILE_VALIDATION_SEMAPHORE: LazyLock<Semaphore> =
 
 pub(crate) async fn acquire_native_validation_permit()
 -> crate::Result<Option<SemaphorePermit<'static>>> {
-    if crate::util::download::active_engine()
-        == crate::util::download::DownloadEngine::XmclCompat
-    {
-        return Ok(None);
-    }
     Ok(Some(FILE_VALIDATION_SEMAPHORE.acquire().await?))
 }
 
@@ -1248,18 +1243,14 @@ fn record_route_success(
         let baseline = persisted_route_health(&key, route.proxy);
         let throughput_bps = (!transfer_elapsed.is_zero())
             .then(|| bytes as f64 / transfer_elapsed.as_secs_f64());
-        if crate::util::download::active_engine()
-            != crate::util::download::DownloadEngine::XmclCompat
-        {
-            crate::util::download::native_breaker::record_success(route);
-            crate::util::download::native_reputation::record_success(
-                key.family.as_str(),
-                &key.authority,
-                route.proxy,
-                ttfb.as_secs_f64() * 1000.0,
-                throughput_bps,
-            );
-        }
+        crate::util::download::native_breaker::record_success(route);
+        crate::util::download::native_reputation::record_success(
+            key.family.as_str(),
+            &key.authority,
+            route.proxy,
+            ttfb.as_secs_f64() * 1000.0,
+            throughput_bps,
+        );
         let mut health = ROUTE_HEALTH.lock();
         let entry = health.entry(key).or_insert(baseline);
         entry.success_samples = entry.success_samples.saturating_add(1);
@@ -1332,11 +1323,6 @@ fn record_native_transfer_failure(
     route: &DownloadRoute,
     cooldown: Option<time::Duration>,
 ) {
-    if crate::util::download::active_engine()
-        == crate::util::download::DownloadEngine::XmclCompat
-    {
-        return;
-    }
     if let Some(cooldown) = cooldown {
         crate::util::download::native_breaker::record_failure_with_cooldown(
             route, cooldown,
@@ -1353,15 +1339,11 @@ pub(crate) fn record_route_health_failure(
 ) {
     if let Some(key) = route_health_key(route, resource) {
         let baseline = persisted_route_health(&key, route.proxy);
-        if crate::util::download::active_engine()
-            != crate::util::download::DownloadEngine::XmclCompat
-        {
-            crate::util::download::native_reputation::record_failure(
-                key.family.as_str(),
-                &key.authority,
-                route.proxy,
-            );
-        }
+        crate::util::download::native_reputation::record_failure(
+            key.family.as_str(),
+            &key.authority,
+            route.proxy,
+        );
         let mut health = ROUTE_HEALTH.lock();
         let entry = health.entry(key).or_insert(baseline);
         entry.consecutive_failures =
@@ -5124,43 +5106,6 @@ async fn prepare_partial_download(
     .await
 }
 
-async fn try_xmcl_download(
-    request: &DownloadRequest,
-    destination: &Path,
-    routes: &[DownloadRoute],
-    semaphore: &FetchSemaphore,
-    part_path: &Path,
-    progress: Option<&mut FetchProgressFn<'_>>,
-) -> Option<crate::Result<DownloadResult>> {
-    if crate::util::download::active_engine()
-        != crate::util::download::DownloadEngine::XmclCompat
-    {
-        return None;
-    }
-    if let Some(first_route) = routes.first() {
-        record_install_download_started(
-            request,
-            first_route,
-            0,
-            routes.len().saturating_mul(3).max(1),
-        )
-        .await;
-    }
-    record_install_download_stage(request, DownloadItemStatus::Downloading)
-        .await;
-    Some(
-        crate::util::download::xmcl::download_to_path(
-            request,
-            destination,
-            routes,
-            semaphore,
-            part_path,
-            progress,
-        )
-        .await,
-    )
-}
-
 enum H2AttemptResult {
     Completed(DownloadResult),
     Fallback { failed_nonofficial: Option<String> },
@@ -5261,7 +5206,7 @@ async fn download_to_path_inner(
     request: DownloadRequest,
     destination: &Path,
     semaphore: &FetchSemaphore,
-    mut progress: Option<&mut FetchProgressFn<'_>>,
+    progress: Option<&mut FetchProgressFn<'_>>,
 ) -> crate::Result<DownloadResult> {
     if let Some(parent) = destination.parent() {
         io::create_dir_all(parent).await?;
@@ -5297,19 +5242,6 @@ async fn download_to_path_inner(
         return Ok(result);
     }
     prepare_partial_download(&routes, &part_path, &request.integrity).await?;
-    if let Some(result) = try_xmcl_download(
-        &request,
-        destination,
-        &routes,
-        semaphore,
-        &part_path,
-        progress.as_deref_mut(),
-    )
-    .await
-    {
-        return result;
-    }
-
     prepare_native_download_routes(&request, &mut routes, semaphore).await;
 
     // Prefer one stream on a healthy shared HTTP/2 connection when the file

@@ -1,8 +1,7 @@
 //! Theseus settings file
 
-use crate::util::download::DownloadEngine;
 use serde::{Deserialize, Serialize};
-use sqlx::{Pool, Row, Sqlite};
+use sqlx::{Pool, Sqlite};
 use std::collections::HashMap;
 
 // Types
@@ -102,8 +101,6 @@ impl<'de> Deserialize<'de> for HomeLayout {
 pub struct Settings {
     pub max_concurrent_downloads: usize,
     pub max_concurrent_writes: usize,
-    #[serde(default)]
-    pub download_engine: DownloadEngine,
     #[serde(default)]
     pub auto_concurrent_downloads: bool,
     #[serde(default)]
@@ -289,7 +286,6 @@ pub enum FeatureFlag {
     AdvancedFiltersCollapsed,
     PageTransitions,
     ShowVersionEnvironmentColumn,
-    XmclDownloadEngine,
     AutoInstallDependencies,
 }
 
@@ -398,13 +394,6 @@ impl Settings {
         .fetch_one(exec)
         .await?;
 
-        let engine_row =
-            sqlx::query("SELECT download_engine FROM settings WHERE id = 0")
-                .fetch_one(exec)
-                .await?;
-        let download_engine = DownloadEngine::from_str(
-            &engine_row.get::<String, _>("download_engine"),
-        );
         let bypass_curseforge_download_restrictions: bool = sqlx::query_scalar(
             "SELECT bypass_curseforge_download_restrictions FROM settings WHERE id = 0",
         )
@@ -418,7 +407,6 @@ impl Settings {
         let settings = Self {
             max_concurrent_downloads: res.max_concurrent_downloads as usize,
             max_concurrent_writes: res.max_concurrent_writes as usize,
-            download_engine,
             auto_concurrent_downloads: res.auto_concurrent_downloads == 1,
             minecraft_metadata_source: DownloadSourceMode::from_string(
                 &res.minecraft_metadata_source,
@@ -548,7 +536,6 @@ impl Settings {
             auto_download_updates: res.auto_download_updates.map(|x| x == 1),
             version: res.version as usize,
         };
-        crate::util::download::set_active_engine(settings.download_engine);
         Ok(settings)
     }
 
@@ -804,10 +791,6 @@ impl Settings {
         .execute(exec)
         .await?;
 
-        sqlx::query("UPDATE settings SET download_engine = ? WHERE id = 0")
-            .bind(self.download_engine.as_str())
-            .execute(exec)
-            .await?;
         sqlx::query(
             "UPDATE settings SET bypass_curseforge_download_restrictions = ? WHERE id = 0",
         )

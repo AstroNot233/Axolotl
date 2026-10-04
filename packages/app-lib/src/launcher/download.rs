@@ -1861,8 +1861,7 @@ pub async fn download_assets(
             ResourceClass::MinecraftAsset,
             source_mode,
         );
-        let apply_native_policy = crate::util::download::active_engine()
-            != crate::util::download::DownloadEngine::XmclCompat;
+        let apply_native_policy = true;
         if apply_native_policy {
             let probe_request =
                 DownloadRequest::new(&first_url, ResourceClass::MinecraftAsset)

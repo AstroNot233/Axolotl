@@ -1,6 +1,5 @@
 //! Theseus settings management interface
 
-pub use crate::util::download::DownloadEngine;
 pub use crate::{
     State,
     state::{
@@ -32,18 +31,6 @@ pub async fn set(mut settings: Settings) -> crate::Result<()> {
     settings.update(&state.pool).await?;
     state.update_http_client_for_settings(&settings).await?;
     state.update_download_settings(&settings);
-    crate::util::download::set_active_engine(settings.download_engine);
-
-    Ok(())
-}
-
-#[tracing::instrument]
-pub async fn set_download_engine(engine: DownloadEngine) -> crate::Result<()> {
-    let state = State::get().await?;
-    let mut settings = Settings::get(&state.pool).await?;
-    settings.download_engine = engine;
-    settings.update(&state.pool).await?;
-    crate::util::download::set_active_engine(engine);
     Ok(())
 }
 

@@ -674,7 +674,6 @@ fn main() {
                         "privacy_set",
                         "telemetry_set",
                         "discord_rpc_set",
-                        "download_engine_set",
                         "cancel_directory_change",
                         "proxy_get",
                         "proxy_set",
