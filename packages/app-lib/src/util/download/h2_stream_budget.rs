@@ -8,12 +8,14 @@ use tokio::sync::{
     AcquireError, OwnedSemaphorePermit, Semaphore, SemaphorePermit,
 };
 
-const MAX_H2_STREAMS_PER_AUTHORITY: usize = 32;
+const MAX_H2_STREAMS_PER_AUTHORITY: usize = 256;
+const MAX_ASSET_H2_STREAMS_PER_AUTHORITY: usize = 24;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct AuthorityKey {
     authority: String,
     proxy: ProxyPolicy,
+    asset: bool,
 }
 
 static AUTHORITY_BUDGETS: LazyLock<
@@ -32,9 +34,9 @@ pub(crate) struct H2DownloadPermit<'a> {
 pub(crate) async fn acquire_download<'a>(
     route: &DownloadRoute,
     semaphore: Option<&'a crate::util::fetch::FetchSemaphore>,
-    _asset: bool,
+    asset: bool,
 ) -> Result<H2DownloadPermit<'a>, AcquireError> {
-    let stream = acquire(route).await?;
+    let stream = acquire_for(route, asset).await?;
     let file = match semaphore {
         Some(semaphore) => Some(semaphore.0.acquire().await?),
         None => None,
@@ -46,10 +48,15 @@ pub(crate) async fn acquire_download<'a>(
 }
 
 fn budget(route: &DownloadRoute) -> Option<Arc<Semaphore>> {
+    budget_for(route, false)
+}
+
+fn budget_for(route: &DownloadRoute, asset: bool) -> Option<Arc<Semaphore>> {
     let authority = crate::util::fetch::url_authority(&route.url)?;
     let key = AuthorityKey {
         authority: super::proxy_context::authority_key(&authority, route.proxy),
         proxy: route.proxy,
+        asset,
     };
     let mut budgets = AUTHORITY_BUDGETS.lock();
     if budgets.len() >= 256 {
@@ -59,7 +66,11 @@ fn budget(route: &DownloadRoute) -> Option<Arc<Semaphore>> {
         budgets
             .entry(key)
             .or_insert_with(|| {
-                Arc::new(Semaphore::new(MAX_H2_STREAMS_PER_AUTHORITY))
+                Arc::new(Semaphore::new(if asset {
+                    MAX_ASSET_H2_STREAMS_PER_AUTHORITY
+                } else {
+                    MAX_H2_STREAMS_PER_AUTHORITY
+                }))
             })
             .clone(),
     )
@@ -68,8 +79,15 @@ fn budget(route: &DownloadRoute) -> Option<Arc<Semaphore>> {
 pub(crate) async fn acquire(
     route: &DownloadRoute,
 ) -> Result<H2StreamPermit, AcquireError> {
+    acquire_for(route, false).await
+}
+
+pub(crate) async fn acquire_for(
+    route: &DownloadRoute,
+    asset: bool,
+) -> Result<H2StreamPermit, AcquireError> {
     Ok(H2StreamPermit {
-        _authority: match budget(route) {
+        _authority: match budget_for(route, asset) {
             Some(budget) => Some(budget.acquire_owned().await?),
             None => None,
         },

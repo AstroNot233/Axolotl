@@ -32,6 +32,13 @@ const HAPPY_EYEBALLS_DELAY: Duration = Duration::from_millis(250);
 const STREAM_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const IDLE_EVICTION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const CONNECTION_WAIT_TIMEOUT: Duration = Duration::from_secs(45);
+const MAX_PARALLEL_CONNECTIONS_PER_AUTHORITY: usize = 32;
+const PARALLEL_CONNECTION_STABILITY: Duration = Duration::from_millis(1500);
+const PARALLEL_CONNECTION_STREAMS_PER_TARGET: usize = 8;
+
+fn next_parallel_connection_target(current: usize) -> usize {
+    (current * 2).min(MAX_PARALLEL_CONNECTIONS_PER_AUTHORITY)
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum H2ConnectFailureKind {
@@ -210,6 +217,18 @@ static BATCH_CONNECTIONS: std::sync::LazyLock<
     AsyncMutex<HashMap<String, ConnectionSlot>>,
 > = std::sync::LazyLock::new(|| AsyncMutex::new(HashMap::new()));
 
+struct ParallelConnectionPoolState {
+    connections: Vec<Arc<SharedH2Connection>>,
+    target: usize,
+    last_expansion: std::time::Instant,
+}
+
+type ParallelConnectionPool = Arc<AsyncMutex<ParallelConnectionPoolState>>;
+
+static PARALLEL_CONNECTIONS: std::sync::LazyLock<
+    AsyncMutex<HashMap<String, ParallelConnectionPool>>,
+> = std::sync::LazyLock::new(|| AsyncMutex::new(HashMap::new()));
+
 async fn connection_slot(authority: &str) -> ConnectionSlot {
     let mut connections = CONNECTIONS.lock().await;
     connections
@@ -223,6 +242,20 @@ async fn batch_connection_slot(authority: &str) -> ConnectionSlot {
     connections
         .entry(authority.to_string())
         .or_insert_with(|| Arc::new(AsyncMutex::new(None)))
+        .clone()
+}
+
+async fn parallel_connection_pool(authority: &str) -> ParallelConnectionPool {
+    let mut connections = PARALLEL_CONNECTIONS.lock().await;
+    connections
+        .entry(authority.to_string())
+        .or_insert_with(|| {
+            Arc::new(AsyncMutex::new(ParallelConnectionPoolState {
+                connections: Vec::new(),
+                target: 2,
+                last_expansion: std::time::Instant::now(),
+            }))
+        })
         .clone()
 }
 
@@ -536,7 +569,7 @@ async fn establish(
 
 /// Returns the live shared connection for `authority`, establishing one on
 /// first use or after a previous connection died.
-pub(crate) async fn shared_connection(
+async fn shared_connection_single(
     route: &DownloadRoute,
     reserve_native_budget: bool,
     allow_cold_connection: bool,
@@ -610,6 +643,125 @@ pub(crate) async fn shared_connection(
     })??;
     *cached = Some(Arc::clone(&connection));
     Ok(connection)
+}
+
+/// Returns the least-loaded H2 connection for a parallel content transfer.
+/// Every selected connection remains fully multiplexed; expansion only adds a
+/// new TCP/TLS connection after the existing pool is carrying sustained load.
+pub(crate) async fn shared_connection(
+    route: &DownloadRoute,
+    reserve_native_budget: bool,
+    allow_cold_connection: bool,
+    allow_parallel_connections: bool,
+) -> Result<Arc<SharedH2Connection>, H2ConnectError> {
+    if !allow_parallel_connections {
+        return shared_connection_single(
+            route,
+            reserve_native_budget,
+            allow_cold_connection,
+        )
+        .await;
+    }
+
+    let authority =
+        crate::util::fetch::url_authority(&route.url).ok_or_else(|| {
+            H2ConnectError::new(
+                H2ConnectFailureKind::Protocol,
+                "HTTP/2 route has no authority".to_string(),
+            )
+        })?;
+    let key = super::proxy_context::authority_key(&authority, route.proxy);
+    let pool = parallel_connection_pool(&key).await;
+    let primary = shared_connection_single(
+        route,
+        reserve_native_budget,
+        allow_cold_connection,
+    )
+    .await?;
+    let mut state = pool.lock().await;
+    state.connections.retain(|connection| {
+        !connection.is_dead() && !connection.is_idle_expired()
+    });
+    if !state
+        .connections
+        .iter()
+        .any(|connection| Arc::ptr_eq(connection, &primary))
+    {
+        state.connections.push(Arc::clone(&primary));
+    }
+
+    let needs_initial_connection = state.connections.len() < state.target;
+    let stable = !needs_initial_connection
+        && state.last_expansion.elapsed() >= PARALLEL_CONNECTION_STABILITY
+        && state.connections.iter().all(|connection| {
+            connection.active_streams()
+                >= state.target * PARALLEL_CONNECTION_STREAMS_PER_TARGET
+        });
+    if stable && state.target < MAX_PARALLEL_CONNECTIONS_PER_AUTHORITY {
+        state.target = next_parallel_connection_target(state.target);
+        state.last_expansion = std::time::Instant::now();
+        tracing::debug!(
+            authority,
+            target = state.target,
+            "Expanded adaptive H2 connection target"
+        );
+    }
+
+    let target = state.target;
+    let least_loaded = state
+        .connections
+        .iter()
+        .min_by_key(|connection| connection.active_streams())
+        .cloned()
+        .expect("parallel H2 pool always contains its primary connection");
+    if !needs_initial_connection
+        && (state.connections.len() >= target
+            || state.connections.len()
+                >= MAX_PARALLEL_CONNECTIONS_PER_AUTHORITY)
+    {
+        return Ok(least_loaded);
+    }
+    drop(state);
+
+    let sibling = establish(route, reserve_native_budget).await?;
+    let mut state = pool.lock().await;
+    state.connections.retain(|connection| {
+        !connection.is_dead() && !connection.is_idle_expired()
+    });
+    if state.connections.len() < state.target {
+        state.connections.push(Arc::clone(&sibling));
+        tracing::debug!(
+            authority,
+            connections = state.connections.len(),
+            target,
+            "Expanded multiplexed content download connection pool"
+        );
+        Ok(sibling)
+    } else {
+        Ok(state
+            .connections
+            .iter()
+            .min_by_key(|connection| connection.active_streams())
+            .cloned()
+            .unwrap_or(sibling))
+    }
+}
+
+#[cfg(test)]
+mod parallel_pool_tests {
+    use super::*;
+
+    #[test]
+    fn adaptive_connection_targets_follow_the_requested_ladder() {
+        let mut target = 2;
+        let mut targets = Vec::new();
+        while target < MAX_PARALLEL_CONNECTIONS_PER_AUTHORITY {
+            targets.push(target);
+            target = next_parallel_connection_target(target);
+        }
+        targets.push(target);
+        assert_eq!(targets, [2, 4, 8, 16, 32]);
+    }
 }
 
 /// Returns the optional second connection used exclusively by a busy asset

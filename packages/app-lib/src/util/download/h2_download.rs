@@ -111,6 +111,7 @@ pub(crate) async fn try_download_via_h2(
     }
     let connection = match connect_authority(
         route,
+        request.resource,
         true,
         policy.allow_cold_connection,
     )
@@ -333,6 +334,7 @@ mod range_policy_tests {
 
 async fn connect_authority(
     route: &DownloadRoute,
+    resource: fetch::ResourceClass,
     reserve_native_budget: bool,
     allow_cold_connection: bool,
 ) -> Result<Arc<SharedH2Connection>, H2DownloadFailure> {
@@ -342,6 +344,10 @@ async fn connect_authority(
         route,
         reserve_native_budget,
         allow_cold_connection,
+        matches!(
+            resource,
+            fetch::ResourceClass::Modrinth | fetch::ResourceClass::Modpack
+        ),
     )
     .await
     {
@@ -937,8 +943,13 @@ where
     // first one and keep draining the batch so siblings already in flight or
     // still queued are not abandoned, then surface the error to the caller.
     let mut local_object_error: Option<crate::Error> = None;
-    let connection = match connect_authority(route, apply_native_policy, true)
-        .await
+    let connection = match connect_authority(
+        route,
+        fetch::ResourceClass::MinecraftAsset,
+        apply_native_policy,
+        true,
+    )
+    .await
     {
         Ok(connection) => connection,
         Err(failure) => {

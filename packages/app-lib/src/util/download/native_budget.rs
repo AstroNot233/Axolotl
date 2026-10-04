@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError};
 
-const MAX_CONNECTIONS_PER_AUTHORITY: usize = 8;
+const MAX_CONNECTIONS_PER_AUTHORITY: usize = 32;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct AuthorityKey {
