@@ -7124,12 +7124,15 @@ mod tests {
     }
 
     #[test]
-    fn auto_modrinth_cdn_keeps_tianpao_ahead_of_a_sampled_official_route() {
+    fn disabled_tianpao_routes_leave_official_cdn_available() {
         let _guard = AUTO_SOURCE_TEST_LOCK.lock().unwrap();
         let previous_health = std::mem::take(&mut *ROUTE_HEALTH.lock());
         let url = "https://cdn-alt.modrinth.com/data/project/versions/version/file.jar";
         let mut routes = explicit_mirror_routes(url, ResourceClass::Modrinth);
         routes.push(official_route(url, ResourceClass::Modrinth));
+        assert!(routes
+            .iter()
+            .all(|route| route.source != DownloadRouteSource::Tianpao));
         let official = routes
             .iter()
             .find(|route| is_official_route(route))
