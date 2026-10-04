@@ -214,13 +214,6 @@ export type AppSettings = {
 	pending_update_toast_for_version: string | null
 	auto_download_updates: boolean | null
 
-	// 音乐播放器
-	music_volume: number
-	music_muted: boolean
-	music_play_mode: string
-	music_autoplay_on_launch: boolean
-	music_current_track_id: string | null
-
 	version: number
 }
 

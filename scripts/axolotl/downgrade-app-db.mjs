@@ -52,17 +52,6 @@ const CHANNELS = ['release', 'beta']
 // Only recent migrations are listed. Dropping to a threshold before them is
 // refused rather than guessed at; --allow-unmapped accepts the risk explicitly.
 const REVERTIBLE_SCHEMA = {
-	// settings music columns; home_music_tracks registry
-	20261003120000: {
-		columns: [
-			{ table: 'settings', column: 'music_volume' },
-			{ table: 'settings', column: 'music_muted' },
-			{ table: 'settings', column: 'music_play_mode' },
-			{ table: 'settings', column: 'music_autoplay_on_launch' },
-			{ table: 'settings', column: 'music_current_track_id' },
-		],
-		tables: ['home_music_tracks'],
-	},
 	20261002120000: { tables: ['official_login_proof'] },
 	// settings.close_behavior
 	20260903120000: { columns: [{ table: 'settings', column: 'close_behavior' }] },
