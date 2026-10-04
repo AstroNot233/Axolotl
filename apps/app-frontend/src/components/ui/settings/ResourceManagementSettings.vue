@@ -467,7 +467,7 @@ function loadMinecraftDirectories() {
 		const parsed = JSON.parse(raw)
 		if (!Array.isArray(parsed)) return []
 		const directories = parsed.flatMap((value) => {
-			if (typeof value === 'string') return [{ path: value, mode: 'isolated' }]
+			if (typeof value === 'string') return [{ path: value, mode: 'automatic' }]
 			if (value && typeof value === 'object' && typeof value.path === 'string') {
 				return [
 					{
@@ -749,7 +749,7 @@ async function addMinecraftDirectory() {
 	const normalized = directory.trim().replace(/[\\/]+$/, '')
 	if (!normalized) return
 	if (!minecraftDirectories.value.some((entry) => entry.path === normalized)) {
-		minecraftDirectories.value.push({ path: normalized, mode: 'isolated' })
+		minecraftDirectories.value.push({ path: normalized, mode: 'automatic' })
 	}
 }
 
