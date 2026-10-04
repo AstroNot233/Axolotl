@@ -10,15 +10,15 @@
 				type="button"
 				:aria-label="formatMessage(messages.downloads)"
 				:class="[
-					'flex shrink-0 items-center gap-2 border-0 text-[var(--color-text-primary)] transition-colors',
+					'inline-flex h-9 min-w-0 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-solid border-transparent px-2.5 text-base font-semibold leading-5 text-[var(--color-text-primary)] transition-colors',
 					activeJobs.length || hasLegacyDownload
-						? 'rounded-xl bg-surface-4 px-3 py-1.5 hover:bg-surface-5'
-						: 'size-8 justify-center rounded-full bg-transparent hover:bg-surface-4',
+						? 'bg-surface-4 hover:bg-surface-5'
+						: 'w-9 !rounded-full bg-transparent hover:bg-surface-4',
 				]"
 				:style="triggerStyle"
 			>
-				<LoaderCircleIcon v-if="hasActivity" class="size-4 shrink-0 animate-spin" />
-				<DownloadIcon v-else class="size-4 shrink-0" />
+				<LoaderCircleIcon v-if="hasActivity" class="size-5 shrink-0 animate-spin" />
+				<DownloadIcon v-else class="size-5 shrink-0" />
 				<template v-if="activeJobs.length || hasLegacyDownload">
 					<span class="max-w-[12rem] truncate text-sm font-semibold">
 						{{ activeJobs[0]?.display?.title ?? formatMessage(messages.downloads) }}
@@ -234,6 +234,10 @@ async function cancel(jobId: string) {
 <style>
 .download-center-menu[data-state='open'] {
 	animation: download-center-menu-in 140ms ease-out;
+}
+
+.download-center-menu .menu-arrow {
+	transform: translateY(1px);
 }
 
 .download-center-menu[data-state='closed'] {
