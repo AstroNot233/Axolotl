@@ -852,6 +852,7 @@ fn main() {
                         "drop_classify_extract",
                         "drop_extract_zip_to_temp",
                         "drop_scan_launcher_instances",
+                        "drop_resolve_gamedirs",
                         "drop_remove_temp_dir",
                         "drop_detect_file_lock",
                         "drop_extract_mod_metadata",
