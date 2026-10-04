@@ -669,6 +669,13 @@ impl State {
     ) -> crate::Result<()> {
         let _update = self.configured_http_client_update.lock().await;
         let proxy = crate::state::proxy_settings::get(&self.pool).await?;
+        if {
+            let current = self.configured_http_client.read();
+            current.proxy == proxy
+                && current.ignore_ssl_errors == settings.ignore_ssl_errors
+        } {
+            return Ok(());
+        }
         let client = crate::util::fetch::DownloadClients::build(
             &proxy,
             settings.ignore_ssl_errors,
@@ -904,7 +911,7 @@ impl State {
         let download_semaphore =
             FetchSemaphore(Semaphore::new(download_concurrency));
         let io_semaphore =
-            IoSemaphore(Semaphore::new(settings.max_concurrent_writes));
+            IoSemaphore(Semaphore::new(settings.max_concurrent_writes.max(1)));
         let api_semaphore =
             FetchSemaphore(Semaphore::new(download_concurrency));
         let auto_prefers_mirror = settings.auto_prefers_mirror();

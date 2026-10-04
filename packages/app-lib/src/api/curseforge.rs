@@ -586,7 +586,7 @@ pub(crate) async fn stage_curseforge_upgrade_file(
         true,
     )
     .await?;
-    verify_installed_curseforge_file(&path, &file, None).await?;
+    verify_installed_curseforge_file(&path, &file, None, None).await?;
     Ok(StagedCurseForgeUpgrade {
         path,
         file,
@@ -8821,6 +8821,7 @@ pub(crate) struct CurseForgeVerificationTask {
     project_type: ProjectType,
     ownership_kind: crate::state::instances::ContentOwnershipKind,
     expected_bytes: u64,
+    download_result: Option<crate::util::fetch::DownloadResult>,
     cancellation: CancellationToken,
 }
 
@@ -8966,6 +8967,7 @@ async fn verify_and_record_curseforge_modpack_file(
         &task.download_path,
         &task.file,
         Some(&task.cancellation),
+        task.download_result.as_ref(),
     )
     .await
     {
@@ -9382,6 +9384,7 @@ async fn download_installed_file(
                 project_type,
                 ownership_kind,
                 expected_bytes: file.file_length,
+                download_result: Some(result.clone()),
                 cancellation: cancellation.clone(),
             };
             tokio::select! {
@@ -9400,6 +9403,13 @@ async fn download_installed_file(
         }
         return Ok(DownloadedCurseForgeFile { relative_path });
     }
+    let verified = verify_installed_curseforge_file(
+        download_path,
+        file,
+        None,
+        Some(&result),
+    )
+    .await?;
     // Acquire the writer before the instance lock so a progress checkpoint
     // cannot leave this materialization holding the lock indefinitely.
     let database_permit = Some(state.acquire_install_db_permit().await?);
@@ -9408,15 +9418,15 @@ async fn download_installed_file(
         crate::state::materialize_project_download(download_path, &full_path)
             .await?;
     crate::util::io::remove_file(download_path).await?;
-    let record_result = record_installed_curseforge_file_with_permit(
+    let record_result = record_verified_curseforge_file_with_permit(
         instance_id,
         &relative_path,
-        &full_path,
         file,
         project_type,
         ownership_kind,
         database_permit,
         &state,
+        verified,
     )
     .await;
     match record_result {
@@ -9472,6 +9482,15 @@ async fn fingerprint_and_sha1_file(
     path: &Path,
     cancellation: Option<&CancellationToken>,
 ) -> crate::Result<(u64, String, u32)> {
+    #[cfg(test)]
+    crate::util::download::verified_file::record_scan();
+    let started = std::time::Instant::now();
+    let acquire = crate::util::fetch::acquire_native_validation_permit();
+    let _permit = if let Some(cancellation) = cancellation {
+        tokio::select! { biased; _ = cancellation.cancelled() => return Err(ErrorKind::OtherError("fingerprint verification canceled while waiting for resources".into()).into()), permit = acquire => permit? }
+    } else {
+        acquire.await?
+    };
     const BUFFER_SIZE: usize = 256 * 1024;
     let mut file = tokio::fs::File::open(path).await?;
     let mut buffer = vec![0_u8; BUFFER_SIZE];
@@ -9512,6 +9531,7 @@ async fn fingerprint_and_sha1_file(
         }
         fingerprint.update(&buffer[..read]);
     }
+    tracing::debug!(path = %path.display(), bytes = size, verification_ms = started.elapsed().as_millis(), "Completed CurseForge fingerprint verification");
     Ok((size, sha1.digest().to_string(), fingerprint.finish()))
 }
 
@@ -9519,13 +9539,33 @@ async fn verify_installed_curseforge_file(
     path: &Path,
     file: &CurseForgeFile,
     cancellation: Option<&CancellationToken>,
+    download: Option<&crate::util::fetch::DownloadResult>,
 ) -> crate::Result<VerifiedInstalledCurseForgeFile> {
+    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        return Err(ErrorKind::OtherError(
+            "CurseForge verification canceled".into(),
+        )
+        .into());
+    }
     if let Some(expected_sha1) = file
         .hashes
         .iter()
         .find(|hash| hash.algo == 1 && !hash.value.trim().is_empty())
         .map(|hash| hash.value.as_str())
     {
+        if let Some(download) = download {
+            if download.path == path
+                && download.verified_sha1.as_deref().is_some_and(|hash| {
+                    hash.eq_ignore_ascii_case(expected_sha1)
+                })
+            {
+                if let Some(proof) = &download.verified_file {
+                    if proof.matches(path, download.size).await {
+                        return Ok(VerifiedInstalledCurseForgeFile { size: download.size, sha1: expected_sha1.to_string(), pending_completion: CurseForgePendingCompletionProof::AuthoritativeSha1 });
+                    }
+                }
+            }
+        }
         let (size, sha1) = match cancellation {
             Some(cancellation) => {
                 sha1_file_cancellable(path, cancellation).await?
@@ -9585,7 +9625,30 @@ async fn record_installed_curseforge_file_with_permit(
     state: &State,
 ) -> crate::Result<()> {
     let verified =
-        verify_installed_curseforge_file(full_path, file, None).await?;
+        verify_installed_curseforge_file(full_path, file, None, None).await?;
+    record_verified_curseforge_file_with_permit(
+        instance_id,
+        relative_path,
+        file,
+        project_type,
+        ownership_kind,
+        database_permit,
+        state,
+        verified,
+    )
+    .await
+}
+
+async fn record_verified_curseforge_file_with_permit(
+    instance_id: &str,
+    relative_path: &str,
+    file: &CurseForgeFile,
+    project_type: ProjectType,
+    ownership_kind: crate::state::instances::ContentOwnershipKind,
+    database_permit: Option<tokio::sync::SemaphorePermit<'_>>,
+    state: &State,
+    verified: VerifiedInstalledCurseForgeFile,
+) -> crate::Result<()> {
     match verified.pending_completion {
         CurseForgePendingCompletionProof::None => {
             let provider_ref = ContentProviderRef::CurseForge {
@@ -10162,6 +10225,161 @@ mod tests {
         assert_eq!(curseforge_modpack_h2_range_concurrency(1024 * 1024), None);
     }
 
+    #[tokio::test]
+    async fn staged_digest_proof_is_reused_only_for_the_unchanged_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let staged = directory.path().join("content.installing.download");
+        let other = directory.path().join("other.installing.download");
+        tokio::fs::write(&staged, b"verified staged bytes")
+            .await
+            .unwrap();
+        let sha1 = sha1_smol::Sha1::from(b"verified staged bytes").hexdigest();
+        let file = stage8_curseforge_file(
+            1,
+            2,
+            "content.jar",
+            21,
+            vec![CurseForgeFileHash {
+                value: sha1.clone(),
+                algo: 1,
+            }],
+            0,
+        );
+        let download = crate::util::fetch::DownloadResult {
+            path: staged.clone(),
+            url: "https://staged-proof.invalid/file".into(),
+            source: crate::util::fetch::DownloadRouteSource::Official,
+            size: 21,
+            attempts: 1,
+            fallback_count: 0,
+            verified_sha1: Some(sha1.clone()),
+            verified_sha512: None,
+            verified_file:
+                crate::util::download::verified_file::VerifiedFile::capture(
+                    &staged, 21,
+                )
+                .await,
+        };
+        assert!(
+            download
+                .verified_file
+                .as_ref()
+                .unwrap()
+                .matches(&staged, 21)
+                .await
+        );
+        let (verified, scans) =
+            crate::util::download::verified_file::track_scans(
+                verify_installed_curseforge_file(
+                    &staged,
+                    &file,
+                    None,
+                    Some(&download),
+                ),
+            )
+            .await;
+        let verified = verified.unwrap();
+        assert_eq!(scans, 0);
+        assert_eq!(verified.sha1, sha1);
+        assert_eq!(
+            verified.pending_completion,
+            CurseForgePendingCompletionProof::AuthoritativeSha1
+        );
+        let serialized = serde_json::to_value(&download).unwrap();
+        let restored: crate::util::fetch::DownloadResult =
+            serde_json::from_value(serialized).unwrap();
+        assert!(restored.verified_file.is_none());
+        let (rescanned, scans) =
+            crate::util::download::verified_file::track_scans(
+                verify_installed_curseforge_file(
+                    &staged,
+                    &file,
+                    None,
+                    Some(&restored),
+                ),
+            )
+            .await;
+        assert!(rescanned.is_ok());
+        assert_eq!(scans, 1);
+        tokio::fs::write(&other, b"corrupted other bytes")
+            .await
+            .unwrap();
+        assert!(
+            verify_installed_curseforge_file(
+                &other,
+                &file,
+                None,
+                Some(&download)
+            )
+            .await
+            .is_err()
+        );
+        tokio::fs::write(&staged, b"corrupted staged file")
+            .await
+            .unwrap();
+        let handle =
+            std::fs::File::options().write(true).open(&staged).unwrap();
+        handle
+            .set_times(std::fs::FileTimes::new().set_modified(
+                std::time::SystemTime::UNIX_EPOCH
+                    + std::time::Duration::from_secs(123456),
+            ))
+            .unwrap();
+        assert!(
+            verify_installed_curseforge_file(
+                &staged,
+                &file,
+                None,
+                Some(&download)
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            verify_installed_curseforge_file(
+                &staged,
+                &file,
+                None,
+                Some(&restored)
+            )
+            .await
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn staged_digest_proof_never_skips_fingerprint_verification() {
+        let directory = tempfile::tempdir().unwrap();
+        let staged = directory.path().join("content.installing.download");
+        tokio::fs::write(&staged, b"verified staged bytes")
+            .await
+            .unwrap();
+        let file = stage8_curseforge_file(1, 2, "content.jar", 21, vec![], 1);
+        let download = crate::util::fetch::DownloadResult {
+            path: staged.clone(),
+            url: "https://staged-proof.invalid/file".into(),
+            source: crate::util::fetch::DownloadRouteSource::Official,
+            size: 21,
+            attempts: 1,
+            fallback_count: 0,
+            verified_sha1: Some("trusted-sha1".into()),
+            verified_sha512: None,
+            verified_file:
+                crate::util::download::verified_file::VerifiedFile::capture(
+                    &staged, 21,
+                )
+                .await,
+        };
+        let result = verify_installed_curseforge_file(
+            &staged,
+            &file,
+            None,
+            Some(&download),
+        )
+        .await;
+        assert!(result.err().unwrap().to_string().contains("fingerprint"));
+    }
+
     #[test]
     fn curseforge_overrides_publish_after_all_entries_validate() {
         let root = tempfile::tempdir().unwrap();
@@ -10376,6 +10594,7 @@ mod tests {
                 ownership_kind:
                     crate::state::instances::ContentOwnershipKind::PackManaged,
                 expected_bytes: 19,
+                download_result: None,
                 cancellation: CancellationToken::new(),
             },
             database_tx,

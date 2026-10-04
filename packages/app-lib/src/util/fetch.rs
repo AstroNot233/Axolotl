@@ -371,14 +371,23 @@ pub struct DownloadResult {
     pub verified_sha1: Option<String>,
     #[serde(default)]
     pub verified_sha512: Option<String>,
+    #[serde(skip)]
+    pub(crate) verified_file:
+        Option<super::download::verified_file::VerifiedFile>,
 }
 
-fn attach_verified_integrity(
+async fn attach_verified_integrity(
     mut result: DownloadResult,
     integrity: &Integrity,
 ) -> DownloadResult {
     result.verified_sha1 = integrity.sha1.clone();
     result.verified_sha512 = integrity.sha512.clone();
+    result.verified_file =
+        super::download::verified_file::VerifiedFile::capture(
+            &result.path,
+            result.size,
+        )
+        .await;
     result
 }
 
@@ -1104,19 +1113,6 @@ pub fn build_proxied_client(
         .expect("proxy configuration should be valid")
         .build()
         .expect("proxied client configuration should be valid")
-}
-
-pub(crate) fn build_configured_client(
-    proxy: &crate::util::proxy::ProxyConfig,
-    ignore_ssl_errors: bool,
-) -> crate::Result<reqwest::Client> {
-    proxy
-        .apply(
-            reqwest_client_builder()
-                .danger_accept_invalid_certs(ignore_ssl_errors),
-        )?
-        .build()
-        .map_err(Into::into)
 }
 
 pub async fn configured_client() -> crate::Result<reqwest::Client> {
@@ -2867,6 +2863,10 @@ const STALE_PARTIAL_DOWNLOAD_MAX_AGE: time::Duration =
 
 fn is_partial_download_file_name(name: &str) -> bool {
     name.ends_with(".part")
+        || name.ends_with(".part.ranges.json")
+        || name
+            .rsplit_once(".part.ranges.json.")
+            .is_some_and(|(_, suffix)| uuid::Uuid::parse_str(suffix).is_ok())
         || name
             .rsplit_once(".segment-")
             .is_some_and(|(prefix, index)| {
@@ -4091,7 +4091,10 @@ async fn download_tail_candidate(
         super::download::local_resources::write(
             &path,
             accepted as u64,
-            file.write_all(&chunk[..accepted]),
+            async {
+                file.write_all(&chunk[..accepted]).await?;
+                file.flush().await
+            },
         )
         .await
         .map_err(|error| {
@@ -4857,9 +4860,10 @@ async fn try_segmented_download(
                 }
             }
             _ = scheduler.tick() => {
-                let slow_decision = slow_policy.observe(
+                let slow_decision = slow_policy.observe_with_pressure(
                     downloaded,
                     size.saturating_sub(downloaded),
+                    super::download::local_resources::pressure(part_path),
                 );
                 if allow_low_throughput_abort
                     && !alternate_probe_finished
@@ -5110,22 +5114,6 @@ pub(crate) async fn record_install_download_stage(
     }
 }
 
-pub(crate) async fn record_install_download_finished(
-    request: &DownloadRequest,
-    bytes: u64,
-) {
-    let Some(tracking) = &request.install_tracking else {
-        return;
-    };
-    if let Err(error) = tracking
-        .reporter
-        .record_download_request_finished(&tracking.item_id, bytes)
-        .await
-    {
-        tracing::warn!(%error, "Failed to record finished download request");
-    }
-}
-
 /// Resolves hosts ahead of the first request so every file shares one ordered
 /// address list instead of racing the same DNS queries.
 pub(crate) async fn prewarm_download_dns(hosts: &[&str]) {
@@ -5316,6 +5304,7 @@ async fn reuse_existing_download(
         fallback_count: 0,
         verified_sha1: request.integrity.sha1.clone(),
         verified_sha512: request.integrity.sha512.clone(),
+        verified_file: None,
     }))
 }
 
@@ -5421,21 +5410,70 @@ async fn try_h2_download(
             if !preserve_partial {
                 remove_if_exists(part_path).await?;
             }
-            if preserve_partial
-                && tokio::fs::try_exists(super::download::range_journal::path(
-                    part_path,
-                ))
-                .await?
-            {
-                return Err(ErrorKind::NetworkError(format!(
-                    "range transfer failed; checkpoints retained: {failure:?}"
-                ))
-                .into());
-            }
             cleanup_segment_files(part_path, MAX_SEGMENT_CONCURRENCY).await?;
             Ok(H2AttemptResult::Fallback { failed_nonofficial })
         }
     }
+}
+
+async fn resume_checkpointed_download(
+    request: &DownloadRequest,
+    routes: &[DownloadRoute],
+    destination: &Path,
+    part_path: &Path,
+    semaphore: &FetchSemaphore,
+) -> crate::Result<Option<DownloadResult>> {
+    let mut range_resume_error = None;
+    for route in routes {
+        if let Some(outcome) = super::download::h2_range::resume_http1(
+            request,
+            route,
+            destination,
+            part_path,
+            semaphore,
+        )
+        .await?
+        {
+            match outcome {
+                super::download::h2_download::H2DownloadOutcome::Completed(
+                    result,
+                ) => {
+                    return Ok(Some(
+                        attach_verified_integrity(result, &request.integrity)
+                            .await,
+                    ));
+                }
+                super::download::h2_download::H2DownloadOutcome::Canceled => {
+                    return Err(ErrorKind::OtherError(
+                        "download canceled".into(),
+                    )
+                    .into());
+                }
+                super::download::h2_download::H2DownloadOutcome::Fallback {
+                    failure,
+                    preserve_partial,
+                } => {
+                    if !preserve_partial {
+                        range_resume_error = None;
+                        break;
+                    }
+                    record_route_health_failure(route, request.resource, None);
+                    range_resume_error = Some(
+                        ErrorKind::NetworkError(format!(
+                            "range resume failed: {failure:?}"
+                        ))
+                        .into(),
+                    );
+                }
+            }
+        } else {
+            break;
+        }
+    }
+    if let Some(error) = range_resume_error {
+        return Err(error);
+    }
+    Ok(None)
 }
 
 async fn download_to_path_inner(
@@ -5475,44 +5513,18 @@ async fn download_to_path_inner(
         reuse_existing_download(&request, &routes, destination, &part_path)
             .await?
     {
-        return Ok(attach_verified_integrity(result, &request.integrity));
+        return Ok(attach_verified_integrity(result, &request.integrity).await);
     }
-    if let Some(route) = routes.first() {
-        if let Some(outcome) = super::download::h2_range::resume_http1(
-            &request,
-            route,
-            destination,
-            &part_path,
-            semaphore,
-        )
-        .await?
-        {
-            match outcome {
-                super::download::h2_download::H2DownloadOutcome::Completed(
-                    result,
-                ) => {
-                    return Ok(attach_verified_integrity(
-                        result,
-                        &request.integrity,
-                    ));
-                }
-                super::download::h2_download::H2DownloadOutcome::Canceled => {
-                    return Err(ErrorKind::OtherError(
-                        "download canceled".into(),
-                    )
-                    .into());
-                }
-                super::download::h2_download::H2DownloadOutcome::Fallback {
-                    failure,
-                    ..
-                } => {
-                    return Err(ErrorKind::NetworkError(format!(
-                        "range resume failed: {failure:?}"
-                    ))
-                    .into());
-                }
-            }
-        }
+    if let Some(result) = resume_checkpointed_download(
+        &request,
+        &routes,
+        destination,
+        &part_path,
+        semaphore,
+    )
+    .await?
+    {
+        return Ok(result);
     }
     prepare_partial_download(&routes, &part_path, &request.integrity).await?;
     prepare_native_download_routes(&request, &mut routes, semaphore).await;
@@ -5537,7 +5549,8 @@ async fn download_to_path_inner(
                 return Ok(attach_verified_integrity(
                     result,
                     &request.integrity,
-                ));
+                )
+                .await);
             }
             H2AttemptResult::Fallback { failed_nonofficial } => {
                 failed_nonofficial
@@ -5547,6 +5560,17 @@ async fn download_to_path_inner(
         None
     };
 
+    if let Some(result) = resume_checkpointed_download(
+        &request,
+        &routes,
+        destination,
+        &part_path,
+        semaphore,
+    )
+    .await?
+    {
+        return Ok(result);
+    }
     let request_integrity = request.integrity.clone();
     let result = run_native_download_attempts(
         request,
@@ -5558,7 +5582,7 @@ async fn download_to_path_inner(
         h2_failed_nonofficial,
     )
     .await?;
-    Ok(attach_verified_integrity(result, &request_integrity))
+    Ok(attach_verified_integrity(result, &request_integrity).await)
 }
 
 enum NativeSegmentedAttempt {
@@ -5683,6 +5707,7 @@ async fn try_segmented_native_attempt(
                         fallback_count: session.fallback_count,
                         verified_sha1: request.integrity.sha1.clone(),
                         verified_sha512: request.integrity.sha512.clone(),
+                        verified_file: None,
                     },
                 )));
             }
@@ -6090,6 +6115,10 @@ pub async fn sha1_file_async(
     path: impl AsRef<Path>,
 ) -> crate::Result<(u64, String)> {
     let path = path.as_ref();
+    #[cfg(test)]
+    super::download::verified_file::record_scan();
+    let started = Instant::now();
+    let _permit = acquire_native_validation_permit().await?;
     // Local files can be multi-gigabyte .mrpacks, so hash them without materializing bytes.
     let mut file = File::open(path)
         .await
@@ -6111,6 +6140,7 @@ pub async fn sha1_file_async(
         size += bytes_read as u64;
     }
 
+    tracing::debug!(path = %path.display(), bytes = size, verification_ms = started.elapsed().as_millis(), "Completed SHA-1 file verification");
     Ok((size, hasher.digest().to_string()))
 }
 
@@ -6119,6 +6149,10 @@ pub async fn sha1_file_cancellable(
     cancellation: &tokio_util::sync::CancellationToken,
 ) -> crate::Result<(u64, String)> {
     let path = path.as_ref();
+    #[cfg(test)]
+    super::download::verified_file::record_scan();
+    let started = Instant::now();
+    let _permit = tokio::select! { biased; _ = cancellation.cancelled() => return Err(ErrorKind::OtherError("verification canceled while waiting for resources".into()).into()), permit = acquire_native_validation_permit() => permit? };
     let mut file = File::open(path)
         .await
         .map_err(|e| IOError::with_path(e, path))?;
@@ -6136,6 +6170,7 @@ pub async fn sha1_file_cancellable(
         hasher.update(&buffer[..bytes_read]);
         size += bytes_read as u64;
     }
+    tracing::debug!(path = %path.display(), bytes = size, verification_ms = started.elapsed().as_millis(), "Completed cancellable SHA-1 file verification");
     Ok((size, hasher.digest().to_string()))
 }
 
@@ -7899,13 +7934,16 @@ mod tests {
             }
             _ => panic!("segmented fixture download did not succeed"),
         }
-        assert!(requests.load(Ordering::Relaxed) >= 4);
-        assert_eq!(normal_requests.load(Ordering::Relaxed), 0);
         assert!(
-            RANGE_SPLITTING_SUPPORTED
-                .lock()
-                .contains(&range_splitting_authority(&route).unwrap())
+            requests.load(Ordering::Relaxed) >= INITIAL_SEGMENT_CONCURRENCY
         );
+        assert_eq!(normal_requests.load(Ordering::Relaxed), 0);
+        assert!(RANGE_SPLITTING_SUPPORTED.lock().contains(
+            &super::super::download::proxy_context::authority_key(
+                &range_splitting_authority(&route).unwrap(),
+                route.proxy
+            )
+        ));
         assert_eq!(
             verify_file(&part_path, &request.integrity).await.unwrap(),
             size as u64
@@ -8057,7 +8095,10 @@ mod tests {
         .await;
 
         assert!(matches!(outcome, SegmentedDownloadOutcome::Success(_)));
-        assert_eq!(redirect_requests.load(Ordering::Relaxed), 4);
+        assert_eq!(
+            redirect_requests.load(Ordering::Relaxed),
+            INITIAL_SEGMENT_CONCURRENCY
+        );
         assert!(range_requests.load(Ordering::Relaxed) >= 5);
         assert_eq!(normal_requests.load(Ordering::Relaxed), 0);
         redirect_server.abort();
@@ -9148,7 +9189,7 @@ async fn run_native_route_attempts(
                             break;
                         }
                     };
-                    super::download::local_resources::write(&part_path, chunk.len() as u64, file.write_all(&chunk)).await.map_err(|error| {
+                    super::download::local_resources::write(&part_path, chunk.len() as u64, async { file.write_all(&chunk).await?; file.flush().await }).await.map_err(|error| {
                         IOError::with_path(error, &part_path)
                     })?;
                     hashers.update(&chunk);
@@ -9174,9 +9215,10 @@ async fn run_native_route_attempts(
                     }
                 }
                 _ = throughput_timer.tick() => {
-                    let slow_decision = slow_policy.observe(
+                    let slow_decision = slow_policy.observe_with_pressure(
                         downloaded,
                         total_size.saturating_sub(downloaded),
+                        super::download::local_resources::pressure(&part_path),
                     );
                     if allow_low_throughput_abort
                         && total_size >= SEGMENTED_DOWNLOAD_THRESHOLD
@@ -9269,7 +9311,12 @@ async fn run_native_route_attempts(
             // Best-effort durability for data a later resume builds
             // on; a power loss could otherwise leave a zero-filled
             // tail that wastes the resumed transfer.
-            let _ = file.sync_data().await;
+            let _ = super::download::local_resources::write(
+                &part_path,
+                0,
+                file.sync_data(),
+            )
+            .await;
         }
         drop(file);
         drop(permit);
@@ -9536,6 +9583,7 @@ async fn run_native_route_attempts(
             fallback_count: session.fallback_count,
             verified_sha1: request.integrity.sha1.clone(),
             verified_sha512: request.integrity.sha512.clone(),
+            verified_file: None,
         }));
     }
 

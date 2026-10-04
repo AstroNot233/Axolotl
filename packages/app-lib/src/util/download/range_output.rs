@@ -151,7 +151,7 @@ impl RangeOutput {
         )
         .await
         .map_err(|error| io::io_error_with_lock_info(error, path))?;
-        file.flush()
+        super::local_resources::write(path, 0, file.flush())
             .await
             .map_err(|error| io::io_error_with_lock_info(error, path))
     }
@@ -197,7 +197,10 @@ impl RangeWriter {
         let result = super::local_resources::write(
             &self.path,
             bytes.len() as u64,
-            self.file.write_all(bytes),
+            async {
+                self.file.write_all(bytes).await?;
+                self.file.get_mut().flush().await
+            },
         )
         .await
         .map_err(|error| io::io_error_with_lock_info(error, &self.path));

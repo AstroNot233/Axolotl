@@ -25,6 +25,7 @@ pub(crate) mod range_journal;
 pub(crate) mod range_output;
 pub(crate) mod route_health;
 pub(crate) mod route_policy;
+pub(crate) mod verified_file;
 pub(crate) fn task_concurrency_limit(state: &crate::State) -> Option<usize> {
     Some(state.download_concurrency())
 }

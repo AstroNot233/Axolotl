@@ -473,7 +473,8 @@ async fn run_download(
     };
     if let Err(error) = result {
         let invalid = fetch::is_integrity_error(&error)
-            || matches!(error.raw.as_ref(), crate::ErrorKind::OtherError(message) if message.starts_with("Invalid JAR"));
+            || matches!(error.raw.as_ref(), crate::ErrorKind::JSONError(_))
+            || matches!(error.raw.as_ref(), crate::ErrorKind::OtherError(message) if message.starts_with("Invalid JAR") || message.starts_with("Incorrect size"));
         if invalid {
             discard(part).await;
         }
@@ -503,6 +504,7 @@ async fn run_download(
         fallback_count: 0,
         verified_sha1: request.integrity.sha1.clone(),
         verified_sha512: request.integrity.sha512.clone(),
+        verified_file: None,
     })
 }
 
@@ -597,9 +599,6 @@ async fn recover_range(
         }
         transport.failed(h2);
         last_failure = failure.unwrap_or(H2DownloadFailure::Protocol);
-        if offset == range.end {
-            return Err(last_failure);
-        }
         tracing::debug!(
             range_start = range.start,
             resume_offset = offset,

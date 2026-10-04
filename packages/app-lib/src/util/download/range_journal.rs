@@ -84,7 +84,15 @@ impl RangeJournal {
         if !metadata.is_file() {
             return Ok(None);
         }
-        let bytes = tokio::fs::read(&journal_path).await?;
+        let mut bytes = Vec::new();
+        tokio::fs::File::open(&journal_path)
+            .await?
+            .take(16 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .await?;
+        if bytes.len() > 16 * 1024 {
+            return Ok(None);
+        }
         let mut state = match serde_json::from_slice::<Journal>(&bytes) {
             Ok(state) if state.valid(integrity, size) => state,
             _ => return Ok(None),

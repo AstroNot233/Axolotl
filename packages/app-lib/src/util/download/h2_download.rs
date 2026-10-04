@@ -544,11 +544,10 @@ async fn single_stream(
         let Some(chunk) = chunk else {
             break;
         };
-        super::local_resources::write(
-            part_path,
-            chunk.len() as u64,
-            file.write_all(&chunk),
-        )
+        super::local_resources::write(part_path, chunk.len() as u64, async {
+            file.write_all(&chunk).await?;
+            file.flush().await
+        })
         .await?;
         hashers.update(&chunk);
         downloaded += chunk.len() as u64;
@@ -559,9 +558,10 @@ async fn single_stream(
         }
         if policy.abort_if_slow
             && matches!(
-                slow_policy.observe(
+                slow_policy.observe_with_pressure(
                     downloaded,
                     total_size.saturating_sub(downloaded),
+                    super::local_resources::pressure(part_path),
                 ),
                 super::native_slow::SlowDecision::Probe { .. }
                     | super::native_slow::SlowDecision::Idle { .. }
@@ -602,6 +602,7 @@ async fn single_stream(
         fallback_count: 0,
         verified_sha1: request.integrity.sha1.clone(),
         verified_sha512: request.integrity.sha512.clone(),
+        verified_file: None,
     })
 }
 
@@ -1266,7 +1267,10 @@ async fn download_asset_item(
             if let Err(error) = super::local_resources::write(
                 &part_path,
                 chunk.len() as u64,
-                file.write_all(&chunk),
+                async {
+                    file.write_all(&chunk).await?;
+                    file.flush().await
+                },
             )
             .await
             {
