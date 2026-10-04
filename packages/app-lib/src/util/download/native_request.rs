@@ -4,8 +4,7 @@ use super::modrinth_redirect::repair_official_redirect as repair_official_cdn_re
 use crate::ErrorKind;
 use crate::util::fetch::{
     DIRECT_REQWEST_CLIENT, DOWNLOAD_DNS_RESOLVER, DOWNLOAD_META_HEADER,
-    DownloadMeta, DownloadRoute, HTTP1_DIRECT_REQWEST_CLIENT,
-    HTTP1_NO_REDIRECT_REQWEST_CLIENT, MAX_REDIRECT_LOCATION_BYTES,
+    DownloadClients, DownloadMeta, DownloadRoute, MAX_REDIRECT_LOCATION_BYTES,
     NO_REDIRECT_REQWEST_CLIENT, ProxyPolicy, authority_uses_http1_fallback,
     forget_effective_route_authority, is_allowed_download_redirect,
     is_h2_protocol_failure, is_official_modrinth_download_url,
@@ -35,8 +34,7 @@ pub(crate) async fn send_path_request_with_clients(
     download_meta: Option<&DownloadMeta>,
     range_start: Option<u64>,
     range_end: Option<u64>,
-    system_client: &reqwest::Client,
-    direct_client: &reqwest::Client,
+    clients: &DownloadClients,
     redirect_target: Option<&AsyncMutex<Option<Url>>>,
 ) -> crate::Result<(reqwest::Response, String)> {
     let original = Url::parse(&route.url)?;
@@ -57,12 +55,9 @@ pub(crate) async fn send_path_request_with_clients(
             &reqwest::Client,
             &reqwest::Client,
         ) = if fallback_to_http1 {
-            (
-                &HTTP1_NO_REDIRECT_REQWEST_CLIENT,
-                &HTTP1_DIRECT_REQWEST_CLIENT,
-            )
+            (&clients.http1_system, &clients.http1_direct)
         } else {
-            (system_client, direct_client)
+            (&clients.system, &clients.direct)
         };
         let client = if route.proxy == ProxyPolicy::Direct {
             direct_client_for_hop
@@ -199,6 +194,10 @@ pub(crate) async fn send_path_request(
     range_start: Option<u64>,
     range_end: Option<u64>,
 ) -> crate::Result<(reqwest::Response, String)> {
+    let clients = DownloadClients::for_request(
+        &NO_REDIRECT_REQWEST_CLIENT,
+        &DIRECT_REQWEST_CLIENT,
+    );
     send_path_request_with_clients(
         route,
         custom_header,
@@ -206,8 +205,7 @@ pub(crate) async fn send_path_request(
         download_meta,
         range_start,
         range_end,
-        &NO_REDIRECT_REQWEST_CLIENT,
-        &DIRECT_REQWEST_CLIENT,
+        &clients,
         None,
     )
     .await

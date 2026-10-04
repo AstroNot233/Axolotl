@@ -19,6 +19,8 @@ pub(crate) struct NativeH2Policy {
 pub(crate) enum NativeH2IneligibleReason {
     Http1Fallback,
     SystemProxy,
+    ConfiguredProxy,
+    CertificatePolicy,
 }
 
 impl NativeH2IneligibleReason {
@@ -26,6 +28,12 @@ impl NativeH2IneligibleReason {
         match self {
             Self::Http1Fallback => "authority is temporarily using HTTP/1.1",
             Self::SystemProxy => "system proxy requires the reqwest transport",
+            Self::ConfiguredProxy => {
+                "configured proxy requires the reqwest transport"
+            }
+            Self::CertificatePolicy => {
+                "certificate policy requires the reqwest transport"
+            }
         }
     }
 }
@@ -36,6 +44,21 @@ pub(crate) fn h2_ineligible_reason(
     let authority = crate::util::fetch::url_authority(&route.url)?;
     if crate::util::fetch::authority_uses_http1_fallback(&authority) {
         return Some(NativeH2IneligibleReason::Http1Fallback);
+    }
+    if let Some(state) = crate::State::get_if_initialized() {
+        let clients = state.download_clients();
+        if clients.ignore_ssl_errors {
+            return Some(NativeH2IneligibleReason::CertificatePolicy);
+        }
+        if route.proxy == ProxyPolicy::System {
+            match clients.proxy.mode {
+                crate::util::proxy::ProxyMode::None => return None,
+                crate::util::proxy::ProxyMode::Custom => {
+                    return Some(NativeH2IneligibleReason::ConfiguredProxy);
+                }
+                crate::util::proxy::ProxyMode::System => {}
+            }
+        }
     }
     if route.proxy == ProxyPolicy::System && system_proxy_configured() {
         return Some(NativeH2IneligibleReason::SystemProxy);

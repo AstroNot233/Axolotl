@@ -1089,6 +1089,71 @@ pub async fn configured_client() -> crate::Result<reqwest::Client> {
     Ok(crate::State::get().await?.configured_http_client())
 }
 
+#[derive(Clone)]
+pub(crate) struct DownloadClients {
+    pub(crate) metadata: reqwest::Client,
+    pub(crate) system: reqwest::Client,
+    pub(crate) direct: reqwest::Client,
+    pub(crate) http1_system: reqwest::Client,
+    pub(crate) http1_direct: reqwest::Client,
+    pub(crate) proxy: crate::util::proxy::ProxyConfig,
+    pub(crate) ignore_ssl_errors: bool,
+}
+
+impl DownloadClients {
+    pub(crate) fn build(
+        proxy: &crate::util::proxy::ProxyConfig,
+        ignore_ssl_errors: bool,
+    ) -> crate::Result<Self> {
+        let build = |direct: bool, http1: bool| {
+            let builder = file_reqwest_client_builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .danger_accept_invalid_certs(ignore_ssl_errors);
+            let builder = if http1 { builder.http1_only() } else { builder };
+            let builder = if direct {
+                builder.no_proxy()
+            } else {
+                proxy.apply(builder)?
+            };
+            #[cfg(not(test))]
+            let builder = builder.https_only(true);
+            builder.build().map_err(crate::Error::from)
+        };
+        Ok(Self {
+            metadata: build_configured_client(proxy, ignore_ssl_errors)?,
+            system: build(false, false)?,
+            direct: build(true, false)?,
+            http1_system: build(false, true)?,
+            http1_direct: build(true, true)?,
+            proxy: proxy.clone(),
+            ignore_ssl_errors,
+        })
+    }
+
+    pub(crate) fn for_request(
+        system: &reqwest::Client,
+        direct: &reqwest::Client,
+    ) -> Self {
+        if let Some(state) = crate::State::get_if_initialized() {
+            let mut clients = state.download_clients();
+            if std::ptr::eq(system, &*HTTP1_NO_REDIRECT_REQWEST_CLIENT) {
+                clients.system = clients.http1_system.clone();
+                clients.direct = clients.http1_direct.clone();
+            }
+            return clients;
+        }
+        Self {
+            metadata: system.clone(),
+            system: system.clone(),
+            direct: direct.clone(),
+            http1_system: HTTP1_NO_REDIRECT_REQWEST_CLIENT.clone(),
+            http1_direct: HTTP1_DIRECT_REQWEST_CLIENT.clone(),
+            proxy: Default::default(),
+            ignore_ssl_errors: false,
+        }
+    }
+}
+
 fn http1_file_reqwest_client_builder() -> reqwest::ClientBuilder {
     reqwest_client_builder().http1_only()
 }
@@ -3365,8 +3430,7 @@ async fn probe_route_throughput(
             download_meta,
             Some(0),
             Some(probe_end),
-            system_client,
-            direct_client,
+            &DownloadClients::for_request(system_client, direct_client),
             None,
         ),
     )
@@ -3852,8 +3916,7 @@ async fn download_tail_candidate(
             download_meta,
             Some(requested_start),
             Some(requested_end),
-            system_client,
-            direct_client,
+            &DownloadClients::for_request(system_client, direct_client),
             redirect_target,
         ),
     )
@@ -4050,8 +4113,7 @@ async fn download_segment(
                 download_meta,
                 Some(requested_start),
                 Some(requested_end),
-                system_client,
-                direct_client,
+                &DownloadClients::for_request(system_client, direct_client),
                 redirect_target,
             ),
         )

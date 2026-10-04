@@ -160,7 +160,7 @@ pub struct State {
     pub(crate) pool: SqlitePool,
 
     // Cloning reqwest::Client retains its underlying connection pool.
-    configured_http_client: RwLock<reqwest::Client>,
+    configured_http_client: RwLock<crate::util::fetch::DownloadClients>,
     configured_http_client_update: AsyncMutex<()>,
 
     pub(crate) file_watcher: FileWatcher,
@@ -653,7 +653,7 @@ impl State {
     ) -> crate::Result<()> {
         let _update = self.configured_http_client_update.lock().await;
         let settings = Settings::get(&self.pool).await?;
-        let client = crate::util::fetch::build_configured_client(
+        let client = crate::util::fetch::DownloadClients::build(
             config,
             settings.ignore_ssl_errors,
         )?;
@@ -668,7 +668,7 @@ impl State {
     ) -> crate::Result<()> {
         let _update = self.configured_http_client_update.lock().await;
         let proxy = crate::state::proxy_settings::get(&self.pool).await?;
-        let client = crate::util::fetch::build_configured_client(
+        let client = crate::util::fetch::DownloadClients::build(
             &proxy,
             settings.ignore_ssl_errors,
         )?;
@@ -677,6 +677,12 @@ impl State {
     }
 
     pub(crate) fn configured_http_client(&self) -> reqwest::Client {
+        self.configured_http_client.read().metadata.clone()
+    }
+
+    pub(crate) fn download_clients(
+        &self,
+    ) -> crate::util::fetch::DownloadClients {
         self.configured_http_client.read().clone()
     }
 
@@ -897,7 +903,7 @@ impl State {
         let auto_prefers_mirror = settings.auto_prefers_mirror();
         let proxy_config = proxy_settings::get(&pool).await?;
         let configured_http_client =
-            crate::util::fetch::build_configured_client(
+            crate::util::fetch::DownloadClients::build(
                 &proxy_config,
                 settings.ignore_ssl_errors,
             )?;
@@ -1049,7 +1055,7 @@ pub(crate) async fn test_state(
     let file_watcher = instances::watcher::init_watcher().await?;
     let proxy_config = proxy_settings::get(&pool).await?;
     let settings = Settings::get(&pool).await?;
-    let configured_http_client = crate::util::fetch::build_configured_client(
+    let configured_http_client = crate::util::fetch::DownloadClients::build(
         &proxy_config,
         settings.ignore_ssl_errors,
     )?;
