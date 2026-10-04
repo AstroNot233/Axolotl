@@ -133,6 +133,18 @@ export async function scanLauncherInstances(
 	]
 }
 
+export interface ResolvedGamedir {
+	path: string
+	dialect: string
+}
+
+export function resolveGamedirs(
+	launcherType: string,
+	basePath: string,
+): Promise<ResolvedGamedir[]> {
+	return invoke('plugin:drop|drop_resolve_gamedirs', { launcherType, basePath })
+}
+
 /**
  * Detect processes holding a file lock on the given path.
  *

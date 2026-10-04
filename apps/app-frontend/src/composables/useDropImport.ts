@@ -17,6 +17,7 @@ import { join } from '@tauri-apps/api/path'
 import { computed, type ComputedRef, nextTick, ref } from 'vue'
 import type { Router } from 'vue-router'
 
+import { syncConfiguredDirectLinks } from '@/helpers/direct-link-sync'
 import {
 	classifyDroppedItem,
 	classifyDroppedItemWithExtraction,
@@ -26,6 +27,7 @@ import {
 	lookupModHash,
 	type ModrinthLookupResult,
 	removeTempDir,
+	resolveGamedirs,
 	scanLauncherInstances,
 	type ScanResult,
 } from '@/helpers/drop'
@@ -699,6 +701,34 @@ export function useDropImport(options: DropImportOptions) {
 		await handleDropHelp()
 	}
 
+	async function routeToGamedirFlow(paths: string[]) {
+		const roots = paths
+			.filter((path) => path.trim())
+			.map((path) => ({ path: path.trim(), mode: 'isolated' as const }))
+		if (roots.length === 0) return false
+		try {
+			const raw = localStorage.getItem('axolotl-minecraft-directories')
+			const existing = raw ? JSON.parse(raw) : []
+			const merged = [...(Array.isArray(existing) ? existing : []), ...roots]
+			const unique = [...new Map(merged.map((root) => [root.path, root])).values()]
+			localStorage.setItem('axolotl-minecraft-directories', JSON.stringify(unique))
+			await syncConfiguredDirectLinks(unique)
+			addNotification({
+				title: formatMessage(messages.dropInstanceImportedTitle),
+				text: formatMessage(messages.dropInstanceImportedText, { name: paths.join(', ') }),
+				type: 'success',
+			})
+			return true
+		} catch (error) {
+			addNotification({
+				title: formatMessage(messages.dropScanFailed),
+				text: error instanceof Error ? error.message : String(error),
+				type: 'error',
+			})
+			return false
+		}
+	}
+
 	async function handleDropConfirm(type: string, innerBase?: string) {
 		const classification = dropClassification.value
 		dropClassification.value = null
@@ -730,75 +760,9 @@ export function useDropImport(options: DropImportOptions) {
 		})
 
 		if (type === 'dot_minecraft') {
-			dropDebug('handleDropConfirm:.minecraft folder branch', {
-				dropFilePath: dropFilePath.value,
-			})
-			if (!dropFilePath.value) {
-				dropDebug('handleDropConfirm: dot_minecraft — no dropFilePath, aborting')
-				return
-			}
-			currentImportContext.value = { launcherType: 'Generic', basePath: dropFilePath.value }
-			scanningInstances.value = true
-			let results: ScanResult[]
-			try {
-				results = await scanLauncherInstances('Generic', dropFilePath.value)
-			} catch (error) {
-				currentImportContext.value = null
-				dropDebug('handleDropConfirm:.minecraft scan failed', error)
-				addNotification({ title: formatMessage(messages.dropScanFailed), type: 'error' })
-				return
-			} finally {
-				scanningInstances.value = false
-			}
-			const totalInstances = results.reduce((s, r) => s + r.instances.length, 0)
-			dropDebug('handleDropConfirm:.minecraft scan result', { totalInstances, results })
-
-			if (totalInstances === 0) {
-				currentImportContext.value = null
-				dropDebug('handleDropConfirm: no instances found in.minecraft folder')
-				addNotification({ title: formatMessage(messages.dropNoInstances), type: 'warning' })
-				return
-			}
-
-			if (totalInstances === 1 && results[0]?.instances[0]) {
-				const single = results[0].instances[0]
-				dropDebug('handleDropConfirm: single instance from.minecraft, showing symlink modal', {
-					name: single.name,
-					path: single.path,
-				})
-				selectedInstances.value = [
-					{
-						launcherType: 'Generic',
-						basePath: single.compatibleMode ? single.path : dropFilePath.value,
-						name: single.name,
-						path: single.compatibleMode ? (single.versionPath ?? single.path) : single.path,
-						compatibleMode: single.compatibleMode,
-						versionPath: single.versionPath,
-					},
-				]
-				const cap = await check_symlink_capability()
-				symlinkCardsModal.value?.show({
-					instances: [
-						{
-							name: single.name,
-							path: single.compatibleMode ? (single.versionPath ?? single.path) : single.path,
-							launcherType: 'Generic',
-							basePath: single.compatibleMode ? single.path : dropFilePath.value,
-							compatibleMode: single.compatibleMode,
-							versionPath: single.versionPath,
-						},
-					],
-					symlinkCapable: cap,
-				})
-				return
-			}
-
-			dropDebug(
-				'handleDropConfirm: multiple instances from.minecraft, showing launcher import modal',
-			)
-			launcherImportModal.value?.show(results)
+			await routeToGamedirFlow([dropFilePath.value ?? ''])
 			return
-		}
+			}
 
 		if (isLauncherImport && type === 'instance') {
 			const launcherType =
@@ -808,6 +772,14 @@ export function useDropImport(options: DropImportOptions) {
 					? classification!.launcher_dir!
 					: classification!.base_path!
 			dropDebug('handleDropConfirm: launcher import branch', { launcherType, basePath })
+			if (['Generic', 'PCL2', 'PCL2CE', 'HMCL'].includes(launcherType)) {
+				const resolved = await resolveGamedirs(
+					launcherType,
+					classification!.base_path ?? classification!.launcher_dir ?? filePath!,
+				)
+				await routeToGamedirFlow(resolved.map((entry) => entry.path))
+				return
+			}
 
 			let scanBasePath = basePath
 			if (isZipPath(basePath)) {
@@ -2587,3 +2559,5 @@ function defineMessages<T extends Record<string, { id: string; defaultMessage: s
 ): T {
 	return messages
 }
+
+

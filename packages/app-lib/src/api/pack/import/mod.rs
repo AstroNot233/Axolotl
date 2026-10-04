@@ -32,6 +32,7 @@ mod axolotl;
 pub mod curseforge;
 pub(crate) mod direct_link;
 pub mod gdlauncher;
+pub mod gamedir_resolve;
 pub(crate) mod generic;
 pub mod hmcl;
 pub mod hmcl_config;
@@ -1854,3 +1855,4 @@ mod generic_instance_scan_tests {
         assert_eq!(instances[0].path, version_dir.to_string_lossy());
     }
 }
+
