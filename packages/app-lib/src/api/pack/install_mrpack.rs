@@ -63,7 +63,6 @@ const ITEM_FAILURE_REASON_CHAR_LIMIT: usize = 1_024;
 /// over a single connection (no range segmentation) and only after every pass
 /// is exhausted does the install ask the user about missing content.
 const AUTO_RETRY_PASSES: usize = 2;
-const NATIVE_CONTENT_TASK_CONCURRENCY: usize = 32;
 const NATIVE_CONTENT_FINALIZE_CONCURRENCY: usize = 4;
 const CONTENT_DATABASE_BATCH_SIZE: usize = 25;
 const CONTENT_DATABASE_FLUSH_INTERVAL: Duration = Duration::from_millis(500);
@@ -1247,14 +1246,8 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
             .iter()
             .map(|&index| (index, pack_files[index].clone()))
             .collect::<Vec<_>>();
-        let native_pipeline = Some((
-            Arc::new(Semaphore::new(
-                state
-                    .download_concurrency()
-                    .min(NATIVE_CONTENT_TASK_CONCURRENCY),
-            )),
-            Arc::new(Semaphore::new(NATIVE_CONTENT_FINALIZE_CONCURRENCY)),
-        ));
+        let finalize_semaphore =
+            Arc::new(Semaphore::new(NATIVE_CONTENT_FINALIZE_CONCURRENCY));
         let (completion_tx, mut completion_rx) =
             mpsc::channel::<MrpackDatabaseTask>(128);
         let completion_instance_id = content_context.instance_id.clone();
@@ -1522,17 +1515,12 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
         let pass_failures =
             collect_required_file_failures_concurrently(
         tasks,
-        Some(match &native_pipeline {
-            Some((download, _)) => {
-                download.available_permits() + NATIVE_CONTENT_FINALIZE_CONCURRENCY
-            }
-            None => state.download_concurrency(),
-        }),
+        Some(state.download_concurrency()),
         |(manifest_index, project)| {
             let content_context = content_context.clone();
             let skipped_missing_content_paths =
                 skipped_missing_content_paths.clone();
-            let native_pipeline = native_pipeline.clone();
+            let finalize_semaphore = finalize_semaphore.clone();
             let verification_tx = verification_tx.clone();
              async move {
                 let project_size = project.file_size as u64;
@@ -1657,10 +1645,6 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                 // Only the transfer owns a network worker. Metadata and DB
                 // finalization run in a separate bounded stage so a slow
                 // SQLite write cannot stop subsequent file transfers.
-                let download_permit = match native_pipeline.as_ref() {
-                    Some((download, _)) => Some(download.acquire().await?),
-                    None => None,
-                };
                 content_context
                     .reporter
                     .record_download_stage(
@@ -1698,7 +1682,6 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                     Ok(download) => download,
                     Err(error) => return Err(error),
                 };
-                drop(download_permit);
                 let downloaded_bytes = download.size;
                 content_context.record_download_result(&download).await;
                 let verification_task = MrpackVerificationTask {
@@ -1708,9 +1691,7 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                     target_path,
                     downloaded_bytes,
                     attempts: download.attempts as u32,
-                    finalize_semaphore: native_pipeline
-                        .as_ref()
-                        .map(|(_, finalize)| Arc::clone(finalize)),
+                    finalize_semaphore: Some(Arc::clone(&finalize_semaphore)),
                 };
                 let enqueue_cancellation =
                     content_context.reporter.cancellation_token();

@@ -51,7 +51,8 @@ impl RangeOutput {
                     .write(true)
                     .open(path)
                     .await?;
-                file.set_len(size).await?;
+                super::local_resources::write(path, 0, file.set_len(size))
+                    .await?;
                 Ok(())
             },
         )
@@ -175,10 +176,13 @@ impl RangeWriter {
             tokio::time::sleep(probe.delay).await;
         }
 
-        let result =
-            self.file.write_all(bytes).await.map_err(|error| {
-                io::io_error_with_lock_info(error, &self.path)
-            });
+        let result = super::local_resources::write(
+            &self.path,
+            bytes.len() as u64,
+            self.file.write_all(bytes),
+        )
+        .await
+        .map_err(|error| io::io_error_with_lock_info(error, &self.path));
         #[cfg(test)]
         if let Some(probe) = probe {
             probe
@@ -191,8 +195,7 @@ impl RangeWriter {
     }
 
     pub(crate) async fn flush(&mut self) -> Result<(), IOError> {
-        self.file
-            .flush()
+        super::local_resources::write(&self.path, 0, self.file.flush())
             .await
             .map_err(|error| io::io_error_with_lock_info(error, &self.path))
     }

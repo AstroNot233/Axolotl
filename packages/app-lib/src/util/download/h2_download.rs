@@ -279,6 +279,7 @@ pub(crate) async fn try_download_via_h2(
         &integrity,
         total_size,
         policy,
+        _stream_permit,
     )
     .await;
     match result {
@@ -467,6 +468,7 @@ async fn single_stream(
     integrity: &Integrity,
     total_size: u64,
     policy: super::native::NativeH2Policy,
+    permit: super::h2_stream_budget::H2DownloadPermit<'_>,
 ) -> crate::Result<DownloadResult> {
     let mut headers = request_headers(request, route);
     headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
@@ -511,7 +513,12 @@ async fn single_stream(
         let Some(chunk) = chunk else {
             break;
         };
-        file.write_all(&chunk).await?;
+        super::local_resources::write(
+            part_path,
+            chunk.len() as u64,
+            file.write_all(&chunk),
+        )
+        .await?;
         hashers.update(&chunk);
         downloaded += chunk.len() as u64;
         activity.record_bytes(chunk.len());
@@ -535,8 +542,9 @@ async fn single_stream(
             .into());
         }
     }
-    file.flush().await?;
+    super::local_resources::write(part_path, 0, file.flush()).await?;
     drop(file);
+    drop(permit);
     let computed = hashers.finish(downloaded);
     record_install_stage(
         request,
@@ -1198,7 +1206,13 @@ async fn download_asset_item(
             let Some(chunk) = chunk else {
                 break;
             };
-            if let Err(error) = file.write_all(&chunk).await {
+            if let Err(error) = super::local_resources::write(
+                &part_path,
+                chunk.len() as u64,
+                file.write_all(&chunk),
+            )
+            .await
+            {
                 return Ok(AssetBatchItemOutcome::LocalObjectFailed {
                     error: error.into(),
                 });
@@ -1208,12 +1222,15 @@ async fn download_asset_item(
             activity.record_bytes(chunk.len());
             super::h2_receive::release_capacity(&mut stream, chunk.len())?;
         }
-        if let Err(error) = file.flush().await {
+        if let Err(error) =
+            super::local_resources::write(&part_path, 0, file.flush()).await
+        {
             return Ok(AssetBatchItemOutcome::LocalObjectFailed {
                 error: error.into(),
             });
         }
         drop(file);
+        drop(_stream_permit);
         if downloaded == 0 {
             return Err(crate::ErrorKind::OtherError(
                 "downloaded asset is empty".to_string(),

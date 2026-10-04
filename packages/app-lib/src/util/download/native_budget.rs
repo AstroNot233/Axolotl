@@ -1,13 +1,11 @@
-//! Per-authority connection budget for the native download engine.
+//! Per-authority physical connection admission; transfer weights use the shared download semaphore.
 
 use crate::util::fetch::{DownloadRoute, ProxyPolicy};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError};
-use tokio::time::{Duration, sleep};
 
-const MAX_NATIVE_CONNECTIONS: usize = 32;
 const MAX_CONNECTIONS_PER_AUTHORITY: usize = 8;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -19,11 +17,8 @@ struct AuthorityKey {
 static AUTHORITY_BUDGETS: LazyLock<
     Mutex<HashMap<AuthorityKey, Arc<Semaphore>>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
-static GLOBAL_BUDGET: LazyLock<Arc<Semaphore>> =
-    LazyLock::new(|| Arc::new(Semaphore::new(MAX_NATIVE_CONNECTIONS)));
 
 pub(crate) struct NativeBudgetPermit {
-    _global: OwnedSemaphorePermit,
     _authority: Option<OwnedSemaphorePermit>,
 }
 
@@ -50,91 +45,48 @@ fn budget(route: &DownloadRoute) -> Option<Arc<Semaphore>> {
 pub(crate) async fn acquire(
     route: &DownloadRoute,
 ) -> Result<NativeBudgetPermit, tokio::sync::AcquireError> {
-    let authority_budget = budget(route);
-    loop {
-        let global = Arc::clone(&GLOBAL_BUDGET).acquire_owned().await?;
-        let authority = match authority_budget.as_ref() {
-            Some(budget) => match Arc::clone(budget).try_acquire_owned() {
-                Ok(permit) => Some(permit),
-                Err(TryAcquireError::NoPermits) => {
-                    drop(global);
-                    sleep(Duration::from_millis(5)).await;
-                    continue;
-                }
-                Err(TryAcquireError::Closed) => {
-                    unreachable!("native authority budgets are never closed")
-                }
-            },
-            None => None,
-        };
-        return Ok(NativeBudgetPermit {
-            _global: global,
-            _authority: authority,
-        });
-    }
+    let authority = match budget(route) {
+        Some(budget) => Some(budget.acquire_owned().await?),
+        None => None,
+    };
+    Ok(NativeBudgetPermit {
+        _authority: authority,
+    })
 }
 
 pub(crate) async fn acquire_many(
     route: &DownloadRoute,
     count: usize,
 ) -> Result<Vec<NativeBudgetPermit>, tokio::sync::AcquireError> {
-    let authority_budget = budget(route);
-    let (global, authority) = loop {
-        let global = Arc::clone(&GLOBAL_BUDGET)
-            .acquire_many_owned(count as u32)
-            .await?;
-        let authority = match authority_budget.as_ref() {
-            Some(budget) => {
-                match Arc::clone(budget).try_acquire_many_owned(count as u32) {
-                    Ok(permit) => Some(permit),
-                    Err(TryAcquireError::NoPermits) => {
-                        drop(global);
-                        sleep(Duration::from_millis(5)).await;
-                        continue;
-                    }
-                    Err(TryAcquireError::Closed) => unreachable!(
-                        "native authority budgets are never closed"
-                    ),
-                }
-            }
-            None => None,
-        };
-        break (global, authority);
+    let mut authority = match budget(route) {
+        Some(budget) => Some(
+            budget
+                .acquire_many_owned(
+                    count.min(MAX_CONNECTIONS_PER_AUTHORITY) as u32
+                )
+                .await?,
+        ),
+        None => None,
     };
-    let mut global = global;
-    let mut authority = authority;
-    let mut permits = Vec::with_capacity(count);
-    for _ in 0..count {
-        let global = global
-            .split(1)
-            .expect("native global permit batch has enough permits");
-        let authority = authority.as_mut().map(|authority| {
-            authority
-                .split(1)
-                .expect("native authority permit batch has enough permits")
-        });
-        permits.push(NativeBudgetPermit {
-            _global: global,
-            _authority: authority,
-        });
-    }
-    Ok(permits)
+    Ok((0..count.min(MAX_CONNECTIONS_PER_AUTHORITY))
+        .map(|_| NativeBudgetPermit {
+            _authority: authority.as_mut().map(|permit| {
+                permit
+                    .split(1)
+                    .expect("authority batch contains enough permits")
+            }),
+        })
+        .collect())
 }
 
 pub(crate) fn try_acquire(
     route: &DownloadRoute,
 ) -> Result<NativeBudgetPermit, TryAcquireError> {
-    let global = Arc::clone(&GLOBAL_BUDGET).try_acquire_owned()?;
-    let authority = match budget(route) {
-        Some(budget) => match budget.try_acquire_owned() {
-            Ok(permit) => Some(permit),
-            Err(error) => return Err(error),
-        },
-        None => None,
-    };
     Ok(NativeBudgetPermit {
-        _global: global,
-        _authority: authority,
+        _authority: match budget(route) {
+            Some(budget) => Some(budget.try_acquire_owned()?),
+            None => None,
+        },
     })
 }
 

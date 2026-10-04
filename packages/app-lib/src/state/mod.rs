@@ -768,6 +768,7 @@ impl State {
         let mut controller = AutoConcurrencyController::default();
         loop {
             interval.tick().await;
+            crate::util::download::local_resources::sample_cpu().await;
             if !self.auto_concurrent_downloads.load(Ordering::Acquire) {
                 controller = AutoConcurrencyController::default();
                 self.download_sample_bytes.swap(0, Ordering::AcqRel);

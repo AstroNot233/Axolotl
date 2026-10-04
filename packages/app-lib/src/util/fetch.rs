@@ -59,8 +59,8 @@ const METADATA_HEDGE_DELAY: time::Duration = time::Duration::from_secs(2);
 #[cfg(test)]
 const METADATA_HEDGE_DELAY: time::Duration = time::Duration::from_millis(100);
 const SEGMENTED_DOWNLOAD_THRESHOLD: u64 = 4 * 1024 * 1024;
-const INITIAL_SEGMENT_CONCURRENCY: usize = 4;
-const MAX_SEGMENT_CONCURRENCY: usize = 4;
+const INITIAL_SEGMENT_CONCURRENCY: usize = 2;
+const MAX_SEGMENT_CONCURRENCY: usize = 8;
 const MIN_SEGMENT_SIZE: u64 = 256 * 1024;
 const ROUTE_PROBE_BYTES: u64 = 256 * 1024;
 const ROUTE_PROBE_MIN_IMPROVEMENT_PERCENT: u64 = 25;
@@ -3295,10 +3295,9 @@ fn route_segmented_concurrency_cap(
     route: &DownloadRoute,
     available_permits: usize,
 ) -> usize {
-    let fair_share = (available_permits / 2).max(2);
+    let fair_share = (available_permits / 2).max(1);
     let cap = segmented_concurrency_cap(available_permits)
         .min(fair_share)
-        .min(8)
         .min(crate::util::download::native_budget::available(route));
     if route.source == DownloadRouteSource::Bmclapi
         || route.source == DownloadRouteSource::Tianpao
@@ -3399,6 +3398,23 @@ fn initial_segment_count(size: u64, available_permits: usize) -> usize {
     INITIAL_SEGMENT_CONCURRENCY
         .min(segmented_concurrency_cap(available_permits))
         .min(size_limit)
+}
+
+fn adaptive_range_cap(
+    size: u64,
+    route_cap: usize,
+    disk_cap: usize,
+    consecutive_failures: u32,
+) -> usize {
+    let size_cap = (size / (4 * 1024 * 1024))
+        .max(1)
+        .min(MAX_SEGMENT_CONCURRENCY as u64) as usize;
+    let failure_cap = match consecutive_failures {
+        0..=1 => MAX_SEGMENT_CONCURRENCY,
+        2..=3 => 2,
+        _ => 1,
+    };
+    route_cap.min(size_cap).min(disk_cap).min(failure_cap)
 }
 
 fn create_initial_ranges(size: u64, count: usize) -> Vec<DownloadRange> {
@@ -4060,7 +4076,13 @@ async fn download_tail_candidate(
         let accepted = usize::try_from(expected.saturating_sub(received))
             .unwrap_or(usize::MAX)
             .min(chunk.len());
-        file.write_all(&chunk[..accepted]).await.map_err(|error| {
+        super::download::local_resources::write(
+            &path,
+            accepted as u64,
+            file.write_all(&chunk[..accepted]),
+        )
+        .await
+        .map_err(|error| {
             SegmentDownloadError::Fatal(IOError::with_path(error, &path).into())
         })?;
         received += accepted as u64;
@@ -4074,9 +4096,11 @@ async fn download_tail_candidate(
     if received != expected {
         return Err(SegmentDownloadError::Transport);
     }
-    file.flush().await.map_err(|error| {
-        SegmentDownloadError::Fatal(IOError::with_path(error, &path).into())
-    })?;
+    super::download::local_resources::write(&path, 0, file.flush())
+        .await
+        .map_err(|error| {
+            SegmentDownloadError::Fatal(IOError::with_path(error, &path).into())
+        })?;
     drop(file);
     cleanup.disarm();
     Ok(TailCandidateCompletion {
@@ -4643,8 +4667,23 @@ async fn try_segmented_download(
         allow_low_throughput_abort,
     } = context;
     let configured_limit = configured_semaphore_limit(semaphore);
-    let concurrency_cap =
-        route_segmented_concurrency_cap(route, configured_limit);
+    let route_cap = route_segmented_concurrency_cap(route, configured_limit);
+    let health =
+        route_health_key(route, request.resource)
+            .map(|key| {
+                ROUTE_HEALTH.lock().get(&key).cloned().unwrap_or_else(|| {
+                    persisted_route_health(&key, route.proxy)
+                })
+            })
+            .unwrap_or_default();
+    let disk_cap =
+        super::download::local_resources::range_limit(part_path).await;
+    let concurrency_cap = adaptive_range_cap(
+        size,
+        route_cap,
+        disk_cap,
+        health.consecutive_failures,
+    );
     let requested_initial_count = initial_segment_count(size, concurrency_cap);
     if requested_initial_count < 2 {
         tracing::debug!(
@@ -4845,6 +4884,11 @@ async fn try_segmented_download(
                     slow_policy.commit();
                 }
                 if hedge_active.load(Ordering::Acquire) {
+                    continue;
+                }
+                let pressure = super::download::local_resources::pressure(part_path);
+                if pressure.blocks_expansion() {
+                    tracing::debug!(cpu_percent = pressure.cpu_percent, write_latency_ms = pressure.write_latency_ms, "Pausing range expansion under local resource pressure");
                     continue;
                 }
                 let snapshot = speed.speed_snapshot();
@@ -7308,7 +7352,7 @@ mod tests {
     #[test]
     fn large_files_start_parallel_ranges_without_consulting_speed_floor() {
         let size = 16 * 1024 * 1024;
-        assert_eq!(initial_segment_count(size, 64), 4);
+        assert_eq!(initial_segment_count(size, 64), 2);
         let ranges = create_initial_ranges(size, 4);
         assert_eq!(ranges.len(), 4);
         assert_eq!(ranges.first().unwrap().start, 0);
@@ -7321,10 +7365,10 @@ mod tests {
     #[test]
     fn segmented_concurrency_respects_effective_and_global_limits() {
         assert_eq!(segmented_concurrency_cap(64), MAX_SEGMENT_CONCURRENCY);
-        assert_eq!(segmented_concurrency_cap(8), 4);
+        assert_eq!(segmented_concurrency_cap(8), 8);
         assert_eq!(segmented_concurrency_cap(4), 4);
         assert_eq!(segmented_concurrency_cap(1), 1);
-        assert_eq!(initial_segment_count(16 * 1024 * 1024, 3), 3);
+        assert_eq!(initial_segment_count(16 * 1024 * 1024, 3), 2);
     }
 
     #[tokio::test]
@@ -7364,7 +7408,27 @@ mod tests {
         );
 
         assert_eq!(route_segmented_concurrency_cap(&bmclapi, 64), 4);
-        assert_eq!(route_segmented_concurrency_cap(&official, 64), 4);
+        assert_eq!(route_segmented_concurrency_cap(&official, 64), 8);
+    }
+
+    #[test]
+    fn adaptive_ranges_can_expand_and_reserve_capacity_for_small_files() {
+        let size = 128 * 1024 * 1024;
+        let max = adaptive_range_cap(size, 8, 8, 0);
+        assert_eq!(max, 8);
+        assert!(initial_segment_count(size, max) < max);
+        assert_eq!(adaptive_range_cap(8 * 1024 * 1024, 8, 8, 0), 2);
+        assert_eq!(adaptive_range_cap(size, 8, 1, 0), 1);
+        assert_eq!(adaptive_range_cap(size, 8, 8, 2), 2);
+        assert_eq!(adaptive_range_cap(size, 8, 8, 4), 1);
+        let official = route(
+            "https://range-fairness.invalid/file".into(),
+            DownloadRouteSource::Official,
+            false,
+            true,
+        );
+        assert_eq!(route_segmented_concurrency_cap(&official, 4), 2);
+        assert_eq!(route_segmented_concurrency_cap(&official, 1), 1);
     }
 
     #[test]
@@ -9015,7 +9079,7 @@ async fn run_native_route_attempts(
                             break;
                         }
                     };
-                    file.write_all(&chunk).await.map_err(|error| {
+                    super::download::local_resources::write(&part_path, chunk.len() as u64, file.write_all(&chunk)).await.map_err(|error| {
                         IOError::with_path(error, &part_path)
                     })?;
                     hashers.update(&chunk);
@@ -9129,7 +9193,7 @@ async fn run_native_route_attempts(
         drop(alternate_probe);
         record_install_download_progress(&request, downloaded, total_size)
             .await;
-        file.flush()
+        super::download::local_resources::write(&part_path, 0, file.flush())
             .await
             .map_err(|error| IOError::with_path(error, &part_path))?;
         if transfer_error.is_some() {

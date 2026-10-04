@@ -1936,7 +1936,7 @@ pub async fn download_assets(
                 batch_items,
                 ASSET_BATCH_CONCURRENCY.min(st.download_concurrency()),
                 apply_native_policy,
-                apply_native_policy.then_some(&st.fetch_semaphore),
+                apply_native_policy.then_some(&st.download_semaphore),
                 callback,
             )
             .await?;
@@ -2173,7 +2173,7 @@ pub async fn download_libraries(
     let num_files = tasks.len();
     loading_try_for_each_concurrent(
 		stream::iter(tasks).map(Ok::<LibraryDownloadTask<'_>, crate::Error>),
-		crate::util::download::task_concurrency_limit(&st).map(|limit| limit.saturating_mul(2)),
+		crate::util::download::task_concurrency_limit(&st),
         loading_bar,
         loading_amount,
         num_files,
