@@ -367,6 +367,19 @@ pub struct DownloadResult {
     pub size: u64,
     pub attempts: usize,
     pub fallback_count: usize,
+    #[serde(default)]
+    pub verified_sha1: Option<String>,
+    #[serde(default)]
+    pub verified_sha512: Option<String>,
+}
+
+fn attach_verified_integrity(
+    mut result: DownloadResult,
+    integrity: &Integrity,
+) -> DownloadResult {
+    result.verified_sha1 = integrity.sha1.clone();
+    result.verified_sha512 = integrity.sha512.clone();
+    result
 }
 
 static IN_FLIGHT_DOWNLOADS: LazyLock<
@@ -5141,6 +5154,8 @@ async fn reuse_existing_download(
         size,
         attempts: 0,
         fallback_count: 0,
+        verified_sha1: request.integrity.sha1.clone(),
+        verified_sha512: request.integrity.sha512.clone(),
     }))
 }
 
@@ -5287,7 +5302,7 @@ async fn download_to_path_inner(
         reuse_existing_download(&request, &routes, destination, &part_path)
             .await?
     {
-        return Ok(result);
+        return Ok(attach_verified_integrity(result, &request.integrity));
     }
     prepare_partial_download(&routes, &part_path, &request.integrity).await?;
     prepare_native_download_routes(&request, &mut routes, semaphore).await;
@@ -5308,7 +5323,12 @@ async fn download_to_path_inner(
         )
         .await?
         {
-            H2AttemptResult::Completed(result) => return Ok(result),
+            H2AttemptResult::Completed(result) => {
+                return Ok(attach_verified_integrity(
+                    result,
+                    &request.integrity,
+                ));
+            }
             H2AttemptResult::Fallback { failed_nonofficial } => {
                 failed_nonofficial
             }
@@ -5317,7 +5337,8 @@ async fn download_to_path_inner(
         None
     };
 
-    run_native_download_attempts(
+    let request_integrity = request.integrity.clone();
+    let result = run_native_download_attempts(
         request,
         destination,
         semaphore,
@@ -5326,7 +5347,8 @@ async fn download_to_path_inner(
         part_path,
         h2_failed_nonofficial,
     )
-    .await
+    .await?;
+    Ok(attach_verified_integrity(result, &request_integrity))
 }
 
 enum NativeSegmentedAttempt {
@@ -5449,6 +5471,8 @@ async fn try_segmented_native_attempt(
                         size: result.size,
                         attempts: session.attempts,
                         fallback_count: session.fallback_count,
+                        verified_sha1: request.integrity.sha1.clone(),
+                        verified_sha512: request.integrity.sha512.clone(),
                     },
                 )));
             }
@@ -9280,6 +9304,8 @@ async fn run_native_route_attempts(
             size: downloaded,
             attempts: session.attempts,
             fallback_count: session.fallback_count,
+            verified_sha1: request.integrity.sha1.clone(),
+            verified_sha512: request.integrity.sha512.clone(),
         }));
     }
 

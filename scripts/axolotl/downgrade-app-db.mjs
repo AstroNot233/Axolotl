@@ -52,6 +52,9 @@ const CHANNELS = ['release', 'beta']
 // Only recent migrations are listed. Dropping to a threshold before them is
 // refused rather than guessed at; --allow-unmapped accepts the risk explicitly.
 const REVERTIBLE_SCHEMA = {
+	20261004120000: {
+		tables: ['store_operations', 'store_retained_refs', 'store_instance_files', 'store_blobs'],
+	},
 	// XMCL removal only normalizes data; keep the legacy column as a rollback tombstone.
 	20261004130000: {},
 	20261002120000: { tables: ['official_login_proof'] },

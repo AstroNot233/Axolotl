@@ -561,6 +561,8 @@ async fn single_stream(
         size: downloaded,
         attempts: 1,
         fallback_count: 0,
+        verified_sha1: request.integrity.sha1.clone(),
+        verified_sha512: request.integrity.sha512.clone(),
     })
 }
 

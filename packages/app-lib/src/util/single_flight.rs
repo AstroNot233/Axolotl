@@ -177,6 +177,8 @@ mod tests {
                 size: 7,
                 attempts: 1,
                 fallback_count: 0,
+                verified_sha1: None,
+                verified_sha512: None,
             })
         });
         let second_path = dir.path().join("artifact.jar");
@@ -265,6 +267,8 @@ mod tests {
                     size: 7,
                     attempts: 1,
                     fallback_count: 0,
+                    verified_sha1: None,
+                    verified_sha512: None,
                 })
             })
             .await
