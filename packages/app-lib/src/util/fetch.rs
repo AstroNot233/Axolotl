@@ -3,7 +3,7 @@ use super::download::modrinth_redirect::is_official_redirect as is_official_modr
 #[cfg(test)]
 use super::download::modrinth_redirect::repair_official_redirect as repair_official_cdn_redirect;
 use super::download::route_policy;
-use super::download_dns::DownloadDnsResolver;
+use super::download_dns::{DEFAULT_DOH_SERVER, DownloadDnsResolver};
 use super::download_manager::{DownloadSpeedTracker, SpeedSnapshot};
 use super::io::{self, IOError};
 use crate::event::LoadingBarId;
@@ -49,8 +49,6 @@ const BMCLAPI_BASE_URL: &str = "https://bmclapi2.bangbang93.com";
 const MCIM_BASE_URL: &str = "https://mod.mcimirror.top";
 const ALIYUN_MAVEN_BASE_URL: &str =
     "https://maven.aliyun.com/repository/public";
-pub(crate) const TIANPAO_HOST: &str = "mod.tianpao.top";
-const TIANPAO_BASE_URL: &str = "https://mod.tianpao.top";
 pub(crate) const MODRINTH_CDN_OFFICIAL_HOST: &str = "cdn-alt.modrinth.com";
 pub(crate) const MODRINTH_CDN_LEGACY_HOST: &str = "cdn.modrinth.com";
 const METADATA_ATTEMPT_BUDGET: usize = 4;
@@ -576,7 +574,6 @@ fn official_route(url: &str, resource: ResourceClass) -> DownloadRoute {
         .map_or(DownloadRouteSource::Official, |host| match host.as_str() {
             "bmclapi2.bangbang93.com" => DownloadRouteSource::Bmclapi,
             "mod.mcimirror.top" => DownloadRouteSource::Mcim,
-            "mod.tianpao.top" => DownloadRouteSource::Tianpao,
             "maven.aliyun.com" => DownloadRouteSource::Aliyun,
             _ => DownloadRouteSource::Official,
         });
@@ -736,33 +733,11 @@ fn explicit_mirror_routes(
             path.to_string(),
             DownloadRouteSource::Bmclapi,
         ),
-        "cdn.modrinth.com" | "cdn-alt.modrinth.com"
-            if path.starts_with("/data/") =>
-        {
-            push_mirror(
-                &mut routes,
-                TIANPAO_BASE_URL,
-                path.to_string(),
-                DownloadRouteSource::Tianpao,
-            );
-        }
         "api.curseforge.com" => push_mirror(
             &mut routes,
             MCIM_BASE_URL,
             format!("/curseforge{path}"),
             DownloadRouteSource::Mcim,
-        ),
-        "edge.forgecdn.net" if path.starts_with("/files/") => push_mirror(
-            &mut routes,
-            TIANPAO_BASE_URL,
-            path.to_string(),
-            DownloadRouteSource::Tianpao,
-        ),
-        "media.forgecdn.net" => push_mirror(
-            &mut routes,
-            TIANPAO_BASE_URL,
-            format!("/media{path}"),
-            DownloadRouteSource::Tianpao,
         ),
         _ => {}
     }
@@ -1131,15 +1106,27 @@ pub(crate) struct DownloadClients {
     pub(crate) scope: String,
     pub(crate) system_dns: Arc<DownloadDnsResolver>,
     pub(crate) direct_dns: Arc<DownloadDnsResolver>,
+    pub(crate) doh_enabled: bool,
+    pub(crate) doh_server: String,
 }
 
 impl DownloadClients {
     pub(crate) fn build(
         proxy: &crate::util::proxy::ProxyConfig,
         ignore_ssl_errors: bool,
+        doh_enabled: bool,
+        doh_server: &str,
     ) -> crate::Result<Self> {
-        let system_dns = Arc::new(DownloadDnsResolver::default());
-        let direct_dns = Arc::new(DownloadDnsResolver::default());
+        let system_dns = Arc::new(DownloadDnsResolver::with_doh_and_proxy(
+            doh_enabled,
+            doh_server,
+            Some(proxy),
+        )?);
+        let direct_dns = Arc::new(DownloadDnsResolver::with_doh_and_proxy(
+            doh_enabled,
+            doh_server,
+            None,
+        )?);
         let build = |direct: bool, http1: bool| {
             let builder = file_reqwest_client_builder()
                 .redirect(reqwest::redirect::Policy::none())
@@ -1180,12 +1167,16 @@ impl DownloadClients {
             http1_direct: build(true, true)?,
             proxy: proxy.clone(),
             ignore_ssl_errors,
-            scope: super::download::proxy_context::fingerprint(
+            scope: super::download::proxy_context::fingerprint_with_doh(
                 proxy,
                 ignore_ssl_errors,
+                doh_enabled,
+                doh_server,
             ),
             system_dns,
             direct_dns,
+            doh_enabled,
+            doh_server: doh_server.to_string(),
         })
     }
 
@@ -1211,6 +1202,8 @@ impl DownloadClients {
             scope: "unconfigured".into(),
             system_dns: Arc::clone(&DOWNLOAD_DNS_RESOLVER),
             direct_dns: Arc::clone(&DOWNLOAD_DNS_RESOLVER),
+            doh_enabled: false,
+            doh_server: DEFAULT_DOH_SERVER.to_string(),
         }
     }
 }
@@ -3312,7 +3305,6 @@ fn route_segmented_concurrency_cap(
         .min(fair_share)
         .min(crate::util::download::native_budget::available(route));
     if route.source == DownloadRouteSource::Bmclapi
-        || route.source == DownloadRouteSource::Tianpao
         || matches!(route.source, DownloadRouteSource::Official)
             && Url::parse(&route.url).ok().is_some_and(|url| {
                 matches!(
