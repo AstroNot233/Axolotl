@@ -1036,9 +1036,6 @@ function validateMinecraftDirectory(value) {
 			:title="formatMessage(messages.dohSettings)"
 		>
 			<template #header>
-				<h2 class="m-0 text-lg font-semibold text-[var(--color-text-primary)]">
-					{{ formatMessage(messages.dohSettings) }}
-				</h2>
 				<p class="m-0 mt-1 text-sm leading-relaxed text-[var(--color-text-tertiary)]">
 					{{ formatMessage(messages.dohSettingsDescription) }}
 				</p>
