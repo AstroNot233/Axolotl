@@ -603,14 +603,17 @@ const dohServerOptions = computed(() => [
 	{ value: 'https://dns.google/dns-query', label: 'Google DNS' },
 	{ value: 'custom', label: 'Custom' },
 ])
-const dohServerSelection = computed({
-	get: () =>
-		dohServerOptions.value.some((option) => option.value === settings.value.doh_server)
-			? settings.value.doh_server
-			: 'custom',
-	set: (value) => {
-		if (value !== 'custom') settings.value.doh_server = value
-	},
+const dohPresetUrls = new Set([
+	'https://doh.pub/dns-query',
+	'https://dns.alidns.com/dns-query',
+	'https://dns.google/dns-query',
+])
+const dohServerSelection = ref(
+	dohPresetUrls.has(settings.value.doh_server) ? settings.value.doh_server : 'custom',
+)
+
+watch(dohServerSelection, (value) => {
+	if (value !== 'custom') settings.value.doh_server = value
 })
 
 const appDirectoryDescriptionText = computed(() =>
