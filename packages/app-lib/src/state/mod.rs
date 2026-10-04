@@ -657,6 +657,8 @@ impl State {
         let client = crate::util::fetch::DownloadClients::build(
             config,
             settings.ignore_ssl_errors,
+            settings.doh_enabled,
+            &settings.doh_server,
         )?;
         crate::state::proxy_settings::set(&self.pool, config).await?;
         *self.configured_http_client.write() = client;
@@ -673,12 +675,16 @@ impl State {
             let current = self.configured_http_client.read();
             current.proxy == proxy
                 && current.ignore_ssl_errors == settings.ignore_ssl_errors
+                && current.doh_enabled == settings.doh_enabled
+                && current.doh_server == settings.doh_server.trim()
         } {
             return Ok(());
         }
         let client = crate::util::fetch::DownloadClients::build(
             &proxy,
             settings.ignore_ssl_errors,
+            settings.doh_enabled,
+            &settings.doh_server,
         )?;
         *self.configured_http_client.write() = client;
         Ok(())
@@ -920,6 +926,8 @@ impl State {
             crate::util::fetch::DownloadClients::build(
                 &proxy_config,
                 settings.ignore_ssl_errors,
+                settings.doh_enabled,
+                &settings.doh_server,
             )?;
 
         tracing::info!("Initializing directories");
@@ -1072,6 +1080,8 @@ pub(crate) async fn test_state(
     let configured_http_client = crate::util::fetch::DownloadClients::build(
         &proxy_config,
         settings.ignore_ssl_errors,
+        settings.doh_enabled,
+        &settings.doh_server,
     )?;
 
     Ok(Arc::new(State {

@@ -5,6 +5,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+pub const DEFAULT_DOH_SERVER: &str = "https://doh.pub/dns-query";
+
 /// `lookup_host` does not expose the authoritative record TTL. Keep entries
 /// long enough to retain the connection-reuse benefit, but short enough that
 /// a changed CDN, VPN, or network is not pinned until the application exits.
@@ -32,6 +34,9 @@ pub struct DownloadDnsResolver {
     /// enough to obtain the per-host lock, never while DNS is awaited.
     resolving_hosts: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     host_overrides: Arc<Mutex<HashMap<String, String>>>,
+    doh_enabled: bool,
+    doh_server: Arc<str>,
+    doh_client: reqwest::Client,
     #[cfg(test)]
     test_addresses: Arc<Mutex<HashMap<String, Vec<SocketAddr>>>>,
     #[cfg(test)]
@@ -45,6 +50,12 @@ impl Default for DownloadDnsResolver {
             last_resolved: Arc::default(),
             resolving_hosts: Arc::default(),
             host_overrides: Arc::default(),
+            doh_enabled: false,
+            doh_server: Arc::from(DEFAULT_DOH_SERVER),
+            doh_client: reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .expect("DNS bootstrap client configuration should be valid"),
             #[cfg(test)]
             test_addresses: Arc::default(),
             #[cfg(test)]
@@ -54,6 +65,50 @@ impl Default for DownloadDnsResolver {
 }
 
 impl DownloadDnsResolver {
+    pub fn with_doh(
+        enabled: bool,
+        server: impl Into<String>,
+    ) -> crate::Result<Self> {
+        Self::with_doh_and_proxy(enabled, server, None)
+    }
+
+    pub fn with_doh_and_proxy(
+        enabled: bool,
+        server: impl Into<String>,
+        proxy: Option<&crate::util::proxy::ProxyConfig>,
+    ) -> crate::Result<Self> {
+        let server = server.into();
+        let parsed = reqwest::Url::parse(&server).map_err(|error| {
+            crate::ErrorKind::InputError(format!(
+                "DoH server URL is invalid: {error}"
+            ))
+        })?;
+        if parsed.scheme() != "https" || parsed.host_str().is_none() {
+            return Err(crate::ErrorKind::InputError(
+                "DoH server must be an HTTPS URL".to_string(),
+            )
+            .into());
+        }
+        let builder = match proxy {
+            Some(proxy) => proxy.apply(reqwest::Client::builder())?,
+            None => reqwest::Client::builder().no_proxy(),
+        };
+        let doh_client = builder.build().map_err(crate::Error::from)?;
+        Ok(Self {
+            doh_enabled: enabled,
+            doh_server: Arc::from(server),
+            doh_client,
+            ..Self::default()
+        })
+    }
+
+    pub fn doh_enabled(&self) -> bool {
+        self.doh_enabled
+    }
+
+    pub fn doh_server(&self) -> &str {
+        &self.doh_server
+    }
     /// Resolves `host` through `resolver_host` while preserving the original
     /// URL host for HTTP Host headers and TLS SNI.
     #[allow(dead_code)]
@@ -180,9 +235,53 @@ impl DownloadDnsResolver {
                 return Ok(addresses);
             }
         }
+        if self.doh_enabled {
+            return self.lookup_doh(resolution_host).await;
+        }
         tokio::net::lookup_host((resolution_host, 0))
             .await
             .map(|addresses| addresses.collect())
+    }
+
+    async fn lookup_doh(&self, host: &str) -> std::io::Result<Vec<SocketAddr>> {
+        let mut addresses = Vec::new();
+        for record_type in ["A", "AAAA"] {
+            let response = self
+                .doh_client
+                .get(self.doh_server.as_ref())
+                .query(&[("name", host), ("type", record_type)])
+                .header(reqwest::header::ACCEPT, "application/dns-json")
+                .send()
+                .await
+                .map_err(std::io::Error::other)?;
+            if !response.status().is_success() {
+                return Err(std::io::Error::other(format!(
+                    "DoH server returned {}",
+                    response.status()
+                )));
+            }
+            let value: serde_json::Value =
+                response.json().await.map_err(std::io::Error::other)?;
+            if let Some(answer) =
+                value.get("Answer").and_then(serde_json::Value::as_array)
+            {
+                for record in answer {
+                    if let Some(address) =
+                        record.get("data").and_then(serde_json::Value::as_str)
+                    {
+                        if let Ok(ip) = address.parse::<IpAddr>() {
+                            addresses.push(SocketAddr::new(ip, 0));
+                        }
+                    }
+                }
+            }
+        }
+        if addresses.is_empty() {
+            return Err(std::io::Error::other(
+                "DoH response contained no addresses",
+            ));
+        }
+        Ok(addresses)
     }
 
     async fn refresh(&self, host: &str) -> std::io::Result<Vec<IpAddr>> {
@@ -312,6 +411,15 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn doh_configuration_requires_https_and_keeps_the_default() {
+        assert_eq!(DEFAULT_DOH_SERVER, "https://doh.pub/dns-query");
+        assert!(DownloadDnsResolver::with_doh(true, "http://dns.example/query").is_err());
+        let resolver = DownloadDnsResolver::with_doh(true, DEFAULT_DOH_SERVER).unwrap();
+        assert!(resolver.doh_enabled());
+        assert_eq!(resolver.doh_server(), DEFAULT_DOH_SERVER);
+    }
 
     async fn spawn_ipv4_server() -> (u16, tokio::task::JoinHandle<()>) {
         let listener =

@@ -36,6 +36,20 @@ pub(crate) fn fingerprint(
     config: &ProxyConfig,
     ignore_ssl_errors: bool,
 ) -> String {
+    fingerprint_with_doh(
+        config,
+        ignore_ssl_errors,
+        false,
+        crate::util::download_dns::DEFAULT_DOH_SERVER,
+    )
+}
+
+pub(crate) fn fingerprint_with_doh(
+    config: &ProxyConfig,
+    ignore_ssl_errors: bool,
+    doh_enabled: bool,
+    doh_server: &str,
+) -> String {
     let mut digest = Sha256::new();
     for value in [
         config.mode.as_str(),
@@ -47,6 +61,9 @@ pub(crate) fn fingerprint(
         digest.update(value.as_bytes());
     }
     digest.update([u8::from(ignore_ssl_errors)]);
+    digest.update([u8::from(doh_enabled)]);
+    digest.update((doh_server.len() as u64).to_le_bytes());
+    digest.update(doh_server.as_bytes());
     format!("{:x}", digest.finalize())
 }
 
@@ -125,8 +142,13 @@ mod tests {
             mode: ProxyMode::None,
             ..Default::default()
         };
-        let first =
-            crate::util::fetch::DownloadClients::build(&config, false).unwrap();
+        let first = crate::util::fetch::DownloadClients::build(
+            &config,
+            false,
+            true,
+            crate::util::download_dns::DEFAULT_DOH_SERVER,
+        )
+        .unwrap();
         let second = crate::util::fetch::DownloadClients::build(
             &ProxyConfig {
                 mode: ProxyMode::Custom,
@@ -134,6 +156,8 @@ mod tests {
                 ..Default::default()
             },
             false,
+            true,
+            crate::util::download_dns::DEFAULT_DOH_SERVER,
         )
         .unwrap();
         assert_ne!(first.scope, second.scope);
@@ -162,6 +186,8 @@ mod tests {
                     ..Default::default()
                 },
                 false,
+                true,
+                crate::util::download_dns::DEFAULT_DOH_SERVER,
             )
             .unwrap();
             keys.push(with_snapshot(clients, async {

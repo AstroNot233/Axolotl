@@ -224,10 +224,6 @@ const messages = defineMessages({
 		id: 'app.settings.resources.source.open-bmcl-api',
 		defaultMessage: 'Prefer OpenBMCLAPI',
 	},
-	tianpaoSource: {
-		id: 'app.settings.resources.source.tianpao',
-		defaultMessage: 'Prefer Tianpao',
-	},
 	minecraftMetadataSource: {
 		id: 'app.settings.resources.minecraft-metadata-source',
 		defaultMessage: 'Minecraft metadata',
@@ -394,6 +390,26 @@ const messages = defineMessages({
 		id: 'app.settings.resources.proxy-test-failed',
 		defaultMessage: 'Connection failed',
 	},
+	dohSettings: {
+		id: 'app.settings.resources.doh-settings',
+		defaultMessage: 'DNS over HTTPS',
+	},
+	dohSettingsDescription: {
+		id: 'app.settings.resources.doh-settings-description',
+		defaultMessage: 'Resolve download hosts through the selected encrypted DNS service.',
+	},
+	dohEnabled: {
+		id: 'app.settings.resources.doh-enabled',
+		defaultMessage: 'Use DNS over HTTPS',
+	},
+	dohServer: {
+		id: 'app.settings.resources.doh-server',
+		defaultMessage: 'DNS over HTTPS server',
+	},
+	dohServerPlaceholder: {
+		id: 'app.settings.resources.doh-server-placeholder',
+		defaultMessage: 'https://doh.pub/dns-query',
+	},
 	missingContentAutoImport: {
 		id: 'app.settings.resources.missing-content-auto-import',
 		defaultMessage: 'Automatically import missing modpack files',
@@ -537,13 +553,11 @@ const minecraftDirectoryModeOptions = computed(() => [
 const modrinthSourceOptions = computed(() => [
 	automaticSourceOption.value,
 	officialPreferredSourceOption.value,
-	{ value: 'mirror_preferred', label: formatMessage(messages.tianpaoSource) },
 	officialOnlySourceOption.value,
 ])
 const curseforgeSourceOptions = computed(() => [
 	automaticSourceOption.value,
 	officialPreferredSourceOption.value,
-	{ value: 'mirror_preferred', label: formatMessage(messages.tianpaoSource) },
 	officialOnlySourceOption.value,
 ])
 const mojangAuthSource = downloadSourceModel('mojang_auth_source')
@@ -583,6 +597,21 @@ const proxyModeOptions = computed(() => [
 		label: formatMessage(messages.proxyModeCustom),
 	},
 ])
+const dohServerOptions = computed(() => [
+	{ value: 'https://doh.pub/dns-query', label: 'doh.pub' },
+	{ value: 'https://dns.alidns.com/dns-query', label: 'AliDNS' },
+	{ value: 'https://dns.google/dns-query', label: 'Google DNS' },
+	{ value: 'custom', label: 'Custom' },
+])
+const dohServerSelection = computed({
+	get: () =>
+		dohServerOptions.value.some((option) => option.value === settings.value.doh_server)
+			? settings.value.doh_server
+			: 'custom',
+	set: (value) => {
+		if (value !== 'custom') settings.value.doh_server = value
+	},
+})
 
 const appDirectoryDescriptionText = computed(() =>
 	isPortable.value
@@ -997,6 +1026,42 @@ function validateMinecraftDirectory(value) {
 				<template #control>
 					<div class="w-full">
 						<Combobox v-model="mojangAuthSource" :options="mojangAuthSourceOptions" />
+					</div>
+				</template>
+			</SettingsRow>
+		</SettingsSection>
+
+		<SettingsSection
+			v-if="props.scope === 'content-downloads'"
+			:title="formatMessage(messages.dohSettings)"
+		>
+			<template #header>
+				<h2 class="m-0 text-lg font-semibold text-[var(--color-text-primary)]">
+					{{ formatMessage(messages.dohSettings) }}
+				</h2>
+				<p class="m-0 mt-1 text-sm leading-relaxed text-[var(--color-text-tertiary)]">
+					{{ formatMessage(messages.dohSettingsDescription) }}
+				</p>
+			</template>
+			<SettingsRow>
+				<template #label>{{ formatMessage(messages.dohEnabled) }}</template>
+				<template #control>
+					<Toggle id="doh-enabled" v-model="settings.doh_enabled" />
+				</template>
+			</SettingsRow>
+			<SettingsRow v-if="settings.doh_enabled" stacked>
+				<template #label>{{ formatMessage(messages.dohServer) }}</template>
+				<template #control>
+					<div class="flex w-full flex-col gap-3">
+						<Combobox v-model="dohServerSelection" :options="dohServerOptions" />
+						<StyledInput
+							v-if="dohServerSelection === 'custom'"
+							id="doh-server"
+							v-model="settings.doh_server"
+							type="url"
+							:placeholder="formatMessage(messages.dohServerPlaceholder)"
+							wrapper-class="w-full"
+						/>
 					</div>
 				</template>
 			</SettingsRow>

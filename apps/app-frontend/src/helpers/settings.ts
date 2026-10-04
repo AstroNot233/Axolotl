@@ -62,6 +62,10 @@ export type ProxyTestResult = {
 	latency_ms: number | null
 	message: string
 }
+export type DohSettings = {
+	doh_enabled: boolean
+	doh_server: string
+}
 
 export async function getUpdateChannel(): Promise<UpdateChannel> {
 	const channel = await invoke<string>('get_update_channel')

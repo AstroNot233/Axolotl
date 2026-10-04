@@ -115,6 +115,10 @@ pub struct Settings {
     pub bypass_curseforge_download_restrictions: bool,
     #[serde(default)]
     pub ignore_ssl_errors: bool,
+    #[serde(default = "default_doh_enabled")]
+    pub doh_enabled: bool,
+    #[serde(default = "default_doh_server")]
+    pub doh_server: String,
     #[serde(default)]
     pub mojang_auth_source: DownloadSourceMode,
     #[serde(default, rename = "use_minecraft_mirror", skip_serializing)]
@@ -226,6 +230,14 @@ pub struct PrivacySettings {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_doh_enabled() -> bool {
+    true
+}
+
+fn default_doh_server() -> String {
+    crate::util::download_dns::DEFAULT_DOH_SERVER.to_string()
 }
 
 /// Fully opaque home widget cards; users can dial this down to reveal the
@@ -404,6 +416,11 @@ impl Settings {
         )
         .fetch_one(exec)
         .await?;
+        let (doh_enabled, doh_server): (bool, String) = sqlx::query_as(
+            "SELECT doh_enabled, doh_server FROM settings WHERE id = 0",
+        )
+        .fetch_one(exec)
+        .await?;
         let settings = Self {
             max_concurrent_downloads: res.max_concurrent_downloads as usize,
             max_concurrent_writes: res.max_concurrent_writes as usize,
@@ -422,6 +439,8 @@ impl Settings {
             ),
             bypass_curseforge_download_restrictions,
             ignore_ssl_errors,
+            doh_enabled,
+            doh_server,
             mojang_auth_source: DownloadSourceMode::from_string(
                 &res.mojang_auth_source,
             ),
@@ -813,6 +832,14 @@ impl Settings {
         .bind(self.show_worlds_tab_in_instances)
         .bind(self.show_screenshots_tab_in_instances)
         .bind(self.show_skin_selector_in_sidebar)
+        .execute(exec)
+        .await?;
+
+        sqlx::query(
+            "UPDATE settings SET doh_enabled = ?, doh_server = ? WHERE id = 0",
+        )
+        .bind(self.doh_enabled)
+        .bind(self.doh_server.trim())
         .execute(exec)
         .await?;
 

@@ -52,6 +52,12 @@ const CHANNELS = ['release', 'beta']
 // Only recent migrations are listed. Dropping to a threshold before them is
 // refused rather than guessed at; --allow-unmapped accepts the risk explicitly.
 const REVERTIBLE_SCHEMA = {
+	20261004140000: {
+		columns: [
+			{ table: 'settings', column: 'doh_enabled' },
+			{ table: 'settings', column: 'doh_server' },
+		],
+	},
 	20261004120000: {
 		tables: ['store_operations', 'store_retained_refs', 'store_instance_files', 'store_blobs'],
 	},

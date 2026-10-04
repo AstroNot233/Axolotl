@@ -357,6 +357,13 @@ async fn connect_tcp(
     // (IPv4/IPv6 preference and per-IP reliability), falling back to the
     // system resolver when no list is cached yet.
     let resolver = super::proxy_context::resolver(proxy);
+    if resolver.resolved_addresses(host).is_empty() {
+        let _ = tokio::time::timeout(
+            CONNECTION_WAIT_TIMEOUT,
+            resolver.pre_resolve(host),
+        )
+        .await;
+    }
     let addresses = resolver.resolved_addresses(host);
     let mut last_error = None;
     if !addresses.is_empty() {
@@ -380,29 +387,37 @@ async fn connect_tcp(
             }
         }
     }
-    let stream = tokio::time::timeout(
-        CONNECT_TIMEOUT,
-        tokio::net::TcpStream::connect((host, port)),
-    )
-    .await
-    .map_err(|_| {
-        last_error.take().unwrap_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                format!("connection to {host}:{port} timed out"),
-            )
-        })
-    })?
-    .map_err(|error| {
-        last_error.take().unwrap_or_else(|| {
-            std::io::Error::new(
-                error.kind(),
-                format!("connection to {host}:{port} failed: {error}"),
-            )
-        })
-    })?;
-    stream.set_nodelay(true).ok();
-    Ok(stream)
+    if !resolver.doh_enabled() {
+        let stream = tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            tokio::net::TcpStream::connect((host, port)),
+        )
+        .await
+        .map_err(|_| {
+            last_error.take().unwrap_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("connection to {host}:{port} timed out"),
+                )
+            })
+        })?
+        .map_err(|error| {
+            last_error.take().unwrap_or_else(|| {
+                std::io::Error::new(
+                    error.kind(),
+                    format!("connection to {host}:{port} failed: {error}"),
+                )
+            })
+        })?;
+        stream.set_nodelay(true).ok();
+        return Ok(stream);
+    }
+    Err(last_error.unwrap_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("no resolved addresses available for {host}:{port}"),
+        )
+    }))
 }
 
 /// Connects a new shared HTTP/2 connection to `authority` (host[:port]).
