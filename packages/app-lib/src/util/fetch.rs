@@ -7130,9 +7130,11 @@ mod tests {
         let url = "https://cdn-alt.modrinth.com/data/project/versions/version/file.jar";
         let mut routes = explicit_mirror_routes(url, ResourceClass::Modrinth);
         routes.push(official_route(url, ResourceClass::Modrinth));
-        assert!(routes
-            .iter()
-            .all(|route| route.source != DownloadRouteSource::Tianpao));
+        assert!(
+            routes
+                .iter()
+                .all(|route| route.source != DownloadRouteSource::Tianpao)
+        );
         let official = routes
             .iter()
             .find(|route| is_official_route(route))

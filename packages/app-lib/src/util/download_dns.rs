@@ -415,8 +415,12 @@ mod tests {
     #[test]
     fn doh_configuration_requires_https_and_keeps_the_default() {
         assert_eq!(DEFAULT_DOH_SERVER, "https://doh.pub/dns-query");
-        assert!(DownloadDnsResolver::with_doh(true, "http://dns.example/query").is_err());
-        let resolver = DownloadDnsResolver::with_doh(true, DEFAULT_DOH_SERVER).unwrap();
+        assert!(
+            DownloadDnsResolver::with_doh(true, "http://dns.example/query")
+                .is_err()
+        );
+        let resolver =
+            DownloadDnsResolver::with_doh(true, DEFAULT_DOH_SERVER).unwrap();
         assert!(resolver.doh_enabled());
         assert_eq!(resolver.doh_server(), DEFAULT_DOH_SERVER);
     }
