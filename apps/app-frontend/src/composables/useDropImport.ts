@@ -704,7 +704,7 @@ export function useDropImport(options: DropImportOptions) {
 	async function routeToGamedirFlow(paths: string[]) {
 		const roots = paths
 			.filter((path) => path.trim())
-			.map((path) => ({ path: path.trim(), mode: 'isolated' as const }))
+			.map((path) => ({ path: path.trim(), mode: 'automatic' as const }))
 		if (roots.length === 0) return false
 		try {
 			const raw = localStorage.getItem('axolotl-minecraft-directories')
@@ -762,7 +762,7 @@ export function useDropImport(options: DropImportOptions) {
 		if (type === 'dot_minecraft') {
 			await routeToGamedirFlow([dropFilePath.value ?? ''])
 			return
-			}
+		}
 
 		if (isLauncherImport && type === 'instance') {
 			const launcherType =
@@ -1678,6 +1678,22 @@ export function useDropImport(options: DropImportOptions) {
 		}
 
 		if (resolved.item_type === 'launcher' || resolved.item_type === 'hmcl_launcher') {
+			const launcherType =
+				resolved.item_type === 'hmcl_launcher'
+					? 'HMCL'
+					: ((resolved as { launcher_type?: string }).launcher_type ?? 'Generic')
+			if (['Generic', 'PCL2', 'PCL2CE', 'HMCL'].includes(launcherType)) {
+				const basePath =
+					resolved.item_type === 'hmcl_launcher'
+						? ((resolved as { launcher_dir?: string }).launcher_dir ?? '')
+						: ((resolved as { base_path?: string }).base_path ?? '')
+				const resolvedDirs = await resolveGamedirs(launcherType, basePath)
+				item.scanState = 'done'
+				item.itemType = 'gamedir'
+				item.basePath = resolvedDirs.map((entry) => entry.path).join('|')
+				if (resolvedDirs.length === 0) item.reason = 'No game directories found'
+				return
+			}
 			await expandBatchLauncher(item, resolved)
 			return
 		}
@@ -1909,6 +1925,7 @@ export function useDropImport(options: DropImportOptions) {
 			'litematic',
 			'data_pack',
 			'instance',
+			'gamedir',
 		]
 		const byType = new Map<string, BatchDropItem[]>()
 		for (const item of batchItems.value) {
@@ -1978,6 +1995,10 @@ export function useDropImport(options: DropImportOptions) {
 					})),
 					symlinkCapable: cap,
 				})
+			} else if (group.type === 'gamedir') {
+				await routeToGamedirFlow(group.items.flatMap((item) => (item.basePath ?? '').split('|')))
+				batchConfirmIndex++
+				await showNextBatchGroup()
 			} else {
 				await showBatchGroupConfirmModal(group)
 			}
@@ -2559,5 +2580,3 @@ function defineMessages<T extends Record<string, { id: string; defaultMessage: s
 ): T {
 	return messages
 }
-
-

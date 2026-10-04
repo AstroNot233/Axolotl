@@ -82,7 +82,7 @@ export interface DirectLinkSyncReport {
 	errors: string[]
 }
 
-export type ExternalMinecraftRootMode = 'isolated' | 'shared'
+export type ExternalMinecraftRootMode = 'automatic' | 'isolated' | 'shared'
 
 export interface ExternalMinecraftRoot {
 	path: string

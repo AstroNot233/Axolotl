@@ -665,10 +665,11 @@ pub async fn drop_resolve_gamedirs(
         serde_json::from_str(&format!("\"{launcher_type}\"")).map_err(
             |error| format!("Invalid launcher type '{launcher_type}': {error}"),
         )?;
-    Ok(theseus::pack::import::gamedir_resolve::resolve_gamedirs(
+    theseus::pack::import::gamedir_resolve::resolve_gamedirs(
         launcher_type,
         std::path::PathBuf::from(base_path),
-    ))
+    )
+    .map_err(|error| error.to_string())
 }
 
 /// Detect processes holding a file lock on the given path.

@@ -822,7 +822,12 @@ function startDirectLinkSync() {
 							return [
 								{
 									path: value.path,
-									mode: value.mode === 'shared' ? ('shared' as const) : ('isolated' as const),
+									mode:
+										value.mode === 'shared'
+											? ('shared' as const)
+											: value.mode === 'automatic'
+												? ('automatic' as const)
+												: ('isolated' as const),
 								},
 							]
 						}

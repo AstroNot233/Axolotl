@@ -1,6 +1,15 @@
 use std::path::{Path, PathBuf};
 
+use super::direct_link::has_minecraft_version_manifest;
 use super::{ImportLauncherType, hmcl, pcl};
+
+fn has_version_manifest(root: &Path) -> bool {
+    std::fs::read_dir(root.join("versions")).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| has_minecraft_version_manifest(&entry.path()))
+    })
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,10 +30,17 @@ fn push_dir(result: &mut Vec<ResolvedGamedir>, path: PathBuf, dialect: &str) {
 pub fn resolve_gamedirs(
     launcher_type: ImportLauncherType,
     base_path: PathBuf,
-) -> Vec<ResolvedGamedir> {
+) -> crate::Result<Vec<ResolvedGamedir>> {
     let mut result = Vec::new();
     match launcher_type {
         ImportLauncherType::Generic => {
+            if !base_path.is_dir() || !has_version_manifest(&base_path) {
+                return Err(crate::ErrorKind::InputError(
+                    "Selected folder is not a Minecraft game directory"
+                        .to_string(),
+                )
+                .into());
+            }
             push_dir(&mut result, base_path, "generic")
         }
         ImportLauncherType::PCL2 | ImportLauncherType::PCL2CE => {
@@ -47,5 +63,5 @@ pub fn resolve_gamedirs(
     }
     result.sort_by(|a, b| a.path.cmp(&b.path));
     result.dedup_by(|a, b| Path::new(&a.path) == Path::new(&b.path));
-    result
+    Ok(result)
 }

@@ -21,8 +21,7 @@ pub struct ExternalMinecraftRoot {
 }
 
 fn default_external_root_mode() -> ExternalGameDirMode {
-    // Existing string-only Settings entries used version isolation exclusively.
-    ExternalGameDirMode::Isolated
+    ExternalGameDirMode::Automatic
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

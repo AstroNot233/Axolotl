@@ -183,6 +183,10 @@ const messages = defineMessages({
 		id: 'app.settings.resources.minecraft-directory-mode.shared',
 		defaultMessage: 'Shared .minecraft directory',
 	},
+	minecraftDirectoryModeAutomatic: {
+		id: 'app.settings.resources.minecraft-directory-mode.automatic',
+		defaultMessage: 'Automatic',
+	},
 	purgeConfirmTitle: {
 		id: 'app.settings.resources.purge-confirm-title',
 		defaultMessage: 'Are you sure you want to purge the cache?',
@@ -477,7 +481,12 @@ function loadMinecraftDirectories() {
 				return [
 					{
 						path: value.path,
-						mode: value.mode === 'shared' ? 'shared' : 'isolated',
+						mode:
+							value.mode === 'shared'
+								? 'shared'
+								: value.mode === 'automatic'
+									? 'automatic'
+									: 'isolated',
 					},
 				]
 			}
@@ -503,7 +512,12 @@ function persistMinecraftDirectories(values) {
 				values
 					.map((value) => ({
 						path: value.path.trim(),
-						mode: value.mode === 'shared' ? 'shared' : 'isolated',
+						mode:
+							value.mode === 'shared'
+								? 'shared'
+								: value.mode === 'automatic'
+									? 'automatic'
+									: 'isolated',
 					}))
 					.filter((value) => isMinecraftDirectoryPath(value.path))
 					.map((value) => [value.path, value]),
@@ -547,6 +561,7 @@ const minecraftSourceOptions = computed(() => [
 	officialOnlySourceOption.value,
 ])
 const minecraftDirectoryModeOptions = computed(() => [
+	{ value: 'automatic', label: formatMessage(messages.minecraftDirectoryModeAutomatic) },
 	{ value: 'isolated', label: formatMessage(messages.minecraftDirectoryModeIsolated) },
 	{ value: 'shared', label: formatMessage(messages.minecraftDirectoryModeShared) },
 ])
