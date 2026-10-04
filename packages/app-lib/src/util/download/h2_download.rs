@@ -25,7 +25,7 @@ use url::Url;
 
 /// Logical worker target for the batch asset downloader. Actual H2 stream
 /// admission is separately capped so assets cannot starve ordinary content.
-pub(crate) const ASSET_BATCH_CONCURRENCY: usize = 256;
+pub(crate) const ASSET_BATCH_CONCURRENCY: usize = 64;
 /// Internal retry passes for failed batch items before they are handed back
 /// to the caller for the regular per-file download path.
 const ASSET_BATCH_RETRY_PASSES: usize = 2;
@@ -94,6 +94,7 @@ pub(crate) async fn try_download_via_h2(
     destination: &Path,
     part_path: &Path,
     policy: super::native::NativeH2Policy,
+    semaphore: &fetch::FetchSemaphore,
 ) -> H2DownloadOutcome {
     if request
         .cancellation
@@ -144,7 +145,11 @@ pub(crate) async fn try_download_via_h2(
     } else {
         let _probe_stream_permit = match tokio::time::timeout(
             ASSET_RESOURCE_WAIT_TIMEOUT,
-            super::h2_stream_budget::acquire(route),
+            super::h2_stream_budget::acquire_download(
+                route,
+                Some(semaphore),
+                false,
+            ),
         )
         .await
         {
@@ -216,6 +221,7 @@ pub(crate) async fn try_download_via_h2(
             part_path,
             total_size,
             concurrency,
+            Some(semaphore),
         )
         .await;
     }
@@ -226,7 +232,11 @@ pub(crate) async fn try_download_via_h2(
     .await;
     let stream_wait = tokio::time::timeout(
         ASSET_RESOURCE_WAIT_TIMEOUT,
-        super::h2_stream_budget::acquire(route),
+        super::h2_stream_budget::acquire_download(
+            route,
+            Some(semaphore),
+            false,
+        ),
     );
     let stream_wait_started = Instant::now();
     let stream_result = if let Some(cancellation) =
@@ -1080,28 +1090,6 @@ async fn download_asset_item(
             "timed out waiting for asset destination lock".to_string(),
         )
     })?;
-    let fetch_permit = if apply_native_policy {
-        let Some(semaphore) = native_semaphore else {
-            return Err(crate::ErrorKind::OtherError(
-                "native asset batch is missing fetch budget".to_string(),
-            )
-            .into());
-        };
-        Some(
-            tokio::time::timeout(
-                ASSET_RESOURCE_WAIT_TIMEOUT,
-                semaphore.0.acquire(),
-            )
-            .await
-            .map_err(|_| {
-                crate::ErrorKind::NetworkError(
-                    "timed out waiting for asset fetch permit".to_string(),
-                )
-            })??,
-        )
-    } else {
-        None
-    };
     // A different downloader may have committed the object while this item
     // waited for the destination lock. Reuse it instead of opening another
     // stream, which also prevents cross-engine `.part`/rename races.
@@ -1144,7 +1132,11 @@ async fn download_asset_item(
         Some(
             tokio::time::timeout(
                 ASSET_RESOURCE_WAIT_TIMEOUT,
-                super::h2_stream_budget::acquire_asset(route),
+                super::h2_stream_budget::acquire_download(
+                    route,
+                    native_semaphore,
+                    true,
+                ),
             )
             .await
             .map_err(|_| {
@@ -1168,7 +1160,6 @@ async fn download_asset_item(
     headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
 
     let (response, mut stream) = open_stream(&connection, uri, headers).await?;
-    drop(fetch_permit);
     if !response.status().is_success() {
         // 301/302/303/307/308 are redirect responses that must be interpreted
         // by the redirect-handling layer, not treated as line-level transfer

@@ -54,6 +54,7 @@ pub(crate) async fn download(
     part_path: &Path,
     total_size: u64,
     concurrency: usize,
+    semaphore: Option<&fetch::FetchSemaphore>,
 ) -> H2DownloadOutcome {
     if request
         .cancellation
@@ -101,6 +102,7 @@ pub(crate) async fn download(
             Arc::clone(&downloaded),
             Arc::clone(&reported_bucket),
             progress_delta,
+            semaphore,
         ));
     }
     loop {
@@ -189,6 +191,7 @@ async fn download_range(
     downloaded: Arc<AtomicU64>,
     reported_bucket: Arc<AtomicU64>,
     progress_delta: u64,
+    semaphore: Option<&fetch::FetchSemaphore>,
 ) -> Result<(), H2DownloadFailure> {
     super::h2_download::record_install_stage(
         request,
@@ -197,7 +200,7 @@ async fn download_range(
     .await;
     let _permit = tokio::time::timeout(
         Duration::from_secs(45),
-        super::h2_stream_budget::acquire(route),
+        super::h2_stream_budget::acquire_download(route, semaphore, false),
     )
     .await
     .map_err(|_| H2DownloadFailure::Connect)?
@@ -429,6 +432,7 @@ mod tests {
             &part_path,
             data.len() as u64,
             8,
+            None,
         )
         .await;
 
@@ -504,6 +508,7 @@ mod tests {
                 &part_for_task,
                 2 * 1024 * 1024,
                 16,
+                None,
             )
             .await
         });

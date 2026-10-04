@@ -993,6 +993,8 @@ static TAIL_HEDGE_SEMAPHORE: LazyLock<Semaphore> =
     LazyLock::new(|| Semaphore::new(MAX_GLOBAL_TAIL_HEDGES));
 static FILE_VALIDATION_SEMAPHORE: LazyLock<Semaphore> =
     LazyLock::new(|| Semaphore::new(4));
+static ROUTE_PROBE_SEMAPHORE: LazyLock<FetchSemaphore> =
+    LazyLock::new(|| FetchSemaphore(Semaphore::new(2)));
 
 pub(crate) async fn acquire_native_validation_permit()
 -> crate::Result<Option<SemaphorePermit<'static>>> {
@@ -1365,8 +1367,10 @@ fn record_route_failure(
     resource: ResourceClass,
     cooldown: Option<time::Duration>,
 ) {
-    if let Some(state) = crate::State::get_if_initialized() {
-        state.record_download_error();
+    if cooldown.is_some()
+        && let Some(state) = crate::State::get_if_initialized()
+    {
+        state.record_download_throttle();
     }
     record_route_health_failure(route, resource, cooldown);
 }
@@ -3408,7 +3412,7 @@ async fn probe_route_throughput(
     custom_header: Option<&(String, String)>,
     credentials: Option<&crate::state::ModrinthCredentials>,
     download_meta: Option<&DownloadMeta>,
-    semaphore: &FetchSemaphore,
+    _semaphore: &FetchSemaphore,
     system_client: &reqwest::Client,
     direct_client: &reqwest::Client,
     resource: ResourceClass,
@@ -3419,7 +3423,7 @@ async fn probe_route_throughput(
     }
     let probe_bytes = ROUTE_PROBE_BYTES.min(total_size);
     let probe_end = probe_bytes.checked_sub(1)?;
-    let _permit = acquire_native_connection(route, semaphore).await.ok()?;
+    let _permit = ROUTE_PROBE_SEMAPHORE.0.acquire().await.ok()?;
     let started = Instant::now();
     let response = tokio::time::timeout(
         ROUTE_PROBE_TIMEOUT,
@@ -3580,14 +3584,9 @@ fn route_health_is_cold(
     })
 }
 
-/// Ensures the download task has a fresh throughput measurement before the
-/// first file of a resource family starts downloading in Auto mode.
-/// Candidate routes are probed concurrently once per task; other files of
-/// the same family wait for that probe instead of running their own, so
-/// small files get measured route ordering without per-file probing.
+/// Schedules one shared throughput probe while real downloads proceed.
 enum TaskProbeDecision {
     Run(Arc<Notify>),
-    Wait(Arc<Notify>),
     Done,
 }
 
@@ -3602,7 +3601,7 @@ struct TaskProbePlan {
 fn build_task_probe_plan(
     request: &DownloadRequest,
     routes: &[DownloadRoute],
-    semaphore: &FetchSemaphore,
+    _semaphore: &FetchSemaphore,
 ) -> Option<TaskProbePlan> {
     if !matches!(
         source_mode_for_resource(request.resource),
@@ -3610,7 +3609,10 @@ fn build_task_probe_plan(
     ) {
         return None;
     }
-    let size = request.integrity.size.filter(|size| *size > 0)?;
+    let size = request
+        .integrity
+        .size
+        .filter(|size| *size >= SEGMENTED_DOWNLOAD_THRESHOLD)?;
     let first_route = routes.first()?;
     let family = route_health_key(first_route, request.resource)?.family;
     if !route_health_is_cold(first_route, request.resource) {
@@ -3628,9 +3630,7 @@ fn build_task_probe_plan(
         .take(TASK_PROBE_MAX_ROUTES)
         .cloned()
         .collect::<Vec<_>>();
-    if candidates.len() < 2
-        || semaphore.0.available_permits() < candidates.len()
-    {
+    if candidates.len() < 2 {
         return None;
     }
     let mut probe_authorities = candidates
@@ -3678,32 +3678,12 @@ fn claim_task_probe(plan: &TaskProbePlan) -> TaskProbeDecision {
     });
     if recently_probed {
         TaskProbeDecision::Done
-    } else if let Some(notify) = entry.in_flight.clone() {
-        TaskProbeDecision::Wait(notify)
+    } else if entry.in_flight.is_some() {
+        TaskProbeDecision::Done
     } else {
         let notify = Arc::new(Notify::new());
         entry.in_flight = Some(notify.clone());
         TaskProbeDecision::Run(notify)
-    }
-}
-
-async fn wait_for_task_probe(
-    state: &Arc<super::download::route_health::TaskProbeState>,
-    family: ResourceFamily,
-    notify: Arc<Notify>,
-) {
-    let notified = notify.notified();
-    let already_done = {
-        let families = state.families.lock();
-        families.get(&family).is_none_or(|entry| {
-            entry
-                .in_flight
-                .as_ref()
-                .is_none_or(|in_flight| !Arc::ptr_eq(in_flight, &notify))
-        })
-    };
-    if !already_done {
-        let _ = tokio::time::timeout(TASK_PROBE_MAX_WAIT, notified).await;
     }
 }
 
@@ -3772,19 +3752,21 @@ async fn ensure_task_routes_probed(
     };
     match claim_task_probe(&plan) {
         TaskProbeDecision::Done => {}
-        TaskProbeDecision::Wait(notify) => {
-            wait_for_task_probe(&plan.state, plan.family, notify).await;
-        }
         TaskProbeDecision::Run(notify) => {
-            run_task_probe(
-                request,
-                semaphore,
-                system_client,
-                direct_client,
-                &plan,
-                notify,
-            )
-            .await;
+            let request = request.clone();
+            let system_client = system_client.clone();
+            let direct_client = direct_client.clone();
+            tokio::spawn(async move {
+                run_task_probe(
+                    &request,
+                    &ROUTE_PROBE_SEMAPHORE,
+                    &system_client,
+                    &direct_client,
+                    &plan,
+                    notify,
+                )
+                .await;
+            });
         }
     }
     order_auto_routes(
@@ -4981,18 +4963,26 @@ pub(crate) async fn record_install_download_finished(
 /// Resolves hosts ahead of the first request so every file shares one ordered
 /// address list instead of racing the same DNS queries.
 pub(crate) async fn prewarm_download_dns(hosts: &[&str]) {
-    let requests = hosts.iter().map(|host| {
-        let resolver = Arc::clone(&DOWNLOAD_DNS_RESOLVER);
-        let host = (*host).to_string();
-        async move {
-            let _ = tokio::time::timeout(
-                time::Duration::from_secs(10),
-                resolver.pre_resolve(&host),
-            )
+    let hosts = hosts
+        .iter()
+        .map(|host| (*host).to_string())
+        .collect::<Vec<_>>();
+    tokio::spawn(async move {
+        let requests = hosts.into_iter().map(|host| {
+            let resolver = Arc::clone(&DOWNLOAD_DNS_RESOLVER);
+            async move {
+                let _ = tokio::time::timeout(
+                    time::Duration::from_secs(10),
+                    resolver.pre_resolve(&host),
+                )
+                .await;
+            }
+        });
+        futures::stream::iter(requests)
+            .buffer_unordered(8)
+            .collect::<Vec<_>>()
             .await;
-        }
     });
-    futures::future::join_all(requests).await;
 }
 
 fn error_chain(error: &crate::Error) -> String {
@@ -5031,6 +5021,9 @@ pub async fn download_to_path(
         })
         .await;
     if let Err(error) = &result {
+        if let Some(state) = crate::State::get_if_initialized() {
+            state.record_download_error();
+        }
         tracing::debug!(
             url = %request_url,
             destination = %destination_path.display(),
@@ -5181,14 +5174,6 @@ async fn try_h2_download(
     part_path: &Path,
     semaphore: &FetchSemaphore,
 ) -> crate::Result<H2AttemptResult> {
-    let _permit =
-        tokio::time::timeout(RESOURCE_WAIT_TIMEOUT, semaphore.0.acquire())
-            .await
-            .map_err(|_| {
-                ErrorKind::NetworkError(
-                    "timed out waiting for HTTP/2 download permit".to_string(),
-                )
-            })??;
     let started = Instant::now();
     match crate::util::download::h2_download::try_download_via_h2(
         request,
@@ -5196,6 +5181,7 @@ async fn try_h2_download(
         destination,
         part_path,
         policy,
+        semaphore,
     )
     .await
     {

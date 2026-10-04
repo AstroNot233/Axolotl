@@ -10,6 +10,7 @@
 //! split into range streams over their shared connection.
 
 use bytes::Bytes;
+use futures::stream::{FuturesUnordered, StreamExt};
 use h2::client::SendRequest;
 use rustls::ClientConfig;
 use rustls_pki_types::ServerName;
@@ -27,7 +28,7 @@ use crate::util::fetch::DownloadRoute;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-const DNS_PREWARM_TIMEOUT: Duration = Duration::from_secs(10);
+const HAPPY_EYEBALLS_DELAY: Duration = Duration::from_millis(250);
 const STREAM_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const IDLE_EVICTION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const CONNECTION_WAIT_TIMEOUT: Duration = Duration::from_secs(45);
@@ -266,33 +267,85 @@ async fn connect_addresses(
     port: u16,
     addresses: &[IpAddr],
 ) -> std::io::Result<TcpStream> {
-    let mut last_error = None;
-    for address in addresses {
-        match tokio::time::timeout(
-            CONNECT_TIMEOUT,
-            TcpStream::connect((*address, port)),
-        )
-        .await
-        {
-            Ok(Ok(stream)) => {
-                stream.set_nodelay(true).ok();
-                return Ok(stream);
-            }
-            Ok(Err(error)) => last_error = Some(error),
-            Err(_) => {
-                last_error = Some(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    format!("connection to {host}:{port} timed out"),
-                ));
+    let attempts = interleaved_addresses(addresses)
+        .into_iter()
+        .enumerate()
+        .map(|(index, address)| async move {
+            tokio::time::sleep(
+                HAPPY_EYEBALLS_DELAY.saturating_mul(index as u32),
+            )
+            .await;
+            TcpStream::connect((address, port)).await
+        });
+    tokio::time::timeout(CONNECT_TIMEOUT, async {
+        let mut pending = attempts.collect::<FuturesUnordered<_>>();
+        let mut last_error = None;
+        while let Some(result) = pending.next().await {
+            match result {
+                Ok(stream) => {
+                    stream.set_nodelay(true).ok();
+                    if let Ok(address) = stream.peer_addr() {
+                        crate::util::fetch::DOWNLOAD_DNS_RESOLVER
+                            .record_host_success(host, address.ip());
+                    }
+                    return Ok(stream);
+                }
+                Err(error) => last_error = Some(error),
             }
         }
-    }
-    Err(last_error.unwrap_or_else(|| {
+        Err(last_error.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no addresses available for {host}"),
+            )
+        }))
+    })
+    .await
+    .map_err(|_| {
         std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("no addresses available for {host}"),
+            std::io::ErrorKind::TimedOut,
+            format!("connection to {host}:{port} timed out"),
         )
-    }))
+    })?
+}
+
+fn interleaved_addresses(addresses: &[IpAddr]) -> Vec<IpAddr> {
+    let mut preferred = addresses.iter().copied().filter(|address| {
+        address.is_ipv6() == addresses.first().is_some_and(IpAddr::is_ipv6)
+    });
+    let mut alternate = addresses.iter().copied().filter(|address| {
+        address.is_ipv6() != addresses.first().is_some_and(IpAddr::is_ipv6)
+    });
+    let mut ordered = Vec::with_capacity(addresses.len());
+    loop {
+        let first = preferred.next();
+        let second = alternate.next();
+        if first.is_none() && second.is_none() {
+            break;
+        }
+        ordered.extend(first);
+        ordered.extend(second);
+    }
+    ordered
+}
+
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+
+    #[test]
+    fn happy_eyeballs_interleaves_address_families() {
+        let ordered = interleaved_addresses(&[
+            "2001:db8::1".parse().unwrap(),
+            "2001:db8::2".parse().unwrap(),
+            "192.0.2.1".parse().unwrap(),
+            "192.0.2.2".parse().unwrap(),
+        ]);
+        assert_eq!(ordered[0].to_string(), "2001:db8::1");
+        assert_eq!(ordered[1].to_string(), "192.0.2.1");
+        assert_eq!(ordered[2].to_string(), "2001:db8::2");
+        assert_eq!(ordered[3].to_string(), "192.0.2.2");
+    }
 }
 
 async fn connect_tcp(host: &str, port: u16) -> std::io::Result<TcpStream> {
@@ -373,14 +426,6 @@ async fn establish(
         .rsplit_once(':')
         .map(|(host, port)| (host, port.parse::<u16>().unwrap_or(443)))
         .unwrap_or((&authority, 443));
-
-    // Pre-resolve so `connect_tcp` gets the ordered, reliability-ranked
-    // address list shared with the legacy reqwest path.
-    let _ = tokio::time::timeout(
-        DNS_PREWARM_TIMEOUT,
-        crate::util::fetch::DOWNLOAD_DNS_RESOLVER.pre_resolve(host),
-    )
-    .await;
 
     let tcp = connect_tcp(host, port).await.map_err(|error| {
 		H2ConnectError::new(

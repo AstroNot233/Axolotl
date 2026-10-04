@@ -7,7 +7,9 @@ use crate::util::fetch::{DownloadRoute, ProxyPolicy};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
-use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{
+    AcquireError, OwnedSemaphorePermit, Semaphore, SemaphorePermit,
+};
 use tokio::time::{Duration, sleep};
 
 const MAX_H2_STREAMS: usize = 128;
@@ -35,6 +37,31 @@ static ASSET_GLOBAL_BUDGET: LazyLock<Arc<Semaphore>> =
 pub(crate) struct H2StreamPermit {
     _global: OwnedSemaphorePermit,
     _authority: Option<OwnedSemaphorePermit>,
+}
+
+pub(crate) struct H2DownloadPermit<'a> {
+    _stream: H2StreamPermit,
+    _file: Option<SemaphorePermit<'a>>,
+}
+
+pub(crate) async fn acquire_download<'a>(
+    route: &DownloadRoute,
+    semaphore: Option<&'a crate::util::fetch::FetchSemaphore>,
+    asset: bool,
+) -> Result<H2DownloadPermit<'a>, AcquireError> {
+    let stream = if asset {
+        acquire_asset(route).await?
+    } else {
+        acquire(route).await?
+    };
+    let file = match semaphore {
+        Some(semaphore) => Some(semaphore.0.acquire().await?),
+        None => None,
+    };
+    Ok(H2DownloadPermit {
+        _stream: stream,
+        _file: file,
+    })
 }
 
 fn budget(route: &DownloadRoute) -> Option<Arc<Semaphore>> {

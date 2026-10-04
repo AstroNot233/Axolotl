@@ -1934,7 +1934,7 @@ pub async fn download_assets(
             let failed = download_asset_batch_via_h2(
                 &route,
                 batch_items,
-                ASSET_BATCH_CONCURRENCY,
+                ASSET_BATCH_CONCURRENCY.min(st.download_concurrency()),
                 apply_native_policy,
                 apply_native_policy.then_some(&st.fetch_semaphore),
                 callback,
