@@ -1815,9 +1815,7 @@ pub(crate) async fn materialize_project_download(
     if temporary.exists() {
         io::remove_file(&temporary).await?;
     }
-    if tokio::fs::hard_link(source, &temporary).await.is_err() {
-        io::copy(source, &temporary).await?;
-    }
+    io::copy(source, &temporary).await?;
     let mut backup = destination.as_os_str().to_os_string();
     backup.push(".installing.previous");
     let backup = PathBuf::from(backup);
@@ -1883,7 +1881,7 @@ pub(crate) async fn materialize_project_download_batch(
             &state.pool,
         )
         .await?;
-        if !destinations.insert(relative_path.clone()) {
+        if !destinations.insert(materialization_path_key(&relative_path)) {
             return Err(crate::ErrorKind::InputError(format!(
                 "Multiple content files target {relative_path}"
             ))
@@ -1910,6 +1908,7 @@ pub(crate) async fn materialize_project_download_batch(
             known_modrinth_version_id: Some(download.version_id),
         });
     }
+    let _critical = crate::install::critical_section::enter();
     let mut materialized = Vec::with_capacity(sources.len());
     let result: crate::Result<()> = async {
         for (source, destination) in &sources {
@@ -1957,6 +1956,14 @@ pub(crate) async fn materialize_project_download_batch(
         .into_iter()
         .map(|record| record.relative_path)
         .collect())
+}
+
+fn materialization_path_key(path: &str) -> String {
+    if cfg!(any(windows, target_os = "macos")) {
+        path.replace('\\', "/").to_lowercase()
+    } else {
+        path.to_string()
+    }
 }
 
 async fn record_project_files_atomic_with_plan(
@@ -4162,6 +4169,31 @@ mod tests {
     use super::*;
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use std::time::Duration;
+
+    #[test]
+    fn materialization_keys_reject_case_collisions_on_insensitive_platforms() {
+        assert_eq!(
+            materialization_path_key("mods/Foo.jar")
+                == materialization_path_key("mods/foo.jar"),
+            cfg!(any(windows, target_os = "macos"))
+        );
+    }
+
+    #[tokio::test]
+    async fn materialized_instances_do_not_share_writable_inodes() {
+        let directory = tempfile::tempdir().unwrap();
+        let shared = directory.path().join("shared");
+        let first = directory.path().join("first/mod.jar");
+        let second = directory.path().join("second/mod.jar");
+        tokio::fs::write(&shared, b"original").await.unwrap();
+        materialize_project_download(&shared, &first).await.unwrap();
+        materialize_project_download(&shared, &second)
+            .await
+            .unwrap();
+        tokio::fs::write(&first, b"modified").await.unwrap();
+        assert_eq!(tokio::fs::read(shared).await.unwrap(), b"original");
+        assert_eq!(tokio::fs::read(second).await.unwrap(), b"original");
+    }
 
     #[test]
     fn resource_pack_target_preferences_ignore_game_version() {
