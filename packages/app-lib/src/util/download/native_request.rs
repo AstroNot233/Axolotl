@@ -97,9 +97,11 @@ pub(crate) async fn send_path_request_with_clients(
             Err(error) => {
                 if let Some(host) = record_dns_connection_failure(route, &error)
                 {
-                    super::proxy_context::resolver(route.proxy)
-                        .pre_resolve(&host)
-                        .await;
+                    crate::util::fetch::prewarm_download_dns_for(
+                        route.proxy,
+                        &[&host],
+                    )
+                    .await;
                 }
                 if !fallback_to_http1
                     && redirect_count < 5

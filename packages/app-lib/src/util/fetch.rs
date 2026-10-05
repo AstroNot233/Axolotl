@@ -1117,6 +1117,7 @@ impl DownloadClients {
         doh_enabled: bool,
         doh_server: &str,
     ) -> crate::Result<Self> {
+        let doh_server = doh_server.trim();
         let system_dns = Arc::new(DownloadDnsResolver::with_doh_and_proxy(
             doh_enabled,
             doh_server,
@@ -1572,9 +1573,7 @@ async fn fetch_validated_metadata_route(
         Ok(response) => response,
         Err(error) => {
             if let Some(host) = record_dns_connection_failure(route, &error) {
-                super::download::proxy_context::resolver(route.proxy)
-                    .pre_resolve(&host)
-                    .await;
+                prewarm_download_dns_for(route.proxy, &[&host]).await;
             }
             return Err(error.into());
         }
@@ -2630,9 +2629,7 @@ async fn fetch_advanced_inner(
                     if let Some(host) =
                         record_dns_connection_failure(route, &err)
                     {
-                        super::download::proxy_context::resolver(route.proxy)
-                            .pre_resolve(&host)
-                            .await;
+                        prewarm_download_dns_for(route.proxy, &[&host]).await;
                     }
                     record_route_failure(route, resource, None);
                     let error_message = err.to_string();
@@ -5109,8 +5106,14 @@ pub(crate) async fn record_install_download_stage(
 /// Resolves hosts ahead of the first request so every file shares one ordered
 /// address list instead of racing the same DNS queries.
 pub(crate) async fn prewarm_download_dns(hosts: &[&str]) {
-    let resolver =
-        super::download::proxy_context::resolver(ProxyPolicy::System);
+    prewarm_download_dns_for(ProxyPolicy::System, hosts).await;
+}
+
+pub(crate) async fn prewarm_download_dns_for(
+    proxy: ProxyPolicy,
+    hosts: &[&str],
+) {
+    let resolver = super::download::proxy_context::resolver(proxy);
     let hosts = hosts
         .iter()
         .map(|host| (*host).to_string())
