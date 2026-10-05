@@ -105,17 +105,6 @@ function handleImportExisting() {
 				/>
 			</div>
 
-			<!--			<p class="m-0 text-sm text-[var(&#45;&#45;color-text-tertiary)]">
-				{{ formatMessage(messages.pclHmclHint) }}
-				{{ ' ' }}
-				<RouterLink
-					to="/settings#storage-backups"
-					class="text-brand underline decoration-transparent underline-offset-2 transition-colors hover:decoration-current"
-				>
-					{{ formatMessage(messages.addMinecraftFolder) }}
-				</RouterLink>
-			</p>-->
-
 			<Button type="quiet" class="self-start" @click="navigateBack">
 				<LeftArrowIcon class="size-4" stroke-width="2" />
 				{{ formatMessage(messages.back) }}
