@@ -8,6 +8,7 @@
 			type="quiet"
 			circular
 			icon-only
+			:label="formatMessage(messages.minimize)"
 			class="relative expanded-button"
 			@click="() => getCurrentWindow().minimize()"
 			><MinimizeIcon />
@@ -16,6 +17,7 @@
 			type="quiet"
 			circular
 			icon-only
+			:label="isMaximized ? formatMessage(messages.restore) : formatMessage(messages.maximize)"
 			class="relative expanded-button"
 			@click="() => getCurrentWindow().toggleMaximize()"
 			><RestoreIcon v-if="isMaximized" />
@@ -27,6 +29,7 @@
 			interaction="filled"
 			circular
 			icon-only
+			:label="formatMessage(messages.close)"
 			class="relative expanded-button close-button"
 			@click="handleClose"
 		>
@@ -37,7 +40,7 @@
 
 <script setup>
 import { MaximizeIcon, MinimizeIcon, RestoreIcon, XIcon } from '@modrinth/assets'
-import { Button } from '@modrinth/ui'
+import { Button, defineMessages, useVIntl } from '@modrinth/ui'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
@@ -47,6 +50,26 @@ import { getOS } from '@/helpers/utils.js'
 import { useTheming } from '@/store/state'
 
 const themeStore = useTheming()
+const { formatMessage } = useVIntl()
+
+const messages = defineMessages({
+	minimize: {
+		id: 'app.window-controls.minimize',
+		defaultMessage: 'Minimize',
+	},
+	maximize: {
+		id: 'app.window-controls.maximize',
+		defaultMessage: 'Maximize',
+	},
+	restore: {
+		id: 'app.window-controls.restore',
+		defaultMessage: 'Restore',
+	},
+	close: {
+		id: 'app.window-controls.close',
+		defaultMessage: 'Close',
+	},
+})
 
 const nativeDecorations = ref(true)
 const isMaximized = ref(false)
