@@ -107,6 +107,7 @@ impl RangeTransport for NativeRangeTransport<'_> {
             .await
             .map_err(|_| H2DownloadFailure::Connect)?
             .map_err(|_| H2DownloadFailure::Connect)?;
+            let permit = (permit, connection.track_stream());
             let mut headers =
                 super::h2_download::request_headers(self.request, self.route);
             headers
@@ -224,6 +225,9 @@ impl RangeTransport for NativeRangeTransport<'_> {
     }
 
     fn failed(&self, h2: bool) {
+        if h2 && let Some(connection) = &self.connection {
+            connection.record_stream_failure();
+        }
         if h2 && let Some(authority) = fetch::url_authority(&self.route.url) {
             super::native_reputation::record_transport_failure(
                 &authority,

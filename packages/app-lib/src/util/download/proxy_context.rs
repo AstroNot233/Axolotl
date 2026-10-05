@@ -71,12 +71,14 @@ pub(crate) fn scope(proxy: ProxyPolicy) -> String {
     clients()
         .map(|clients| match proxy {
             ProxyPolicy::System => clients.scope,
-            ProxyPolicy::Direct => fingerprint(
+            ProxyPolicy::Direct => fingerprint_with_doh(
                 &ProxyConfig {
                     mode: crate::util::proxy::ProxyMode::None,
                     ..Default::default()
                 },
                 clients.ignore_ssl_errors,
+                clients.doh_enabled,
+                &clients.doh_server,
             ),
         })
         .unwrap_or_else(|| format!("unconfigured-{proxy:?}"))
@@ -134,6 +136,35 @@ mod tests {
         }
         assert_ne!(original, fingerprint(&base, true));
         assert!(!original.contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn direct_scope_changes_with_doh_configuration() {
+        let mut keys = Vec::new();
+        for (enabled, endpoint) in [
+            (true, "https://doh.pub/dns-query"),
+            (false, "https://doh.pub/dns-query"),
+            (true, "https://dns.google/dns-query"),
+        ] {
+            let clients = crate::util::fetch::DownloadClients::build(
+                &ProxyConfig {
+                    mode: ProxyMode::None,
+                    ..Default::default()
+                },
+                false,
+                enabled,
+                endpoint,
+            )
+            .unwrap();
+            keys.push(
+                with_snapshot(clients, async {
+                    authority_key("direct-doh.invalid:443", ProxyPolicy::Direct)
+                })
+                .await,
+            );
+        }
+        assert_ne!(keys[0], keys[1]);
+        assert_ne!(keys[0], keys[2]);
     }
 
     #[test]
@@ -194,7 +225,8 @@ mod tests {
 				assert_eq!(super::super::native::h2_ineligible_reason(&route), Some(super::super::native::NativeH2IneligibleReason::ConfiguredProxy));
 				super::super::native_reputation::record_success("other", "proxy-isolation.invalid:443", ProxyPolicy::System, 1.0, None);
 				let mut permits = Vec::new();
-				for _ in 0..8 { permits.push(super::super::native_budget::acquire(&route).await.unwrap()); }
+				let capacity = super::super::native_budget::available(&route);
+				for _ in 0..capacity { permits.push(super::super::native_budget::acquire(&route).await.unwrap()); }
 				assert_eq!(super::super::native_budget::available(&route), 0);
 				let key = super::super::route_health::route_health_key(&route, crate::util::fetch::ResourceClass::Other).unwrap();
 				drop(permits);

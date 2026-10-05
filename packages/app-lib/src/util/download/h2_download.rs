@@ -125,6 +125,7 @@ pub(crate) async fn try_download_via_h2(
             };
         }
     };
+    let connection_activity = connection.track_stream();
     let Ok(uri) = route.url.parse::<Uri>() else {
         return H2DownloadOutcome::Fallback {
             failure: H2DownloadFailure::Http,
@@ -213,6 +214,7 @@ pub(crate) async fn try_download_via_h2(
     };
 
     if let Some(concurrency) = request.h2_range_concurrency {
+        drop(connection_activity);
         let configured = fetch::configured_semaphore_limit(semaphore);
         let disk_limit = super::local_resources::range_limit(part_path).await;
         let concurrency =
@@ -285,11 +287,13 @@ pub(crate) async fn try_download_via_h2(
         total_size,
         policy,
         _stream_permit,
+        connection_activity,
     )
     .await;
     match result {
         Ok(result) => H2DownloadOutcome::Completed(result),
         Err(error) => {
+            connection.record_stream_failure();
             let failure = classify_download_error(&error);
             tracing::debug!(
                 url = %fetch::sanitize_url_for_log(&request.url),
@@ -506,6 +510,7 @@ async fn single_stream(
     total_size: u64,
     policy: super::native::NativeH2Policy,
     permit: super::h2_stream_budget::H2DownloadPermit<'_>,
+    connection_activity: super::h2_pool::H2StreamActivity,
 ) -> crate::Result<DownloadResult> {
     let mut headers = request_headers(request, route);
     headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
@@ -582,6 +587,7 @@ async fn single_stream(
     super::local_resources::write(part_path, 0, file.flush()).await?;
     drop(file);
     drop(permit);
+    drop(connection_activity);
     let computed = hashers.finish(downloaded);
     record_install_stage(
         request,
