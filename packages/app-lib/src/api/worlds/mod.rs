@@ -718,6 +718,17 @@ pub async fn backup_world(instance: &Path, world: &str) -> Result<u64> {
     Ok(io::metadata(output_path).await?.len())
 }
 
+fn truncate_to_char_boundary(value: &mut String, max_bytes: usize) {
+    if value.len() <= max_bytes {
+        return;
+    }
+    let mut cut = max_bytes;
+    while !value.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    value.truncate(cut);
+}
+
 fn find_available_name(dir: &Path, file_name: &str, extension: &str) -> String {
     static RESERVED_WINDOWS_FILENAMES: LazyLock<Regex> = LazyLock::new(|| {
         RegexBuilder::new(r#"^.*\.|(?:COM|CLOCK\$|CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$"#)
@@ -759,7 +770,7 @@ fn find_available_name(dir: &Path, file_name: &str, extension: &str) -> String {
     }
 
     if file_name.len() > 255 - extension.len() {
-        file_name.truncate(255 - extension.len());
+        truncate_to_char_boundary(&mut file_name, 255 - extension.len());
     }
 
     let mut current_attempt = file_name.clone();
@@ -767,7 +778,10 @@ fn find_available_name(dir: &Path, file_name: &str, extension: &str) -> String {
         if count != 0 {
             let with_count = format!(" ({count})");
             if file_name.len() > 255 - with_count.len() {
-                current_attempt.truncate(255 - with_count.len());
+                truncate_to_char_boundary(
+                    &mut current_attempt,
+                    255 - with_count.len(),
+                );
             }
             current_attempt.push_str(&with_count);
         }
