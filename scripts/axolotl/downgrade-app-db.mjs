@@ -58,7 +58,7 @@ const REVERTIBLE_SCHEMA = {
 			{ table: 'settings', column: 'doh_server' },
 		],
 	},
-	20261004120000: {
+	20261004120001: {
 		tables: ['store_operations', 'store_retained_refs', 'store_instance_files', 'store_blobs'],
 	},
 	// XMCL removal only normalizes data; keep the legacy column as a rollback tombstone.
