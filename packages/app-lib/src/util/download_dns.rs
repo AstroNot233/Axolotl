@@ -18,7 +18,6 @@ const CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 const CONNECTION_FAILURES_BEFORE_REFRESH: u8 = 2;
 const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(6);
 const DOH_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-const SECOND_FAMILY_GRACE: Duration = Duration::from_millis(250);
 const FAILURE_CACHE_TTL: Duration = Duration::from_secs(2);
 const MAX_DNS_MESSAGE_BYTES: usize = 65535;
 
@@ -373,7 +372,7 @@ impl DownloadDnsResolver {
         }
         let resolution_host = self.resolution_host(&host);
         let lookup = tokio::time::timeout(
-            DOH_REQUEST_TIMEOUT + SECOND_FAMILY_GRACE,
+            DOH_REQUEST_TIMEOUT + Duration::from_millis(250),
             self.lookup_addresses(&resolution_host),
         )
         .await
@@ -562,23 +561,27 @@ async fn resolve_families(
     ipv4: impl std::future::Future<Output = std::io::Result<Vec<SocketAddr>>>,
     ipv6: impl std::future::Future<Output = std::io::Result<Vec<SocketAddr>>>,
 ) -> std::io::Result<Vec<SocketAddr>> {
-    tokio::pin!(ipv4, ipv6);
-    let (first, second) = tokio::select! {
-        first = &mut ipv4 => {
-            let wait = if first.is_ok() { SECOND_FAMILY_GRACE } else { DOH_REQUEST_TIMEOUT };
-            (first, tokio::time::timeout(wait, &mut ipv6).await.ok())
-        }
-        first = &mut ipv6 => {
-            let wait = if first.is_ok() { SECOND_FAMILY_GRACE } else { DOH_REQUEST_TIMEOUT };
-            (first, tokio::time::timeout(wait, &mut ipv4).await.ok())
-        }
+    let (ipv4, ipv6) = tokio::join!(
+        tokio::time::timeout(DOH_REQUEST_TIMEOUT, ipv4),
+        tokio::time::timeout(DOH_REQUEST_TIMEOUT, ipv6)
+    );
+    let flatten = |result: Result<
+        std::io::Result<Vec<SocketAddr>>,
+        tokio::time::error::Elapsed,
+    >| {
+        result.unwrap_or_else(|_| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "DoH address family timed out",
+            ))
+        })
     };
-    match (first, second) {
-        (Ok(mut addresses), Some(Ok(other))) => {
+    match (flatten(ipv4), flatten(ipv6)) {
+        (Ok(mut addresses), Ok(other)) => {
             addresses.extend(other);
             Ok(addresses)
         }
-        (Ok(addresses), _) | (Err(_), Some(Ok(addresses))) => Ok(addresses),
+        (Ok(addresses), _) | (Err(_), Ok(addresses)) => Ok(addresses),
         (Err(error), _) => Err(error),
     }
 }
@@ -698,7 +701,7 @@ mod tests {
             vec![address]
         );
         let addresses = tokio::time::timeout(
-            Duration::from_secs(1),
+            DOH_REQUEST_TIMEOUT + Duration::from_secs(1),
             resolve_families(
                 async { Ok(vec![address]) },
                 std::future::pending(),
@@ -708,6 +711,23 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(addresses, vec![address]);
+    }
+
+    #[tokio::test]
+    async fn late_ipv4_addresses_are_kept_when_ipv6_arrives_first() {
+        let ipv4 = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 1), 0));
+        let ipv6 = SocketAddr::from((Ipv6Addr::LOCALHOST, 0));
+        let addresses = resolve_families(
+            async {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                Ok(vec![ipv4])
+            },
+            async { Ok(vec![ipv6]) },
+        )
+        .await
+        .unwrap();
+        assert!(addresses.contains(&ipv4));
+        assert!(addresses.contains(&ipv6));
     }
 
     #[tokio::test]
