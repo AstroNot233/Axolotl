@@ -1337,7 +1337,7 @@ async fn write_version_info(path: &Path, data: Vec<u8>) -> crate::Result<()> {
 }
 
 /// Bumped when derived loader metadata must be rebuilt from the base profile.
-const DERIVED_VERSION_CACHE_FORMAT: &str = "4";
+const DERIVED_VERSION_CACHE_FORMAT: &str = "5";
 
 fn normalize_version_timestamps(
     version: &GameVersion,

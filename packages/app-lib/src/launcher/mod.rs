@@ -1360,6 +1360,11 @@ async fn install_minecraft_with_local_source(
         .await?;
     }
 
+    if has_client_processors(version_info.processors.as_deref())
+        && version_info.data.is_none()
+    {
+        version_info.data = Some(Default::default());
+    }
     if let Some(processors) = &version_info.processors {
         let libraries_dir = state.directories.libraries_dir();
         let client_mappings = version_info

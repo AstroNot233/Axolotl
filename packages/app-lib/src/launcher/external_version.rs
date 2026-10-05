@@ -1,5 +1,6 @@
 //! Publication of portable versions after internal loader installation completes.
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use daedalus::minecraft::{
@@ -29,6 +30,7 @@ fn uses_fml_runtime(info: &VersionInfo) -> bool {
         info.main_class.as_str(),
         "cpw.mods.bootstraplauncher.BootstrapLauncher"
             | "cpw.mods.modlauncher.Launcher"
+            | "net.minecraftforge.bootstrap.BootstrapLauncher"
     )
 }
 
@@ -55,6 +57,84 @@ fn is_fml_runtime_library(library: &Library) -> bool {
             (Some("net.minecraftforge"), Some("forge"))
                 | (Some("net.neoforged"), Some("neoforge"))
         ))
+}
+
+fn library_identity(name: &str) -> Option<(String, String)> {
+    let mut coordinates = name.split(':');
+    Some((
+        coordinates.next()?.to_string(),
+        coordinates.next()?.to_string(),
+    ))
+}
+
+fn library_applies_to_host(library: &LinkedLibrary) -> bool {
+    library.library.rules.as_deref().is_none_or(|rules| {
+        super::parse_rules(
+            rules,
+            std::env::consts::ARCH,
+            &QuickPlayType::None,
+            true,
+        )
+    })
+}
+
+/// PCL resolves duplicate Maven identities from the first matching entry.
+/// Put the host-applicable entry first so a platform-specific duplicate cannot
+/// shadow the runtime artifact needed by this installation.
+fn order_duplicate_libraries_for_portable_launch(
+    libraries: &mut [LinkedLibrary],
+) {
+    let mut counts = HashMap::<(String, String), usize>::new();
+    for library in libraries.iter() {
+        if let Some(identity) = library_identity(&library.library.name) {
+            *counts.entry(identity).or_default() += 1;
+        }
+    }
+    let duplicate_identities = counts
+        .into_iter()
+        .filter_map(|(identity, count)| (count > 1).then_some(identity))
+        .collect::<HashSet<_>>();
+    let mut positions = HashMap::<(String, String), Vec<usize>>::new();
+    for (index, library) in libraries.iter().enumerate() {
+        if let Some(identity) = library_identity(&library.library.name)
+            && duplicate_identities.contains(&identity)
+        {
+            positions.entry(identity).or_default().push(index);
+        }
+    }
+    for indices in positions.values() {
+        let mut entries = indices
+            .iter()
+            .map(|&index| libraries[index].clone())
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|library| !library_applies_to_host(library));
+        for (index, library) in indices.iter().copied().zip(entries) {
+            libraries[index] = library;
+        }
+    }
+}
+
+fn expand_native_artifact_library(
+    library: &LinkedLibrary,
+) -> Vec<LinkedLibrary> {
+    let Some(downloads) = library.library.downloads.as_ref() else {
+        return vec![library.clone()];
+    };
+    if !library.library.include_in_classpath
+        || library.library.natives.is_none()
+        || downloads.artifact.is_none()
+        || is_native_only_library(&library.library)
+    {
+        return vec![library.clone()];
+    }
+
+    let mut classpath = library.clone();
+    classpath.library.natives = None;
+    classpath.library.extract = None;
+    if let Some(downloads) = classpath.library.downloads.as_mut() {
+        downloads.classifiers = None;
+    }
+    vec![classpath, library.clone()]
 }
 
 /// FML discovers game modules through Maven paths, including outputs absent from its classpath.
@@ -241,10 +321,15 @@ pub(crate) fn project_manifest(
             });
         }
     }
+    let mut libraries = libraries
+        .iter()
+        .flat_map(expand_native_artifact_library)
+        .collect::<Vec<_>>();
+    order_duplicate_libraries_for_portable_launch(&mut libraries);
     let mut document = serde_json::to_value(info)?;
     document["id"] = version_name.into();
     document["clientVersion"] = game_version.into();
-    if info.main_class == "cpw.mods.bootstraplauncher.BootstrapLauncher" {
+    if uses_fml_runtime(info) {
         exclude_fml_game_modules_from_bootstrap(
             &mut document,
             &libraries,
@@ -270,6 +355,28 @@ pub(crate) fn project_manifest(
                     object.get_mut("downloads").and_then(Value::as_object_mut)
             {
                 downloads.remove("artifact");
+            }
+            if let Some(classifiers) = object
+                .get_mut("downloads")
+                .and_then(Value::as_object_mut)
+                .and_then(|downloads| {
+                    downloads
+                        .get_mut("classifiers")
+                        .and_then(Value::as_object_mut)
+                })
+            {
+                classifiers.retain(|_, classifier| {
+                    classifier
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .is_some_and(|path| !path.is_empty())
+                });
+                if classifiers.is_empty() {
+                    object
+                        .get_mut("downloads")
+                        .and_then(Value::as_object_mut)
+                        .map(|downloads| downloads.remove("classifiers"));
+                }
             }
             Ok(value)
         })
@@ -416,7 +523,23 @@ async fn copy_runtime_libraries(
                     ))
                 })?
                 .to_path_buf();
-            plans.push((cache.join(relative), plan, !lib.downloadable));
+            let mut source = cache.join(&relative);
+            if !source.is_file()
+                && let Some(sha1) = plan.sha1.as_deref().filter(|sha1| {
+                    sha1.len() == 40
+                        && sha1.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+            {
+                let cached_native = state
+                    .directories
+                    .caches_dir()
+                    .join("minecraft-natives")
+                    .join(format!("{sha1}.jar"));
+                if cached_native.is_file() {
+                    source = cached_native;
+                }
+            }
+            plans.push((source, plan, !lib.downloadable));
         }
         if let Some(classifiers) = lib
             .downloads
@@ -810,6 +933,114 @@ mod tests {
         assert_eq!(serde_json::to_value(&info).unwrap(), before);
     }
 
+    #[test]
+    fn projection_splits_classpath_artifact_from_native_metadata() {
+        let mut info = version_info();
+        info.libraries = serde_json::from_value(json!([{
+            "name": "com.mojang:text2speech:1.10.3",
+            "natives": {"windows": "natives-windows"},
+            "extract": {"exclude": ["META-INF/"]},
+            "downloads": {
+                "artifact": {"path": "com/mojang/text2speech/1.10.3/text2speech-1.10.3.jar", "sha1": "main", "size": 1, "url": "https://libraries.minecraft.net/main.jar"},
+                "classifiers": {"natives-windows": {"path": "com/mojang/text2speech/1.10.3/text2speech-1.10.3-natives-windows.jar", "sha1": "native", "size": 1, "url": "https://libraries.minecraft.net/native.jar"}}
+            }
+        }])).unwrap();
+
+        let portable = project_manifest(&info, "Legacy", "1.12.2").unwrap();
+        let libraries = portable.document["libraries"].as_array().unwrap();
+        assert_eq!(libraries.len(), 2);
+        assert!(libraries[0]["downloads"].get("artifact").is_some());
+        assert!(libraries[0].get("natives").is_none());
+        assert!(libraries[0]["downloads"].get("classifiers").is_none());
+        assert!(libraries[1].get("natives").is_some());
+        assert!(libraries[1]["downloads"].get("classifiers").is_some());
+        assert_eq!(portable.libraries.len(), 2);
+    }
+
+    #[test]
+    fn projection_keeps_duplicate_library_positions_stable() {
+        let mut info = version_info();
+        info.libraries = serde_json::from_value(json!([
+            {"name": "first:library:1"},
+            {"name": "com.mojang:text2speech:1.11.3", "rules": [{"action": "allow", "os": {"name": "osx-arm64"}}]},
+            {"name": "com.mojang:text2speech:1.10.3"},
+            {"name": "last:library:1"}
+        ])).unwrap();
+
+        let portable = project_manifest(&info, "Legacy", "1.12.2").unwrap();
+        let names = portable
+            .libraries
+            .iter()
+            .map(|library| library.library.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                "first:library:1",
+                "com.mojang:text2speech:1.10.3",
+                "com.mojang:text2speech:1.11.3",
+                "last:library:1"
+            ]
+        );
+    }
+
+    #[test]
+    fn portable_projection_puts_host_applicable_duplicate_library_first() {
+        let mut info = version_info();
+        info.libraries = serde_json::from_value(json!([
+            {
+                "name": "com.mojang:text2speech:1.11.3",
+                "rules": [{"action": "allow", "os": {"name": "osx-arm64"}}],
+                "downloads": {"artifact": {"path": "com/mojang/text2speech/1.11.3/text2speech-1.11.3.jar", "sha1": "", "size": 0, "url": ""}}
+            },
+            {
+                "name": "com.mojang:text2speech:1.10.3",
+                "downloads": {"artifact": {"path": "com/mojang/text2speech/1.10.3/text2speech-1.10.3.jar", "sha1": "", "size": 0, "url": ""}}
+            }
+        ])).unwrap();
+        let portable = project_manifest(&info, "Legacy", "1.12.2").unwrap();
+        let names = portable
+            .libraries
+            .iter()
+            .map(|library| library.library.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                "com.mojang:text2speech:1.10.3",
+                "com.mojang:text2speech:1.11.3"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn native_classifier_is_published_from_the_internal_native_cache() {
+        let (_temp, state, direct) = fixture().await;
+        let native_bytes = jar_bytes(b"windows narrator native");
+        let native_sha1 = sha1_smol::Sha1::from(&native_bytes[..]).hexdigest();
+        let native_cache = state
+            .directories
+            .caches_dir()
+            .join("minecraft-natives")
+            .join(format!("{native_sha1}.jar"));
+        write(&native_cache, &native_bytes);
+        let mut info = version_info();
+        info.libraries = serde_json::from_value(json!([{
+            "name": "com.mojang:text2speech:1.10.3",
+            "natives": {"windows": "natives-windows"},
+            "downloads": {
+                "artifact": {"path": "com/mojang/text2speech/1.10.3/text2speech-1.10.3.jar", "sha1": "", "size": 0, "url": ""},
+                "classifiers": {"natives-windows": {"path": "com/mojang/text2speech/1.10.3/text2speech-1.10.3-natives-windows.jar", "sha1": native_sha1, "size": native_bytes.len(), "url": "https://libraries.minecraft.net/com/mojang/text2speech/1.10.3/text2speech-1.10.3-natives-windows.jar"}}
+            }
+        }])).unwrap();
+        seed_cache(&state, &info);
+        finalize(&state, &direct, &info, &CancellationToken::new())
+            .await
+            .unwrap();
+        let published = direct.libraries_dir().join("com/mojang/text2speech/1.10.3/text2speech-1.10.3-natives-windows.jar");
+        assert_eq!(std::fs::read(published).unwrap(), native_bytes);
+    }
+
     #[tokio::test]
     async fn generated_forge_and_optifine_artifacts_resolve_after_idempotent_repair()
      {
@@ -1006,6 +1237,38 @@ mod tests {
                     .contains("Invalid FML client runtime artifact")
             );
         }
+    }
+
+    #[test]
+    fn modern_forge_bootstrap_launcher_projects_generated_runtime_artifacts() {
+        let mut info = fml_version_info(false);
+        info.main_class =
+            "net.minecraftforge.bootstrap.BootstrapLauncher".to_string();
+        let portable = project_manifest(&info, "Survival", "1.20.2").unwrap();
+        for key in ["PATCHED", "MC_SRG", "MC_EXTRA"] {
+            let coordinate = info.data.as_ref().unwrap()[key]
+                .client
+                .trim_start_matches('[')
+                .trim_end_matches(']');
+            assert!(
+                portable
+                    .libraries
+                    .iter()
+                    .any(|library| library.library.name == coordinate)
+            );
+        }
+        assert!(
+            portable.document["arguments"]["jvm"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|argument| {
+                    argument.as_str().is_some_and(|argument| {
+                        argument
+                            .contains("client-1.20.1-20230612.114412-srg.jar")
+                    })
+                })
+        );
     }
 
     #[tokio::test]
