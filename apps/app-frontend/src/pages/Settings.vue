@@ -358,7 +358,7 @@ const pageTitle: MessageDescriptor = settingsPageTitle
 					<button
 						v-if="searchQuery"
 						type="button"
-						class="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md border-0 bg-transparent text-[var(--color-text-tertiary)] transition-colors hover:bg-surface-4 hover:text-[var(--color-text-primary)]"
+						class="absolute inset-y-0 right-1.5 z-10 my-auto flex size-7 items-center justify-center rounded-md border-0 bg-transparent text-[var(--color-text-tertiary)] transition-colors hover:bg-surface-4 hover:text-[var(--color-text-primary)]"
 						:aria-label="formatMessage(messages.clearSearch)"
 						@click="searchQuery = ''"
 					>
