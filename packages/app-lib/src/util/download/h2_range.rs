@@ -135,7 +135,7 @@ impl RangeTransport for NativeRangeTransport<'_> {
                 )
             {
                 self.failed(true);
-                return Err(H2DownloadFailure::Http);
+                return Err(range_response_failure(response.status().as_u16()));
             }
             let stream = futures::stream::unfold(
                 (Some(body), permit),
@@ -204,7 +204,7 @@ impl RangeTransport for NativeRangeTransport<'_> {
                 .and_then(|value| value.to_str().ok())
                 != Some(expected.as_str())
         {
-            return Err(H2DownloadFailure::Http);
+            return Err(range_response_failure(response.status().as_u16()));
         }
         let stream = futures::stream::unfold(
             (Some(response), permit),
@@ -304,7 +304,7 @@ pub(crate) async fn resume_http1(
         return Ok(None);
     }
     let Some(size) = request.integrity.size else {
-        discard(part).await;
+        discard(part).await?;
         return Ok(None);
     };
     let load = RangeJournal::load(part, &request.integrity, size);
@@ -314,7 +314,7 @@ pub(crate) async fn resume_http1(
         load.await?
     };
     let Some(journal) = loaded else {
-        discard(part).await;
+        discard(part).await?;
         return Ok(None);
     };
     let count = journal
@@ -350,9 +350,23 @@ pub(crate) async fn resume_http1(
     ))
 }
 
-async fn discard(part: &Path) {
-    let _ = tokio::fs::remove_file(part).await;
-    let _ = tokio::fs::remove_file(super::range_journal::path(part)).await;
+pub(crate) async fn discard(part: &Path) -> crate::Result<()> {
+    for path in [part.to_path_buf(), super::range_journal::path(part)] {
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+fn range_response_failure(status: u16) -> H2DownloadFailure {
+    if matches!(status, 200 | 206 | 416) {
+        H2DownloadFailure::RangeUnsupported
+    } else {
+        H2DownloadFailure::Http
+    }
 }
 
 async fn run_download(
@@ -459,6 +473,20 @@ async fn run_download(
         match next {
             Some(Ok(())) => {}
             Some(Err(failure)) => {
+                if failure == H2DownloadFailure::RangeUnsupported {
+                    drop(tasks);
+                    drop(output);
+                    if discard(part).await.is_err() {
+                        return H2DownloadOutcome::Fallback {
+                            failure: H2DownloadFailure::Io,
+                            preserve_partial: true,
+                        };
+                    }
+                    return H2DownloadOutcome::Fallback {
+                        failure,
+                        preserve_partial: false,
+                    };
+                }
                 return H2DownloadOutcome::Fallback {
                     failure,
                     preserve_partial: preserve,
@@ -480,7 +508,12 @@ async fn run_download(
             || matches!(error.raw.as_ref(), crate::ErrorKind::JSONError(_))
             || matches!(error.raw.as_ref(), crate::ErrorKind::OtherError(message) if message.starts_with("Invalid JAR") || message.starts_with("Incorrect size"));
         if invalid {
-            discard(part).await;
+            if discard(part).await.is_err() {
+                return H2DownloadOutcome::Fallback {
+                    failure: H2DownloadFailure::Io,
+                    preserve_partial: true,
+                };
+            }
         }
         return H2DownloadOutcome::Fallback {
             failure: if invalid {
@@ -545,6 +578,13 @@ async fn recover_range(
             match transport.open(offset, range.end - 1, attempt).await {
                 Ok(body) => body,
                 Err(error) => {
+                    if matches!(
+                        error,
+                        H2DownloadFailure::RangeUnsupported
+                            | H2DownloadFailure::Io
+                    ) {
+                        return Err(error);
+                    }
                     last_failure = error;
                     continue;
                 }
@@ -654,6 +694,67 @@ mod tests {
     use futures::future::poll_fn;
     use http::{Response, StatusCode};
     use sha1_smol::Sha1;
+
+    struct UnsupportedRangeTransport;
+    #[async_trait]
+    impl RangeTransport for UnsupportedRangeTransport {
+        async fn open(
+            &self,
+            _start: u64,
+            _end: u64,
+            _attempt: usize,
+        ) -> Result<
+            (BoxStream<'_, Result<Bytes, H2DownloadFailure>>, bool),
+            H2DownloadFailure,
+        > {
+            Err(range_response_failure(200))
+        }
+    }
+
+    #[tokio::test]
+    async fn unsupported_ranges_discard_sparse_output_and_checkpoints() {
+        let directory = tempfile::tempdir().unwrap();
+        let part = directory.path().join("range.part");
+        let destination = directory.path().join("file");
+        let request = DownloadRequest::new(
+            "https://unsupported.invalid/file",
+            fetch::ResourceClass::Other,
+        )
+        .with_integrity(fetch::Integrity::sha1("expected").with_size(8));
+        let route = DownloadRoute {
+            url: request.url.clone(),
+            source: fetch::DownloadRouteSource::Official,
+            is_mirror: false,
+            allow_sensitive_headers: false,
+            supports_range: true,
+            proxy: fetch::ProxyPolicy::System,
+        };
+        let outcome = run_download(
+            &UnsupportedRangeTransport,
+            &request,
+            &route,
+            &destination,
+            &part,
+            8,
+            2,
+            None,
+        )
+        .await;
+        assert!(matches!(
+            outcome,
+            H2DownloadOutcome::Fallback {
+                failure: H2DownloadFailure::RangeUnsupported,
+                preserve_partial: false
+            }
+        ));
+        assert!(!part.exists());
+        assert!(!super::super::range_journal::path(&part).exists());
+        assert_eq!(
+            range_response_failure(206),
+            H2DownloadFailure::RangeUnsupported
+        );
+        assert_eq!(range_response_failure(503), H2DownloadFailure::Http);
+    }
 
     #[test]
     fn splits_file_into_eight_contiguous_ranges() {

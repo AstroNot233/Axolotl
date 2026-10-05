@@ -380,12 +380,7 @@ async fn attach_verified_integrity(
 ) -> DownloadResult {
     result.verified_sha1 = integrity.sha1.clone();
     result.verified_sha512 = integrity.sha512.clone();
-    result.verified_file =
-        super::download::verified_file::VerifiedFile::capture(
-            &result.path,
-            result.size,
-        )
-        .await;
+    result.verified_file = None;
     result
 }
 
@@ -5418,17 +5413,41 @@ async fn resume_checkpointed_download(
     part_path: &Path,
     semaphore: &FetchSemaphore,
 ) -> crate::Result<Option<DownloadResult>> {
-    let mut range_resume_error = None;
+    resume_checkpointed_download_with(
+        request,
+        routes,
+        part_path,
+        |route| async move {
+            super::download::h2_range::resume_http1(
+                request,
+                &route,
+                destination,
+                part_path,
+                semaphore,
+            )
+            .await
+        },
+    )
+    .await
+}
+
+async fn resume_checkpointed_download_with<F, Fut>(
+    request: &DownloadRequest,
+    routes: &[DownloadRoute],
+    part_path: &Path,
+    mut attempt: F,
+) -> crate::Result<Option<DownloadResult>>
+where
+    F: FnMut(DownloadRoute) -> Fut,
+    Fut: std::future::Future<
+            Output = crate::Result<
+                Option<super::download::h2_download::H2DownloadOutcome>,
+            >,
+        >,
+{
+    let mut had_range_failure = false;
     for route in routes {
-        if let Some(outcome) = super::download::h2_range::resume_http1(
-            request,
-            route,
-            destination,
-            part_path,
-            semaphore,
-        )
-        .await?
-        {
+        if let Some(outcome) = attempt(route.clone()).await? {
             match outcome {
                 super::download::h2_download::H2DownloadOutcome::Completed(
                     result,
@@ -5448,25 +5467,29 @@ async fn resume_checkpointed_download(
                     failure,
                     preserve_partial,
                 } => {
+                    if failure
+                        == super::download::h2_download::H2DownloadFailure::Io
+                    {
+                        return Err(ErrorKind::OtherError(
+                            "Checkpoint resume failed due to local I/O".into(),
+                        )
+                        .into());
+                    }
                     if !preserve_partial {
-                        range_resume_error = None;
+                        super::download::h2_range::discard(part_path).await?;
+                        had_range_failure = false;
                         break;
                     }
                     record_route_health_failure(route, request.resource, None);
-                    range_resume_error = Some(
-                        ErrorKind::NetworkError(format!(
-                            "range resume failed: {failure:?}"
-                        ))
-                        .into(),
-                    );
+                    had_range_failure = true;
                 }
             }
         } else {
             break;
         }
     }
-    if let Some(error) = range_resume_error {
-        return Err(error);
+    if had_range_failure {
+        super::download::h2_range::discard(part_path).await?;
     }
     Ok(None)
 }
@@ -6172,6 +6195,99 @@ pub async fn sha1_file_cancellable(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn post_verification_path_replacement_never_receives_a_trusted_proof()
+    {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("staged");
+        tokio::fs::write(&path, b"original").await.unwrap();
+        let integrity =
+            Integrity::sha1(sha1_smol::Sha1::from(b"original").hexdigest());
+        verify_file(&path, &integrity).await.unwrap();
+        let replacement = directory.path().join("replacement");
+        tokio::fs::write(&replacement, b"modified").await.unwrap();
+        finalize_download(&replacement, &path).await.unwrap();
+        let result = DownloadResult {
+            path: path.clone(),
+            url: "https://proof.invalid/file".into(),
+            source: DownloadRouteSource::Official,
+            size: 8,
+            attempts: 1,
+            fallback_count: 0,
+            verified_sha1: None,
+            verified_sha512: None,
+            verified_file: None,
+        };
+        let result = attach_verified_integrity(result, &integrity).await;
+        assert!(result.verified_file.is_none());
+        assert!(verify_file(&path, &integrity).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn failed_checkpoint_ranges_restart_full_download_but_io_and_cancel_keep_checkpoints()
+     {
+        use super::super::download::h2_download::{
+            H2DownloadFailure, H2DownloadOutcome,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let part = directory.path().join("file.part");
+        let destination = directory.path().join("file");
+        let journal = super::super::download::range_journal::path(&part);
+        let request = DownloadRequest::new(
+            "https://resume.invalid/file",
+            ResourceClass::Other,
+        )
+        .with_integrity(Integrity::sha1("expected"));
+        let route = official_route(&request.url, ResourceClass::Other);
+        for failure in [
+            H2DownloadFailure::RangeUnsupported,
+            H2DownloadFailure::Protocol,
+            H2DownloadFailure::Io,
+        ] {
+            tokio::fs::write(&part, b"sparse-part").await.unwrap();
+            tokio::fs::write(&journal, b"checkpoint").await.unwrap();
+            let result = resume_checkpointed_download_with(
+                &request,
+                &[route.clone()],
+                &part,
+                |_| async {
+                    Ok(Some(H2DownloadOutcome::Fallback {
+                        failure,
+                        preserve_partial: failure
+                            != H2DownloadFailure::RangeUnsupported,
+                    }))
+                },
+            )
+            .await;
+            if failure == H2DownloadFailure::Io {
+                assert!(result.is_err());
+                assert!(part.exists() && journal.exists());
+            } else {
+                assert!(result.unwrap().is_none());
+                assert!(!part.exists() && !journal.exists());
+                tokio::fs::write(&part, b"complete full response")
+                    .await
+                    .unwrap();
+                finalize_download(&part, &destination).await.unwrap();
+                assert_eq!(
+                    tokio::fs::read(&destination).await.unwrap(),
+                    b"complete full response"
+                );
+            }
+        }
+        assert!(
+            resume_checkpointed_download_with(
+                &request,
+                &[route],
+                &part,
+                |_| async { Ok(Some(H2DownloadOutcome::Canceled)) }
+            )
+            .await
+            .is_err()
+        );
+        assert!(part.exists() && journal.exists());
+    }
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::Duration;
 

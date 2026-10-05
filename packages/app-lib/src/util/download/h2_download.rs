@@ -67,6 +67,7 @@ pub(crate) enum H2DownloadFailure {
     Tls,
     Protocol,
     Http,
+    RangeUnsupported,
     Integrity,
     Content,
     Io,

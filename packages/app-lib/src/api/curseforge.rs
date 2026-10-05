@@ -10260,13 +10260,14 @@ mod tests {
                 )
                 .await,
         };
-        assert!(
+        assert_eq!(
             download
                 .verified_file
                 .as_ref()
                 .unwrap()
                 .matches(&staged, 21)
-                .await
+                .await,
+            cfg!(unix)
         );
         let (verified, scans) =
             crate::util::download::verified_file::track_scans(
@@ -10279,7 +10280,7 @@ mod tests {
             )
             .await;
         let verified = verified.unwrap();
-        assert_eq!(scans, 0);
+        assert_eq!(scans, if cfg!(unix) { 0 } else { 1 });
         assert_eq!(verified.sha1, sha1);
         assert_eq!(
             verified.pending_completion,

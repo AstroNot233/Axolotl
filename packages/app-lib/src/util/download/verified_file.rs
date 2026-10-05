@@ -32,6 +32,8 @@ pub(crate) struct VerifiedFile {
     modified: SystemTime,
     created: Option<SystemTime>,
     identity: (u64, u64),
+    #[cfg(unix)]
+    changed: (i64, i64),
 }
 
 impl VerifiedFile {
@@ -49,6 +51,11 @@ impl VerifiedFile {
                 modified: metadata.modified().ok()?,
                 created: metadata.created().ok(),
                 identity: file_identity(&file, &metadata)?,
+                #[cfg(unix)]
+                changed: {
+                    use std::os::unix::fs::MetadataExt;
+                    (metadata.ctime(), metadata.ctime_nsec())
+                },
             })
         })
         .await
@@ -57,7 +64,8 @@ impl VerifiedFile {
     }
 
     pub(crate) async fn matches(&self, path: &Path, size: u64) -> bool {
-        self.path == path
+        cfg!(unix)
+            && self.path == path
             && self.size == size
             && Self::capture(path, size).await.as_ref() == Some(self)
     }
@@ -117,7 +125,7 @@ mod tests {
         tokio::fs::write(&staged, b"original").await.unwrap();
         tokio::fs::write(&other, b"original").await.unwrap();
         let proof = VerifiedFile::capture(&staged, 8).await.unwrap();
-        assert!(proof.matches(&staged, 8).await);
+        assert_eq!(proof.matches(&staged, 8).await, cfg!(unix));
         assert!(!proof.matches(&other, 8).await);
         assert!(!proof.matches(&staged, 7).await);
         let file = std::fs::File::options().write(true).open(&staged).unwrap();
@@ -126,5 +134,23 @@ mod tests {
         ))
         .unwrap();
         assert!(!proof.matches(&staged, 8).await);
+    }
+
+    #[tokio::test]
+    async fn proof_rejects_same_length_edits_with_restored_mtime() {
+        use std::io::{Seek, Write};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("staged");
+        std::fs::write(&path, b"original").unwrap();
+        let proof = VerifiedFile::capture(&path, 8).await.unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut file =
+            std::fs::File::options().write(true).open(&path).unwrap();
+        file.rewind().unwrap();
+        file.write_all(b"modified").unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert!(!proof.matches(&path, 8).await);
     }
 }
