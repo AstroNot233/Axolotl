@@ -430,8 +430,8 @@ pub fn merge_partial_version(
             .minecraft_arguments
             .or(merge.minecraft_arguments),
         minimum_launcher_version: merge.minimum_launcher_version,
-        release_time: partial.release_time,
-        time: partial.time,
+        release_time: merge.release_time,
+        time: merge.time,
         type_: partial.type_,
         data: partial.data,
         processors: partial.processors,
@@ -498,6 +498,11 @@ mod merge_tests {
     #[test]
     fn merge_partial_version_keeps_loader_order_and_removes_exact_duplicates() {
         let now = Utc::now();
+        let mut minecraft = version_info();
+        minecraft.release_time = "2017-09-18T08:39:46Z".parse().unwrap();
+        minecraft.time = "2021-12-15T15:04:05Z".parse().unwrap();
+        let release_time = minecraft.release_time;
+        let time = minecraft.time;
         let partial = PartialVersionInfo {
             id: "1.12.2-liteloader".to_string(),
             inherits_from: "1.12.2".to_string(),
@@ -523,7 +528,10 @@ mod merge_tests {
             processors: None,
         };
 
-        let merged = merge_partial_version(partial, version_info());
+        let merged = merge_partial_version(partial, minecraft);
+        assert_eq!(merged.release_time, release_time);
+        assert_eq!(merged.time, time);
+        assert_eq!(merged.id, "1.12.2-liteloader");
         assert_eq!(
             merged
                 .libraries
