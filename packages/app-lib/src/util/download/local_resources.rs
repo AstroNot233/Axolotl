@@ -14,6 +14,26 @@ static WRITE_SAMPLES: LazyLock<Mutex<HashMap<PathBuf, WriteSample>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static CPU_PERCENT: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0);
+static DISKS: std::sync::OnceLock<Vec<(PathBuf, sysinfo::DiskKind)>> =
+    std::sync::OnceLock::new();
+static DISKS_READY: tokio::sync::OnceCell<()> =
+    tokio::sync::OnceCell::const_new();
+
+async fn initialize_disks() {
+    DISKS_READY
+        .get_or_init(|| async {
+            let disks = tokio::task::spawn_blocking(|| {
+                sysinfo::Disks::new_with_refreshed_list()
+                    .iter()
+                    .map(|disk| (disk.mount_point().to_path_buf(), disk.kind()))
+                    .collect()
+            })
+            .await
+            .unwrap_or_default();
+            let _ = DISKS.set(disks);
+        })
+        .await;
+}
 
 #[derive(Clone, Copy, Default)]
 struct WriteSample {
@@ -34,9 +54,23 @@ impl Pressure {
 }
 
 fn volume(path: &Path) -> PathBuf {
-    path.components()
-        .take(if cfg!(windows) { 2 } else { 1 })
-        .collect()
+    volume_for_mounts(path, DISKS.get().map_or(&[], Vec::as_slice))
+}
+
+fn volume_for_mounts(
+    path: &Path,
+    disks: &[(PathBuf, sysinfo::DiskKind)],
+) -> PathBuf {
+    disks
+        .iter()
+        .filter(|(mount, _)| path.starts_with(mount))
+        .max_by_key(|(mount, _)| mount.as_os_str().len())
+        .map(|(mount, _)| mount.clone())
+        .unwrap_or_else(|| {
+            path.components()
+                .take(if cfg!(windows) { 2 } else { 1 })
+                .collect()
+        })
 }
 
 pub(crate) fn pressure(path: &Path) -> Pressure {
@@ -77,21 +111,10 @@ pub(crate) fn disk_range_limit(kind: sysinfo::DiskKind) -> usize {
 }
 
 pub(crate) async fn range_limit(path: &Path) -> usize {
-    static DISKS: tokio::sync::OnceCell<Vec<(PathBuf, sysinfo::DiskKind)>> =
-        tokio::sync::OnceCell::const_new();
-    let disks = DISKS
-        .get_or_init(|| async {
-            tokio::task::spawn_blocking(|| {
-                sysinfo::Disks::new_with_refreshed_list()
-                    .iter()
-                    .map(|disk| (disk.mount_point().to_path_buf(), disk.kind()))
-                    .collect()
-            })
-            .await
-            .unwrap_or_default()
-        })
-        .await;
-    let limit = disks
+    initialize_disks().await;
+    let limit = DISKS
+        .get()
+        .map_or(&[][..], Vec::as_slice)
         .iter()
         .filter(|(mount, _)| path.starts_with(mount))
         .max_by_key(|(mount, _)| mount.as_os_str().len())
@@ -128,6 +151,7 @@ async fn write_with_budget<F, T>(
 where
     F: Future<Output = std::io::Result<T>>,
 {
+    initialize_disks().await;
     let waiting = Instant::now();
     let _permit = semaphore.acquire().await.map_err(std::io::Error::other)?;
     let queue_ms = waiting.elapsed().as_secs_f64() * 1000.0;
@@ -158,6 +182,24 @@ where
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn pressure_keys_use_the_longest_matching_mount() {
+        let mounts = vec![
+            (PathBuf::from("/"), sysinfo::DiskKind::Unknown(0)),
+            (PathBuf::from("/mnt/hdd"), sysinfo::DiskKind::HDD),
+            (PathBuf::from("/mnt/ssd"), sysinfo::DiskKind::SSD),
+        ];
+        let hdd = volume_for_mounts(Path::new("/mnt/hdd/mod.jar"), &mounts);
+        let ssd = volume_for_mounts(Path::new("/mnt/ssd/mod.jar"), &mounts);
+        assert_ne!(hdd, ssd);
+        assert_eq!(hdd, PathBuf::from("/mnt/hdd"));
+        assert_eq!(ssd, PathBuf::from("/mnt/ssd"));
+        assert_eq!(
+            volume_for_mounts(Path::new("/mnt/ssd-other/file"), &mounts),
+            PathBuf::from("/")
+        );
+    }
 
     #[test]
     fn disk_and_local_pressure_limit_range_growth() {
