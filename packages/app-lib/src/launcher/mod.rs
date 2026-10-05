@@ -1354,6 +1354,8 @@ async fn install_minecraft_with_local_source(
             &content_set.game_version,
             &loader_version.id,
             &client_path,
+            repairing,
+            &database_cancellation,
         )
         .await?;
     }

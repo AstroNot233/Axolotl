@@ -117,6 +117,19 @@ async fn copy_runtime_artifact(
         }
         return Ok(());
     }
+    if let Err(error) =
+        fetch::validate_file_content(source, plan.validation).await
+    {
+        if required {
+            return Err(crate::ErrorKind::LauncherError(format!(
+                "Invalid required runtime artifact {} at {}: {error}",
+                plan.label,
+                source.display()
+            ))
+            .into());
+        }
+        return Ok(());
+    }
     let sha1 = match &plan.sha1 {
         Some(sha1) => sha1.clone(),
         None => fetch::sha1_file_async(source).await?.1,
@@ -168,9 +181,16 @@ async fn copy_runtime_libraries(
         let lib = &library.library;
         let mut plans = Vec::new();
         if lib.include_in_classpath
-            && let Some(plan) =
+            && let Some(mut plan) =
                 direct_ensure::linked_classpath_plan(direct, library)?
         {
+            if !lib.downloadable
+                && plan.destination.extension().is_some_and(|extension| {
+                    extension.eq_ignore_ascii_case("jar")
+                })
+            {
+                plan.validation = fetch::ContentValidation::Jar;
+            }
             let relative = library.classpath_relative_path()?;
             let declared_source = cache.join(&relative);
             let source = if declared_source.is_file() {
@@ -422,13 +442,23 @@ mod tests {
         std::fs::write(path, bytes).unwrap();
     }
 
+    fn jar_bytes(payload: &[u8]) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        archive
+            .start_file("fixture", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        archive.write_all(payload).unwrap();
+        archive.finish().unwrap().into_inner()
+    }
+
     fn seed_cache(state: &State, info: &VersionInfo) {
         write(
             state
                 .directories
                 .version_dir(&info.id)
                 .join(format!("{}.jar", info.id)),
-            b"client jar",
+            &jar_bytes(b"client jar"),
         );
         for library in info
             .libraries
@@ -439,7 +469,7 @@ mod tests {
                 state.directories.libraries_dir().join(
                     daedalus::get_path_from_artifact(&library.name).unwrap(),
                 ),
-                library.name.as_bytes(),
+                &jar_bytes(library.name.as_bytes()),
             );
         }
     }
@@ -551,11 +581,11 @@ mod tests {
                         direct.libraries_dir().join("custom/forge-client.jar")
                     )
                     .unwrap(),
-                    info.libraries[0].name.as_bytes()
+                    jar_bytes(info.libraries[0].name.as_bytes())
                 );
                 assert_eq!(
                     std::fs::read(direct.client_jar("Survival")).unwrap(),
-                    b"client jar"
+                    jar_bytes(b"client jar")
                 );
             }
         }
@@ -604,6 +634,34 @@ mod tests {
             .to_string();
         assert!(error.contains("forge"), "{error}");
         assert_eq!(std::fs::read(json).unwrap(), b"previous manifest");
+    }
+
+    #[tokio::test]
+    async fn corrupt_generated_jar_blocks_publication_even_without_a_checksum()
+    {
+        let (_temp, state, direct) = fixture().await;
+        let mut info = version_info();
+        info.libraries = runtime_libraries();
+        seed_cache(&state, &info);
+        let source = state.directories.libraries_dir().join(
+            daedalus::get_path_from_artifact(&info.libraries[0].name).unwrap(),
+        );
+        write(&source, b"interrupted patch output");
+        let json = direct.version_dir().join("Survival.json");
+        write(&json, b"previous manifest");
+        let error = finalize(&state, &direct, &info, &CancellationToken::new())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&info.libraries[0].name), "{error}");
+        assert!(error.contains("Invalid"), "{error}");
+        assert_eq!(std::fs::read(json).unwrap(), b"previous manifest");
+        assert!(
+            !direct
+                .libraries_dir()
+                .join("custom/forge-client.jar")
+                .exists()
+        );
     }
 
     #[tokio::test]
@@ -662,11 +720,11 @@ mod tests {
         assert!(!direct.version_dir().join("Survival.json").exists());
         write(
             state.directories.libraries_dir().join("native/current.jar"),
-            b"current native",
+            &jar_bytes(b"current native"),
         );
         write(
             state.directories.libraries_dir().join("native/other.jar"),
-            b"other native",
+            &jar_bytes(b"other native"),
         );
         finalize(&state, &direct, &info, &CancellationToken::new())
             .await
@@ -674,12 +732,12 @@ mod tests {
         assert_eq!(
             std::fs::read(direct.libraries_dir().join("native/current.jar"))
                 .unwrap(),
-            b"current native"
+            jar_bytes(b"current native")
         );
         assert_eq!(
             std::fs::read(direct.libraries_dir().join("native/other.jar"))
                 .unwrap(),
-            b"other native"
+            jar_bytes(b"other native")
         );
         let resolved = direct.resolve().unwrap();
         let classpath = super::super::args::get_linked_class_paths(
