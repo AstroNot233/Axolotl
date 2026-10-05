@@ -62,6 +62,11 @@
 								size="2xs"
 								circular
 								icon-only
+								:label="
+									item.supportData
+										? formatMessage(messages.copySupport)
+										: formatMessage(messages.copy)
+								"
 								@click="copyToClipboard(item)"
 								><CheckIcon v-if="copied[getCopyKey(item)]" />
 								<CopyIcon v-else />
@@ -72,6 +77,7 @@
 								size="2xs"
 								circular
 								icon-only
+								:label="errorActionLabel || formatMessage(messages.exportErrorLogs)"
 								:disabled="exporting[item.id]"
 								@click="handleErrorAction(item)"
 								><DownloadIcon />
@@ -81,7 +87,7 @@
 								size="2xs"
 								circular
 								icon-only
-								:aria-label="formatMessage(messages.dismiss)"
+								:label="formatMessage(messages.dismiss)"
 								@click="dismissNotification(index)"
 								><XIcon />
 							</Button>
