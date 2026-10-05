@@ -5789,8 +5789,9 @@ fn modpack_zip_error(error: zip::result::ZipError) -> crate::Error {
 }
 
 fn safe_archive_relative_path(value: &str) -> crate::Result<String> {
-    let path = Path::new(value);
-    if value.is_empty()
+    let normalized = value.replace('\\', "/");
+    let path = Path::new(&normalized);
+    if normalized.is_empty()
         || path.is_absolute()
         || path
             .components()
@@ -5801,7 +5802,7 @@ fn safe_archive_relative_path(value: &str) -> crate::Result<String> {
         )
         .into());
     }
-    Ok(path.to_string_lossy().replace('\\', "/"))
+    Ok(normalized)
 }
 
 pub(crate) fn loader_family(loader_id: &str) -> &str {
