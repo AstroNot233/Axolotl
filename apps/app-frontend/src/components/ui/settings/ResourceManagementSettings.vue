@@ -1,7 +1,15 @@
 <script setup>
-import { BoxIcon, FolderOpenIcon, FolderSearchIcon, PlusIcon, TrashIcon } from '@modrinth/assets'
+import {
+	BoxIcon,
+	FolderOpenIcon,
+	FolderSearchIcon,
+	PlusIcon,
+	SaveIcon,
+	TrashIcon,
+} from '@modrinth/assets'
 import {
 	Combobox,
+	commonMessages,
 	ConfirmModal,
 	defineMessages,
 	IconButton,
@@ -13,7 +21,7 @@ import {
 } from '@modrinth/ui'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
 import { purge_cache_types } from '@/helpers/cache.js'
 import { configureCurseForgeManualDownloadWatcher } from '@/helpers/curseforge'
@@ -410,6 +418,14 @@ const messages = defineMessages({
 		id: 'app.settings.resources.doh-server-placeholder',
 		defaultMessage: 'https://doh.pub/dns-query',
 	},
+	dohCustom: {
+		id: 'app.settings.resources.doh-custom',
+		defaultMessage: 'Custom',
+	},
+	dohInvalidServer: {
+		id: 'app.settings.resources.doh-invalid-server',
+		defaultMessage: 'Enter a valid HTTPS URL.',
+	},
 	missingContentAutoImport: {
 		id: 'app.settings.resources.missing-content-auto-import',
 		defaultMessage: 'Automatically import missing modpack files',
@@ -601,7 +617,7 @@ const dohServerOptions = computed(() => [
 	{ value: 'https://doh.pub/dns-query', label: 'doh.pub' },
 	{ value: 'https://dns.alidns.com/dns-query', label: 'AliDNS' },
 	{ value: 'https://dns.google/dns-query', label: 'Google DNS' },
-	{ value: 'custom', label: 'Custom' },
+	{ value: 'custom', label: formatMessage(messages.dohCustom) },
 ])
 const dohPresetUrls = new Set([
 	'https://doh.pub/dns-query',
@@ -611,9 +627,38 @@ const dohPresetUrls = new Set([
 const dohServerSelection = ref(
 	dohPresetUrls.has(settings.value.doh_server) ? settings.value.doh_server : 'custom',
 )
+const dohServerDraft = ref(settings.value.doh_server)
+const dohSaving = ref(false)
+const dohDraftValid = computed(() => {
+	try {
+		const url = new URL(dohServerDraft.value.trim())
+		return url.protocol === 'https:' && !!url.hostname
+	} catch {
+		return false
+	}
+})
+let settingsSave = Promise.resolve()
+
+async function applyDohServer() {
+	if (!dohDraftValid.value || dohSaving.value) return
+	const previous = settings.value.doh_server
+	dohSaving.value = true
+	settings.value.doh_server = dohServerDraft.value.trim()
+	try {
+		await nextTick()
+		await settingsSave
+	} catch {
+		settings.value.doh_server = previous
+	} finally {
+		dohSaving.value = false
+	}
+}
 
 watch(dohServerSelection, (value) => {
-	if (value !== 'custom') settings.value.doh_server = value
+	if (value !== 'custom') {
+		settings.value.doh_server = value
+		dohServerDraft.value = value
+	}
 })
 
 const appDirectoryDescriptionText = computed(() =>
@@ -624,14 +669,15 @@ const appDirectoryDescriptionText = computed(() =>
 
 watch(
 	settings,
-	async () => {
+	() => {
 		const setSettings = JSON.parse(JSON.stringify(settings.value))
 
 		if (!setSettings.custom_dir) {
 			setSettings.custom_dir = null
 		}
 
-		await set(setSettings)
+		settingsSave = settingsSave.catch(() => {}).then(() => set(setSettings))
+		void settingsSave.catch(handleError)
 	},
 	{ deep: true },
 )
@@ -1046,22 +1092,45 @@ function validateMinecraftDirectory(value) {
 			<SettingsRow>
 				<template #label>{{ formatMessage(messages.dohEnabled) }}</template>
 				<template #control>
-					<Toggle id="doh-enabled" v-model="settings.doh_enabled" />
+					<Toggle id="doh-enabled" v-model="settings.doh_enabled" :disabled="dohSaving" />
 				</template>
 			</SettingsRow>
 			<SettingsRow v-if="settings.doh_enabled" stacked>
 				<template #label>{{ formatMessage(messages.dohServer) }}</template>
 				<template #control>
 					<div class="flex w-full flex-col gap-3">
-						<Combobox v-model="dohServerSelection" :options="dohServerOptions" />
-						<StyledInput
-							v-if="dohServerSelection === 'custom'"
-							id="doh-server"
-							v-model="settings.doh_server"
-							type="url"
-							:placeholder="formatMessage(messages.dohServerPlaceholder)"
-							wrapper-class="w-full"
+						<Combobox
+							v-model="dohServerSelection"
+							:options="dohServerOptions"
+							:disabled="dohSaving"
 						/>
+						<template v-if="dohServerSelection === 'custom'">
+							<div class="flex items-center gap-2">
+								<StyledInput
+									id="doh-server"
+									v-model="dohServerDraft"
+									type="url"
+									:disabled="dohSaving"
+									:aria-invalid="!dohDraftValid || undefined"
+									:aria-describedby="!dohDraftValid ? 'doh-server-error' : undefined"
+									:placeholder="formatMessage(messages.dohServerPlaceholder)"
+									wrapper-class="min-w-0 flex-1"
+									@keydown.enter.prevent="applyDohServer"
+								/>
+								<IconButton
+									v-tooltip="formatMessage(commonMessages.saveButton)"
+									:label="formatMessage(commonMessages.saveButton)"
+									:disabled="!dohDraftValid || dohServerDraft.trim() === settings.doh_server"
+									:loading="dohSaving"
+									@click="applyDohServer"
+								>
+									<SaveIcon />
+								</IconButton>
+							</div>
+							<p v-if="!dohDraftValid" id="doh-server-error" class="m-0 text-sm text-red">
+								{{ formatMessage(messages.dohInvalidServer) }}
+							</p>
+						</template>
 					</div>
 				</template>
 			</SettingsRow>

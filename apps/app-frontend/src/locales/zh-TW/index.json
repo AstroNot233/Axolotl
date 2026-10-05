@@ -6851,6 +6851,12 @@
   "app.settings.resources.database-backups-description": {
     "message": "重要應用程式的資料備份保存在這裡，以便日後需要時復原。"
   },
+	"app.settings.resources.doh-custom": {
+		"message": "自訂"
+	},
+	"app.settings.resources.doh-invalid-server": {
+		"message": "請輸入有效的 HTTPS 網址。"
+	},
   "app.settings.resources.doh-enabled": {
     "message": "使用 DNS over HTTPS"
   },

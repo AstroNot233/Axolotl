@@ -9392,8 +9392,14 @@
   "app.settings.resources.database-backups-description": {
     "message": "Backups of important app data are stored here in case you need to recover them later."
   },
+  "app.settings.resources.doh-custom": {
+    "message": "Custom"
+  },
   "app.settings.resources.doh-enabled": {
     "message": "Use DNS over HTTPS"
+  },
+  "app.settings.resources.doh-invalid-server": {
+    "message": "Enter a valid HTTPS URL."
   },
   "app.settings.resources.doh-server": {
     "message": "DNS over HTTPS server"

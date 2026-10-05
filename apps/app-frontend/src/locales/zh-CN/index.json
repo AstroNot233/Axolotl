@@ -9308,6 +9308,12 @@
   "app.settings.resources.database-backups-description": {
     "message": "重要应用数据的备份存储在此处，以便日后需要时恢复。"
   },
+	"app.settings.resources.doh-custom": {
+		"message": "自定义"
+	},
+	"app.settings.resources.doh-invalid-server": {
+		"message": "请输入有效的 HTTPS 地址。"
+	},
   "app.settings.resources.doh-enabled": {
     "message": "使用 DNS over HTTPS"
   },
