@@ -537,7 +537,7 @@ const focusState = ref(createDownloadFocusState(focusedJobId.value))
 watch(
 	() => route.query.tab,
 	(value) => {
-		if (value === 'active' || value === 'history') tab.value = value
+		tab.value = value === 'history' ? 'history' : 'active'
 	},
 )
 

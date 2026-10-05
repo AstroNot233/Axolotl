@@ -1,13 +1,16 @@
 import { mount } from '@vue/test-utils'
 import { expect, it, vi } from 'vitest'
-import { nextTick, ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 
 import type { InstallJobSnapshot } from '@/helpers/install'
 import { preserveMonotonicProgress } from '@/helpers/install-progress'
 
 import Downloads from './Downloads.vue'
 
-const fixture = vi.hoisted(() => ({ manager: {} as unknown }))
+const fixture = vi.hoisted(() => ({
+	manager: {} as unknown,
+	route: { query: {} as Record<string, unknown> },
+}))
 
 // Keep the actual page and ProgressBar; isolate native APIs and unrelated controls.
 vi.mock('@/providers/download-manager', () => ({
@@ -22,7 +25,7 @@ vi.mock('@/components/ui/modal/MissingModpackContentModal.vue', () => ({
 	default: { render: () => null },
 }))
 vi.mock('vue-router', () => ({
-	useRoute: () => ({ query: {} }),
+	useRoute: () => fixture.route,
 	useRouter: () => ({ push: vi.fn() }),
 }))
 vi.mock('@modrinth/ui', async () => {
@@ -86,6 +89,25 @@ function downloadingJob(provider: InstallJobSnapshot['provider']): InstallJobSna
 		items: [],
 	}
 }
+
+it('returning from history without a valid tab query displays active downloads', async () => {
+	fixture.route = reactive({ query: { tab: 'history' } as Record<string, unknown> })
+	const jobs = ref([downloadingJob('modrinth')])
+	fixture.manager = { jobs, activeJobs: jobs, historyJobs: ref([]), legacyDownloads: ref([]) }
+	const wrapper = mount(Downloads, { global: { directives: { tooltip: () => {} } } })
+	try {
+		const tabs = () => wrapper.get('[data-onboarding-id="downloads-tabs"] > div')
+		expect(tabs().attributes('active-index')).toBe('1')
+		for (const value of [undefined, 'invalid', 'active']) {
+			fixture.route.query.tab = value
+			await nextTick()
+			expect(tabs().attributes('active-index')).toBe('0')
+		}
+	} finally {
+		wrapper.unmount()
+		fixture.route = { query: {} }
+	}
+})
 
 it.each(['curse_forge', 'local'] as const)(
 	'%s extraction clears the previous download percentage and accepts new phase progress',

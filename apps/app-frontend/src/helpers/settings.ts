@@ -136,7 +136,7 @@ export function setBrowseDefaultInstanceId(instanceId: string | null) {
 	}
 }
 
-export type AppSettings = {
+export type AppSettings = DohSettings & {
 	max_concurrent_downloads: number
 	max_concurrent_writes: number
 	auto_concurrent_downloads: boolean

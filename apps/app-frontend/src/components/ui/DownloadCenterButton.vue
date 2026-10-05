@@ -68,6 +68,8 @@
 							</button>
 							<button
 								v-tooltip="formatMessage(messages.cancel)"
+								:disabled="cancelingJobs.has(job.job_id)"
+								:aria-label="formatMessage(messages.cancel)"
 								class="flex size-6 shrink-0 items-center justify-center rounded-full text-[var(--color-text-tertiary)] hover:bg-surface-5 hover:text-[var(--color-text-primary)]"
 								@click="void cancel(job.job_id)"
 							>
@@ -118,7 +120,13 @@
 
 <script setup lang="ts">
 import { DownloadIcon, LoaderCircleIcon, XIcon } from '@modrinth/assets'
-import { defineMessages, PopoutMenu, useFormatBytes, useVIntl } from '@modrinth/ui'
+import {
+	defineMessages,
+	injectNotificationManager,
+	PopoutMenu,
+	useFormatBytes,
+	useVIntl,
+} from '@modrinth/ui'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -129,6 +137,8 @@ const { formatMessage } = useVIntl()
 const formatBytes = useFormatBytes()
 const router = useRouter()
 const downloadManager = injectDownloadManager()
+const { handleError } = injectNotificationManager()
+const cancelingJobs = ref(new Set<string>())
 const open = ref(false)
 
 const messages = defineMessages({
@@ -242,7 +252,15 @@ function runPopoutAction(hide: () => void, action: () => void) {
 }
 
 async function cancel(jobId: string) {
-	await downloadManager.cancel(jobId)
+	if (cancelingJobs.value.has(jobId)) return
+	cancelingJobs.value.add(jobId)
+	try {
+		await downloadManager.cancel(jobId)
+	} catch (error) {
+		handleError(error)
+	} finally {
+		cancelingJobs.value.delete(jobId)
+	}
 }
 </script>
 
