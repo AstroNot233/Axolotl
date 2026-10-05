@@ -634,6 +634,15 @@ fn create_main_window(app: &AppHandle, route: &str) -> Result<(), String> {
         {
             builder = builder.decorations(false);
         }
+        #[cfg(target_os = "macos")]
+        {
+            builder = builder
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .hidden_title(true)
+                .traffic_light_position(tauri::LogicalPosition::new(
+                    15.0, 22.0,
+                ));
+        }
         builder.build().map_err(|error| error.to_string())?;
     }
     Ok(())
