@@ -848,14 +848,18 @@ impl Settings {
         .bind(self.show_skin_selector_in_sidebar)
         .execute(exec)
         .await?;
-        sqlx::query("UPDATE settings SET allow_external_scheme = ? WHERE id = 0")
-            .bind(self.allow_external_scheme)
-            .execute(exec)
-            .await?;
-        sqlx::query("UPDATE settings SET allow_privileged_scheme = ? WHERE id = 0")
-            .bind(self.allow_privileged_scheme)
-            .execute(exec)
-            .await?;
+        sqlx::query(
+            "UPDATE settings SET allow_external_scheme = ? WHERE id = 0",
+        )
+        .bind(self.allow_external_scheme)
+        .execute(exec)
+        .await?;
+        sqlx::query(
+            "UPDATE settings SET allow_privileged_scheme = ? WHERE id = 0",
+        )
+        .bind(self.allow_privileged_scheme)
+        .execute(exec)
+        .await?;
 
         Ok(())
     }

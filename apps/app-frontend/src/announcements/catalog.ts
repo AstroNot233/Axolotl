@@ -42,6 +42,26 @@ export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
 						'Fixed right-click Copy and Paste menus in the Discover and Library search fields.',
 					'zh-CN': '修复发现页和库页面搜索框无法通过右键菜单复制、粘贴的问题。',
 				},
+				{
+					'en-US': 'Fixed some i18n strings that were not following the i18n specification.',
+					'zh-CN': '修补部分文案未遵循i18n规范的问题。',
+				},
+				{
+					'en-US': 'Fixed proxy behavior when logging in with a Mojang account.',
+					'zh-CN': '修复代理在登陆游戏账号时的不正常行为。',
+				},
+			],
+			changed: [
+				{
+					'en-US': 'Import instances using the .minecraft folder directly.',
+					'zh-CN': '导入实例时，将优先以.minecraft文件夹直用方式导入。',
+				},
+			],
+			added: [
+				{
+					'en-US': 'Added more URL Scheme abilities.',
+					'zh-CN': '新增更多URL Scheme能力。',
+				},
 			],
 		},
 	},
