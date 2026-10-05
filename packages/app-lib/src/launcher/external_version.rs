@@ -2,7 +2,9 @@
 
 use std::path::Path;
 
-use daedalus::minecraft::{DownloadType, VersionInfo};
+use daedalus::minecraft::{
+    DownloadType, Library, LibraryDownload, LibraryDownloads, VersionInfo,
+};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
@@ -22,12 +24,185 @@ pub(crate) struct PortableVersion {
     pub(crate) libraries: Vec<LinkedLibrary>,
 }
 
+fn uses_fml_runtime(info: &VersionInfo) -> bool {
+    matches!(
+        info.main_class.as_str(),
+        "cpw.mods.bootstraplauncher.BootstrapLauncher"
+            | "cpw.mods.modlauncher.Launcher"
+    )
+}
+
+fn is_fml_runtime_library(library: &Library) -> bool {
+    let mut coordinate = library.name.split(':');
+    let group = coordinate.next();
+    let artifact = coordinate.next();
+    let _version = coordinate.next();
+    let classifier = coordinate.next();
+    matches!(
+        (group, artifact),
+        (
+            Some("net.minecraftforge"),
+            Some(
+                "fmlcore"
+                    | "javafmllanguage"
+                    | "lowcodelanguage"
+                    | "mclanguage"
+            )
+        )
+    ) || (classifier == Some("universal")
+        && matches!(
+            (group, artifact),
+            (Some("net.minecraftforge"), Some("forge"))
+                | (Some("net.neoforged"), Some("neoforge"))
+        ))
+}
+
+/// FML discovers game modules through Maven paths, including outputs absent from its classpath.
+fn generated_fml_runtime_libraries(
+    info: &VersionInfo,
+) -> crate::Result<Vec<Library>> {
+    let mut libraries = Vec::new();
+    if !uses_fml_runtime(info) {
+        return Ok(libraries);
+    }
+    let Some(data) = &info.data else {
+        return Ok(libraries);
+    };
+    for key in ["PATCHED", "MC_SRG", "MC_EXTRA"] {
+        let Some(entry) = data.get(key) else {
+            continue;
+        };
+        let coordinate = entry.client.trim().trim_matches(['\'', '"']);
+        let coordinate = coordinate.strip_prefix('[').and_then(|coordinate| coordinate.strip_suffix(']')).ok_or_else(|| {
+            crate::ErrorKind::LauncherError(format!("FML client runtime artifact {key} has no Maven coordinate: {}", entry.client))
+        })?;
+        let path = daedalus::get_path_from_artifact(coordinate)?;
+        if coordinate.starts_with("com.axolotl.loader-installer:embedded:")
+            || !direct_ensure::safe_maven_relative_path(&path)
+            || !path.ends_with(".jar")
+        {
+            return Err(crate::ErrorKind::LauncherError(format!("Invalid FML client runtime artifact {key}: {coordinate} at {path}")).into());
+        }
+        let sha1 = data
+            .get(&format!("{key}_SHA"))
+            .and_then(|entry| super::processor_output_sha1(&entry.client))
+            .unwrap_or_default()
+            .to_string();
+        libraries.push(Library {
+            name: coordinate.to_string(),
+            downloads: Some(LibraryDownloads {
+                artifact: Some(LibraryDownload {
+                    path: Some(path),
+                    sha1,
+                    size: 0,
+                    url: String::new(),
+                }),
+                classifiers: None,
+            }),
+            url: None,
+            extract: None,
+            natives: None,
+            rules: None,
+            checksums: None,
+            include_in_classpath: true,
+            downloadable: false,
+        });
+    }
+    Ok(libraries)
+}
+
+fn extend_bootstrap_ignore_argument(
+    value: &mut Value,
+    filenames: &[String],
+) -> bool {
+    match value {
+        Value::String(argument) => {
+            let Some(ignored) = argument.strip_prefix("-DignoreList=") else {
+                return false;
+            };
+            let mut ignored = ignored
+                .split(',')
+                .filter(|prefix| !prefix.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            for filename in filenames {
+                if !ignored.iter().any(|prefix| filename.starts_with(prefix)) {
+                    ignored.push(filename.clone());
+                }
+            }
+            *argument = format!("-DignoreList={}", ignored.join(","));
+            true
+        }
+        Value::Array(arguments) => {
+            arguments.iter_mut().fold(false, |changed, argument| {
+                extend_bootstrap_ignore_argument(argument, filenames) || changed
+            })
+        }
+        Value::Object(argument) => {
+            argument.get_mut("value").is_some_and(|value| {
+                extend_bootstrap_ignore_argument(value, filenames)
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Declared FML game JARs must remain outside BootstrapLauncher's parent module layer.
+fn exclude_fml_game_modules_from_bootstrap(
+    document: &mut Value,
+    libraries: &[LinkedLibrary],
+    generated: &[Library],
+) -> crate::Result<()> {
+    let mut filenames = Vec::new();
+    for library in libraries {
+        if is_fml_runtime_library(&library.library)
+            || generated
+                .iter()
+                .any(|generated| generated.name == library.library.name)
+        {
+            let path = library.classpath_relative_path()?;
+            if let Some(filename) =
+                path.file_name().and_then(|name| name.to_str())
+            {
+                filenames.push(filename.to_string());
+            }
+        }
+    }
+    if filenames.is_empty() {
+        return Ok(());
+    }
+    let arguments = document
+        .as_object_mut()
+        .unwrap()
+        .entry("arguments")
+        .or_insert_with(|| serde_json::json!({}));
+    let jvm = arguments
+        .as_object_mut()
+        .unwrap()
+        .entry("jvm")
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .unwrap();
+    let mut changed = false;
+    for argument in jvm.iter_mut() {
+        changed |= extend_bootstrap_ignore_argument(argument, &filenames);
+    }
+    if !changed {
+        let mut argument =
+            Value::String("-DignoreList=asm,securejarhandler".to_string());
+        extend_bootstrap_ignore_argument(&mut argument, &filenames);
+        jvm.push(argument);
+    }
+    Ok(())
+}
+
 pub(crate) fn project_manifest(
     info: &VersionInfo,
     version_name: &str,
     game_version: &str,
 ) -> crate::Result<PortableVersion> {
-    let libraries = info
+    let generated = generated_fml_runtime_libraries(info)?;
+    let mut libraries = info
         .libraries
         .iter()
         .filter(|library| {
@@ -36,17 +211,46 @@ pub(crate) fn project_manifest(
                 .starts_with("com.axolotl.loader-installer:embedded:")
                 && (library.include_in_classpath
                     || library.natives.is_some()
-                    || is_native_only_library(library))
+                    || is_native_only_library(library)
+                    || (uses_fml_runtime(info)
+                        && is_fml_runtime_library(library)))
         })
         .map(|library| LinkedLibrary {
-            library: library.clone(),
+            library: {
+                let mut runtime_library = library.clone();
+                if uses_fml_runtime(info) && is_fml_runtime_library(library) {
+                    runtime_library.include_in_classpath = true;
+                }
+                runtime_library
+            },
             hint: None,
             filename: None,
         })
         .collect::<Vec<_>>();
+    for generated_library in &generated {
+        if let Some(existing) = libraries
+            .iter_mut()
+            .find(|library| library.library.name == generated_library.name)
+        {
+            existing.library = generated_library.clone();
+        } else {
+            libraries.push(LinkedLibrary {
+                library: generated_library.clone(),
+                hint: None,
+                filename: None,
+            });
+        }
+    }
     let mut document = serde_json::to_value(info)?;
     document["id"] = version_name.into();
     document["clientVersion"] = game_version.into();
+    if info.main_class == "cpw.mods.bootstraplauncher.BootstrapLauncher" {
+        exclude_fml_game_modules_from_bootstrap(
+            &mut document,
+            &libraries,
+            &generated,
+        )?;
+    }
     let object = document
         .as_object_mut()
         .expect("VersionInfo serializes as an object");
@@ -410,6 +614,72 @@ mod tests {
         ])).unwrap()
     }
 
+    fn fml_version_info(neoforge: bool) -> VersionInfo {
+        let mut info = version_info();
+        let (game, loader, patched, extra, universal) = if neoforge {
+            (
+                "1.21.1",
+                "21.1.251",
+                "net.neoforged:neoforge:21.1.251:client",
+                "net.minecraft:client:1.21.1-20240808.144430:extra",
+                "net.neoforged:neoforge:21.1.251:universal",
+            )
+        } else {
+            (
+                "1.20.1",
+                "47.4.20",
+                "net.minecraftforge:forge:1.20.1-47.4.20:client",
+                "net.minecraft:client:1.20.1-20230612.114412:extra",
+                "net.minecraftforge:forge:1.20.1-47.4.20:universal",
+            )
+        };
+        info.id = format!("{game}-{loader}");
+        info.arguments.as_mut().unwrap().insert(
+            daedalus::minecraft::ArgumentType::Jvm,
+            vec![daedalus::minecraft::Argument::Normal(
+                "-DignoreList=bootstraplauncher,asm".to_string(),
+            )],
+        );
+        info.libraries = serde_json::from_value(json!([
+            {"name": "cpw.mods:bootstraplauncher:1.1.2"},
+            {"name": universal, "include_in_classpath": false},
+            {"name": "net.minecraftforge:installertools:1.3.0", "include_in_classpath": false},
+            {"name": "net.minecraftforge:ForgeAutoRenamingTool:0.1.22:all", "include_in_classpath": false}
+        ])).unwrap();
+        if !neoforge {
+            for module in [
+                "fmlcore",
+                "javafmllanguage",
+                "lowcodelanguage",
+                "mclanguage",
+            ] {
+                info.libraries.push(serde_json::from_value(json!({
+                    "name": format!("net.minecraftforge:{module}:1.20.1-47.4.20"),
+                    "include_in_classpath": false
+                })).unwrap());
+            }
+        }
+        let srg = format!("{}:srg", extra.strip_suffix(":extra").unwrap());
+        for (key, coordinate) in [
+            ("PATCHED", patched),
+            ("MC_EXTRA", extra),
+            ("MC_SRG", srg.as_str()),
+            (
+                "MC_SLIM",
+                "net.minecraft:client:1.20.1-20230612.114412:slim",
+            ),
+        ] {
+            info.data.as_mut().unwrap().insert(
+                key.to_string(),
+                daedalus::modded::SidedDataEntry {
+                    client: format!("[{coordinate}]"),
+                    server: "[example:server-only:1]".to_string(),
+                },
+            );
+        }
+        info
+    }
+
     async fn fixture() -> (TempDir, Arc<State>, DirectLinkedLaunch) {
         let temp = TempDir::new().unwrap();
         let dirs = DirectoryInfo {
@@ -460,16 +730,18 @@ mod tests {
                 .join(format!("{}.jar", info.id)),
             &jar_bytes(b"client jar"),
         );
-        for library in info
+        for library in project_manifest(info, "Survival", "1.20.1")
+            .unwrap()
             .libraries
             .iter()
-            .filter(|library| library.include_in_classpath)
+            .filter(|library| library.library.include_in_classpath)
         {
             write(
                 state.directories.libraries_dir().join(
-                    daedalus::get_path_from_artifact(&library.name).unwrap(),
+                    daedalus::get_path_from_artifact(&library.library.name)
+                        .unwrap(),
                 ),
-                &jar_bytes(library.name.as_bytes()),
+                &jar_bytes(library.library.name.as_bytes()),
             );
         }
     }
@@ -600,6 +872,140 @@ mod tests {
             b"world"
         );
         assert!(!direct.libraries_dir().join("processor").exists());
+    }
+
+    #[tokio::test]
+    async fn fml_runtime_modules_and_generated_outputs_are_exported_for_forge_and_neoforge()
+     {
+        let (_temp, state, direct) = fixture().await;
+        for neoforge in [false, true] {
+            let info = fml_version_info(neoforge);
+            let game_version = if neoforge { "1.21.1" } else { "1.20.1" };
+            let before = serde_json::to_value(&info).unwrap();
+            let projected =
+                project_manifest(&info, "Survival", game_version).unwrap();
+            assert_eq!(projected.libraries.len(), if neoforge { 5 } else { 9 });
+            assert!(
+                projected
+                    .libraries
+                    .iter()
+                    .all(|library| library.library.include_in_classpath)
+            );
+            assert!(projected.libraries.iter().all(|library| {
+                !library.library.name.contains("installertools")
+                    && !library.library.name.contains("AutoRenamingTool")
+            }));
+            let ignored =
+                projected.document["arguments"]["jvm"][0].as_str().unwrap();
+            assert!(ignored.starts_with("-DignoreList=bootstraplauncher,asm,"));
+            for key in ["PATCHED", "MC_SRG", "MC_EXTRA"] {
+                let coordinate = info.data.as_ref().unwrap()[key]
+                    .client
+                    .trim_start_matches('[')
+                    .trim_end_matches(']');
+                let library = projected
+                    .libraries
+                    .iter()
+                    .find(|library| library.library.name == coordinate)
+                    .unwrap();
+                assert!(!library.library.downloadable);
+                let filename = library
+                    .classpath_relative_path()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string();
+                assert!(ignored.contains(&filename), "{ignored}");
+            }
+            seed_cache(&state, &info);
+            finalize_version(
+                &direct,
+                &info.id,
+                game_version,
+                &info,
+                &state,
+                std::env::consts::ARCH,
+                true,
+                None,
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+            for library in &projected.libraries {
+                assert!(
+                    direct.library_path(library).unwrap().is_file(),
+                    "{}",
+                    library.library.name
+                );
+            }
+            let resolved = direct.resolve().unwrap();
+            let classpath = super::super::args::get_linked_class_paths(
+                &direct,
+                &resolved.merged.libraries,
+                &[&direct.client_jar("Survival")],
+                std::env::consts::ARCH,
+                true,
+            )
+            .unwrap();
+            assert!(classpath.contains("-client.jar"), "{classpath}");
+            assert!(classpath.contains("-extra.jar"), "{classpath}");
+            assert!(classpath.contains("-srg.jar"), "{classpath}");
+            assert!(classpath.contains("-universal.jar"), "{classpath}");
+            assert!(
+                !classpath.contains("-slim.jar")
+                    && !classpath.contains("AutoRenamingTool")
+                    && !classpath.contains("installertools"),
+                "{classpath}"
+            );
+            assert_eq!(serde_json::to_value(&info).unwrap(), before);
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_fml_output_absent_from_the_classpath_blocks_publication() {
+        let (_temp, state, direct) = fixture().await;
+        let info = fml_version_info(false);
+        seed_cache(&state, &info);
+        let patched = "net.minecraftforge:forge:1.20.1-47.4.20:client";
+        std::fs::remove_file(
+            state
+                .directories
+                .libraries_dir()
+                .join(daedalus::get_path_from_artifact(patched).unwrap()),
+        )
+        .unwrap();
+        let json = direct.version_dir().join("Survival.json");
+        write(&json, b"previous manifest");
+        let error = finalize(&state, &direct, &info, &CancellationToken::new())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(patched), "{error}");
+        assert_eq!(std::fs::read(json).unwrap(), b"previous manifest");
+    }
+
+    #[test]
+    fn fml_generated_output_paths_are_validated_before_projection() {
+        let mut info = fml_version_info(false);
+        for coordinate in [
+            "[example:../../escape:1]",
+            "[com.axolotl.loader-installer:embedded:1:patched@jar]",
+        ] {
+            info.data
+                .as_mut()
+                .unwrap()
+                .get_mut("PATCHED")
+                .unwrap()
+                .client = coordinate.to_string();
+            assert!(
+                project_manifest(&info, "Survival", "1.20.1")
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("Invalid FML client runtime artifact")
+            );
+        }
     }
 
     #[tokio::test]
