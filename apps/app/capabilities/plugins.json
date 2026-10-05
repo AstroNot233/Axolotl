@@ -169,6 +169,8 @@
 		"terracotta:default",
 		"multiplayer:default",
 		"servers:default",
+		"friends:default",
+		"telemetry:default",
 		"planet-minecraft:default"
 	]
 }
