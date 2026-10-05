@@ -5,7 +5,7 @@ use quartz_nbt::{NbtCompound, NbtList, NbtTag};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
 use tokio::task::JoinSet;
@@ -104,6 +104,15 @@ pub async fn list_world_datapacks(
     Ok(result)
 }
 
+/// Accepts exactly one normal path component, rejecting empty names, `.`,
+/// `..`, multi-segment paths and absolute paths.
+fn is_single_normal_component(path: &Path) -> bool {
+    matches!(
+        path.components().collect::<Vec<_>>().as_slice(),
+        [Component::Normal(_)]
+    )
+}
+
 /// Deletes a datapack (folder or zip) inside a save's `datapacks` folder.
 pub async fn delete_world_datapack(
     instance_id: &str,
@@ -112,13 +121,13 @@ pub async fn delete_world_datapack(
 ) -> Result<()> {
     let instance_dir = get_full_path(instance_id).await?;
     let world_path = Path::new(world_path);
-    if world_path.components().count() != 1 {
+    if !is_single_normal_component(world_path) {
         return Err(
             ErrorKind::InputError("Invalid world path".into()).as_error()
         );
     }
     let file_name = Path::new(file_name);
-    if file_name.components().count() != 1 || file_name.as_os_str().is_empty() {
+    if !is_single_normal_component(file_name) {
         return Err(ErrorKind::InputError("Invalid datapack file name".into())
             .as_error());
     }
@@ -152,13 +161,13 @@ pub async fn set_world_datapack_enabled(
 ) -> Result<()> {
     let instance_dir = get_full_path(instance_id).await?;
     let world_path = Path::new(world_path);
-    if world_path.components().count() != 1 {
+    if !is_single_normal_component(world_path) {
         return Err(
             ErrorKind::InputError("Invalid world path".into()).as_error()
         );
     }
     let file_name = Path::new(file_name);
-    if file_name.components().count() != 1 || file_name.as_os_str().is_empty() {
+    if !is_single_normal_component(file_name) {
         return Err(ErrorKind::InputError("Invalid datapack file name".into())
             .as_error());
     }
