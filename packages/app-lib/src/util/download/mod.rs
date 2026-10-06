@@ -4,6 +4,7 @@
 //! HTTP/1.1 range requests. Route health, integrity checks, and recovery are
 //! applied uniformly to every download.
 
+pub(crate) mod authority_scheduler;
 pub(crate) mod diagnostics;
 pub mod h2_download;
 pub mod h2_pool;
