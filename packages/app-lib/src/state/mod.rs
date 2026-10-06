@@ -794,6 +794,13 @@ impl State {
     ) -> crate::Result<()> {
         self.update_http_client_for_settings(settings).await?;
         self.update_download_settings(settings);
+        // The stored level is the one `set` kept, which a request value this
+        // build does not know has already been replaced by the default.
+        if let Err(error) =
+            crate::logger::set_log_level(&settings.normalized().log_level)
+        {
+            tracing::warn!(%error, "Keeping the previous log level");
+        }
         Ok(())
     }
 
