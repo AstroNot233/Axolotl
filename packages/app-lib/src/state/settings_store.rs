@@ -252,16 +252,33 @@ async fn shipped_defaults(path: &Path) -> Map<String, Value> {
     }
 }
 
+/// What every key falls back to when no document carries it, which is what a
+/// write compares against once a deployment ships nothing for it.
+fn settings_defaults() -> Map<String, Value> {
+    match serde_json::to_value(Settings::default()) {
+        Ok(Value::Object(defaults)) => defaults,
+        other => {
+            debug_assert!(
+                false,
+                "the settings default is not an object: {other:?}"
+            );
+            Map::new()
+        }
+    }
+}
+
 /// Gives `key` to the document, or takes it away when its value is what the
-/// deployment already ships: a key that returns to a shipped default leaves the
-/// document again, so changing that default still reaches the settings.
+/// build or the deployment already provides: a key that returns to its default
+/// leaves the document again, so a changed default still reaches the settings.
 fn write_key(
     data: &mut Map<String, Value>,
     key: &str,
     value: Value,
+    shipped: &Map<String, Value>,
     defaults: &Map<String, Value>,
 ) {
-    if defaults.get(key) == Some(&value) {
+    let provided = provided(shipped.get(key), defaults, key);
+    if provided == Some(&value) {
         data.remove(key);
     } else {
         data.insert(key.to_string(), value);
@@ -273,6 +290,7 @@ fn write_key(
 /// part of this, since startup hands it over to the documents once.
 pub(crate) async fn read_settings() -> Settings {
     let mut settings = Settings::default();
+    let defaults = settings_defaults();
     for (name, keys) in DOMAINS {
         settings = overlay_layers(
             config_path(name).as_deref(),
@@ -281,8 +299,58 @@ pub(crate) async fn read_settings() -> Settings {
             settings,
         )
         .await;
+        prune_repeated(name, keys, &defaults).await;
     }
     settings
+}
+
+/// Drops what a local document repeats of a value the build or the deployment
+/// already provides. Writing a value into a deployment's own document is how
+/// its owner says a key should follow it, so the local copy stops shadowing it
+/// as soon as the two agree, and a later change to that default still arrives.
+async fn prune_repeated(
+    name: &str,
+    keys: &[&str],
+    defaults: &Map<String, Value>,
+) {
+    if config_dir().is_none() {
+        return;
+    }
+    let Some(path) = local_path(name) else {
+        return;
+    };
+    let stored = stored_at(&path).await;
+    if stored.is_empty() {
+        return;
+    }
+    let shipped = shipped_defaults(&path).await;
+    let repeated = keys.iter().any(|key| {
+        stored.get(*key).is_some_and(|value| {
+            provided(shipped.get(*key), defaults, key) == Some(value)
+        })
+    });
+    if !repeated {
+        return;
+    }
+
+    let _writing = WRITES.lock().await;
+    if let Err(error) = prune_at(&path, keys, &shipped, defaults).await {
+        tracing::warn!(
+            path = %path.display(),
+            %error,
+            "Failed to drop the entries a default already provides"
+        );
+    }
+}
+
+/// What `key` resolves to when no document carries it: the deployment's value
+/// when it ships one, and the build's default otherwise.
+fn provided<'a>(
+    shipped: Option<&'a Value>,
+    defaults: &'a Map<String, Value>,
+    key: &str,
+) -> Option<&'a Value> {
+    shipped.or_else(|| defaults.get(key))
 }
 
 /// Layers the documents of one domain, so a default gives way to the local file
@@ -330,6 +398,64 @@ pub async fn sanitise() -> crate::Result<usize> {
         removed += sanitise_at(&path, keys).await?;
     }
     Ok(removed)
+}
+
+/// Drops the entries that only repeat what the build or a deployment already
+/// provides, which is what a document written before those defaults existed
+/// carries. Startup runs it once, so a default a deployment changed while the
+/// launcher was closed reaches the settings again.
+pub(crate) async fn prune_redundant() {
+    let _writing = WRITES.lock().await;
+    let settings_defaults = settings_defaults();
+    for (name, keys) in DOMAINS {
+        let Some(path) = local_path(name) else {
+            return;
+        };
+        let shipped = shipped_defaults(&path).await;
+        if let Err(error) =
+            prune_at(&path, keys, &shipped, &settings_defaults).await
+        {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "Failed to prune the {name} settings"
+            );
+        }
+    }
+}
+
+async fn prune_at(
+    path: &Path,
+    keys: &[&str],
+    shipped: &Map<String, Value>,
+    defaults: &Map<String, Value>,
+) -> crate::Result<()> {
+    let Stored::Ready(document) = read(path).await else {
+        return Ok(());
+    };
+    let Some(mut data) = document.data.as_object().cloned() else {
+        return Ok(());
+    };
+    let before = data.len();
+    for key in keys {
+        let Some(value) = data.get(*key).cloned() else {
+            continue;
+        };
+        let provided = provided(shipped.get(*key), defaults, key);
+        if provided == Some(&value) {
+            data.remove(*key);
+        }
+    }
+    if data.len() == before {
+        return Ok(());
+    }
+
+    tracing::info!(
+        path = %path.display(),
+        removed = before - data.len(),
+        "Dropped settings entries a default already provides"
+    );
+    write_document(path, data).await
 }
 
 async fn sanitise_at(path: &Path, keys: &[&str]) -> crate::Result<usize> {
@@ -477,6 +603,7 @@ async fn store_to(
         return Ok(());
     };
     let defaults = shipped_defaults(path).await;
+    let settings_defaults = settings_defaults();
 
     let normalized = settings.normalized();
     let mut value = serde_json::to_value(&normalized)?;
@@ -486,7 +613,7 @@ async fn store_to(
     fields.retain(|key, _| keys.contains(&key.as_str()));
 
     for (key, value) in fields.iter() {
-        write_key(&mut data, key, value.clone(), &defaults);
+        write_key(&mut data, key, value.clone(), &defaults, &settings_defaults);
     }
 
     write_document(path, data).await
@@ -567,7 +694,8 @@ async fn set_key_at(path: &Path, key: &str, value: Value) -> crate::Result<()> {
         return Ok(());
     };
     let defaults = shipped_defaults(path).await;
-    write_key(&mut data, key, value, &defaults);
+    let settings_defaults = settings_defaults();
+    write_key(&mut data, key, value, &defaults, &settings_defaults);
     write_document(path, data).await
 }
 
@@ -579,8 +707,9 @@ async fn set_entries_at(
         return Ok(());
     };
     let defaults = shipped_defaults(path).await;
+    let settings_defaults = settings_defaults();
     for (key, value) in entries {
-        write_key(&mut data, key, value.clone(), &defaults);
+        write_key(&mut data, key, value.clone(), &defaults, &settings_defaults);
     }
     write_document(path, data).await
 }
@@ -705,6 +834,79 @@ mod tests {
     #[tokio::test]
     async fn a_store_without_a_directory_has_nothing_to_write_to() {
         assert!(!needs_seeding_at(None, true).await);
+    }
+
+    #[tokio::test]
+    async fn a_key_that_matches_the_default_leaves_the_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appearance.json");
+        TEST_CONFIG_DIR.with(|current| *current.borrow_mut() = None);
+
+        let mut settings = Settings::default();
+        settings.theme = crate::state::Theme::Dark;
+        settings.locale = "de-DE".to_string();
+        store_to(&path, appearance(), &settings).await.unwrap();
+
+        let stored = stored_at(&path).await;
+        assert!(!stored.contains_key("theme"));
+        assert_eq!(stored.get("locale"), Some(&Value::from("de-DE")));
+    }
+
+    /// A value the user also wrote into the deployment's document stops
+    /// shadowing it, which is what lets a later change to it arrive.
+    #[tokio::test]
+    async fn a_local_entry_that_repeats_a_shipped_default_leaves_the_document()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let shipped = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(DIR_NAME)).unwrap();
+        let path = dir.path().join(DIR_NAME).join("appearance.json");
+        std::fs::write(&path, document(r#"{"theme":"oled","locale":"fr-FR"}"#))
+            .unwrap();
+        std::fs::write(
+            &shipped.path().join("appearance.json"),
+            document(r#"{"theme":"oled"}"#),
+        )
+        .unwrap();
+
+        TEST_DIR.with(|current| {
+            *current.borrow_mut() = Some(dir.path().to_path_buf());
+        });
+        TEST_CONFIG_DIR.with(|current| {
+            *current.borrow_mut() = Some(shipped.path().to_path_buf());
+        });
+        let settings = read_settings().await;
+
+        assert_eq!(settings.theme.as_str(), "oled");
+        assert_eq!(settings.locale, "fr-FR");
+        let stored = stored_at(&path).await;
+        assert!(!stored.contains_key("theme"));
+        assert_eq!(stored.get("locale"), Some(&Value::from("fr-FR")));
+
+        TEST_DIR.with(|current| *current.borrow_mut() = None);
+        TEST_CONFIG_DIR.with(|current| *current.borrow_mut() = None);
+    }
+
+    /// A document that leaves a key out reads as the default the build carries.
+    #[tokio::test]
+    async fn a_key_a_document_leaves_out_reads_as_the_default() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(DIR_NAME)).unwrap();
+        std::fs::write(
+            dir.path().join(DIR_NAME).join("appearance.json"),
+            document(r#"{"locale":"de-DE"}"#),
+        )
+        .unwrap();
+        TEST_DIR.with(|current| {
+            *current.borrow_mut() = Some(dir.path().to_path_buf());
+        });
+        TEST_CONFIG_DIR.with(|current| *current.borrow_mut() = None);
+
+        let settings = read_settings().await;
+        assert_eq!(settings.locale, "de-DE");
+        assert_eq!(settings.log_level, crate::logger::DEFAULT_LOG_LEVEL);
+
+        TEST_DIR.with(|current| *current.borrow_mut() = None);
     }
 
     #[tokio::test]

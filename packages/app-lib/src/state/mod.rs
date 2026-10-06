@@ -898,6 +898,8 @@ impl State {
             Settings::store_proxy_config(&Settings::proxy_config().await).await;
         }
 
+        settings_store::prune_redundant().await;
+
         legacy_converter::migrate_legacy_data(&pool).await?;
 
         tracing::info!("Fetching app settings");
