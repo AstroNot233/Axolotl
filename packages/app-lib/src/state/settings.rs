@@ -564,7 +564,6 @@ impl Settings {
             .unwrap_or(false),
             version: res.version as usize,
         };
-        crate::util::download::set_active_engine(settings.download_engine);
         Ok(settings)
     }
 

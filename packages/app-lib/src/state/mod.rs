@@ -911,6 +911,8 @@ impl State {
         )
         .await?;
 
+        crate::util::download::set_active_engine(settings.download_engine);
+
         let directories =
             DirectoryInfo::init(settings.custom_dir, &app_identifier).await?;
 
