@@ -35,18 +35,7 @@ const CONNECTION_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
 // additional-connection path is being stabilized. Re-enable the adaptive
 // pool and asset sibling connection together after their failure behavior is
 // verified.
-const ADDITIONAL_H2_CONNECTIONS_ENABLED: bool = false;
-const MAX_PARALLEL_STREAM_TARGET: usize = 32;
-const PARALLEL_CONNECTION_STABILITY: Duration = Duration::from_millis(500);
-const PARALLEL_CONNECTIONS_PER_STREAM_TARGET: usize = 4;
-
-fn next_parallel_connection_target(current: usize) -> usize {
-    (current * 2).min(MAX_PARALLEL_STREAM_TARGET)
-}
-
-fn connection_target(stream_target: usize) -> usize {
-    (stream_target / PARALLEL_CONNECTIONS_PER_STREAM_TARGET).max(1)
-}
+const ADDITIONAL_H2_CONNECTIONS_ENABLED: bool = true;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum H2ConnectFailureKind {
@@ -88,6 +77,8 @@ pub struct SharedH2Connection {
     /// This is deliberately separate from HTTP/2's peer stream accounting: it
     /// lets an asset batch distribute work across sibling TCP connections.
     active_streams: Arc<AtomicUsize>,
+    bytes_transferred: AtomicUsize,
+    reserved_streams: Arc<AtomicUsize>,
     successful_responses: AtomicUsize,
     last_failure: Mutex<Option<std::time::Instant>>,
     last_activity: Arc<Mutex<std::time::Instant>>,
@@ -123,6 +114,8 @@ impl SharedH2Connection {
             physical_budget: Mutex::new(physical_budget),
             dead: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_streams: Arc::new(AtomicUsize::new(0)),
+            bytes_transferred: AtomicUsize::new(0),
+            reserved_streams: Arc::new(AtomicUsize::new(0)),
             successful_responses: AtomicUsize::new(0),
             last_failure: Mutex::new(None),
             last_activity: Arc::new(Mutex::new(std::time::Instant::now())),
@@ -143,6 +136,30 @@ impl SharedH2Connection {
         self.active_streams.load(Ordering::Acquire)
     }
 
+    pub(crate) fn record_bytes(&self, bytes: usize) {
+        self.bytes_transferred.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub(crate) fn bytes_transferred_for_scheduler(&self) -> usize {
+        self.bytes_transferred.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn assigned_streams_for_scheduler(&self) -> usize {
+        self.active_streams() + self.reserved_streams.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn reserve_stream_for_scheduler(&self) {
+        self.reserved_streams.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub(crate) fn release_stream_reservation(&self) {
+        let _ = self.reserved_streams.fetch_update(
+            Ordering::AcqRel,
+            Ordering::Acquire,
+            |reserved| reserved.checked_sub(1),
+        );
+    }
+
     pub(crate) fn track_stream(&self) -> H2StreamActivity {
         *self
             .last_activity
@@ -150,6 +167,7 @@ impl SharedH2Connection {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) =
             std::time::Instant::now();
         self.active_streams.fetch_add(1, Ordering::AcqRel);
+        self.release_stream_reservation();
         H2StreamActivity {
             active_streams: Arc::clone(&self.active_streams),
             last_activity: Arc::clone(&self.last_activity),
@@ -166,9 +184,17 @@ impl SharedH2Connection {
                 >= IDLE_EVICTION_TIMEOUT
     }
 
+    pub(crate) fn is_idle_expired_for_scheduler(&self) -> bool {
+        self.is_idle_expired()
+    }
+
     fn evict(&self) {
         self.dead.store(true, Ordering::Release);
         self.evict.notify_one();
+    }
+
+    pub(crate) fn evict_for_scheduler(&self) {
+        self.evict();
     }
 
     pub(crate) fn record_stream_failure(&self) {
@@ -186,8 +212,13 @@ impl SharedH2Connection {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .is_none_or(|failure| {
-                    failure.elapsed() >= PARALLEL_CONNECTION_STABILITY
+                    failure.elapsed()
+                        >= super::authority_scheduler::STABILITY_WINDOW
                 })
+    }
+
+    pub(crate) fn healthy_for_scheduler(&self) -> bool {
+        self.healthy_for_expansion()
     }
 
     fn has_physical_budget(&self) -> bool {
@@ -271,82 +302,8 @@ static CONNECTIONS: std::sync::LazyLock<
     AsyncMutex<HashMap<String, ConnectionSlot>>,
 > = std::sync::LazyLock::new(|| AsyncMutex::new(HashMap::new()));
 
-/// A bounded sibling connection for saturated asset batches. Normal file
-/// downloads always use `CONNECTIONS`; a second TCP congestion domain is only
-/// created by the asset scheduler after it observes sustained pressure.
-static BATCH_CONNECTIONS: std::sync::LazyLock<
-    AsyncMutex<HashMap<String, ConnectionSlot>>,
-> = std::sync::LazyLock::new(|| AsyncMutex::new(HashMap::new()));
-
-struct ParallelConnectionPoolState {
-    connections: Vec<Arc<SharedH2Connection>>,
-    policy: ParallelConnectionPolicy,
-    connecting: Arc<tokio::sync::Semaphore>,
-}
-
-struct ParallelConnectionPolicy {
-    target: usize,
-    stable_since: Option<std::time::Instant>,
-}
-
-impl Default for ParallelConnectionPoolState {
-    fn default() -> Self {
-        Self {
-            connections: Vec::new(),
-            policy: ParallelConnectionPolicy {
-                target: 4,
-                stable_since: None,
-            },
-            connecting: Arc::new(tokio::sync::Semaphore::new(1)),
-        }
-    }
-}
-
-impl ParallelConnectionPolicy {
-    fn observe(
-        &mut self,
-        now: std::time::Instant,
-        loads: &[usize],
-        healthy: bool,
-    ) {
-        if loads.iter().sum::<usize>() < self.target || !healthy {
-            self.stable_since = None;
-            return;
-        }
-        let since = self.stable_since.get_or_insert(now);
-        if now.duration_since(*since) >= PARALLEL_CONNECTION_STABILITY {
-            self.target = next_parallel_connection_target(self.target);
-            self.stable_since = None;
-        }
-    }
-}
-
-impl ParallelConnectionPoolState {
-    fn prune(&mut self) {
-        self.connections.retain(|connection| {
-            if connection.is_dead() || connection.is_idle_expired() {
-                connection.evict();
-                false
-            } else {
-                true
-            }
-        });
-        if self.connections.is_empty() {
-            self.policy.target = 4;
-            self.policy.stable_since = None;
-        }
-    }
-
-    fn least_loaded(&self) -> Option<Arc<SharedH2Connection>> {
-        self.connections
-            .iter()
-            .filter(|connection| !connection.is_dead())
-            .min_by_key(|connection| connection.active_streams())
-            .cloned()
-    }
-}
-
-type ParallelConnectionPool = Arc<AsyncMutex<ParallelConnectionPoolState>>;
+type ParallelConnectionPool =
+    Arc<AsyncMutex<super::authority_scheduler::AuthorityScheduler>>;
 
 static PARALLEL_CONNECTIONS: std::sync::LazyLock<
     AsyncMutex<HashMap<String, ParallelConnectionPool>>,
@@ -360,20 +317,14 @@ async fn connection_slot(authority: &str) -> ConnectionSlot {
         .clone()
 }
 
-async fn batch_connection_slot(authority: &str) -> ConnectionSlot {
-    let mut connections = BATCH_CONNECTIONS.lock().await;
-    connections
-        .entry(authority.to_string())
-        .or_insert_with(|| Arc::new(AsyncMutex::new(None)))
-        .clone()
-}
-
 async fn parallel_connection_pool(authority: &str) -> ParallelConnectionPool {
     let mut connections = PARALLEL_CONNECTIONS.lock().await;
     connections
         .entry(authority.to_string())
         .or_insert_with(|| {
-            Arc::new(AsyncMutex::new(ParallelConnectionPoolState::default()))
+            Arc::new(AsyncMutex::new(
+                super::authority_scheduler::AuthorityScheduler::default(),
+            ))
         })
         .clone()
 }
@@ -707,21 +658,19 @@ async fn wait_for_idle(
 }
 
 pub(crate) async fn evict_idle_connections(scope: Option<&str>) {
-    for registry in [&*CONNECTIONS, &*BATCH_CONNECTIONS] {
-        let slots = registry
-            .lock()
-            .await
-            .iter()
-            .filter(|(key, _)| scope.is_none_or(|scope| key.as_str() == scope))
-            .map(|(_, slot)| slot.clone())
-            .collect::<Vec<_>>();
-        for slot in slots {
-            if let Ok(cached) = slot.try_lock()
-                && let Some(connection) = cached.as_ref()
-                && connection.active_streams() == 0
-            {
-                connection.evict();
-            }
+    let slots = CONNECTIONS
+        .lock()
+        .await
+        .iter()
+        .filter(|(key, _)| scope.is_none_or(|scope| key.as_str() == scope))
+        .map(|(_, slot)| slot.clone())
+        .collect::<Vec<_>>();
+    for slot in slots {
+        if let Ok(cached) = slot.try_lock()
+            && let Some(connection) = cached.as_ref()
+            && connection.active_streams() == 0
+        {
+            connection.evict();
         }
     }
     let pools = PARALLEL_CONNECTIONS
@@ -733,7 +682,7 @@ pub(crate) async fn evict_idle_connections(scope: Option<&str>) {
         .collect::<Vec<_>>();
     for pool in pools {
         if let Ok(mut state) = pool.try_lock() {
-            for connection in &state.connections {
+            for connection in state.connections_for_eviction() {
                 if connection.active_streams() == 0 {
                     connection.evict();
                 }
@@ -890,40 +839,22 @@ where
 {
     let mut state = pool.lock().await;
     state.prune();
-    if !primary.is_dead()
-        && !state
-            .connections
-            .iter()
-            .any(|connection| Arc::ptr_eq(connection, &primary))
-    {
-        state.connections.push(Arc::clone(&primary));
-    }
-
-    let loads = state
-        .connections
-        .iter()
-        .map(|connection| connection.active_streams())
-        .collect::<Vec<_>>();
-    let healthy = state
-        .connections
-        .iter()
-        .all(|connection| connection.healthy_for_expansion());
-    state
-        .policy
-        .observe(std::time::Instant::now(), &loads, healthy);
-    let least_loaded = state.least_loaded().ok_or_else(|| {
+    state.add_connection(Arc::clone(&primary));
+    state.observe(std::time::Instant::now());
+    let selected = state.select_connection().ok_or_else(|| {
         H2ConnectError::new(
             H2ConnectFailureKind::Protocol,
             "HTTP/2 pool has no live connection".into(),
         )
     })?;
-    if !allow_expansion
-        || state.connections.len() >= connection_target(state.policy.target)
-    {
-        return Ok(least_loaded);
-    }
-    let Ok(_connecting) = state.connecting.clone().try_acquire_owned() else {
-        return Ok(least_loaded);
+    let connecting =
+        if allow_expansion && state.can_expand(std::time::Instant::now()) {
+            state.reserve_connector()
+        } else {
+            None
+        };
+    let Some(_connecting) = connecting else {
+        return Ok(selected);
     };
     drop(state);
     let background_pool = pool.clone();
@@ -938,7 +869,7 @@ where
             Ok(Ok(sibling)) => sibling,
             result => {
                 let mut state = background_pool.lock().await;
-                state.policy.stable_since = None;
+                state.rollback(std::time::Instant::now());
                 tracing::debug!(
                     timed_out = result.is_err(),
                     "Optional HTTP/2 pool expansion failed"
@@ -948,63 +879,23 @@ where
         };
         let mut state = background_pool.lock().await;
         state.prune();
-        if state.connections.len() < connection_target(state.policy.target) {
-            state.connections.push(Arc::clone(&sibling));
+        if state.connection_count() < state.target() {
+            state.add_connection(sibling);
         } else {
-            sibling.evict();
+            sibling.evict_for_scheduler();
         }
     });
-    Ok(least_loaded)
+    Ok(selected)
 }
 
 #[cfg(test)]
 mod parallel_pool_tests {
+    use super::super::authority_scheduler::AuthorityScheduler;
     use super::*;
 
     #[test]
-    fn adaptive_connection_targets_follow_the_requested_ladder() {
-        let mut target = 4;
-        let mut targets = Vec::new();
-        while target < MAX_PARALLEL_STREAM_TARGET {
-            targets.push(target);
-            target = next_parallel_connection_target(target);
-        }
-        targets.push(target);
-        assert_eq!(targets, [4, 8, 16, 32]);
-    }
-
-    #[test]
-    fn sustained_load_reaches_every_target_within_stream_budget() {
-        let mut policy = ParallelConnectionPolicy {
-            target: 4,
-            stable_since: None,
-        };
-        let mut now = std::time::Instant::now();
-        for target in [4, 8, 16] {
-            assert_eq!(policy.target, target);
-            let loads = vec![target];
-            assert!(loads.iter().sum::<usize>() <= 256);
-            policy.observe(now, &loads, true);
-            assert_eq!(policy.target, target);
-            now += PARALLEL_CONNECTION_STABILITY;
-            policy.observe(now, &loads, true);
-            assert_eq!(policy.target, target * 2);
-        }
-    }
-
-    #[test]
-    fn interrupted_load_or_failures_restart_the_stability_window() {
-        let mut policy = ParallelConnectionPolicy {
-            target: 4,
-            stable_since: None,
-        };
-        let now = std::time::Instant::now();
-        policy.observe(now, &[4], true);
-        policy.observe(now + PARALLEL_CONNECTION_STABILITY, &[3], true);
-        policy.observe(now + PARALLEL_CONNECTION_STABILITY * 2, &[4], true);
-        assert_eq!(policy.target, 4);
-        policy.observe(now + PARALLEL_CONNECTION_STABILITY * 3, &[4], false);
-        assert_eq!(policy.target, 4);
+    fn scheduler_uses_the_requested_ladder() {
+        assert_eq!(AuthorityScheduler::targets(), [4, 8, 16, 32]);
     }
 
     async fn memory_connection() -> Arc<SharedH2Connection> {
@@ -1014,239 +905,31 @@ mod parallel_pool_tests {
     }
 
     #[tokio::test]
-    async fn concurrent_cold_callers_establish_only_one_sibling() {
-        let primary = memory_connection().await;
-        let sibling = memory_connection().await;
-        let pool =
-            Arc::new(AsyncMutex::new(ParallelConnectionPoolState::default()));
-        let calls = Arc::new(AtomicUsize::new(0));
-        let done = Arc::new(Notify::new());
-        let _activities = [
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-        ];
-        primary.successful_responses.store(1, Ordering::Release);
-        {
-            let mut state = pool.lock().await;
-            state.connections.push(primary.clone());
-            state.policy.stable_since =
-                Some(std::time::Instant::now() - PARALLEL_CONNECTION_STABILITY);
-            state.policy.target = 8;
-        }
-        let results = futures::future::join_all((0..45).map(|_| {
-            let calls = calls.clone();
-            let sibling = sibling.clone();
-            let done = done.clone();
-            select_parallel_connection(
-                &pool,
-                primary.clone(),
-                true,
-                move || async move {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                    done.notify_one();
-                    Ok(sibling.clone())
-                },
-            )
-        }))
-        .await;
-        assert!(results.iter().all(Result::is_ok));
-        done.notified().await;
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-        let state = pool.lock().await;
-        assert_eq!(state.connections.len(), 2);
-        assert_eq!(state.connecting.available_permits(), 1);
-    }
-
-    #[tokio::test]
-    async fn optional_expansion_does_not_delay_the_primary_and_releases_reservation()
-     {
-        let primary = memory_connection().await;
-        let pool =
-            Arc::new(AsyncMutex::new(ParallelConnectionPoolState::default()));
-        let _activities = [
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-            primary.track_stream(),
-        ];
-        primary.successful_responses.store(1, Ordering::Release);
-        {
-            let mut state = pool.lock().await;
-            state.connections.push(primary.clone());
-            state.policy.stable_since =
-                Some(std::time::Instant::now() - PARALLEL_CONNECTION_STABILITY);
-            state.policy.target = 8;
-        }
-        let started = Arc::new(Notify::new());
-        let finish = Arc::new(Notify::new());
-        let finished = Arc::new(Notify::new());
-        let started_work = started.clone();
-        let finish_work = finish.clone();
-        let finished_work = finished.clone();
-        let selected = select_parallel_connection(
-            &pool,
-            primary.clone(),
-            true,
-            move || async move {
-                started_work.notify_one();
-                finish_work.notified().await;
-                finished_work.notify_one();
-                Err(H2ConnectError::new(
-                    H2ConnectFailureKind::Tcp,
-                    "test failure".into(),
-                ))
-            },
-        )
-        .await
-        .unwrap();
-        assert!(Arc::ptr_eq(&selected, &primary));
-        started.notified().await;
-        let selected = tokio::time::timeout(
-            Duration::from_millis(20),
-            select_parallel_connection(
-                &pool,
-                primary.clone(),
-                true,
-                || async {
-                    panic!("a second optional handshake must not start")
-                },
-            ),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert!(Arc::ptr_eq(&selected, &primary));
-        finish.notify_one();
-        finished.notified().await;
-        assert_eq!(pool.lock().await.connecting.available_permits(), 1);
-    }
-
-    #[tokio::test]
-    async fn tracked_streams_prevent_idle_eviction_and_balance_assignments() {
+    async fn reservations_are_counted_before_stream_activation() {
         let first = memory_connection().await;
         let second = memory_connection().await;
-        let activity = first.track_stream();
-        *first.last_activity.lock().unwrap() =
-            std::time::Instant::now() - IDLE_EVICTION_TIMEOUT;
-        assert!(!first.is_idle_expired());
-        let mut state = ParallelConnectionPoolState::default();
-        state.connections = vec![first.clone(), second.clone()];
-        assert!(Arc::ptr_eq(&state.least_loaded().unwrap(), &second));
-        drop(activity);
-        *first.last_activity.lock().unwrap() =
-            std::time::Instant::now() - IDLE_EVICTION_TIMEOUT;
-        state.prune();
-        assert!(first.is_dead());
-        assert_eq!(state.connections.len(), 1);
+        let mut scheduler = AuthorityScheduler::default();
+        scheduler.add_connection(first.clone());
+        scheduler.add_connection(second.clone());
+        first.reserve_stream_for_scheduler();
+        first.reserve_stream_for_scheduler();
+        assert!(Arc::ptr_eq(
+            &scheduler.select_connection().unwrap(),
+            &second
+        ));
     }
 
     #[tokio::test]
-    async fn a_single_small_file_does_not_open_an_optional_sibling() {
-        let primary = memory_connection().await;
-        let pool =
-            Arc::new(AsyncMutex::new(ParallelConnectionPoolState::default()));
-        let selected = select_parallel_connection(
-            &pool,
-            primary.clone(),
-            true,
-            || async { panic!("cold optional handshake") },
-        )
-        .await
-        .unwrap();
-        assert!(Arc::ptr_eq(&selected, &primary));
-        assert_eq!(pool.lock().await.connections.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn partial_expansion_failures_keep_power_of_two_targets() {
-        let primary = memory_connection().await;
-        let other = memory_connection().await;
-        let third = memory_connection().await;
-        let pool =
-            Arc::new(AsyncMutex::new(ParallelConnectionPoolState::default()));
-        {
-            let mut state = pool.lock().await;
-            state.connections = vec![primary.clone(), other, third];
-            state.policy.target = 8;
-        }
-        let selected =
-            select_parallel_connection(&pool, primary, true, || async {
-                panic!("underloaded pools must not start optional expansion")
-            })
-            .await
-            .unwrap();
-        assert!(!selected.is_dead());
-        assert_eq!(pool.lock().await.policy.target, 8);
-    }
-
-    #[tokio::test]
-    async fn idle_driver_closes_without_revisiting_the_pool_and_preserves_active_streams()
-     {
-        let route = DownloadRoute {
-            url: "https://idle-driver.invalid/file".into(),
-            source: crate::util::fetch::DownloadRouteSource::Official,
-            is_mirror: false,
-            allow_sensitive_headers: false,
-            supports_range: true,
-            proxy: crate::util::fetch::ProxyPolicy::System,
-        };
-        let capacity = super::super::native_budget::available(&route);
+    async fn idle_connections_are_pruned() {
         let connection = memory_connection().await;
-        *connection.physical_budget.lock().unwrap() =
-            Some(super::super::native_budget::acquire(&route).await.unwrap());
-        let activity = connection.track_stream();
-        let driver = spawn_connection_driver(
-            &connection,
-            std::future::pending::<()>(),
-            Duration::from_millis(20),
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(!connection.is_dead());
-        drop(activity);
-        tokio::time::timeout(Duration::from_secs(1), driver)
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(connection.is_dead());
-        assert_eq!(super::super::native_budget::available(&route), capacity);
-    }
-
-    #[tokio::test]
-    async fn dropping_an_unpooled_connection_releases_its_physical_permit() {
-        let route = DownloadRoute {
-            url: "https://unpooled-permit.invalid/file".into(),
-            source: crate::util::fetch::DownloadRouteSource::Official,
-            is_mirror: false,
-            allow_sensitive_headers: false,
-            supports_range: true,
-            proxy: crate::util::fetch::ProxyPolicy::System,
-        };
-        let capacity = super::super::native_budget::available(&route);
-        let connection = memory_connection().await;
-        *connection.physical_budget.lock().unwrap() =
-            Some(super::super::native_budget::acquire(&route).await.unwrap());
-        let driver_reference = Arc::downgrade(&connection);
-        let evict = connection.evict.clone();
-        drop(connection);
-        assert!(driver_reference.upgrade().is_none());
-        assert_eq!(super::super::native_budget::available(&route), capacity);
-        tokio::time::timeout(Duration::from_millis(50), evict.notified())
-            .await
-            .unwrap();
+        let mut scheduler = AuthorityScheduler::default();
+        scheduler.add_connection(connection.clone());
+        connection.evict_for_scheduler();
+        scheduler.prune();
+        assert_eq!(scheduler.connection_count(), 0);
+        assert_eq!(scheduler.target(), 4);
     }
 }
-
 /// Returns the optional second connection used exclusively by a busy asset
 /// batch. It is stored independently so ordinary file downloads retain their
 /// stable primary connection and never create extra TCP connections.
@@ -1254,77 +937,7 @@ pub(crate) async fn shared_batch_connection(
     route: &DownloadRoute,
     reserve_native_budget: bool,
 ) -> Result<Arc<SharedH2Connection>, H2ConnectError> {
-    if !ADDITIONAL_H2_CONNECTIONS_ENABLED {
-        return shared_connection_single(route, reserve_native_budget, true)
-            .await;
-    }
-    if let Some(reason) = super::native::h2_ineligible_reason(route) {
-        return Err(H2ConnectError::new(
-            H2ConnectFailureKind::Protocol,
-            reason.as_str().to_string(),
-        ));
-    }
-    let authority =
-        crate::util::fetch::url_authority(&route.url).ok_or_else(|| {
-            H2ConnectError::new(
-                H2ConnectFailureKind::Protocol,
-                "HTTP/2 route has no authority".to_string(),
-            )
-        })?;
-    let slot = batch_connection_slot(&super::proxy_context::authority_key(
-        &authority,
-        route.proxy,
-    ))
-    .await;
-    let deadline = tokio::time::Instant::now() + CONNECTION_WAIT_TIMEOUT;
-    let mut cached = tokio::time::timeout_at(deadline, slot.lock())
-    .await
-    .map_err(|_| {
-        H2ConnectError::new(
-            H2ConnectFailureKind::Protocol,
-            format!("timed out waiting for asset HTTP/2 connection slot {authority}"),
-        )
-    })?;
-    if let Some(connection) = cached.as_ref().filter(|connection| {
-        !connection.is_dead() && !connection.is_idle_expired()
-    }) {
-        if !reserve_native_budget || connection.has_physical_budget() {
-            tracing::debug!(
-                authority,
-                "Reusing sibling HTTP/2 asset connection"
-            );
-            return Ok(Arc::clone(connection));
-        }
-        return Err(H2ConnectError::new(
-            H2ConnectFailureKind::Protocol,
-            "sibling HTTP/2 connection is not covered by the native connection budget"
-                .to_string(),
-        ));
-    }
-    if cached.as_ref().is_some_and(|connection| {
-        connection.is_dead() || connection.is_idle_expired()
-    }) {
-        if let Some(connection) = cached.as_ref() {
-            connection.evict();
-        }
-        *cached = None;
-    }
-    tracing::debug!(authority, "Establishing sibling HTTP/2 asset connection");
-    let connection = tokio::time::timeout_at(
-        deadline,
-        establish(route, reserve_native_budget),
-    )
-    .await
-    .map_err(|_| {
-        H2ConnectError::new(
-            H2ConnectFailureKind::Tcp,
-            format!(
-                "timed out establishing asset HTTP/2 connection to {authority}"
-            ),
-        )
-    })??;
-    *cached = Some(Arc::clone(&connection));
-    Ok(connection)
+    shared_connection(route, reserve_native_budget, true, true).await
 }
 
 pub(crate) async fn has_live_connection(route: &DownloadRoute) -> bool {

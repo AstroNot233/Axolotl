@@ -17,10 +17,8 @@ use std::path::Path;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
 
 /// Logical worker target for the batch asset downloader. Actual H2 stream
@@ -29,22 +27,7 @@ pub(crate) const ASSET_BATCH_CONCURRENCY: usize = 64;
 /// Internal retry passes for failed batch items before they are handed back
 /// to the caller for the regular per-file download path.
 const ASSET_BATCH_RETRY_PASSES: usize = 2;
-/// Only expand a busy batch after the first connection has had time to warm
-/// up. This avoids extra handshakes for the common small/low-latency batch.
-const ASSET_BATCH_EXPANSION_DELAY: Duration = Duration::from_millis(500);
-/// Expansion is useful only when the primary is close to the authority-wide
-/// stream budget (currently 32). The remaining streams can then be assigned
-/// to a separate TCP congestion domain.
-const ASSET_BATCH_EXPANSION_STREAMS: usize = 24;
 const ASSET_RESOURCE_WAIT_TIMEOUT: Duration = Duration::from_secs(45);
-
-fn should_expand_asset_batch_connection(
-    elapsed: Duration,
-    primary_active_streams: usize,
-) -> bool {
-    elapsed >= ASSET_BATCH_EXPANSION_DELAY
-        && primary_active_streams >= ASSET_BATCH_EXPANSION_STREAMS
-}
 
 /// Outcome of attempting a multiplexed download.
 pub(crate) enum H2DownloadOutcome {
@@ -563,6 +546,7 @@ async fn single_stream(
         .await?;
         hashers.update(&chunk);
         downloaded += chunk.len() as u64;
+        connection.record_bytes(chunk.len());
         activity.record_bytes(chunk.len());
         super::h2_receive::release_capacity(&mut stream, chunk.len())?;
         if progress_gate.should_report(downloaded, total_size) {
@@ -730,18 +714,11 @@ impl Clone for H2BatchAsset {
     }
 }
 
-/// Selects the least busy connection in an asset batch. A sibling connection
-/// is created once, at most, when the initial connection remains saturated
-/// beyond the warm-up period; this keeps the normal case at one TCP/TLS
-/// connection while giving a degraded long batch an independent recovery and
-/// congestion domain.
+/// Selects every asset stream through the shared authority scheduler.
 struct AssetBatchConnectionGroup {
     primary: Arc<SharedH2Connection>,
-    sibling: AsyncMutex<Option<Arc<SharedH2Connection>>>,
-    expansion_attempted: AtomicBool,
     route: DownloadRoute,
     reserve_native_budget: bool,
-    started: Instant,
 }
 
 impl AssetBatchConnectionGroup {
@@ -752,68 +729,27 @@ impl AssetBatchConnectionGroup {
     ) -> Self {
         Self {
             primary,
-            sibling: AsyncMutex::new(None),
-            expansion_attempted: AtomicBool::new(false),
             route: route.clone(),
             reserve_native_budget,
-            started: Instant::now(),
         }
-    }
-
-    fn should_expand(&self) -> bool {
-        should_expand_asset_batch_connection(
-            self.started.elapsed(),
-            self.primary.active_streams(),
-        )
     }
 
     async fn connection(&self, rescue: bool) -> Arc<SharedH2Connection> {
-        if (rescue || self.should_expand())
-            && self
-                .expansion_attempted
-                .compare_exchange(
-                    false,
-                    true,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                )
-                .is_ok()
+        match super::h2_pool::shared_batch_connection(
+            &self.route,
+            self.reserve_native_budget,
+        )
+        .await
         {
-            match super::h2_pool::shared_batch_connection(
-                &self.route,
-                self.reserve_native_budget,
-            )
-            .await
-            {
-                Ok(connection) => {
-                    tracing::info!(
-                        authority = %fetch::url_authority(&self.route.url).unwrap_or_default(),
-                        primary_active_streams = self.primary.active_streams(),
-                        "Expanded saturated HTTP/2 asset batch with a sibling connection"
-                    );
-                    *self.sibling.lock().await = Some(connection);
-                }
-                Err(error) => {
-                    tracing::debug!(
-                        authority = %fetch::url_authority(&self.route.url).unwrap_or_default(),
-                        error = %error,
-                        "Could not expand HTTP/2 asset batch; retaining primary connection"
-                    );
-                }
+            Ok(connection) => connection,
+            Err(error) => {
+                tracing::debug!(
+                    rescue,
+                    error = %error,
+                    "Asset scheduler fell back to its primary H2 connection"
+                );
+                Arc::clone(&self.primary)
             }
-        }
-
-        let sibling = self.sibling.lock().await.clone();
-        match sibling {
-            Some(sibling) if rescue && !sibling.is_dead() => sibling,
-            Some(sibling)
-                if !sibling.is_dead()
-                    && sibling.active_streams()
-                        < self.primary.active_streams() =>
-            {
-                sibling
-            }
-            _ => Arc::clone(&self.primary),
         }
     }
 }
@@ -821,22 +757,6 @@ impl AssetBatchConnectionGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn asset_batch_expansion_requires_sustained_saturation() {
-        assert!(!should_expand_asset_batch_connection(
-            ASSET_BATCH_EXPANSION_DELAY,
-            ASSET_BATCH_EXPANSION_STREAMS - 1,
-        ));
-        assert!(!should_expand_asset_batch_connection(
-            ASSET_BATCH_EXPANSION_DELAY - Duration::from_millis(1),
-            ASSET_BATCH_EXPANSION_STREAMS,
-        ));
-        assert!(should_expand_asset_batch_connection(
-            ASSET_BATCH_EXPANSION_DELAY,
-            ASSET_BATCH_EXPANSION_STREAMS,
-        ));
-    }
 
     #[tokio::test]
     async fn committed_asset_recovers_a_legacy_copy_without_redownloading() {
@@ -1298,6 +1218,7 @@ async fn download_asset_item(
             }
             hashers.update(&chunk);
             downloaded += chunk.len() as u64;
+            connection.record_bytes(chunk.len());
             activity.record_bytes(chunk.len());
             super::h2_receive::release_capacity(&mut stream, chunk.len())?;
         }
