@@ -908,6 +908,12 @@ impl State {
         let api_semaphore =
             FetchSemaphore(Semaphore::new(download_concurrency));
         let auto_prefers_mirror = settings.auto_prefers_mirror();
+        if let Err(error) = Settings::migrate_proxy_password(&pool).await {
+            tracing::warn!(
+                %error,
+                "Could not move the proxy password to the credential store"
+            );
+        }
         let proxy_config = Settings::proxy_config(&pool).await?;
         let configured_http_client =
             crate::util::fetch::build_configured_client(

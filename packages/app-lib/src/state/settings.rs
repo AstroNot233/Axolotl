@@ -1038,15 +1038,40 @@ impl Settings {
         )
         .fetch_one(exec)
         .await?;
-        let password = super::settings_store::secret("proxy_password")
-            .await
-            .unwrap_or(stored_password);
+        let password = read_proxy_password().unwrap_or(stored_password);
         Ok(ProxyConfig {
             mode: ProxyMode::from_string(&mode),
             url,
             username,
             password,
         })
+    }
+
+    /// Moves a password an older build left in the row into the system
+    /// credential store, so the row stops carrying it.
+    pub(crate) async fn migrate_proxy_password<'a, E>(
+        exec: E,
+    ) -> crate::Result<()>
+    where
+        E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
+    {
+        let stored: String = sqlx::query_scalar(
+            "SELECT proxy_password FROM settings WHERE id = 0",
+        )
+        .fetch_one(exec)
+        .await?;
+        if stored.trim().is_empty() || read_proxy_password().is_some() {
+            return Ok(());
+        }
+
+        write_proxy_password(&stored)?;
+        sqlx::query("UPDATE settings SET proxy_password = '' WHERE id = 0")
+            .execute(exec)
+            .await?;
+        tracing::info!(
+            "Moved the proxy password into the system credential store"
+        );
+        Ok(())
     }
 
     pub(crate) async fn set_proxy_config<'a, E>(
@@ -1057,6 +1082,18 @@ impl Settings {
         E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
         config.validate()?;
+        // The password belongs in the system credential store; the row keeps it
+        // only where that store is unavailable.
+        let stored = match write_proxy_password(&config.password) {
+            Ok(()) => String::new(),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "Storing the proxy password in the settings row instead"
+                );
+                config.password.clone()
+            }
+        };
         sqlx::query(
             "UPDATE settings
              SET proxy_mode = ?, proxy_url = ?, proxy_username = ?, proxy_password = ?
@@ -1065,11 +1102,9 @@ impl Settings {
         .bind(config.mode.as_str())
         .bind(config.url.trim())
         .bind(config.username.trim())
-        .bind(config.password.clone())
+        .bind(stored)
         .execute(exec)
         .await?;
-        super::settings_store::store_secret("proxy_password", &config.password)
-            .await;
         Ok(())
     }
 
@@ -1208,6 +1243,46 @@ impl Settings {
         }
 
         Ok(())
+    }
+}
+
+const PROXY_PASSWORD_KEY: &str = "proxy_password";
+
+fn proxy_password_entry() -> crate::Result<keyring::Entry> {
+    keyring::Entry::new(crate::brand::BUNDLE_IDENTIFIER, PROXY_PASSWORD_KEY)
+        .map_err(|error| {
+            crate::ErrorKind::OtherError(format!(
+                "Could not open the system credential store: {error}"
+            ))
+            .into()
+        })
+}
+
+fn read_proxy_password() -> Option<String> {
+    let entry = proxy_password_entry().ok()?;
+    match entry.get_password() {
+        Ok(value) => (!value.trim().is_empty()).then_some(value),
+        Err(_) => None,
+    }
+}
+
+fn write_proxy_password(password: &str) -> crate::Result<()> {
+    let entry = proxy_password_entry()?;
+    if password.trim().is_empty() {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(crate::ErrorKind::OtherError(format!(
+                "Could not update the system credential store: {error}"
+            ))
+            .into()),
+        }
+    } else {
+        entry.set_password(password).map_err(|error| {
+            crate::ErrorKind::OtherError(format!(
+                "Could not write the system credential store: {error}"
+            ))
+            .into()
+        })
     }
 }
 

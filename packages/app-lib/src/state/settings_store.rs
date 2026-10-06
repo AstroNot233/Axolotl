@@ -21,11 +21,6 @@ use crate::state::{DirectoryInfo, Settings};
 const DIR_NAME: &str = "settings";
 const SCHEMA_VERSION: u32 = 1;
 
-/// `<DIR_NAME>/secrets.json` holds the secrets that belong to the settings.
-/// They are written in plain text; encrypting the file is still open.
-const SECRETS_FILE: &str = "secrets.json";
-const SECRET_NAMES: &[&str] = &["proxy_password"];
-
 /// The documents the store owns, with the keys each one carries.
 const DOMAINS: &[(&str, &[&str])] = &[
     (
@@ -202,9 +197,6 @@ pub async fn sanitise() -> crate::Result<usize> {
         };
         removed += sanitise_at(&path, keys).await?;
     }
-    if let Some(path) = secrets_path() {
-        removed += sanitise_at(&path, SECRET_NAMES).await?;
-    }
     Ok(removed)
 }
 
@@ -322,44 +314,6 @@ async fn store_to(
     data.extend(fields.iter().map(|(k, v)| (k.clone(), v.clone())));
 
     write_document(path, data).await
-}
-
-/// Reads one secret.
-pub(crate) async fn secret(name: &str) -> Option<String> {
-    secret_at(&secrets_path()?, name).await
-}
-
-/// Writes one secret, leaving the rest of the document as it is.
-pub(crate) async fn store_secret(name: &str, value: &str) {
-    let Some(path) = secrets_path() else {
-        return;
-    };
-    if let Err(error) = store_secret_at(&path, name, value).await {
-        tracing::warn!(
-            path = %path.display(),
-            %error,
-            "Failed to save a settings secret"
-        );
-    }
-}
-
-fn secrets_path() -> Option<PathBuf> {
-    Some(SETTINGS_DIR.get()?.join(DIR_NAME).join(SECRETS_FILE))
-}
-
-async fn secret_at(path: &Path, name: &str) -> Option<String> {
-    let Stored::Ready(document) = read(path).await else {
-        return None;
-    };
-    Some(document.data.get(name)?.as_str()?.to_string())
-}
-
-async fn store_secret_at(
-    path: &Path,
-    name: &str,
-    value: &str,
-) -> crate::Result<()> {
-    set_key_at(path, name, Value::String(value.to_string())).await
 }
 
 /// Writes one key of the domain that lists it, leaving the rest of the
@@ -598,33 +552,6 @@ mod tests {
 
         assert_eq!(sanitise_at(&path, appearance()).await.unwrap(), 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), newer);
-    }
-
-    #[tokio::test]
-    async fn a_stored_secret_keeps_the_other_entries() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("secrets.json");
-        std::fs::write(&path, document(r#"{"from_a_newer_build":7}"#)).unwrap();
-
-        store_secret_at(&path, "proxy_password", "hunter2")
-            .await
-            .unwrap();
-        assert_eq!(
-            secret_at(&path, "proxy_password").await.as_deref(),
-            Some("hunter2")
-        );
-
-        let stored: Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
-                .unwrap();
-        assert_eq!(stored["data"]["from_a_newer_build"], 7);
-    }
-
-    #[tokio::test]
-    async fn a_secret_that_was_never_stored_reads_as_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("secrets.json");
-        assert_eq!(secret_at(&path, "proxy_password").await, None);
     }
 
     #[tokio::test]
