@@ -3,8 +3,9 @@
 //! `reqwest`'s connection pool opens a fresh TCP+TLS connection for every
 //! request that arrives while no idle connection is available, so a batch of
 //! concurrent downloads to one CDN costs one handshake per file. This module
-//! maintains multiplexed HTTP/2 connections per authority. Content downloads
-//! grow a bounded pool under sustained load; assets may add one sibling.
+//! maintains multiplexed HTTP/2 connections per authority. The additional
+//! connection paths remain available for later re-enablement, but are
+//! temporarily disabled while their failure behavior is stabilized.
 
 use bytes::Bytes;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -30,6 +31,11 @@ const HAPPY_EYEBALLS_IPV6_DELAY: Duration = Duration::from_millis(80);
 const STREAM_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const IDLE_EVICTION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const CONNECTION_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
+// Temporarily keep one multiplexed H2 connection per authority while the
+// additional-connection path is being stabilized. Re-enable the adaptive
+// pool and asset sibling connection together after their failure behavior is
+// verified.
+const ADDITIONAL_H2_CONNECTIONS_ENABLED: bool = false;
 const MAX_PARALLEL_STREAM_TARGET: usize = 32;
 const PARALLEL_CONNECTION_STABILITY: Duration = Duration::from_millis(500);
 const PARALLEL_CONNECTIONS_PER_STREAM_TARGET: usize = 4;
@@ -825,7 +831,7 @@ pub(crate) async fn shared_connection(
     allow_cold_connection: bool,
     allow_parallel_connections: bool,
 ) -> Result<Arc<SharedH2Connection>, H2ConnectError> {
-    if !allow_parallel_connections {
+    if !allow_parallel_connections || !ADDITIONAL_H2_CONNECTIONS_ENABLED {
         return shared_connection_single(
             route,
             reserve_native_budget,
@@ -1248,6 +1254,10 @@ pub(crate) async fn shared_batch_connection(
     route: &DownloadRoute,
     reserve_native_budget: bool,
 ) -> Result<Arc<SharedH2Connection>, H2ConnectError> {
+    if !ADDITIONAL_H2_CONNECTIONS_ENABLED {
+        return shared_connection_single(route, reserve_native_budget, true)
+            .await;
+    }
     if let Some(reason) = super::native::h2_ineligible_reason(route) {
         return Err(H2ConnectError::new(
             H2ConnectFailureKind::Protocol,
