@@ -546,6 +546,7 @@ async fn single_stream(
         .await?;
         hashers.update(&chunk);
         downloaded += chunk.len() as u64;
+        connection.record_bytes(chunk.len());
         activity.record_bytes(chunk.len());
         super::h2_receive::release_capacity(&mut stream, chunk.len())?;
         if progress_gate.should_report(downloaded, total_size) {
@@ -1217,6 +1218,7 @@ async fn download_asset_item(
             }
             hashers.update(&chunk);
             downloaded += chunk.len() as u64;
+            connection.record_bytes(chunk.len());
             activity.record_bytes(chunk.len());
             super::h2_receive::release_capacity(&mut stream, chunk.len())?;
         }

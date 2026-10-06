@@ -62,7 +62,6 @@ trait RangeTransport: Sync {
 }
 
 struct NativeRangeTransport<'a> {
-    connection: Option<Arc<SharedH2Connection>>,
     uri: Uri,
     request: &'a DownloadRequest,
     route: &'a DownloadRoute,
@@ -91,10 +90,8 @@ impl RangeTransport for NativeRangeTransport<'_> {
                     super::native_reputation::NativeTransport::H2MultiRange,
                 )
             })
-            && let Some(connection) = self
-                .connection
-                .as_ref()
-                .filter(|connection| !connection.is_dead())
+            && let Ok(connection) =
+                super::h2_pool::shared_batch_connection(self.route, true).await
         {
             let permit = tokio::time::timeout(
                 Duration::from_secs(45),
@@ -117,9 +114,12 @@ impl RangeTransport for NativeRangeTransport<'_> {
                 HeaderValue::from_str(&format!("bytes={start}-{end}"))
                     .map_err(|_| H2DownloadFailure::Http)?,
             );
-            let opened =
-                super::h2_download::open_stream(connection, &self.uri, headers)
-                    .await;
+            let opened = super::h2_download::open_stream(
+                &connection,
+                &self.uri,
+                headers,
+            )
+            .await;
             let (response, body) = match opened {
                 Ok(opened) => opened,
                 Err(_) => {
@@ -137,14 +137,16 @@ impl RangeTransport for NativeRangeTransport<'_> {
                 self.failed(true);
                 return Err(range_response_failure(response.status().as_u16()));
             }
+            let connection_for_metrics = connection.clone();
             let stream = futures::stream::unfold(
-                (Some(body), permit),
-                |(body, permit)| async move {
+                (Some(body), permit, connection_for_metrics),
+                |(body, permit, connection_for_metrics)| async move {
                     let mut body = body?;
                     match super::h2_receive::receive_chunk(&mut body, "range")
                         .await
                     {
                         Ok(Some(chunk)) => {
+                            connection_for_metrics.record_bytes(chunk.len());
                             if super::h2_receive::release_capacity(
                                 &mut body,
                                 chunk.len(),
@@ -153,15 +155,18 @@ impl RangeTransport for NativeRangeTransport<'_> {
                             {
                                 return Some((
                                     Err(H2DownloadFailure::Protocol),
-                                    (None, permit),
+                                    (None, permit, connection_for_metrics),
                                 ));
                             }
-                            Some((Ok(chunk), (Some(body), permit)))
+                            Some((
+                                Ok(chunk),
+                                (Some(body), permit, connection_for_metrics),
+                            ))
                         }
                         Ok(None) => None,
                         Err(_) => Some((
                             Err(H2DownloadFailure::Protocol),
-                            (None, permit),
+                            (None, permit, connection_for_metrics),
                         )),
                     }
                 },
@@ -225,9 +230,6 @@ impl RangeTransport for NativeRangeTransport<'_> {
     }
 
     fn failed(&self, h2: bool) {
-        if h2 && let Some(connection) = &self.connection {
-            connection.record_stream_failure();
-        }
         if h2 && let Some(authority) = fetch::url_authority(&self.route.url) {
             super::native_reputation::record_transport_failure(
                 &authority,
@@ -239,7 +241,7 @@ impl RangeTransport for NativeRangeTransport<'_> {
 }
 
 pub(crate) async fn download(
-    connection: &Arc<SharedH2Connection>,
+    _connection: &Arc<SharedH2Connection>,
     uri: &Uri,
     request: &DownloadRequest,
     route: &DownloadRoute,
@@ -250,7 +252,6 @@ pub(crate) async fn download(
     semaphore: Option<&fetch::FetchSemaphore>,
 ) -> H2DownloadOutcome {
     let transport = NativeRangeTransport {
-        connection: Some(connection.clone()),
         uri: uri.clone(),
         request,
         route,
@@ -324,7 +325,6 @@ pub(crate) async fn resume_http1(
         .min((fetch::configured_semaphore_limit(semaphore) / 2).max(1))
         .min(super::local_resources::range_limit(part).await.max(1));
     let transport = NativeRangeTransport {
-        connection: None,
         uri: route.url.parse().map_err(|_| {
             crate::ErrorKind::InputError("invalid range resume URL".into())
         })?,

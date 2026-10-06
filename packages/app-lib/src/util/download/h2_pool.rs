@@ -77,6 +77,7 @@ pub struct SharedH2Connection {
     /// This is deliberately separate from HTTP/2's peer stream accounting: it
     /// lets an asset batch distribute work across sibling TCP connections.
     active_streams: Arc<AtomicUsize>,
+    bytes_transferred: AtomicUsize,
     reserved_streams: Arc<AtomicUsize>,
     successful_responses: AtomicUsize,
     last_failure: Mutex<Option<std::time::Instant>>,
@@ -113,6 +114,7 @@ impl SharedH2Connection {
             physical_budget: Mutex::new(physical_budget),
             dead: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_streams: Arc::new(AtomicUsize::new(0)),
+            bytes_transferred: AtomicUsize::new(0),
             reserved_streams: Arc::new(AtomicUsize::new(0)),
             successful_responses: AtomicUsize::new(0),
             last_failure: Mutex::new(None),
@@ -132,6 +134,10 @@ impl SharedH2Connection {
 
     pub(crate) fn active_streams(&self) -> usize {
         self.active_streams.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn record_bytes(&self, bytes: usize) {
+        self.bytes_transferred.fetch_add(bytes, Ordering::Relaxed);
     }
 
     pub(crate) fn assigned_streams_for_scheduler(&self) -> usize {
