@@ -112,6 +112,17 @@ const DOMAINS: &[(&str, &[&str])] = &[
         "privacy",
         &["discord_rpc", "telemetry", "telemetry_consent_version"],
     ),
+    (
+        "state",
+        &[
+            "migrated",
+            "onboarded",
+            "onboarding_instance_tour_completed",
+            "onboarding_version",
+            "pending_update_toast_for_version",
+            "version",
+        ],
+    ),
 ];
 
 #[derive(Deserialize, Serialize)]
