@@ -90,6 +90,7 @@ const DOMAINS: &[(&str, &[&str])] = &[
             "custom_env_vars",
             "enter_lightweight_mode_on_game_launch",
             "extra_launch_args",
+            "force_fullscreen",
             "game_resolution",
             "hide_on_process_start",
             "hooks",
@@ -97,6 +98,7 @@ const DOMAINS: &[(&str, &[&str])] = &[
             "memory",
         ],
     ),
+    ("backup", &["backup_repository_path"]),
     (
         "network",
         &[
@@ -322,10 +324,34 @@ async fn store_secret_at(
     name: &str,
     value: &str,
 ) -> crate::Result<()> {
+    set_key_at(path, name, Value::String(value.to_string())).await
+}
+
+/// Writes one key of the domain that lists it, leaving the rest of the
+/// document as it is. Keys no domain lists are ignored.
+pub(crate) async fn store_key(key: &str, value: Value) {
+    let Some((name, _)) = DOMAINS.iter().find(|(_, keys)| keys.contains(&key))
+    else {
+        tracing::debug!(key, "Ignoring a settings key no domain lists");
+        return;
+    };
+    let Some(path) = domain_path(name) else {
+        return;
+    };
+    if let Err(error) = set_key_at(&path, key, value).await {
+        tracing::warn!(
+            path = %path.display(),
+            %error,
+            "Failed to save a setting"
+        );
+    }
+}
+
+async fn set_key_at(path: &Path, key: &str, value: Value) -> crate::Result<()> {
     let Some(mut data) = base_data(path).await else {
         return Ok(());
     };
-    data.insert(name.to_string(), Value::String(value.to_string()));
+    data.insert(key.to_string(), value);
     write_document(path, data).await
 }
 
@@ -533,6 +559,28 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("secrets.json");
         assert_eq!(secret_at(&path, "proxy_password").await, None);
+    }
+
+    #[tokio::test]
+    async fn a_single_key_write_keeps_the_rest_of_the_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("game.json");
+        std::fs::write(
+            &path,
+            document(r#"{"theme":"oled","from_a_newer_build":7}"#),
+        )
+        .unwrap();
+
+        set_key_at(&path, "force_fullscreen", Value::Bool(true))
+            .await
+            .unwrap();
+
+        let stored: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
+                .unwrap();
+        assert_eq!(stored["data"]["force_fullscreen"], true);
+        assert_eq!(stored["data"]["theme"], "oled");
+        assert_eq!(stored["data"]["from_a_newer_build"], 7);
     }
 
     #[tokio::test]

@@ -900,6 +900,11 @@ impl Settings {
             .bind(value)
             .execute(exec)
             .await?;
+        super::settings_store::store_key(
+            "force_fullscreen",
+            serde_json::Value::Bool(value),
+        )
+        .await;
         Ok(())
     }
 
@@ -916,6 +921,12 @@ impl Settings {
         .bind(path)
         .execute(exec)
         .await?;
+        let stored = match path {
+            Some(path) => serde_json::Value::String(path.to_string()),
+            None => serde_json::Value::Null,
+        };
+        super::settings_store::store_key("backup_repository_path", stored)
+            .await;
         Ok(())
     }
 
