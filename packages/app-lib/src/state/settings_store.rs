@@ -4,6 +4,10 @@
 //! shadowing the database once a write has created it: an absent document
 //! leaves `Settings::get` reading the row exactly as before.
 //!
+//! `THESEUS_SETTINGS_CONFIG_DIR` points at a read-only directory of documents a
+//! deployment ships, which are read before the local ones and the row; only the
+//! local directory is ever written.
+//!
 //! Keys are only listed here once every reader goes through `Settings::get`,
 //! which is the only place that applies the stored values.
 //!
@@ -139,6 +143,11 @@ enum Stored {
 /// The settings directory, resolved before `State` exists.
 static SETTINGS_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// The read-only directory of documents a deployment ships, when it has one.
+static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+const CONFIG_DIR_ENV: &str = "THESEUS_SETTINGS_CONFIG_DIR";
+
 pub(crate) fn init(app_identifier: &str) {
     let Some(settings_dir) =
         DirectoryInfo::initial_settings_dir_path(app_identifier)
@@ -146,6 +155,11 @@ pub(crate) fn init(app_identifier: &str) {
         return;
     };
     let _ = SETTINGS_DIR.set(settings_dir);
+    if let Some(config_dir) = std::env::var_os(CONFIG_DIR_ENV)
+        && !config_dir.is_empty()
+    {
+        let _ = CONFIG_DIR.set(PathBuf::from(config_dir));
+    }
 }
 
 /// Whether the store has a directory to write to, which startup gives it.
@@ -153,7 +167,7 @@ pub(crate) fn is_active() -> bool {
     SETTINGS_DIR.get().is_some()
 }
 
-fn domain_path(name: &str) -> Option<PathBuf> {
+fn local_path(name: &str) -> Option<PathBuf> {
     Some(
         SETTINGS_DIR
             .get()?
@@ -162,15 +176,37 @@ fn domain_path(name: &str) -> Option<PathBuf> {
     )
 }
 
+fn config_path(name: &str) -> Option<PathBuf> {
+    Some(CONFIG_DIR.get()?.join(format!("{name}.json")))
+}
+
 /// Applies the stored keys on top of `settings`, keeping the database value
 /// for every key no document carries.
 pub(crate) async fn overlay(settings: Settings) -> Settings {
     let mut settings = settings;
     for (name, keys) in DOMAINS {
-        let Some(path) = domain_path(name) else {
-            return settings;
-        };
-        settings = overlay_from(&path, keys, settings).await;
+        settings = overlay_layers(
+            config_path(name).as_deref(),
+            local_path(name).as_deref(),
+            keys,
+            settings,
+        )
+        .await;
+    }
+    settings
+}
+
+/// Layers the documents of one domain, so a default gives way to the local file
+/// and to the row.
+async fn overlay_layers(
+    defaults: Option<&Path>,
+    local: Option<&Path>,
+    keys: &[&str],
+    settings: Settings,
+) -> Settings {
+    let mut settings = settings;
+    for path in [defaults, local].into_iter().flatten() {
+        settings = overlay_from(path, keys, settings).await;
     }
     settings
 }
@@ -179,7 +215,7 @@ pub(crate) async fn overlay(settings: Settings) -> Settings {
 /// keeps the values a document has not taken over yet.
 pub(crate) async fn store(settings: &Settings) {
     for (name, keys) in DOMAINS {
-        let Some(path) = domain_path(name) else {
+        let Some(path) = local_path(name) else {
             return;
         };
         if let Err(error) = store_to(&path, keys, settings).await {
@@ -197,7 +233,7 @@ pub(crate) async fn store(settings: &Settings) {
 pub async fn sanitise() -> crate::Result<usize> {
     let mut removed = 0;
     for (name, keys) in DOMAINS {
-        let Some(path) = domain_path(name) else {
+        let Some(path) = local_path(name) else {
             break;
         };
         removed += sanitise_at(&path, keys).await?;
@@ -231,10 +267,23 @@ async fn sanitise_at(path: &Path, keys: &[&str]) -> crate::Result<usize> {
 /// The stored entries of one document, for callers that read a few keys
 /// without going through `Settings`. Empty when there is nothing to read.
 pub(crate) async fn stored(domain: &str) -> Map<String, Value> {
-    match domain_path(domain) {
-        Some(path) => stored_at(&path).await,
-        None => Map::new(),
+    stored_layers(
+        config_path(domain).as_deref(),
+        local_path(domain).as_deref(),
+    )
+    .await
+}
+
+/// Layers the entries of one domain, so a default gives way to the local file.
+async fn stored_layers(
+    defaults: Option<&Path>,
+    local: Option<&Path>,
+) -> Map<String, Value> {
+    let mut entries = Map::new();
+    for path in [defaults, local].into_iter().flatten() {
+        entries.extend(stored_at(path).await);
     }
+    entries
 }
 
 async fn stored_at(path: &Path) -> Map<String, Value> {
@@ -340,7 +389,7 @@ pub(crate) async fn store_key(key: &str, value: Value) {
 /// a domain that owns its keys is stored. Such a document is left out of
 /// `sanitise`, since no domain lists its keys.
 pub(crate) async fn store_in(domain: &str, entries: &[(&str, Value)]) {
-    let Some(path) = domain_path(domain) else {
+    let Some(path) = local_path(domain) else {
         return;
     };
     if let Err(error) = set_entries_at(&path, entries).await {
@@ -385,7 +434,7 @@ fn key_path(key: &str) -> Option<PathBuf> {
         tracing::debug!(key, "Ignoring a settings key no domain lists");
         return None;
     };
-    domain_path(name)
+    local_path(name)
 }
 
 async fn set_key_at(path: &Path, key: &str, value: Value) -> crate::Result<()> {
@@ -497,6 +546,62 @@ mod tests {
         stored.accent_color = crate::state::AccentColor::Blue;
         let merged = overlay_from(&path, appearance(), stored).await;
         assert_eq!(merged.accent_color, crate::state::AccentColor::Pink);
+    }
+
+    #[tokio::test]
+    async fn a_default_document_gives_way_to_the_local_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let defaults = dir.path().join("defaults.json");
+        let local = dir.path().join("local.json");
+        std::fs::write(
+            &defaults,
+            document(r#"{"locale":"de-DE","theme":"oled"}"#),
+        )
+        .unwrap();
+        std::fs::write(&local, document(r#"{"locale":"fr-FR"}"#)).unwrap();
+
+        let mut stored = fresh_settings().await;
+        stored.locale = "en-US".to_string();
+        stored.theme = crate::state::Theme::Dark;
+        let merged =
+            overlay_layers(Some(&defaults), Some(&local), appearance(), stored)
+                .await;
+
+        assert_eq!(merged.locale, "fr-FR");
+        assert_eq!(merged.theme.as_str(), "oled");
+    }
+
+    #[tokio::test]
+    async fn a_default_document_applies_without_a_local_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let defaults = dir.path().join("defaults.json");
+        std::fs::write(&defaults, document(r#"{"locale":"de-DE"}"#)).unwrap();
+
+        let mut stored = fresh_settings().await;
+        stored.locale = "en-US".to_string();
+        let merged =
+            overlay_layers(Some(&defaults), None, appearance(), stored).await;
+        assert_eq!(merged.locale, "de-DE");
+    }
+
+    #[tokio::test]
+    async fn stored_entries_layer_a_default_under_the_local_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let defaults = dir.path().join("defaults.json");
+        let local = dir.path().join("local.json");
+        std::fs::write(
+            &defaults,
+            document(r#"{"proxy_mode":"system","proxy_url":"http://default"}"#),
+        )
+        .unwrap();
+        std::fs::write(&local, document(r#"{"proxy_mode":"custom"}"#)).unwrap();
+
+        let entries = stored_layers(Some(&defaults), Some(&local)).await;
+        assert_eq!(entries.get("proxy_mode"), Some(&Value::from("custom")));
+        assert_eq!(
+            entries.get("proxy_url"),
+            Some(&Value::from("http://default"))
+        );
     }
 
     #[tokio::test]
