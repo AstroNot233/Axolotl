@@ -6,6 +6,10 @@
 //!
 //! Keys are only listed here once every reader goes through `Settings::get`,
 //! which is the only place that applies the stored values.
+//!
+//! Bump `SCHEMA_VERSION` whenever a domain's key set changes, including when
+//! a key is dropped: that is what stops a build which still knows the removed
+//! key from writing the document again.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -162,6 +166,42 @@ pub(crate) async fn store(settings: &Settings) {
             );
         }
     }
+}
+
+/// Drops the keys no domain knows, for documents another version left behind.
+/// Documents written by a newer build are left alone.
+pub async fn sanitise() -> crate::Result<usize> {
+    let mut removed = 0;
+    for (name, keys) in DOMAINS {
+        let Some(path) = domain_path(name) else {
+            break;
+        };
+        removed += sanitise_at(&path, keys).await?;
+    }
+    Ok(removed)
+}
+
+async fn sanitise_at(path: &Path, keys: &[&str]) -> crate::Result<usize> {
+    let Stored::Ready(mut document) = read(path).await else {
+        return Ok(0);
+    };
+    let Some(data) = document.data.as_object_mut() else {
+        return Ok(0);
+    };
+    let before = data.len();
+    data.retain(|key, _| keys.contains(&key.as_str()));
+    let removed = before - data.len();
+    if removed == 0 {
+        return Ok(0);
+    }
+
+    crate::util::io::write(path, serde_json::to_vec_pretty(&document)?).await?;
+    tracing::info!(
+        path = %path.display(),
+        removed,
+        "Removed settings keys no domain knows"
+    );
+    Ok(removed)
 }
 
 async fn read(path: &Path) -> Stored {
@@ -365,6 +405,39 @@ mod tests {
         store_to(&path, appearance(), &fresh_settings().await)
             .await
             .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), newer);
+    }
+
+    #[tokio::test]
+    async fn sanitise_drops_the_keys_no_domain_knows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appearance.json");
+        std::fs::write(
+            &path,
+            document(r#"{"theme":"oled","from_a_newer_build":7}"#),
+        )
+        .unwrap();
+
+        assert_eq!(sanitise_at(&path, appearance()).await.unwrap(), 1);
+
+        let stored: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
+                .unwrap();
+        assert_eq!(stored["data"]["theme"], "oled");
+        assert!(stored["data"].get("from_a_newer_build").is_none());
+    }
+
+    #[tokio::test]
+    async fn sanitise_leaves_a_newer_document_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appearance.json");
+        let newer = format!(
+            r#"{{"schema_version":{},"written_by":"9.9.9","data":{{"from_a_newer_build":7}}}}"#,
+            SCHEMA_VERSION + 1
+        );
+        std::fs::write(&path, &newer).unwrap();
+
+        assert_eq!(sanitise_at(&path, appearance()).await.unwrap(), 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), newer);
     }
 
