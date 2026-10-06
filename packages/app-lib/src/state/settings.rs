@@ -993,13 +993,20 @@ impl Settings {
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
-        let (mode, url, username, password): (String, String, String, String) =
-            sqlx::query_as(
-                "SELECT proxy_mode, proxy_url, proxy_username, proxy_password
+        let (mode, url, username, stored_password): (
+            String,
+            String,
+            String,
+            String,
+        ) = sqlx::query_as(
+            "SELECT proxy_mode, proxy_url, proxy_username, proxy_password
                  FROM settings WHERE id = 0",
-            )
-            .fetch_one(exec)
-            .await?;
+        )
+        .fetch_one(exec)
+        .await?;
+        let password = super::settings_store::secret("proxy_password")
+            .await
+            .unwrap_or(stored_password);
         Ok(ProxyConfig {
             mode: ProxyMode::from_string(&mode),
             url,
@@ -1027,6 +1034,8 @@ impl Settings {
         .bind(config.password.clone())
         .execute(exec)
         .await?;
+        super::settings_store::store_secret("proxy_password", &config.password)
+            .await;
         Ok(())
     }
 

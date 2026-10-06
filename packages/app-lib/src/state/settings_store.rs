@@ -21,6 +21,11 @@ use crate::state::{DirectoryInfo, Settings};
 const DIR_NAME: &str = "settings";
 const SCHEMA_VERSION: u32 = 1;
 
+/// `<DIR_NAME>/secrets.json` holds the secrets that belong to the settings.
+/// They are written in plain text; encrypting the file is still open.
+const SECRETS_FILE: &str = "secrets.json";
+const SECRET_NAMES: &[&str] = &["proxy_password"];
+
 /// The documents the store owns, with the keys each one carries.
 const DOMAINS: &[(&str, &[&str])] = &[
     (
@@ -178,6 +183,9 @@ pub async fn sanitise() -> crate::Result<usize> {
         };
         removed += sanitise_at(&path, keys).await?;
     }
+    if let Some(path) = secrets_path() {
+        removed += sanitise_at(&path, SECRET_NAMES).await?;
+    }
     Ok(removed)
 }
 
@@ -264,15 +272,9 @@ async fn store_to(
     keys: &[&str],
     settings: &Settings,
 ) -> crate::Result<()> {
-    let stored = read(path).await;
-    if let Stored::Newer(document) = &stored {
-        tracing::warn!(
-            path = %path.display(),
-            version = document.schema_version,
-            "Leaving a settings document written by a newer build alone"
-        );
+    let Some(mut data) = base_data(path).await else {
         return Ok(());
-    }
+    };
 
     let normalized = settings.normalized();
     let mut value = serde_json::to_value(&normalized)?;
@@ -280,18 +282,75 @@ async fn store_to(
         return Ok(());
     };
     fields.retain(|key, _| keys.contains(&key.as_str()));
-
-    // Keep the keys this build does not know, so a document another version
-    // wrote is not stripped of them.
-    let mut data = match stored {
-        Stored::Ready(document) => document.data,
-        _ => Value::Object(Map::new()),
-    }
-    .as_object()
-    .cloned()
-    .unwrap_or_default();
     data.extend(fields.iter().map(|(k, v)| (k.clone(), v.clone())));
 
+    write_document(path, data).await
+}
+
+/// Reads one secret.
+pub(crate) async fn secret(name: &str) -> Option<String> {
+    secret_at(&secrets_path()?, name).await
+}
+
+/// Writes one secret, leaving the rest of the document as it is.
+pub(crate) async fn store_secret(name: &str, value: &str) {
+    let Some(path) = secrets_path() else {
+        return;
+    };
+    if let Err(error) = store_secret_at(&path, name, value).await {
+        tracing::warn!(
+            path = %path.display(),
+            %error,
+            "Failed to save a settings secret"
+        );
+    }
+}
+
+fn secrets_path() -> Option<PathBuf> {
+    Some(SETTINGS_DIR.get()?.join(DIR_NAME).join(SECRETS_FILE))
+}
+
+async fn secret_at(path: &Path, name: &str) -> Option<String> {
+    let Stored::Ready(document) = read(path).await else {
+        return None;
+    };
+    Some(document.data.get(name)?.as_str()?.to_string())
+}
+
+async fn store_secret_at(
+    path: &Path,
+    name: &str,
+    value: &str,
+) -> crate::Result<()> {
+    let Some(mut data) = base_data(path).await else {
+        return Ok(());
+    };
+    data.insert(name.to_string(), Value::String(value.to_string()));
+    write_document(path, data).await
+}
+
+/// The stored entries as a base, so a document another version wrote keeps the
+/// entries this build does not know. `None` means the document must not be
+/// written, which keeps one from a newer build read-only.
+async fn base_data(path: &Path) -> Option<Map<String, Value>> {
+    match read(path).await {
+        Stored::Ready(document) => document.data.as_object().cloned(),
+        Stored::Newer(document) => {
+            tracing::warn!(
+                path = %path.display(),
+                version = document.schema_version,
+                "Leaving a settings document written by a newer build alone"
+            );
+            None
+        }
+        Stored::Missing | Stored::Unreadable => Some(Map::new()),
+    }
+}
+
+async fn write_document(
+    path: &Path,
+    data: Map<String, Value>,
+) -> crate::Result<()> {
     let document = Document {
         schema_version: SCHEMA_VERSION,
         written_by: env!("CARGO_PKG_VERSION").to_string(),
@@ -439,6 +498,33 @@ mod tests {
 
         assert_eq!(sanitise_at(&path, appearance()).await.unwrap(), 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), newer);
+    }
+
+    #[tokio::test]
+    async fn a_stored_secret_keeps_the_other_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.json");
+        std::fs::write(&path, document(r#"{"from_a_newer_build":7}"#)).unwrap();
+
+        store_secret_at(&path, "proxy_password", "hunter2")
+            .await
+            .unwrap();
+        assert_eq!(
+            secret_at(&path, "proxy_password").await.as_deref(),
+            Some("hunter2")
+        );
+
+        let stored: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
+                .unwrap();
+        assert_eq!(stored["data"]["from_a_newer_build"], 7);
+    }
+
+    #[tokio::test]
+    async fn a_secret_that_was_never_stored_reads_as_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.json");
+        assert_eq!(secret_at(&path, "proxy_password").await, None);
     }
 
     #[tokio::test]
