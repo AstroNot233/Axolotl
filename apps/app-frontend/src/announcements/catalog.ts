@@ -38,32 +38,105 @@ export const launcherAnnouncements: readonly LauncherAnnouncement[] = [
             'zh-CN': 'Axolotl Launcher 1.9.8-beta.1',
         },
         changes: {
-            fixed: [
+            added: [
                 {
                     'en-US':
-                        'Fixed right-click Copy and Paste menus in the Discover and Library search fields.',
-                    'zh-CN': '修复发现页和库页面搜索框无法通过右键菜单复制、粘贴的问题。',
+                        'Added more URL Scheme abilities, including routes for opening launcher pages and settings.',
+                    'zh-CN': '新增更多 URL Scheme 功能，包括打开启动器页面和设置项。',
                 },
                 {
                     'en-US':
-                        'Fixed some i18n strings that were not following the i18n specification.',
-                    'zh-CN': '修补部分文案未遵循i18n规范的问题。',
+                        'Added a confirmation gate and settings control for privileged URL Scheme actions.',
+                    'zh-CN': '为高权限 URL Scheme 操作新增确认机制和设置开关。',
                 },
                 {
-                    'en-US': 'Fixed proxy behavior when logging in with a Mojang account.',
-                    'zh-CN': '修复代理在登陆游戏账号时的不正常行为。',
+                    'en-US':
+                        'Added support for importing arbitrary Minecraft game directories and resolving game directories from launcher paths.',
+                    'zh-CN':
+                        '新增任意 Minecraft 游戏目录导入，并支持从其他启动器路径解析游戏目录。',
+                },
+                {
+                    'en-US': 'Added configurable DNS-over-HTTPS servers for downloads.',
+                    'zh-CN': '新增可配置的 DNS over HTTPS 服务器，用于下载解析。',
+                },
+                {
+                    'en-US':
+                        'Added support for linking local servers to managed servers on the Home page, with an online-mode warning when needed.',
+                    'zh-CN': '新增主页本地服务器与受管服务器关联功能，并在必要时提示正版验证冲突。',
+                },
+                {
+                    'en-US':
+                        'Added download history access from the action bar and improved download progress reporting.',
+                    'zh-CN': '新增从操作栏访问下载历史，并改进下载进度显示。',
                 },
             ],
             changed: [
                 {
-                    'en-US': 'Import instances using the .minecraft folder directly.',
-                    'zh-CN': '导入实例时，将优先以.minecraft文件夹直用方式导入。',
+                    'en-US':
+                        'Instances imported from a .minecraft folder now prefer using that folder directly.',
+                    'zh-CN': '从 .minecraft 文件夹导入实例时，现在会优先直接使用该文件夹。',
+                },
+                {
+                    'en-US':
+                        'Improved download reliability and performance with adaptive HTTP/2 connections, shared transfer budgets, verified checkpoints, and better fallback scheduling.',
+                    'zh-CN':
+                        '通过自适应 HTTP/2 连接、共享传输配额、校验检查点和改进的回退调度，提升下载可靠性和性能。',
+                },
+                {
+                    'en-US':
+                        'Improved content installation by batching shared objects and avoiding redundant metadata and local-pack processing.',
+                    'zh-CN':
+                        '通过批量处理共享对象，减少重复元数据查询和本地整合包处理，改进内容安装流程。',
+                },
+                {
+                    'en-US':
+                        'Improved instance launch and import handling for external game directories and loader runtime artifacts.',
+                    'zh-CN': '改进外部游戏目录和加载器运行时文件的实例启动与导入处理。',
                 },
             ],
-            added: [
+            fixed: [
                 {
-                    'en-US': 'Added more URL Scheme abilities.',
-                    'zh-CN': '新增更多URL Scheme能力。',
+                    'en-US':
+                        'Fixed Copy and Paste context menus in Discover and Library search fields.',
+                    'zh-CN': '修复发现页和库页面搜索框无法通过右键菜单复制、粘贴的问题。',
+                },
+                {
+                    'en-US': 'Fixed proxy behavior when logging in with a Mojang account.',
+                    'zh-CN': '修复使用代理登录 Mojang 账户时行为异常的问题。',
+                },
+                {
+                    'en-US':
+                        'Fixed multiple i18n strings that did not follow the localization specification.',
+                    'zh-CN': '修复部分文案未遵循国际化规范的问题。',
+                },
+                {
+                    'en-US':
+                        'Fixed download cancellation, active navigation restoration, speed reporting, and connection recovery issues.',
+                    'zh-CN': '修复下载取消、活动页面恢复、速度显示和连接恢复相关问题。',
+                },
+                {
+                    'en-US':
+                        'Fixed Minecraft launch failures caused by initialization errors, missing Java runtimes, and stale loader artifacts.',
+                    'zh-CN':
+                        '修复初始化错误、缺少 Java 运行时和过期加载器文件导致的 Minecraft 启动失败。',
+                },
+                {
+                    'en-US':
+                        'Fixed lightweight-mode window restoration, macOS titlebar behavior, server process tracking, and world filename handling.',
+                    'zh-CN':
+                        '修复轻量模式窗口恢复、macOS 标题栏、服务器进程跟踪和世界文件名处理问题。',
+                },
+            ],
+            security: [
+                {
+                    'en-US':
+                        'Added archive path validation to reject directory traversal entries in ZIP files and datapacks.',
+                    'zh-CN': '新增归档路径校验，拒绝 ZIP 文件和数据包中的目录穿越条目。',
+                },
+                {
+                    'en-US':
+                        'Added validation for world names and restricted unnecessary plugin URL permissions.',
+                    'zh-CN': '新增世界名称校验，并限制插件不必要的 URL 权限。',
                 },
             ],
         },
