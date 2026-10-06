@@ -6,7 +6,6 @@ use crate::state::{
     load_game_options_sync_state, load_shared_game_options,
 };
 use chrono::Utc;
-use sqlx::{Sqlite, Transaction};
 
 const FULLSCREEN_OPTION_ID: &str = "fullscreen";
 
@@ -110,7 +109,6 @@ pub(crate) async fn update_shared_fullscreen_from_app(
 }
 
 pub(super) async fn update_app_fullscreen_setting(
-    tx: &mut Transaction<'_, Sqlite>,
     value: &CanonicalValue,
     sync_enabled: bool,
 ) -> crate::Result<()> {
@@ -120,6 +118,6 @@ pub(super) async fn update_app_fullscreen_setting(
     let CanonicalValue::Bool(value) = value else {
         return Ok(());
     };
-    crate::state::Settings::set_force_fullscreen(&mut **tx, *value).await?;
+    crate::state::Settings::set_force_fullscreen(*value).await?;
     Ok(())
 }

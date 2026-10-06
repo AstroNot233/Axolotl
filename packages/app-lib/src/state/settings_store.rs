@@ -185,11 +185,6 @@ fn settings_root() -> Option<PathBuf> {
     SETTINGS_DIR.get().cloned()
 }
 
-/// Whether the store has a directory to write to, which startup gives it.
-pub(crate) fn is_active() -> bool {
-    settings_root().is_some()
-}
-
 /// Whether the row still has to hand its settings over to the documents, which
 /// is what an installation that predates them does once: `database_existed`
 /// keeps a fresh installation out, and the directory keeps one that already

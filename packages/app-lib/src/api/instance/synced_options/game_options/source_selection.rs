@@ -301,8 +301,7 @@ pub(in crate::api::instance) async fn initialize_from_source_instance(
     .execute(&mut *tx)
     .await?;
     if let Some(value) = fullscreen_value.as_ref() {
-        update_app_fullscreen_setting(&mut tx, value, fullscreen_sync_enabled)
-            .await?;
+        update_app_fullscreen_setting(value, fullscreen_sync_enabled).await?;
     }
     super::locales::record_observations(
         &mut tx,

@@ -406,7 +406,7 @@ where
         .await?;
 
         settings.migrated = true;
-        settings.update(exec).await?;
+        settings.update().await?;
     }
 
     Ok(())

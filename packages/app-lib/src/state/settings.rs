@@ -587,319 +587,13 @@ impl Settings {
         settings
     }
 
-    /// Persists the settings. The store owns them once startup has given it a
-    /// directory, so the row below is only written while it has not, which
-    /// keeps a database backup and a downgrade holding the values of the last
-    /// build that stored them there.
-    pub async fn update<'a, E>(&self, exec: E) -> crate::Result<()>
-    where
-        E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
-    {
-        if super::settings_store::is_active() {
-            super::settings_store::store(self).await;
-            return Ok(());
-        }
-
-        let normalized = self.normalized();
-        let max_concurrent_writes = self.max_concurrent_writes as i32;
-        let max_concurrent_downloads =
-            normalized.max_concurrent_downloads as i32;
-        let theme = self.theme.as_str();
-        let accent_color = self.accent_color.as_str();
-        let default_page = self.default_page.as_str();
-        let extra_launch_args = serde_json::to_string(&self.extra_launch_args)?;
-        let custom_env_vars = serde_json::to_string(&self.custom_env_vars)?;
-        let feature_flags = serde_json::to_string(&self.feature_flags)?;
-        let custom_background_blur = normalized.custom_background_blur as i32;
-        let custom_background_opacity =
-            normalized.custom_background_opacity as i32;
-        let transparent_background_opacity =
-            normalized.transparent_background_opacity as i32;
-        let sidebar_instance_count = normalized.sidebar_instance_count as i32;
-        let home_layout = self.home_layout.as_str();
-        let home_widgets = self
-            .home_widgets
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?;
-        let terracotta_public_nodes =
-            serde_json::to_string(&self.terracotta_public_nodes)?;
-        let version = self.version as i64;
-        let onboarding_version = self.onboarding_version as i64;
-        let minecraft_metadata_source = self.minecraft_metadata_source.as_str();
-        let minecraft_file_source = self.minecraft_file_source.as_str();
-        let modrinth_source = self.modrinth_source.as_str();
-        let curseforge_source = self.curseforge_source.as_str();
-        let mojang_auth_source = self.mojang_auth_source.as_str();
-        let auto_prefers_mirror = self.auto_prefers_mirror();
-        let use_minecraft_mirror = self
-            .minecraft_file_source
-            .prefers_mirror(auto_prefers_mirror);
-        let use_modrinth_mirror =
-            self.modrinth_source.prefers_mirror(auto_prefers_mirror);
-        let use_curseforge_mirror =
-            self.curseforge_source.prefers_mirror(auto_prefers_mirror);
-
-        sqlx::query!(
-            "
-            UPDATE settings
-            SET
-                max_concurrent_writes = $1,
-                max_concurrent_downloads = $2,
-
-                theme = $3,
-                locale = $4,
-                default_page = $5,
-                collapsed_navigation = $6,
-                advanced_rendering = $7,
-                native_decorations = $8,
-
-                discord_rpc = $9,
-                developer_mode = $10,
-                telemetry = $11,
-
-                onboarded = $12,
-
-                extra_launch_args = jsonb($13),
-                custom_env_vars = jsonb($14),
-                mc_memory_max = $15,
-                mc_memory_auto = $16,
-                 mc_force_fullscreen = $17,
-                 mc_maximize_window = $18,
-                 mc_game_resolution_x = $19,
-                 mc_game_resolution_y = $20,
-                 hide_on_process_start = $21,
-                 auto_set_java_high_performance_mode = $22,
-
-                 hook_pre_launch = $23,
-                 hook_wrapper = $24,
-                 hook_post_exit = $25,
-
-                 custom_dir = $26,
-                 prev_custom_dir = $27,
-                 migrated = $28,
-
-                 toggle_sidebar = $29,
-                 feature_flags = $30,
-                 hide_nametag_skins_page = $31,
-
-                 pending_update_toast_for_version = $32,
-                 accent_color = $33,
-                 custom_background_path = $34,
-                 custom_background_blur = $35,
-                 custom_background_opacity = $36,
-
-                 version = $37,
-                 auto_concurrent_downloads = $38,
-                 minecraft_metadata_source = $39,
-                 minecraft_file_source = $40,
-                 modrinth_source = $41,
-                 curseforge_source = $42,
-                 use_minecraft_mirror = $43,
-                 use_modrinth_mirror = $44,
-                 use_curseforge_mirror = $45,
-                 onboarding_version = $46,
-                 onboarding_instance_tour_completed = $47,
-                 sidebar_instance_count = $48,
-                 transparent_background = $49,
-                 transparent_background_opacity = $50,
-                 transparent_background_blur = $51,
-                 home_layout = $52,
-                 minimal_home_instance_id = $53,
-                 auto_hide_downloads_button = $54,
-                 home_widgets = jsonb($55),
-                 mojang_auth_source = $56,
-				terracotta_public_nodes = jsonb($57),
-				telemetry_consent_version = $58
-            ",
-            max_concurrent_writes,
-            max_concurrent_downloads,
-            theme,
-            self.locale,
-            default_page,
-            self.collapsed_navigation,
-            self.advanced_rendering,
-            self.native_decorations,
-            self.discord_rpc,
-            self.developer_mode,
-            self.telemetry,
-            self.onboarded,
-            extra_launch_args,
-            custom_env_vars,
-            self.memory.maximum,
-            self.memory.automatic,
-            self.force_fullscreen,
-            self.maximize_window,
-            self.game_resolution.0,
-            self.game_resolution.1,
-            self.hide_on_process_start,
-            self.auto_set_java_high_performance_mode,
-            self.hooks.pre_launch,
-            self.hooks.wrapper,
-            self.hooks.post_exit,
-            self.custom_dir,
-            self.prev_custom_dir,
-            self.migrated,
-            self.toggle_sidebar,
-            feature_flags,
-            self.hide_nametag_skins_page,
-            self.pending_update_toast_for_version,
-            accent_color,
-            self.custom_background_path,
-            custom_background_blur,
-            custom_background_opacity,
-            version,
-            self.auto_concurrent_downloads,
-            minecraft_metadata_source,
-            minecraft_file_source,
-            modrinth_source,
-            curseforge_source,
-            use_minecraft_mirror,
-            use_modrinth_mirror,
-            use_curseforge_mirror,
-            onboarding_version,
-            self.onboarding_instance_tour_completed,
-            sidebar_instance_count,
-            self.transparent_background,
-            transparent_background_opacity,
-            self.transparent_background_blur,
-            home_layout,
-            self.minimal_home_instance_id,
-            self.auto_hide_downloads_button,
-            home_widgets,
-            mojang_auth_source,
-            terracotta_public_nodes,
-            self.telemetry_consent_version,
-        )
-        .execute(exec)
-        .await?;
-
-        sqlx::query(
-			"UPDATE settings SET enter_lightweight_mode_on_game_launch = ? WHERE id = 0",
-		)
-		.bind(self.enter_lightweight_mode_on_game_launch)
-		.execute(exec)
-		.await?;
-
-        sqlx::query("UPDATE settings SET close_behavior = ? WHERE id = 0")
-            .bind(&self.close_behavior)
-            .execute(exec)
-            .await?;
-
-        sqlx::query("UPDATE settings SET log_level = ? WHERE id = 0")
-            .bind(&self.log_level)
-            .execute(exec)
-            .await?;
-
-        sqlx::query(
-            "UPDATE settings SET home_widget_background_opacity = ? WHERE id = 0",
-        )
-        .bind(normalized.home_widget_background_opacity as i64)
-        .execute(exec)
-        .await?;
-
-        sqlx::query(
-            "UPDATE settings SET custom_background_component_opacity = ? WHERE id = 0",
-        )
-        .bind(normalized.custom_background_component_opacity as i64)
-        .execute(exec)
-        .await?;
-
-        sqlx::query(
-            "UPDATE settings SET ui_font = ?, mono_font = ? WHERE id = 0",
-        )
-        .bind(normalized.ui_font.clone())
-        .bind(normalized.mono_font.clone())
-        .execute(exec)
-        .await?;
-
-        sqlx::query("UPDATE settings SET hidden_nav_items = ? WHERE id = 0")
-            .bind(serde_json::to_string(&normalized.hidden_nav_items)?)
-            .execute(exec)
-            .await?;
-
-        sqlx::query(
-            "UPDATE settings SET custom_window_title_enabled = ? WHERE id = 0",
-        )
-        .bind(self.custom_window_title_enabled)
-        .execute(exec)
-        .await?;
-
-        sqlx::query(
-            "UPDATE settings SET default_window_title = ? WHERE id = 0",
-        )
-        .bind(normalized.default_window_title.as_str())
-        .execute(exec)
-        .await?;
-
-        sqlx::query(
-            "UPDATE settings SET backup_repository_path = ? WHERE id = 0",
-        )
-        .bind(self.backup_repository_path.as_deref())
-        .execute(exec)
-        .await?;
-
-        sqlx::query("UPDATE settings SET download_engine = ? WHERE id = 0")
-            .bind(self.download_engine.as_str())
-            .execute(exec)
-            .await?;
-        sqlx::query(
-            "UPDATE settings SET bypass_curseforge_download_restrictions = ? WHERE id = 0",
-        )
-        .bind(self.bypass_curseforge_download_restrictions)
-        .execute(exec)
-        .await?;
-        sqlx::query("UPDATE settings SET ignore_ssl_errors = ? WHERE id = 0")
-            .bind(self.ignore_ssl_errors)
-            .execute(exec)
-            .await?;
-        sqlx::query("UPDATE settings SET mc_memory_optimize = ? WHERE id = 0")
-            .bind(self.memory.optimize_before_launch)
-            .execute(exec)
-            .await?;
-        sqlx::query(
-            "UPDATE settings SET sync_features_across_devices = ?, show_files_tab_in_instances = ?, show_worlds_tab_in_instances = ?, show_screenshots_tab_in_instances = ?, show_skin_selector_in_sidebar = ? WHERE id = 0",
-        )
-        .bind(self.sync_features_across_devices)
-        .bind(self.show_files_tab_in_instances)
-        .bind(self.show_worlds_tab_in_instances)
-        .bind(self.show_screenshots_tab_in_instances)
-        .bind(self.show_skin_selector_in_sidebar)
-        .execute(exec)
-        .await?;
-        sqlx::query(
-            "UPDATE settings SET allow_external_scheme = ? WHERE id = 0",
-        )
-        .bind(self.allow_external_scheme)
-        .execute(exec)
-        .await?;
-        sqlx::query(
-            "UPDATE settings SET allow_privileged_scheme = ? WHERE id = 0",
-        )
-        .bind(self.allow_privileged_scheme)
-        .execute(exec)
-        .await?;
-
+    /// Persists the settings, which the store owns.
+    pub async fn update(&self) -> crate::Result<()> {
         super::settings_store::store(self).await;
-
         Ok(())
     }
 
-    pub(crate) async fn set_force_fullscreen<'a, E>(
-        exec: E,
-        value: bool,
-    ) -> crate::Result<()>
-    where
-        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
-    {
-        if !super::settings_store::is_active() {
-            sqlx::query(
-                "UPDATE settings SET mc_force_fullscreen = ? WHERE id = 0",
-            )
-            .bind(value)
-            .execute(exec)
-            .await?;
-        }
+    pub(crate) async fn set_force_fullscreen(value: bool) -> crate::Result<()> {
         super::settings_store::store_key(
             "force_fullscreen",
             serde_json::Value::Bool(value),
@@ -908,21 +602,9 @@ impl Settings {
         Ok(())
     }
 
-    pub(crate) async fn set_backup_repository_path<'a, E>(
-        exec: E,
+    pub(crate) async fn set_backup_repository_path(
         path: Option<&str>,
-    ) -> crate::Result<()>
-    where
-        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
-    {
-        if !super::settings_store::is_active() {
-            sqlx::query(
-                "UPDATE settings SET backup_repository_path = ? WHERE id = 0",
-            )
-            .bind(path)
-            .execute(exec)
-            .await?;
-        }
+    ) -> crate::Result<()> {
         let stored = match path {
             Some(path) => serde_json::Value::String(path.to_string()),
             None => serde_json::Value::Null,
@@ -963,25 +645,9 @@ impl Settings {
         })
     }
 
-    pub(crate) async fn set_privacy<'a, E>(
-        exec: E,
+    pub(crate) async fn set_privacy(
         privacy: &PrivacySettings,
-    ) -> crate::Result<()>
-    where
-        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
-    {
-        if !super::settings_store::is_active() {
-            sqlx::query(
-                "UPDATE settings
-                 SET telemetry = ?, discord_rpc = ?, telemetry_consent_version = ?
-                 WHERE id = 0",
-            )
-            .bind(privacy.telemetry)
-            .bind(privacy.discord_rpc)
-            .bind(privacy.consent_version)
-            .execute(exec)
-            .await?;
-        }
+    ) -> crate::Result<()> {
         super::settings_store::store_key(
             "telemetry",
             serde_json::Value::Bool(privacy.telemetry),
@@ -1000,19 +666,7 @@ impl Settings {
         Ok(())
     }
 
-    pub(crate) async fn set_telemetry<'a, E>(
-        exec: E,
-        enabled: bool,
-    ) -> crate::Result<()>
-    where
-        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
-    {
-        if !super::settings_store::is_active() {
-            sqlx::query("UPDATE settings SET telemetry = ? WHERE id = 0")
-                .bind(enabled)
-                .execute(exec)
-                .await?;
-        }
+    pub(crate) async fn set_telemetry(enabled: bool) -> crate::Result<()> {
         super::settings_store::store_key(
             "telemetry",
             serde_json::Value::Bool(enabled),
@@ -1021,19 +675,7 @@ impl Settings {
         Ok(())
     }
 
-    pub(crate) async fn set_discord_rpc<'a, E>(
-        exec: E,
-        enabled: bool,
-    ) -> crate::Result<()>
-    where
-        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
-    {
-        if !super::settings_store::is_active() {
-            sqlx::query("UPDATE settings SET discord_rpc = ? WHERE id = 0")
-                .bind(enabled)
-                .execute(exec)
-                .await?;
-        }
+    pub(crate) async fn set_discord_rpc(enabled: bool) -> crate::Result<()> {
         super::settings_store::store_key(
             "discord_rpc",
             serde_json::Value::Bool(enabled),
@@ -1133,35 +775,17 @@ impl Settings {
                 Some(config.password.clone())
             }
         };
-        if super::settings_store::is_active() {
-            Self::store_proxy_config(&config).await;
-            if let Some(password) = fallback_password {
-                sqlx::query(
-                    "UPDATE settings SET proxy_password = ? WHERE id = 0",
-                )
+        Self::store_proxy_config(&config).await;
+        if let Some(password) = fallback_password {
+            sqlx::query("UPDATE settings SET proxy_password = ? WHERE id = 0")
                 .bind(password)
                 .execute(exec)
                 .await?;
-            }
-            return Ok(());
         }
-
-        sqlx::query(
-            "UPDATE settings
-             SET proxy_mode = ?, proxy_url = ?, proxy_username = ?, proxy_password = ?
-             WHERE id = 0",
-        )
-        .bind(config.mode.as_str())
-        .bind(config.url.trim())
-        .bind(config.username.trim())
-        .bind(fallback_password.unwrap_or_default())
-        .execute(exec)
-        .await?;
         Ok(())
     }
 
-    /// Writes the proxy the settings carry into its document, which is how the
-    /// row hands it over to the store.
+    /// Writes the proxy the settings carry into its document.
     pub(crate) async fn store_proxy_config(config: &ProxyConfig) {
         super::settings_store::store_in(
             "proxy",
@@ -1263,7 +887,7 @@ impl Settings {
             }
         }
 
-        settings.update(exec).await?;
+        settings.update().await?;
 
         Ok(())
     }
@@ -1702,7 +1326,7 @@ mod tests {
         assert!(settings.bypass_curseforge_download_restrictions);
 
         settings.bypass_curseforge_download_restrictions = false;
-        settings.update(&pool).await.unwrap();
+        settings.update().await.unwrap();
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(!reloaded.bypass_curseforge_download_restrictions);
@@ -1716,7 +1340,7 @@ mod tests {
         assert!(!settings.ignore_ssl_errors);
 
         settings.ignore_ssl_errors = true;
-        settings.update(&pool).await.unwrap();
+        settings.update().await.unwrap();
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(reloaded.ignore_ssl_errors);
@@ -1730,7 +1354,7 @@ mod tests {
         assert!(!settings.memory.optimize_before_launch);
 
         settings.memory.optimize_before_launch = true;
-        settings.update(&pool).await.unwrap();
+        settings.update().await.unwrap();
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(reloaded.memory.optimize_before_launch);
@@ -1744,7 +1368,7 @@ mod tests {
         assert!(!settings.enter_lightweight_mode_on_game_launch);
 
         settings.enter_lightweight_mode_on_game_launch = true;
-        settings.update(&pool).await.unwrap();
+        settings.update().await.unwrap();
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(reloaded.enter_lightweight_mode_on_game_launch);
@@ -1804,7 +1428,7 @@ mod tests {
         });
         let mut settings = Settings::get(&pool).await.unwrap();
         settings.home_widgets = Some(expected.clone());
-        settings.update(&pool).await.unwrap();
+        settings.update().await.unwrap();
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert_eq!(reloaded.home_widgets, Some(expected));
@@ -1858,14 +1482,14 @@ mod tests {
 
         settings.ui_font = Some("  Microsoft YaHei  ".to_string());
         settings.mono_font = Some("JetBrains Mono".to_string());
-        settings.update(&pool).await.unwrap();
+        settings.update().await.unwrap();
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert_eq!(reloaded.ui_font.as_deref(), Some("Microsoft YaHei"));
         assert_eq!(reloaded.mono_font.as_deref(), Some("JetBrains Mono"));
 
         settings.mono_font = Some("   ".to_string());
-        settings.update(&pool).await.unwrap();
+        settings.update().await.unwrap();
 
         let cleared = Settings::get(&pool).await.unwrap();
         assert_eq!(cleared.mono_font, None);
@@ -1882,7 +1506,7 @@ mod tests {
         );
 
         settings.terracotta_public_nodes.clear();
-        settings.update(&pool).await.unwrap();
+        settings.update().await.unwrap();
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(reloaded.terracotta_public_nodes.is_empty());
@@ -1895,7 +1519,7 @@ mod tests {
         let mut settings = Settings::get(&pool).await.unwrap();
         assert_eq!(settings.mojang_auth_source, DownloadSourceMode::Auto);
         settings.mojang_auth_source = DownloadSourceMode::MirrorPreferred;
-        settings.update(&pool).await.unwrap();
+        settings.update().await.unwrap();
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert_eq!(
@@ -2054,15 +1678,15 @@ mod tests {
         privacy.telemetry = true;
         privacy.discord_rpc = false;
         privacy.consent_version = 2;
-        Settings::set_privacy(&pool, &privacy).await.unwrap();
+        Settings::set_privacy(&privacy).await.unwrap();
         assert_eq!(Settings::privacy(&pool).await.unwrap().consent_version, 2);
 
-        Settings::set_telemetry(&pool, false).await.unwrap();
+        Settings::set_telemetry(false).await.unwrap();
         let stored = Settings::privacy(&pool).await.unwrap();
         assert!(!stored.telemetry);
         assert!(!stored.discord_rpc);
 
-        Settings::set_discord_rpc(&pool, true).await.unwrap();
+        Settings::set_discord_rpc(true).await.unwrap();
         assert!(Settings::privacy(&pool).await.unwrap().discord_rpc);
     }
 
@@ -2070,10 +1694,10 @@ mod tests {
     async fn single_column_settings_accessors_round_trip() {
         let pool = migrated_test_pool().await;
 
-        Settings::set_force_fullscreen(&pool, true).await.unwrap();
+        Settings::set_force_fullscreen(true).await.unwrap();
         assert!(Settings::get(&pool).await.unwrap().force_fullscreen);
 
-        Settings::set_backup_repository_path(&pool, Some("/tmp/repo"))
+        Settings::set_backup_repository_path(Some("/tmp/repo"))
             .await
             .unwrap();
         assert_eq!(
@@ -2085,9 +1709,7 @@ mod tests {
             Some("/tmp/repo")
         );
 
-        Settings::set_backup_repository_path(&pool, None)
-            .await
-            .unwrap();
+        Settings::set_backup_repository_path(None).await.unwrap();
         assert!(
             Settings::get(&pool)
                 .await

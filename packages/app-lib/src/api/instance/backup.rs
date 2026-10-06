@@ -3951,7 +3951,6 @@ async fn move_repository_inner(destination: PathBuf) -> crate::Result<()> {
     let update_result: crate::Result<()> = async {
         let mut tx = state.pool.begin().await?;
         crate::state::Settings::set_backup_repository_path(
-            &mut *tx,
             stored_path.as_deref(),
         )
         .await?;

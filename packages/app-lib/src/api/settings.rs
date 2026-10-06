@@ -29,7 +29,7 @@ pub async fn set(mut settings: Settings) -> crate::Result<()> {
         &settings.terracotta_public_nodes,
     )?;
     settings.apply_legacy_download_source_settings();
-    settings.update(&state.pool).await?;
+    settings.update().await?;
     state.apply_runtime_settings(&settings).await?;
 
     Ok(())
@@ -40,7 +40,7 @@ pub async fn set_download_engine(engine: DownloadEngine) -> crate::Result<()> {
     let state = State::get().await?;
     let mut settings = Settings::get(&state.pool).await?;
     settings.download_engine = engine;
-    settings.update(&state.pool).await?;
+    settings.update().await?;
     state.apply_runtime_settings(&settings).await?;
     Ok(())
 }
@@ -57,7 +57,7 @@ pub async fn set_privacy(
 ) -> crate::Result<PrivacySettings> {
     let state = State::get().await?;
     let mut transaction = state.pool.begin().await?;
-    Settings::set_privacy(&mut *transaction, &privacy).await?;
+    Settings::set_privacy(&privacy).await?;
     sqlx::query("DELETE FROM telemetry_outbox")
         .execute(&mut *transaction)
         .await?;
@@ -78,7 +78,7 @@ pub async fn set_privacy(
 pub async fn set_telemetry(enabled: bool) -> crate::Result<PrivacySettings> {
     let state = State::get().await?;
     let mut transaction = state.pool.begin().await?;
-    Settings::set_telemetry(&mut *transaction, enabled).await?;
+    Settings::set_telemetry(enabled).await?;
     sqlx::query("DELETE FROM telemetry_outbox")
         .execute(&mut *transaction)
         .await?;
@@ -92,7 +92,7 @@ pub async fn set_telemetry(enabled: bool) -> crate::Result<PrivacySettings> {
 #[tracing::instrument]
 pub async fn set_discord_rpc(enabled: bool) -> crate::Result<PrivacySettings> {
     let state = State::get().await?;
-    Settings::set_discord_rpc(&state.pool, enabled).await?;
+    Settings::set_discord_rpc(enabled).await?;
     if let Err(error) = state.discord_rpc.clear_to_default(true).await {
         tracing::debug!(target: "theseus::telemetry", %error, "Failed to apply Discord RPC state");
     }
@@ -113,7 +113,7 @@ pub async fn cancel_directory_change(
         settings.custom_dir = Some(prev_custom_dir);
     }
 
-    settings.update(&pool).await?;
+    settings.update().await?;
 
     Ok(())
 }
