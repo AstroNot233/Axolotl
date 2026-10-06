@@ -24,10 +24,10 @@
 						{{ activeJobs[0]?.display?.title ?? formatMessage(messages.downloads) }}
 					</span>
 					<span
-						v-if="activeJobs[0]?.summary.speed_bytes_per_second"
+						v-if="firstJobSpeed"
 						class="shrink-0 text-xs text-[var(--color-text-tertiary)]"
 					>
-						{{ formatBytes(activeJobs[0].summary.speed_bytes_per_second) }}/s
+						{{ formatBytes(firstJobSpeed) }}/s
 					</span>
 					<span
 						class="flex size-5 shrink-0 items-center justify-center rounded-full bg-green text-xs font-semibold text-white"
@@ -130,6 +130,7 @@ import {
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { useDownloadTelemetry } from '@/composables/useDownloadTelemetry'
 import type { InstallJobSnapshot, InstallPhaseId } from '@/helpers/install'
 import { injectDownloadManager } from '@/providers/download-manager'
 
@@ -199,11 +200,15 @@ const phaseDescriptors: Partial<Record<InstallPhaseId, (typeof messages)[keyof t
 	}
 
 const activeJobs = computed(() => downloadManager.activeJobs.value)
+const displayedTelemetry = useDownloadTelemetry(activeJobs)
+const firstJobSpeed = computed(
+	() => displayedTelemetry(activeJobs.value[0])?.speed_bytes_per_second,
+)
 const hasLegacyDownload = computed(() => downloadManager.legacyDownloads.value.length > 0)
 const hasActivity = computed(() => activeJobs.value.length > 0 || hasLegacyDownload.value)
 const totalSpeedLabel = computed(() => {
 	const speed = activeJobs.value.reduce(
-		(total, job) => total + (job.summary.speed_bytes_per_second ?? 0),
+		(total, job) => total + (displayedTelemetry(job)?.speed_bytes_per_second ?? 0),
 		0,
 	)
 	return speed > 0 ? `${formatBytes(speed)}/s` : ''

@@ -487,6 +487,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import MissingModpackContentModal from '@/components/ui/modal/MissingModpackContentModal.vue'
+import { useDownloadTelemetry } from '@/composables/useDownloadTelemetry'
 import { listPendingCurseForgeManualDownloads } from '@/helpers/curseforge'
 import type { CurseForgeManualDownloadItem } from '@/helpers/curseforge-manual'
 import {
@@ -517,6 +518,7 @@ import { isSuccessfulUpgradeJob, upgradeResultLocation } from './instance/upgrad
 type DownloadItem = InstallJobSnapshot['items'][number]
 
 const manager = injectDownloadManager()
+const displayedTelemetry = useDownloadTelemetry(manager.activeJobs)
 const { showCurseForgeManualDownloads } = injectContentInstall()
 const route = useRoute()
 const router = useRouter()
@@ -1120,6 +1122,7 @@ function totalRequiredFiles(job: InstallJobSnapshot) {
 
 function downloadTelemetry(job: InstallJobSnapshot) {
 	const summary = job.summary
+	const telemetry = displayedTelemetry(job)
 	const metrics: string[] = []
 	if (summary.source && !isRecoveryValidation(job)) {
 		metrics.push(
@@ -1128,15 +1131,15 @@ function downloadTelemetry(job: InstallJobSnapshot) {
 			}),
 		)
 	}
-	if (summary.speed_bytes_per_second && summary.speed_bytes_per_second > 0) {
+	if (telemetry?.speed_bytes_per_second && telemetry.speed_bytes_per_second > 0) {
 		metrics.push(
 			formatMessage(messages.downloadSpeed, {
-				speed: formatBytes(summary.speed_bytes_per_second),
+				speed: formatBytes(telemetry.speed_bytes_per_second),
 			}),
 		)
 	}
-	if (summary.eta_seconds != null) {
-		metrics.push(formatDownloadEta(summary.eta_seconds))
+	if (telemetry?.eta_seconds != null) {
+		metrics.push(formatDownloadEta(telemetry.eta_seconds))
 	}
 	if (summary.fallback_count > 0 && !isRecoveryValidation(job)) {
 		metrics.push(formatMessage(messages.downloadFallbacks, { count: summary.fallback_count }))
