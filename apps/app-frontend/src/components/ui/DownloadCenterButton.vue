@@ -135,6 +135,11 @@ import { useRouter } from 'vue-router'
 
 import { useDownloadTelemetry } from '@/composables/useDownloadTelemetry'
 import type { InstallJobSnapshot, InstallPhaseId } from '@/helpers/install'
+import {
+    effectiveInstallProgress,
+    hasDeterminateInstallProgress,
+    installProgressTextSource,
+} from '@/helpers/install-progress'
 import { injectDownloadManager } from '@/providers/download-manager'
 
 const { formatMessage } = useVIntl()
@@ -229,8 +234,8 @@ function phaseLabel(phase: InstallPhaseId) {
 }
 
 function progressPercent(job: InstallJobSnapshot) {
-    const progress = job.progress
-    if (progress?.total && progress.total > 0) {
+    const progress = effectiveInstallProgress(job)
+    if (hasDeterminateInstallProgress(progress)) {
         return Math.min(100, Math.max(0, (progress.current / progress.total) * 100))
     }
     const total = job.summary.bytes_total
@@ -239,9 +244,12 @@ function progressPercent(job: InstallJobSnapshot) {
 }
 
 function progressLabel(job: InstallJobSnapshot) {
-    const total = job.summary.bytes_total
-    if (total && total > 0) {
-        return `${formatBytes(job.summary.bytes_downloaded)} / ${formatBytes(total)}`
+    const progress = effectiveInstallProgress(job)
+    if (hasDeterminateInstallProgress(progress)) {
+        const source = installProgressTextSource(job)
+        return source.type === 'bytes'
+            ? `${formatBytes(progress.current)} / ${formatBytes(progress.total)}`
+            : `${Math.min(progress.current, progress.total)} / ${progress.total}`
     }
     return `${job.summary.files_completed} / ${job.summary.files_total ?? '—'}`
 }

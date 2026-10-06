@@ -25,6 +25,7 @@ import {
     effectiveInstallProgress,
     hasDeterminateInstallProgress,
     installProgressTextSource,
+    preserveMonotonicProgress,
 } from '@/helpers/install-progress'
 import { get_many as getInstances } from '@/helpers/instance'
 import type { DownloadManager } from '@/providers/download-manager'
@@ -731,6 +732,12 @@ export async function useInstallJobNotifications(opts: {
     }
 
     function setJobs(nextJobs: InstallJobSnapshot[]) {
+        const currentJobs = new Map(jobs.value.map((job) => [job.job_id, job]))
+        nextJobs = nextJobs.map((job) => {
+            const current = currentJobs.get(job.job_id)
+            return current ? preserveMonotonicProgress(current, job) : job
+        })
+
         for (const job of nextJobs) {
             if (!jobOrder.has(job.job_id)) {
                 jobOrder.set(job.job_id, nextJobOrder++)

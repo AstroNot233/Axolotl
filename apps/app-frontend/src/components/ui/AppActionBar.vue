@@ -862,6 +862,7 @@ const currentLoadingBarIconUrls = ref<Record<string, string | null>>({})
 const notificationId = ref<string | number | null>(null)
 const dismissed = ref(false)
 const dismissedDownloadSignature = ref<string | null>(null)
+const loadingBarProgress = new Map<string, number>()
 
 function getLoadingBarKey(loadingBar: LoadingBar): string {
     return `${loadingBar.loading_bar_uuid ?? loadingBar.id}`
@@ -871,7 +872,9 @@ function getLoadingProgress(loadingBar: LoadingBar): number {
     if (!loadingBar.total || loadingBar.total <= 0) {
         return 0
     }
-    return Math.max(0, Math.min(1, (loadingBar.current ?? 0) / (loadingBar.total ?? 0)))
+    const key = getLoadingBarKey(loadingBar)
+    const progress = Math.max(0, Math.min(1, (loadingBar.current ?? 0) / loadingBar.total))
+    return Math.max(progress, loadingBarProgress.get(key) ?? 0)
 }
 
 function getLoadingText(loadingBar: LoadingBar): string {
@@ -931,7 +934,8 @@ function buildDownloadItems(): PopupNotificationProgressItem[] {
                 waiting: !bar.total || bar.total <= 0,
                 // Pack downloads report file counts, so prefer count UI over raw percentage.
                 progressType: isPackDownload ? 'count' : 'percentage',
-                progressCurrent: bar.current,
+                progressCurrent:
+                    bar.total && bar.total > 0 ? getLoadingProgress(bar) * bar.total : bar.current,
                 progressTotal: bar.total,
             }
         }),
@@ -1071,6 +1075,7 @@ function applyLoadingEvent(payload: LoadingEventPayload): boolean {
             const { [key]: _removedIcon, ...remainingIcons } = currentLoadingBarIconUrls.value
             currentLoadingBarIconUrls.value = remainingIcons
         }
+        loadingBarProgress.delete(key)
         return false
     }
 
@@ -1082,6 +1087,8 @@ function applyLoadingEvent(payload: LoadingEventPayload): boolean {
         bar_type: payload.event,
     })
     if (!isVisibleLoadingBar(loadingBar)) return false
+
+    loadingBarProgress.set(key, getLoadingProgress(loadingBar))
 
     if (index >= 0) {
         currentLoadingBars.value.splice(index, 1, loadingBar)
@@ -1101,6 +1108,15 @@ async function refreshLoadingBars() {
     currentLoadingBars.value = Object.values(bars)
         .map(formatLoadingBars)
         .filter(isVisibleLoadingBar)
+
+    const activeKeys = new Set(currentLoadingBars.value.map(getLoadingBarKey))
+    for (const key of loadingBarProgress.keys()) {
+        if (!activeKeys.has(key)) loadingBarProgress.delete(key)
+    }
+    for (const bar of currentLoadingBars.value) {
+        const progress = getLoadingProgress(bar)
+        if (bar.total && bar.total > 0) loadingBarProgress.set(getLoadingBarKey(bar), progress)
+    }
 
     const instanceIds = Array.from(
         new Set(
