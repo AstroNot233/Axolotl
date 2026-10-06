@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::state::{DirectoryInfo, Settings};
+use crate::util::proxy::ProxyConfig;
 
 const DIR_NAME: &str = "settings";
 const SCHEMA_VERSION: u32 = 1;
@@ -255,16 +256,20 @@ async fn shipped_defaults(path: &Path) -> Map<String, Value> {
 /// What every key falls back to when no document carries it, which is what a
 /// write compares against once a deployment ships nothing for it.
 fn settings_defaults() -> Map<String, Value> {
-    match serde_json::to_value(Settings::default()) {
-        Ok(Value::Object(defaults)) => defaults,
-        other => {
-            debug_assert!(
-                false,
-                "the settings default is not an object: {other:?}"
-            );
-            Map::new()
-        }
-    }
+    let Ok(Value::Object(mut defaults)) =
+        serde_json::to_value(Settings::default())
+    else {
+        debug_assert!(false, "the settings default is not an object");
+        return Map::new();
+    };
+
+    // The proxy owns its keys, so its defaults come from its type rather than
+    // from the settings.
+    let proxy = ProxyConfig::default();
+    defaults.insert("proxy_mode".to_string(), Value::from(proxy.mode.as_str()));
+    defaults.insert("proxy_url".to_string(), Value::from(proxy.url));
+    defaults.insert("proxy_username".to_string(), Value::from(proxy.username));
+    defaults
 }
 
 /// Gives `key` to the document, or takes it away when its value is what the
@@ -1210,6 +1215,51 @@ mod tests {
             stored.get("proxy_url"),
             Some(&Value::from("http://localhost:8080"))
         );
+    }
+
+    /// A domain that owns its keys follows the defaults just like the others.
+    #[tokio::test]
+    async fn entries_a_domain_owns_follow_the_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proxy.json");
+        TEST_CONFIG_DIR.with(|current| *current.borrow_mut() = None);
+
+        set_entries_at(
+            &path,
+            &[
+                ("proxy_mode", Value::from("custom")),
+                ("proxy_url", Value::from("")),
+            ],
+        )
+        .await
+        .unwrap();
+
+        let stored = stored_at(&path).await;
+        assert_eq!(stored.get("proxy_mode"), Some(&Value::from("custom")));
+        assert!(!stored.contains_key("proxy_url"));
+    }
+
+    /// Startup drops what a document repeats of a default, which is what makes
+    /// a default that changed while the launcher was closed arrive.
+    #[tokio::test]
+    async fn startup_drops_the_entries_a_default_provides() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(DIR_NAME)).unwrap();
+        let path = dir.path().join(DIR_NAME).join("appearance.json");
+        std::fs::write(&path, document(r#"{"theme":"dark","locale":"fr-FR"}"#))
+            .unwrap();
+        TEST_DIR.with(|current| {
+            *current.borrow_mut() = Some(dir.path().to_path_buf());
+        });
+        TEST_CONFIG_DIR.with(|current| *current.borrow_mut() = None);
+
+        prune_redundant().await;
+
+        let stored = stored_at(&path).await;
+        assert!(!stored.contains_key("theme"));
+        assert_eq!(stored.get("locale"), Some(&Value::from("fr-FR")));
+
+        TEST_DIR.with(|current| *current.borrow_mut() = None);
     }
 
     #[tokio::test]
