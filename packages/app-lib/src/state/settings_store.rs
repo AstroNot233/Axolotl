@@ -833,18 +833,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stored_keys_shadow_the_row_after_a_write() {
+    async fn stored_keys_shadow_the_defaults_after_a_write() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("appearance.json");
 
         let mut settings = fresh_settings().await;
-        settings.accent_color = crate::state::AccentColor::Pink;
+        settings.accent_color = crate::state::AccentColor::Blue;
         store_to(&path, appearance(), &settings).await.unwrap();
 
-        let mut stored = fresh_settings().await;
-        stored.accent_color = crate::state::AccentColor::Blue;
-        let merged = overlay_from(&path, appearance(), stored).await;
-        assert_eq!(merged.accent_color, crate::state::AccentColor::Pink);
+        let merged =
+            overlay_from(&path, appearance(), fresh_settings().await).await;
+        assert_eq!(merged.accent_color, crate::state::AccentColor::Blue);
     }
 
     #[tokio::test]
@@ -1110,15 +1109,15 @@ mod tests {
         )
         .unwrap();
 
-        store_to(&path, appearance(), &fresh_settings().await)
-            .await
-            .unwrap();
+        let mut settings = fresh_settings().await;
+        settings.accent_color = crate::state::AccentColor::Blue;
+        store_to(&path, appearance(), &settings).await.unwrap();
 
         let stored: Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
                 .unwrap();
         assert_eq!(stored["data"]["from_a_newer_build"], 7);
-        assert!(stored["data"]["accent_color"].is_string());
+        assert_eq!(stored["data"]["accent_color"], "blue");
         assert_eq!(stored["written_by"], env!("CARGO_PKG_VERSION"));
     }
 
@@ -1300,7 +1299,7 @@ mod tests {
             .unwrap();
 
         let stored = stored_at(&path).await;
-        assert_eq!(stored.get("minimal_home_instance_id"), Some(&Value::Null));
+        assert!(!stored.contains_key("minimal_home_instance_id"));
         assert_eq!(stored.get("other"), Some(&Value::from(1)));
     }
 
