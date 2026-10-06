@@ -14,7 +14,9 @@
 //! Bump `SCHEMA_VERSION` whenever a domain's key set changes, including when
 //! a key is dropped: that is what stops a build which still knows the removed
 //! key from writing the document again. It versions the shape of a document,
-//! unlike the `version` the `state` domain carries, which moves values.
+//! unlike the `version` the `state` domain carries, which moves values. A
+//! document a newer build wrote is still read, so a build that knows less keeps
+//! showing the values the user chose instead of what the row froze.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -136,6 +138,9 @@ struct Document {
     data: Value,
 }
 
+/// A document `Newer` than this build is still read - its values are what the
+/// user last chose - but it is never written back, which is what keeps a build
+/// that knows less from dropping what a newer one stored.
 enum Stored {
     Missing,
     Unreadable,
@@ -329,7 +334,7 @@ async fn stored_layers(
 
 async fn stored_at(path: &Path) -> Map<String, Value> {
     match read(path).await {
-        Stored::Ready(document) => {
+        Stored::Ready(document) | Stored::Newer(document) => {
             document.data.as_object().cloned().unwrap_or_default()
         }
         _ => Map::new(),
@@ -383,12 +388,12 @@ async fn overlay_from(
             return settings;
         }
         Stored::Newer(document) => {
-            tracing::warn!(
+            tracing::debug!(
                 path = %path.display(),
                 version = document.schema_version,
-                "Ignoring a settings document written by a newer build"
+                "Reading a settings document a newer build wrote"
             );
-            return settings;
+            document
         }
     };
 
@@ -868,17 +873,6 @@ mod tests {
         let corrupt = dir.path().join("corrupt.json");
         std::fs::write(&corrupt, b"{ not json").unwrap();
         assert!(stored_at(&corrupt).await.is_empty());
-
-        let newer = dir.path().join("newer.json");
-        std::fs::write(
-            &newer,
-            format!(
-                r#"{{"schema_version":{},"written_by":"9.9.9","data":{{"telemetry":true}}}}"#,
-                SCHEMA_VERSION + 1
-            ),
-        )
-        .unwrap();
-        assert!(stored_at(&newer).await.is_empty());
     }
 
     #[tokio::test]
@@ -931,22 +925,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_document_from_a_newer_build_is_ignored() {
+    async fn a_document_from_a_newer_build_is_read_but_not_written() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("appearance.json");
-        std::fs::write(
-            &path,
-            format!(
-                r#"{{"schema_version":{},"written_by":"9.9.9","data":{{"locale":"de-DE"}}}}"#,
-                SCHEMA_VERSION + 1
-            ),
-        )
-        .unwrap();
+        let newer = format!(
+            r#"{{"schema_version":{},"written_by":"9.9.9","data":{{"locale":"de-DE"}}}}"#,
+            SCHEMA_VERSION + 1
+        );
+        std::fs::write(&path, &newer).unwrap();
 
         let mut stored = fresh_settings().await;
         stored.locale = "fr-FR".to_string();
         let merged = overlay_from(&path, appearance(), stored).await;
-        assert_eq!(merged.locale, "fr-FR");
+        assert_eq!(merged.locale, "de-DE");
+        assert_eq!(
+            stored_at(&path).await.get("locale"),
+            Some(&Value::from("de-DE"))
+        );
+
+        store_to(&path, appearance(), &fresh_settings().await)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), newer);
     }
 
     #[tokio::test]
