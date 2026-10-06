@@ -291,15 +291,27 @@ fn write_key(
 pub(crate) async fn read_settings() -> Settings {
     let mut settings = Settings::default();
     let defaults = settings_defaults();
+    let pruning = config_dir().is_some();
     for (name, keys) in DOMAINS {
-        settings = overlay_layers(
-            config_path(name).as_deref(),
-            local_path(name).as_deref(),
-            keys,
-            settings,
-        )
-        .await;
-        prune_repeated(name, keys, &defaults).await;
+        let shipped = match config_path(name) {
+            Some(path) => readable(&path).await,
+            None => None,
+        };
+        let local = match local_path(name) {
+            Some(path) => readable(&path).await,
+            None => None,
+        };
+
+        for document in [&shipped, &local].into_iter().flatten() {
+            settings = overlay_document(document, keys, settings);
+        }
+        if pruning
+            && let (Some(path), Some(document)) =
+                (local_path(name), local.as_ref())
+        {
+            prune_repeated(&path, keys, shipped.as_ref(), document, &defaults)
+                .await;
+        }
     }
     settings
 }
@@ -309,24 +321,25 @@ pub(crate) async fn read_settings() -> Settings {
 /// its owner says a key should follow it, so the local copy stops shadowing it
 /// as soon as the two agree, and a later change to that default still arrives.
 async fn prune_repeated(
-    name: &str,
+    path: &Path,
     keys: &[&str],
+    shipped: Option<&Document>,
+    local: &Document,
     defaults: &Map<String, Value>,
 ) {
-    if config_dir().is_none() {
-        return;
-    }
-    let Some(path) = local_path(name) else {
+    let Some(stored) = local.data.as_object() else {
         return;
     };
-    let stored = stored_at(&path).await;
-    if stored.is_empty() {
-        return;
-    }
-    let shipped = shipped_defaults(&path).await;
+    let shipped_entries =
+        shipped.and_then(|document| document.data.as_object());
     let repeated = keys.iter().any(|key| {
         stored.get(*key).is_some_and(|value| {
-            provided(shipped.get(*key), defaults, key) == Some(value)
+            let provided = provided(
+                shipped_entries.and_then(|entries| entries.get(*key)),
+                defaults,
+                key,
+            );
+            provided == Some(value)
         })
     });
     if !repeated {
@@ -334,7 +347,8 @@ async fn prune_repeated(
     }
 
     let _writing = WRITES.lock().await;
-    if let Err(error) = prune_at(&path, keys, &shipped, defaults).await {
+    let shipped = shipped_entries.cloned().unwrap_or_default();
+    if let Err(error) = prune_at(path, keys, &shipped, defaults).await {
         tracing::warn!(
             path = %path.display(),
             %error,
@@ -405,22 +419,19 @@ pub async fn sanitise() -> crate::Result<usize> {
 /// carries. Startup runs it once, so a default a deployment changed while the
 /// launcher was closed reaches the settings again.
 pub(crate) async fn prune_redundant() {
-    let _writing = WRITES.lock().await;
-    let settings_defaults = settings_defaults();
+    let defaults = settings_defaults();
     for (name, keys) in DOMAINS {
         let Some(path) = local_path(name) else {
             return;
         };
-        let shipped = shipped_defaults(&path).await;
-        if let Err(error) =
-            prune_at(&path, keys, &shipped, &settings_defaults).await
-        {
-            tracing::warn!(
-                path = %path.display(),
-                %error,
-                "Failed to prune the {name} settings"
-            );
-        }
+        let shipped = match config_path(name) {
+            Some(config) => readable(&config).await,
+            None => None,
+        };
+        let Some(local) = readable(&path).await else {
+            continue;
+        };
+        prune_repeated(&path, keys, shipped.as_ref(), &local, &defaults).await;
     }
 }
 
@@ -543,20 +554,18 @@ async fn read(path: &Path) -> Stored {
     }
 }
 
-async fn overlay_from(
-    path: &Path,
-    keys: &[&str],
-    settings: Settings,
-) -> Settings {
-    let document = match read(path).await {
-        Stored::Ready(document) => document,
-        Stored::Missing => return settings,
+/// The document at `path` as a reader sees it: a missing or unreadable one has
+/// nothing to apply, and one a newer build wrote is read like any other.
+async fn readable(path: &Path) -> Option<Document> {
+    match read(path).await {
+        Stored::Ready(document) => Some(document),
+        Stored::Missing => None,
         Stored::Unreadable => {
             tracing::warn!(
                 path = %path.display(),
                 "Ignoring a settings document that cannot be read"
             );
-            return settings;
+            None
         }
         Stored::Newer(document) => {
             tracing::debug!(
@@ -564,10 +573,28 @@ async fn overlay_from(
                 version = document.schema_version,
                 "Reading a settings document a newer build wrote"
             );
-            document
+            Some(document)
         }
-    };
+    }
+}
 
+async fn overlay_from(
+    path: &Path,
+    keys: &[&str],
+    settings: Settings,
+) -> Settings {
+    match readable(path).await {
+        Some(document) => overlay_document(&document, keys, settings),
+        None => settings,
+    }
+}
+
+/// Applies the keys `document` carries on top of `settings`.
+fn overlay_document(
+    document: &Document,
+    keys: &[&str],
+    settings: Settings,
+) -> Settings {
     let (Ok(mut value), Some(stored)) =
         (serde_json::to_value(&settings), document.data.as_object())
     else {
@@ -585,9 +612,8 @@ async fn overlay_from(
         Ok(settings) => settings,
         Err(error) => {
             tracing::warn!(
-                path = %path.display(),
                 %error,
-                "Keeping the database values of a settings document this build cannot read"
+                "Keeping the defaults of a settings document this build cannot read"
             );
             settings
         }

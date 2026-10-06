@@ -1286,6 +1286,26 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn the_row_hands_its_proxy_over() {
+        let pool = migrated_test_pool().await;
+        sqlx::query(
+            "UPDATE settings
+             SET proxy_mode = 'custom',
+                 proxy_url = 'http://127.0.0.1:7897',
+                 proxy_username = 'someone'
+             WHERE id = 0",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let proxy = Settings::read_row_proxy_config(&pool).await.unwrap();
+        assert_eq!(proxy.mode.as_str(), "custom");
+        assert_eq!(proxy.url, "http://127.0.0.1:7897");
+        assert_eq!(proxy.username, "someone");
+    }
+
     #[test]
     fn home_layout_uses_stable_wire_values() {
         assert_eq!(HomeLayout::from_string("standard"), HomeLayout::Standard);
