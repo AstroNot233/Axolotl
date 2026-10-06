@@ -936,11 +936,18 @@ impl State {
         if settings_store::needs_seeding(database_existed).await {
             tracing::info!("Handing the stored settings over to the documents");
             let stored = Settings::read_row(&pool).await?;
-            settings_store::store(&stored).await;
-            Settings::store_proxy_config(
-                &Settings::read_row_proxy_config(&pool).await?,
+            let proxy = Settings::read_row_proxy_config(&pool).await?;
+            if !settings_store::hand_over(
+                &stored,
+                &Settings::proxy_entries(&proxy),
             )
-            .await;
+            .await
+            {
+                tracing::warn!(
+                    "The settings handover did not finish; the next start \
+                     attempts it again"
+                );
+            }
         }
 
         settings_store::prune_redundant().await;

@@ -36,6 +36,13 @@ use crate::util::proxy::ProxyConfig;
 const DIR_NAME: &str = "settings";
 const SCHEMA_VERSION: u32 = 1;
 
+/// The marker a finished settings handover leaves behind.
+const HANDOVER_MARKER_FILE: &str = ".handed-over";
+
+/// How often one start writes the documents of a handover out, before leaving
+/// the rest to the next one.
+const HANDOVER_ATTEMPTS: usize = 3;
+
 /// The documents the store owns, with the keys each one carries.
 const DOMAINS: &[(&str, &[&str])] = &[
     (
@@ -208,8 +215,9 @@ fn settings_root() -> Option<PathBuf> {
 
 /// Whether the row still has to hand its settings over to the documents, which
 /// is what an installation that predates them does once: `database_existed`
-/// keeps a fresh installation out, and the directory keeps one that already
-/// took the row over from doing it again.
+/// keeps a fresh installation out, and both the marker a finished handover
+/// leaves behind and a complete set of documents keep one that already took the
+/// row over from doing it again.
 pub(crate) async fn needs_seeding(database_existed: bool) -> bool {
     needs_seeding_at(SETTINGS_DIR.get().map(PathBuf::as_path), database_existed)
         .await
@@ -222,14 +230,101 @@ async fn needs_seeding_at(
     let Some(settings_dir) = settings_dir else {
         return false;
     };
-    database_existed
-        && !tokio::fs::try_exists(settings_dir.join(DIR_NAME))
+    if !database_existed {
+        return false;
+    }
+    if tokio::fs::try_exists(handover_marker(settings_dir))
+        .await
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    !documents_exist(settings_dir).await
+}
+
+/// Hands the row's settings and proxy over to the documents, and records that
+/// once every one of them has taken them. Reports whether the handover is on
+/// record: one that fails part way is attempted again, at the next start at the
+/// latest, because nothing else says the documents are complete.
+pub(crate) async fn hand_over(
+    settings: &Settings,
+    proxy: &[(&str, Value)],
+) -> bool {
+    let _writing = WRITES.lock().await;
+    for attempt in 1..=HANDOVER_ATTEMPTS {
+        if hand_over_to(settings, proxy).await {
+            return mark_handed_over().await;
+        }
+        tracing::warn!(attempt, "Retrying the settings handover");
+    }
+    false
+}
+
+/// Whether every document took over the settings of its domain.
+async fn hand_over_to(settings: &Settings, proxy: &[(&str, Value)]) -> bool {
+    let mut complete = store_all(settings).await;
+    let (name, _) = *PROXY_DOCUMENT;
+    let Some(path) = local_path(name) else {
+        return false;
+    };
+    if let Err(error) = set_entries_at(&path, proxy).await {
+        tracing::warn!(
+            path = %path.display(),
+            %error,
+            "Failed to save the {name} settings"
+        );
+        complete = false;
+    }
+    complete
+}
+
+/// Writes the marker a finished handover leaves behind, which only happens once
+/// every document is in place.
+async fn mark_handed_over() -> bool {
+    let Some(path) = settings_root().map(|root| handover_marker(&root)) else {
+        return false;
+    };
+    let written = async {
+        if let Some(parent) = path.parent() {
+            crate::util::io::create_dir_all(parent).await?;
+        }
+        crate::util::io::write(&path, env!("CARGO_PKG_VERSION")).await
+    };
+    match written.await {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "Failed to record the settings handover"
+            );
+            false
+        }
+    }
+}
+
+fn handover_marker(settings_dir: &Path) -> PathBuf {
+    settings_dir.join(DIR_NAME).join(HANDOVER_MARKER_FILE)
+}
+
+async fn documents_exist(settings_dir: &Path) -> bool {
+    for (name, _) in DOMAINS.iter().copied().chain([*PROXY_DOCUMENT]) {
+        if !tokio::fs::try_exists(document_path(settings_dir, name))
             .await
             .unwrap_or(false)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn document_path(settings_dir: &Path, name: &str) -> PathBuf {
+    settings_dir.join(DIR_NAME).join(format!("{name}.json"))
 }
 
 fn local_path(name: &str) -> Option<PathBuf> {
-    Some(settings_root()?.join(DIR_NAME).join(format!("{name}.json")))
+    Some(document_path(&settings_root()?, name))
 }
 
 fn config_path(name: &str) -> Option<PathBuf> {
@@ -418,9 +513,16 @@ async fn overlay_layers(
 /// keeps the values a document has not taken over yet.
 pub(crate) async fn store(settings: &Settings) {
     let _writing = WRITES.lock().await;
+    store_all(settings).await;
+}
+
+/// Persists every domain and reports whether all of them took the settings,
+/// which is what a handover retries on.
+async fn store_all(settings: &Settings) -> bool {
+    let mut complete = true;
     for (name, keys) in DOMAINS {
         let Some(path) = local_path(name) else {
-            return;
+            return false;
         };
         if let Err(error) = store_to(&path, keys, settings).await {
             tracing::warn!(
@@ -428,8 +530,10 @@ pub(crate) async fn store(settings: &Settings) {
                 %error,
                 "Failed to save the {name} settings"
             );
+            complete = false;
         }
     }
+    complete
 }
 
 /// Drops the keys no domain knows, for documents another version left behind.
@@ -906,7 +1010,50 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(needs_seeding_at(Some(dir.path()), true).await);
 
+        // An empty directory is a handover that stopped before its first
+        // document, so the start that finds it writes them all.
         std::fs::create_dir_all(dir.path().join(DIR_NAME)).unwrap();
+        assert!(needs_seeding_at(Some(dir.path()), true).await);
+    }
+
+    /// A handover is only on record once every document is in place, so the
+    /// start that failed part way writes the rest.
+    #[tokio::test]
+    async fn a_handover_writes_every_document_before_it_is_on_record() {
+        let dir = tempfile::tempdir().unwrap();
+        TEST_DIR.with(|current| {
+            *current.borrow_mut() = Some(dir.path().to_path_buf());
+        });
+
+        let settings = Settings::get().await;
+        let proxy = Settings::proxy_entries(&ProxyConfig::default());
+        assert!(hand_over(&settings, &proxy).await);
+        for (name, _) in DOMAINS.iter().copied().chain([*PROXY_DOCUMENT]) {
+            assert!(document_path(dir.path(), name).exists(), "{name}");
+        }
+        assert!(handover_marker(dir.path()).exists());
+        assert!(!needs_seeding_at(Some(dir.path()), true).await);
+
+        // The marker outlives a document the user deletes, which keeps the row
+        // from filling it back in.
+        std::fs::remove_file(document_path(dir.path(), "appearance")).unwrap();
+        assert!(!needs_seeding_at(Some(dir.path()), true).await);
+
+        TEST_DIR.with(|current| *current.borrow_mut() = None);
+    }
+
+    /// An installation whose documents are all in place took the row over
+    /// before the marker existed.
+    #[tokio::test]
+    async fn a_complete_set_of_documents_needs_no_handover() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, _) in DOMAINS.iter().copied().chain([*PROXY_DOCUMENT]) {
+            let path = document_path(dir.path(), name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, document("{}")).unwrap();
+        }
+
+        assert!(!handover_marker(dir.path()).exists());
         assert!(!needs_seeding_at(Some(dir.path()), true).await);
     }
 
