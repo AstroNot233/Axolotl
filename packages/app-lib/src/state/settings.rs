@@ -913,6 +913,54 @@ impl Settings {
         })
     }
 
+    pub(crate) async fn set_privacy<'a, E>(
+        exec: E,
+        privacy: &PrivacySettings,
+    ) -> crate::Result<()>
+    where
+        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        sqlx::query(
+            "UPDATE settings
+             SET telemetry = ?, discord_rpc = ?, telemetry_consent_version = ?
+             WHERE id = 0",
+        )
+        .bind(privacy.telemetry)
+        .bind(privacy.discord_rpc)
+        .bind(privacy.consent_version)
+        .execute(exec)
+        .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn set_telemetry<'a, E>(
+        exec: E,
+        enabled: bool,
+    ) -> crate::Result<()>
+    where
+        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        sqlx::query("UPDATE settings SET telemetry = ? WHERE id = 0")
+            .bind(enabled)
+            .execute(exec)
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn set_discord_rpc<'a, E>(
+        exec: E,
+        enabled: bool,
+    ) -> crate::Result<()>
+    where
+        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        sqlx::query("UPDATE settings SET discord_rpc = ? WHERE id = 0")
+            .bind(enabled)
+            .execute(exec)
+            .await?;
+        Ok(())
+    }
+
     pub fn effective_max_concurrent_downloads(&self) -> usize {
         if self.auto_concurrent_downloads {
             64

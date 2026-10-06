@@ -57,14 +57,7 @@ pub async fn set_privacy(
 ) -> crate::Result<PrivacySettings> {
     let state = State::get().await?;
     let mut transaction = state.pool.begin().await?;
-    sqlx::query(
-		"UPDATE settings SET telemetry = ?, discord_rpc = ?, telemetry_consent_version = ? WHERE id = 0",
-	)
-	.bind(privacy.telemetry)
-	.bind(privacy.discord_rpc)
-	.bind(privacy.consent_version)
-	.execute(&mut *transaction)
-	.await?;
+    Settings::set_privacy(&mut *transaction, &privacy).await?;
     sqlx::query("DELETE FROM telemetry_outbox")
         .execute(&mut *transaction)
         .await?;
@@ -85,10 +78,7 @@ pub async fn set_privacy(
 pub async fn set_telemetry(enabled: bool) -> crate::Result<PrivacySettings> {
     let state = State::get().await?;
     let mut transaction = state.pool.begin().await?;
-    sqlx::query("UPDATE settings SET telemetry = ? WHERE id = 0")
-        .bind(enabled)
-        .execute(&mut *transaction)
-        .await?;
+    Settings::set_telemetry(&mut *transaction, enabled).await?;
     sqlx::query("DELETE FROM telemetry_outbox")
         .execute(&mut *transaction)
         .await?;
@@ -102,10 +92,7 @@ pub async fn set_telemetry(enabled: bool) -> crate::Result<PrivacySettings> {
 #[tracing::instrument]
 pub async fn set_discord_rpc(enabled: bool) -> crate::Result<PrivacySettings> {
     let state = State::get().await?;
-    sqlx::query("UPDATE settings SET discord_rpc = ? WHERE id = 0")
-        .bind(enabled)
-        .execute(&state.pool)
-        .await?;
+    Settings::set_discord_rpc(&state.pool, enabled).await?;
     if let Err(error) = state.discord_rpc.clear_to_default(true).await {
         tracing::debug!(target: "theseus::telemetry", %error, "Failed to apply Discord RPC state");
     }
