@@ -657,6 +657,8 @@ impl Settings {
         let mut settings = self.clone();
         settings.max_concurrent_downloads =
             self.max_concurrent_downloads.clamp(1, 256);
+        settings.max_concurrent_writes =
+            self.max_concurrent_writes.clamp(1, 256);
         settings.custom_background_blur = self.custom_background_blur.min(40);
         settings.custom_background_opacity =
             self.custom_background_opacity.clamp(10, 100);
