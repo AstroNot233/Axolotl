@@ -340,7 +340,7 @@ impl Default for Settings {
             discord_rpc: true,
             onboarded: false,
             onboarding_version: 0,
-            onboarding_instance_tour_completed: true,
+            onboarding_instance_tour_completed: false,
             extra_launch_args: Vec::new(),
             custom_env_vars: Vec::new(),
             memory: MemorySettings {
