@@ -1193,6 +1193,7 @@ impl DefaultPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::db::{migrated_test_pool, test_pool};
 
     #[test]
     fn home_layout_uses_stable_wire_values() {
@@ -1304,12 +1305,7 @@ mod tests {
 
     #[tokio::test]
     async fn official_preferred_sources_round_trip_in_a_fresh_database() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_test_pool().await;
         sqlx::query(
             "
             UPDATE settings
@@ -1346,12 +1342,7 @@ mod tests {
 
     #[tokio::test]
     async fn curseforge_bypass_defaults_on_and_round_trips() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_test_pool().await;
 
         let mut settings = Settings::get(&pool).await.unwrap();
         assert!(settings.bypass_curseforge_download_restrictions);
@@ -1365,12 +1356,7 @@ mod tests {
 
     #[tokio::test]
     async fn ignore_ssl_errors_defaults_off_and_round_trips() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_test_pool().await;
 
         let mut settings = Settings::get(&pool).await.unwrap();
         assert!(!settings.ignore_ssl_errors);
@@ -1384,12 +1370,7 @@ mod tests {
 
     #[tokio::test]
     async fn memory_optimization_round_trips_in_a_fresh_database() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_test_pool().await;
 
         let mut settings = Settings::get(&pool).await.unwrap();
         assert!(!settings.memory.optimize_before_launch);
@@ -1403,12 +1384,7 @@ mod tests {
 
     #[tokio::test]
     async fn lightweight_mode_setting_defaults_off_and_round_trips() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_test_pool().await;
 
         let mut settings = Settings::get(&pool).await.unwrap();
         assert!(!settings.enter_lightweight_mode_on_game_launch);
@@ -1422,11 +1398,7 @@ mod tests {
 
     #[tokio::test]
     async fn lightweight_mode_migration_upgrades_existing_settings_database() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let pool = test_pool().await;
         sqlx::query(
             "CREATE TABLE settings (id INTEGER PRIMARY KEY CHECK (id = 0))",
         )
@@ -1464,12 +1436,7 @@ mod tests {
 
     #[tokio::test]
     async fn home_widgets_round_trip_in_a_fresh_database() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_test_pool().await;
 
         let expected = serde_json::json!({
             "version": 1,
@@ -1491,11 +1458,7 @@ mod tests {
 
     #[tokio::test]
     async fn font_columns_upgrade_an_existing_settings_database() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let pool = test_pool().await;
         sqlx::query(
             "CREATE TABLE settings (id INTEGER PRIMARY KEY CHECK (id = 0))",
         )
@@ -1533,12 +1496,7 @@ mod tests {
 
     #[tokio::test]
     async fn fonts_default_to_none_and_round_trip_in_a_fresh_database() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_test_pool().await;
 
         let mut settings = Settings::get(&pool).await.unwrap();
         assert_eq!(settings.ui_font, None);
@@ -1561,12 +1519,7 @@ mod tests {
 
     #[tokio::test]
     async fn terracotta_public_nodes_default_and_empty_list_round_trip() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_test_pool().await;
 
         let mut settings = Settings::get(&pool).await.unwrap();
         assert_eq!(
@@ -1583,12 +1536,7 @@ mod tests {
 
     #[tokio::test]
     async fn mojang_auth_source_round_trip_in_a_fresh_database() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_test_pool().await;
 
         let mut settings = Settings::get(&pool).await.unwrap();
         assert_eq!(settings.mojang_auth_source, DownloadSourceMode::Auto);
@@ -1613,12 +1561,7 @@ mod tests {
 
     #[tokio::test]
     async fn legacy_mirror_settings_keep_their_previous_intent() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_test_pool().await;
         let settings = Settings::get(&pool).await.unwrap();
         assert!(settings.auto_concurrent_downloads);
         assert!(settings.auto_set_java_high_performance_mode);
@@ -1663,12 +1606,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_source_reset_migration_sets_all_sources_to_auto() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_test_pool().await;
         sqlx::query(
             "
             UPDATE settings
@@ -1702,12 +1640,7 @@ mod tests {
 
     #[tokio::test]
     async fn telemetry_schema_migrates_fresh_and_existing_settings_databases() {
-        let fresh = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&fresh).await.unwrap();
+        let fresh = migrated_test_pool().await;
         let settings = Settings::get(&fresh).await.unwrap();
         assert!(!settings.telemetry);
         assert_eq!(settings.telemetry_consent_version, 0);
@@ -1719,11 +1652,7 @@ mod tests {
                 .is_empty()
         );
 
-        let upgrade = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let upgrade = test_pool().await;
         sqlx::query(
             "CREATE TABLE settings (id INTEGER PRIMARY KEY CHECK (id = 0), telemetry INTEGER NOT NULL DEFAULT 0, discord_rpc INTEGER NOT NULL DEFAULT 1)",
         )

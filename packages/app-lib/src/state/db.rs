@@ -1717,6 +1717,29 @@ async fn stale_data_cleanup(pool: &Pool<Sqlite>) -> crate::Result<()> {
     Ok(())
 }
 
+/// An empty in-memory app database with foreign keys enforced.
+#[cfg(test)]
+pub(crate) async fn test_pool() -> Pool<Sqlite> {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("in-memory app database");
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&pool)
+        .await
+        .expect("enable foreign keys");
+    pool
+}
+
+/// An in-memory app database with every migration applied.
+#[cfg(test)]
+pub(crate) async fn migrated_test_pool() -> Pool<Sqlite> {
+    let pool = test_pool().await;
+    MIGRATOR.run(&pool).await.expect("migrations");
+    pool
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
