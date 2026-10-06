@@ -137,6 +137,11 @@ const DOMAINS: &[(&str, &[&str])] = &[
     ),
 ];
 
+/// The proxy keeps its own document and keys rather than a domain, because no
+/// `Settings` field carries it.
+const PROXY_DOCUMENT: &(&str, &[&str]) =
+    &("proxy", &["proxy_mode", "proxy_url", "proxy_username"]);
+
 #[derive(Deserialize, Serialize)]
 struct Document {
     schema_version: u32,
@@ -318,7 +323,29 @@ pub(crate) async fn read_settings() -> Settings {
                 .await;
         }
     }
+    if pruning {
+        prune_on_read(*PROXY_DOCUMENT, &defaults).await;
+    }
     settings
+}
+
+/// Prunes a document the read chain does not overlay, so a key it repeats
+/// stops shadowing a later change of the value it repeats.
+async fn prune_on_read(
+    (name, keys): (&str, &[&str]),
+    defaults: &Map<String, Value>,
+) {
+    let shipped = match config_path(name) {
+        Some(path) => readable(&path).await,
+        None => None,
+    };
+    let Some(path) = local_path(name) else {
+        return;
+    };
+    let Some(document) = readable(&path).await else {
+        return;
+    };
+    prune_repeated(&path, keys, shipped.as_ref(), &document, defaults).await;
 }
 
 /// Drops what a local document repeats of a value the build or the deployment
@@ -425,7 +452,8 @@ pub async fn sanitise() -> crate::Result<usize> {
 /// launcher was closed reaches the settings again.
 pub(crate) async fn prune_redundant() {
     let defaults = settings_defaults();
-    for (name, keys) in DOMAINS {
+    let domains = DOMAINS.iter().copied().chain([*PROXY_DOCUMENT]);
+    for (name, keys) in domains {
         let Some(path) = local_path(name) else {
             return;
         };
@@ -1257,6 +1285,32 @@ mod tests {
         let stored = stored_at(&path).await;
         assert!(!stored.contains_key("theme"));
         assert_eq!(stored.get("locale"), Some(&Value::from("fr-FR")));
+
+        TEST_DIR.with(|current| *current.borrow_mut() = None);
+    }
+
+    /// The proxy document is pruned next to the domains, which is what keeps a
+    /// local entry from shadowing a deployment's value forever.
+    #[tokio::test]
+    async fn the_proxy_document_is_pruned_with_the_domains() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(DIR_NAME)).unwrap();
+        let path = dir.path().join(DIR_NAME).join("proxy.json");
+        std::fs::write(
+            &path,
+            document(r#"{"proxy_mode":"system","proxy_url":"http://p:1"}"#),
+        )
+        .unwrap();
+        TEST_DIR.with(|current| {
+            *current.borrow_mut() = Some(dir.path().to_path_buf());
+        });
+        TEST_CONFIG_DIR.with(|current| *current.borrow_mut() = None);
+
+        prune_redundant().await;
+
+        let stored = stored_at(&path).await;
+        assert!(!stored.contains_key("proxy_mode"));
+        assert_eq!(stored.get("proxy_url"), Some(&Value::from("http://p:1")));
 
         TEST_DIR.with(|current| *current.borrow_mut() = None);
     }
