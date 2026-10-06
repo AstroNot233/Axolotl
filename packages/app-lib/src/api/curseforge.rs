@@ -4038,7 +4038,11 @@ pub async fn install_modpack_with_reporter(
         crate::api::instance::get_full_path(&request.instance_id).await?;
     if let Some(reporter) = reporter.as_ref() {
         reporter
-            .update(InstallPhaseId::ExtractingOverrides, None, pack_details)
+			.update(
+				InstallPhaseId::ExtractingOverrides,
+				None,
+				pack_details.clone(),
+			)
             .await?;
     }
     let update_ready = content.manual_downloads.is_empty()
@@ -4051,7 +4055,7 @@ pub async fn install_modpack_with_reporter(
         .unwrap_or_default();
     let materialized_overrides = if should_commit {
         Some(
-            crate::api::pack::archive_util::run_blocking_instance_write(
+			crate::api::pack::archive_util::run_cancellable_blocking_instance_write(
                 request.instance_id.clone(),
                 override_cancellation.clone(),
                 move |cancellation| {
@@ -4071,6 +4075,11 @@ pub async fn install_modpack_with_reporter(
         .as_ref()
         .map_or(0, |(files_written, _)| *files_written);
     let post_override_result: crate::Result<()> = async {
+		if let Some(reporter) = reporter.as_ref() {
+			reporter
+				.update(InstallPhaseId::Finalizing, None, pack_details)
+				.await?;
+		}
         if should_commit && !request.allow_target_change {
             crate::api::instance::edit(
             &request.instance_id,
@@ -4564,7 +4573,7 @@ pub async fn install_modpack_from_local_archive_with_reporter(
     let overrides_archive_path = archive_path.clone();
     let override_cancellation = reporter.cancellation_token();
     let (overrides_written, override_replacements) =
-        crate::api::pack::archive_util::run_blocking_instance_write(
+		crate::api::pack::archive_util::run_cancellable_blocking_instance_write(
             instance_id.clone(),
             override_cancellation.clone(),
             move |cancellation| {

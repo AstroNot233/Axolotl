@@ -51,6 +51,7 @@ struct InstallProgressReporterState {
     checkpoint_scheduled: bool,
     checkpoint_in_flight: bool,
     initialized_from_store: bool,
+	parallel_is_foreground: bool,
     postponed_java_versions: HashSet<u32>,
     /// Per-download event throttles. A global throttle makes one busy file
     /// suppress progress events for every other active download.
@@ -153,6 +154,7 @@ impl InstallProgressReporter {
                             checkpoint_scheduled: false,
                             checkpoint_in_flight: false,
                             initialized_from_store: false,
+							parallel_is_foreground: false,
                             postponed_java_versions: HashSet::new(),
                             last_live_emit_at: HashMap::new(),
                             pending_stall_checks: HashSet::new(),
@@ -172,6 +174,7 @@ impl InstallProgressReporter {
                         checkpoint_scheduled: false,
                         checkpoint_in_flight: false,
                         initialized_from_store: false,
+						parallel_is_foreground: false,
                         postponed_java_versions: HashSet::new(),
                         last_live_emit_at: HashMap::new(),
                         pending_stall_checks: HashSet::new(),
@@ -194,6 +197,26 @@ impl InstallProgressReporter {
     pub fn with_parallel_output(mut self) -> Self {
         self.parallel_output = true;
         self
+	}
+
+	/// Makes the remaining core installation visible after pack content finishes.
+	pub(crate) async fn foreground_parallel_output(&self) -> crate::Result<()> {
+		let mut state = self.state.lock().await;
+		state.parallel_is_foreground = true;
+		if state.job.progress.parallel.is_none() {
+			state.job.set_progress(
+				InstallPhaseId::ResolvingMinecraft,
+				None,
+				InstallPhaseDetails::Empty,
+			);
+		}
+		state.foreground_parallel_progress();
+		let snapshot = runtime_snapshot(&state);
+		drop(state);
+		if let Some(snapshot) = snapshot {
+			emit_install_job(&snapshot).await?;
+		}
+		Ok(())
     }
 
     pub(crate) fn without_phase_updates(mut self) -> Self {
@@ -264,6 +287,9 @@ impl InstallProgressReporter {
             total,
             details,
         });
+		if state.parallel_is_foreground {
+			state.foreground_parallel_progress();
+		}
         let Some(snapshot) = runtime_snapshot(&state) else {
             return Ok(());
         };
@@ -1024,6 +1050,20 @@ fn refresh_missing_pause_reason(job: &mut InstallJobState) {
 }
 
 impl InstallProgressReporterState {
+	fn foreground_parallel_progress(&mut self) {
+		if let Some(parallel) = self.job.progress.parallel.take() {
+			self.job.set_progress(
+				parallel.phase,
+				(parallel.total > 0).then_some(InstallProgress {
+					current: parallel.current,
+					total: parallel.total,
+					secondary: None,
+				}),
+				parallel.details,
+			);
+		}
+	}
+
     fn mark_persisted(&mut self, snapshot: InstallJobSnapshot) {
         self.last_snapshot = Some(snapshot);
         self.last_persisted_at = Instant::now();
@@ -1200,6 +1240,108 @@ mod tests {
         let second = InstallProgressReporter::new(job_id, state);
 
         assert!(Arc::ptr_eq(&first.state, &second.state));
+	}
+
+	#[cfg(not(feature = "tauri"))]
+	#[tokio::test]
+	async fn remaining_minecraft_work_before_first_parallel_update() {
+		let (_, _, reporter) = stored_minecraft_progress_job(0, 100).await;
+		reporter
+			.update(
+				InstallPhaseId::ExtractingOverrides,
+				None,
+				InstallPhaseDetails::Empty,
+			)
+			.await
+			.unwrap();
+		reporter.foreground_parallel_output().await.unwrap();
+		assert_eq!(
+			reporter.state.lock().await.job.progress.phase,
+			InstallPhaseId::ResolvingMinecraft
+		);
+		reporter
+			.clone()
+			.with_parallel_output()
+			.update(
+				InstallPhaseId::DownloadingMinecraft,
+				Some(minecraft_progress(25, 100)),
+				minecraft_details(),
+			)
+			.await
+			.unwrap();
+		assert_eq!(
+			reporter.state.lock().await.job.progress.phase,
+			InstallPhaseId::DownloadingMinecraft
+		);
+	}
+
+	#[cfg(not(feature = "tauri"))]
+	#[tokio::test]
+	async fn remaining_minecraft_work_replaces_completed_extraction_phase() {
+		let (_, _, reporter) = stored_minecraft_progress_job(0, 100).await;
+		let parallel = reporter.clone().with_parallel_output();
+		reporter
+			.update(
+				InstallPhaseId::ExtractingOverrides,
+				Some(minecraft_progress(100, 100)),
+				InstallPhaseDetails::Empty,
+			)
+			.await
+			.unwrap();
+		parallel
+			.update(
+				InstallPhaseId::DownloadingMinecraft,
+				Some(minecraft_progress(25, 100)),
+				minecraft_details(),
+			)
+			.await
+			.unwrap();
+		assert_eq!(
+			reporter.state.lock().await.job.progress.phase,
+			InstallPhaseId::ExtractingOverrides
+		);
+		reporter.foreground_parallel_output().await.unwrap();
+		{
+			let state = reporter.state.lock().await;
+			assert_eq!(
+				state.job.progress.phase,
+				InstallPhaseId::DownloadingMinecraft
+			);
+			assert_eq!(
+				state.job.progress.progress.as_ref().unwrap().current,
+				25
+			);
+			assert!(state.job.progress.parallel.is_none());
+		}
+		parallel
+			.update(
+				InstallPhaseId::DownloadingMinecraft,
+				Some(minecraft_progress(75, 100)),
+				minecraft_details(),
+			)
+			.await
+			.unwrap();
+		assert_eq!(
+			reporter
+				.state
+				.lock()
+				.await
+				.job
+				.progress
+				.progress
+				.as_ref()
+				.unwrap()
+				.current,
+			75
+		);
+		parallel
+			.update(InstallPhaseId::ResolvingLoader, None, minecraft_details())
+			.await
+			.unwrap();
+		let state = reporter.state.lock().await;
+		assert_eq!(state.job.progress.phase, InstallPhaseId::ResolvingLoader);
+		assert!(state.job.progress.progress.is_none());
+		assert!(state.job.progress.parallel.is_none());
     }
 
     #[tokio::test]

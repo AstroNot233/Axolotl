@@ -2009,8 +2009,8 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
             return Err(error);
         }
     };
-    let override_replacements =
-        crate::api::pack::archive_util::run_blocking_instance_write(
+	let materialization_result =
+		crate::api::pack::archive_util::run_cancellable_blocking_instance_write(
         instance_id.clone(),
         reporter.cancellation_token(),
         {
@@ -2023,7 +2023,23 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
             }
         },
     )
-    .await?;
+	.await;
+	let override_replacements = match materialization_result {
+		Ok(replacements) => replacements,
+		Err(error) => {
+			let cleanup_targets = override_targets.clone();
+			let cleanup_result = tokio::task::spawn_blocking(move || {
+				crate::api::pack::archive_util::discard_staged_archive_entries(
+					&cleanup_targets,
+				)
+			})
+			.await?;
+			if let Err(cleanup_error) = cleanup_result {
+				return Err(crate::ErrorKind::OtherError(format!("{error}; failed to clean staged MRPack overrides: {cleanup_error}")).into());
+			}
+			return Err(error);
+		}
+	};
     extracted_overrides.sort_unstable_by_key(|extracted| extracted.spec.index);
 
     let mut override_records = Vec::new();
