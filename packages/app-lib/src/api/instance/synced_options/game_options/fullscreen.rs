@@ -120,9 +120,6 @@ pub(super) async fn update_app_fullscreen_setting(
     let CanonicalValue::Bool(value) = value else {
         return Ok(());
     };
-    sqlx::query("UPDATE settings SET mc_force_fullscreen = ? WHERE id = 0")
-        .bind(*value)
-        .execute(&mut **tx)
-        .await?;
+    crate::state::Settings::set_force_fullscreen(&mut **tx, *value).await?;
     Ok(())
 }

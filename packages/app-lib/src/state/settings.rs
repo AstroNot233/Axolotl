@@ -863,6 +863,36 @@ impl Settings {
         Ok(())
     }
 
+    pub(crate) async fn set_force_fullscreen<'a, E>(
+        exec: E,
+        value: bool,
+    ) -> crate::Result<()>
+    where
+        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        sqlx::query("UPDATE settings SET mc_force_fullscreen = ? WHERE id = 0")
+            .bind(value)
+            .execute(exec)
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn set_backup_repository_path<'a, E>(
+        exec: E,
+        path: Option<&str>,
+    ) -> crate::Result<()>
+    where
+        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        sqlx::query(
+            "UPDATE settings SET backup_repository_path = ? WHERE id = 0",
+        )
+        .bind(path)
+        .execute(exec)
+        .await?;
+        Ok(())
+    }
+
     pub fn effective_max_concurrent_downloads(&self) -> usize {
         if self.auto_concurrent_downloads {
             64

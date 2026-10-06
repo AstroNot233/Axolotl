@@ -3950,11 +3950,10 @@ async fn move_repository_inner(destination: PathBuf) -> crate::Result<()> {
     };
     let update_result: crate::Result<()> = async {
         let mut tx = state.pool.begin().await?;
-        sqlx::query(
-            "UPDATE settings SET backup_repository_path = ? WHERE id = 0",
+        crate::state::Settings::set_backup_repository_path(
+            &mut *tx,
+            stored_path.as_deref(),
         )
-        .bind(stored_path)
-        .execute(&mut *tx)
         .await?;
         if source_exists && !same_disk_move {
             sqlx::query(
