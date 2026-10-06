@@ -622,26 +622,47 @@ async fn overlay_from(
     }
 }
 
-/// Applies the keys `document` carries on top of `settings`.
+/// Applies the keys `document` carries on top of `settings`. A single entry this
+/// build cannot read is dropped on its own, so one unusable value cannot take
+/// the rest of its document with it.
 fn overlay_document(
     document: &Document,
     keys: &[&str],
     settings: Settings,
 ) -> Settings {
-    let (Ok(mut value), Some(stored)) =
-        (serde_json::to_value(&settings), document.data.as_object())
-    else {
+    let Some(stored) = document.data.as_object() else {
         return settings;
     };
-    let Some(target) = value.as_object_mut() else {
+    let Ok(Value::Object(base)) = serde_json::to_value(&settings) else {
         return settings;
     };
-    for (key, stored) in stored {
-        if keys.contains(&key.as_str()) {
-            target.insert(key.clone(), stored.clone());
+    let entries: Vec<(&String, &Value)> = stored
+        .iter()
+        .filter(|(key, _)| keys.contains(&key.as_str()))
+        .collect();
+    let with_entries = |applied: &[(&String, &Value)]| {
+        let mut data = base.clone();
+        for (key, value) in applied {
+            data.insert((*key).clone(), (*value).clone());
+        }
+        serde_json::from_value::<Settings>(Value::Object(data))
+    };
+
+    if let Ok(settings) = with_entries(&entries) {
+        return settings;
+    }
+    let mut applied: Vec<(&String, &Value)> = Vec::new();
+    for entry in &entries {
+        applied.push(*entry);
+        if with_entries(&applied).is_err() {
+            applied.pop();
+            tracing::warn!(
+                key = %entry.0,
+                "Ignoring a settings entry this build cannot read"
+            );
         }
     }
-    match serde_json::from_value(value) {
+    match with_entries(&applied) {
         Ok(settings) => settings,
         Err(error) => {
             tracing::warn!(
@@ -943,6 +964,30 @@ mod tests {
 
         TEST_DIR.with(|current| *current.borrow_mut() = None);
         TEST_CONFIG_DIR.with(|current| *current.borrow_mut() = None);
+    }
+
+    /// An entry a document carries in a shape this build cannot read costs only
+    /// itself, which keeps the rest of the document in the settings.
+    #[tokio::test]
+    async fn an_entry_that_cannot_be_read_costs_only_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(DIR_NAME)).unwrap();
+        std::fs::write(
+            dir.path().join(DIR_NAME).join("appearance.json"),
+            document(r#"{"theme":"oled","locale":5,"log_level":"trace"}"#),
+        )
+        .unwrap();
+        TEST_DIR.with(|current| {
+            *current.borrow_mut() = Some(dir.path().to_path_buf());
+        });
+        TEST_CONFIG_DIR.with(|current| *current.borrow_mut() = None);
+
+        let settings = read_settings().await;
+        assert_eq!(settings.theme.as_str(), "oled");
+        assert_eq!(settings.log_level, "trace");
+        assert_eq!(settings.locale, Settings::default().locale);
+
+        TEST_DIR.with(|current| *current.borrow_mut() = None);
     }
 
     /// A document that leaves a key out reads as the default the build carries.
