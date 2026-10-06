@@ -587,10 +587,19 @@ impl Settings {
         settings
     }
 
+    /// Persists the settings. The store owns them once startup has given it a
+    /// directory, so the row below is only written while it has not, which
+    /// keeps a database backup and a downgrade holding the values of the last
+    /// build that stored them there.
     pub async fn update<'a, E>(&self, exec: E) -> crate::Result<()>
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
     {
+        if super::settings_store::is_active() {
+            super::settings_store::store(self).await;
+            return Ok(());
+        }
+
         let normalized = self.normalized();
         let max_concurrent_writes = self.max_concurrent_writes as i32;
         let max_concurrent_downloads =
@@ -883,10 +892,14 @@ impl Settings {
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
-        sqlx::query("UPDATE settings SET mc_force_fullscreen = ? WHERE id = 0")
+        if !super::settings_store::is_active() {
+            sqlx::query(
+                "UPDATE settings SET mc_force_fullscreen = ? WHERE id = 0",
+            )
             .bind(value)
             .execute(exec)
             .await?;
+        }
         super::settings_store::store_key(
             "force_fullscreen",
             serde_json::Value::Bool(value),
@@ -902,12 +915,14 @@ impl Settings {
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
-        sqlx::query(
-            "UPDATE settings SET backup_repository_path = ? WHERE id = 0",
-        )
-        .bind(path)
-        .execute(exec)
-        .await?;
+        if !super::settings_store::is_active() {
+            sqlx::query(
+                "UPDATE settings SET backup_repository_path = ? WHERE id = 0",
+            )
+            .bind(path)
+            .execute(exec)
+            .await?;
+        }
         let stored = match path {
             Some(path) => serde_json::Value::String(path.to_string()),
             None => serde_json::Value::Null,
@@ -955,16 +970,18 @@ impl Settings {
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
-        sqlx::query(
-            "UPDATE settings
-             SET telemetry = ?, discord_rpc = ?, telemetry_consent_version = ?
-             WHERE id = 0",
-        )
-        .bind(privacy.telemetry)
-        .bind(privacy.discord_rpc)
-        .bind(privacy.consent_version)
-        .execute(exec)
-        .await?;
+        if !super::settings_store::is_active() {
+            sqlx::query(
+                "UPDATE settings
+                 SET telemetry = ?, discord_rpc = ?, telemetry_consent_version = ?
+                 WHERE id = 0",
+            )
+            .bind(privacy.telemetry)
+            .bind(privacy.discord_rpc)
+            .bind(privacy.consent_version)
+            .execute(exec)
+            .await?;
+        }
         super::settings_store::store_key(
             "telemetry",
             serde_json::Value::Bool(privacy.telemetry),
@@ -990,10 +1007,12 @@ impl Settings {
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
-        sqlx::query("UPDATE settings SET telemetry = ? WHERE id = 0")
-            .bind(enabled)
-            .execute(exec)
-            .await?;
+        if !super::settings_store::is_active() {
+            sqlx::query("UPDATE settings SET telemetry = ? WHERE id = 0")
+                .bind(enabled)
+                .execute(exec)
+                .await?;
+        }
         super::settings_store::store_key(
             "telemetry",
             serde_json::Value::Bool(enabled),
@@ -1009,10 +1028,12 @@ impl Settings {
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
-        sqlx::query("UPDATE settings SET discord_rpc = ? WHERE id = 0")
-            .bind(enabled)
-            .execute(exec)
-            .await?;
+        if !super::settings_store::is_active() {
+            sqlx::query("UPDATE settings SET discord_rpc = ? WHERE id = 0")
+                .bind(enabled)
+                .execute(exec)
+                .await?;
+        }
         super::settings_store::store_key(
             "discord_rpc",
             serde_json::Value::Bool(enabled),

@@ -148,6 +148,11 @@ pub(crate) fn init(app_identifier: &str) {
     let _ = SETTINGS_DIR.set(settings_dir);
 }
 
+/// Whether the store has a directory to write to, which startup gives it.
+pub(crate) fn is_active() -> bool {
+    SETTINGS_DIR.get().is_some()
+}
+
 fn domain_path(name: &str) -> Option<PathBuf> {
     Some(
         SETTINGS_DIR
@@ -171,7 +176,7 @@ pub(crate) async fn overlay(settings: Settings) -> Settings {
 }
 
 /// Persists every domain, without letting a failure reach the caller: the row
-/// is still the source of truth while the store is introduced.
+/// keeps the values a document has not taken over yet.
 pub(crate) async fn store(settings: &Settings) {
     for (name, keys) in DOMAINS {
         let Some(path) = domain_path(name) else {
