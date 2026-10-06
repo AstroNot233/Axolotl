@@ -943,10 +943,21 @@ impl Settings {
             )
             .fetch_one(exec)
             .await?;
+        let stored = super::settings_store::stored("privacy").await;
         Ok(PrivacySettings {
-            telemetry: telemetry == 1,
-            discord_rpc: discord_rpc == 1,
-            consent_version: consent_version as u32,
+            telemetry: stored
+                .get("telemetry")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(telemetry == 1),
+            discord_rpc: stored
+                .get("discord_rpc")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(discord_rpc == 1),
+            consent_version: stored
+                .get("telemetry_consent_version")
+                .and_then(serde_json::Value::as_u64)
+                .map(|value| value as u32)
+                .unwrap_or(consent_version as u32),
         })
     }
 
@@ -967,6 +978,21 @@ impl Settings {
         .bind(privacy.consent_version)
         .execute(exec)
         .await?;
+        super::settings_store::store_key(
+            "telemetry",
+            serde_json::Value::Bool(privacy.telemetry),
+        )
+        .await;
+        super::settings_store::store_key(
+            "discord_rpc",
+            serde_json::Value::Bool(privacy.discord_rpc),
+        )
+        .await;
+        super::settings_store::store_key(
+            "telemetry_consent_version",
+            serde_json::Value::from(privacy.consent_version),
+        )
+        .await;
         Ok(())
     }
 
@@ -981,6 +1007,11 @@ impl Settings {
             .bind(enabled)
             .execute(exec)
             .await?;
+        super::settings_store::store_key(
+            "telemetry",
+            serde_json::Value::Bool(enabled),
+        )
+        .await;
         Ok(())
     }
 
@@ -995,6 +1026,11 @@ impl Settings {
             .bind(enabled)
             .execute(exec)
             .await?;
+        super::settings_store::store_key(
+            "discord_rpc",
+            serde_json::Value::Bool(enabled),
+        )
+        .await;
         Ok(())
     }
 

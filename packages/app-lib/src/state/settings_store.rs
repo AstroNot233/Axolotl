@@ -108,6 +108,10 @@ const DOMAINS: &[(&str, &[&str])] = &[
             "terracotta_public_nodes",
         ],
     ),
+    (
+        "privacy",
+        &["discord_rpc", "telemetry", "telemetry_consent_version"],
+    ),
 ];
 
 #[derive(Deserialize, Serialize)]
@@ -212,6 +216,24 @@ async fn sanitise_at(path: &Path, keys: &[&str]) -> crate::Result<usize> {
         "Removed settings keys no domain knows"
     );
     Ok(removed)
+}
+
+/// The stored entries of one document, for callers that read a few keys
+/// without going through `Settings`. Empty when there is nothing to read.
+pub(crate) async fn stored(domain: &str) -> Map<String, Value> {
+    match domain_path(domain) {
+        Some(path) => stored_at(&path).await,
+        None => Map::new(),
+    }
+}
+
+async fn stored_at(path: &Path) -> Map<String, Value> {
+    match read(path).await {
+        Stored::Ready(document) => {
+            document.data.as_object().cloned().unwrap_or_default()
+        }
+        _ => Map::new(),
+    }
 }
 
 async fn read(path: &Path) -> Stored {
@@ -581,6 +603,40 @@ mod tests {
         assert_eq!(stored["data"]["force_fullscreen"], true);
         assert_eq!(stored["data"]["theme"], "oled");
         assert_eq!(stored["data"]["from_a_newer_build"], 7);
+    }
+
+    #[tokio::test]
+    async fn stored_reads_the_entries_of_a_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("privacy.json");
+        std::fs::write(&path, document(r#"{"telemetry":true,"other":1}"#))
+            .unwrap();
+
+        let stored = stored_at(&path).await;
+        assert_eq!(stored.get("telemetry"), Some(&Value::Bool(true)));
+        assert_eq!(stored.get("other"), Some(&Value::from(1)));
+    }
+
+    #[tokio::test]
+    async fn stored_is_empty_when_there_is_nothing_to_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("privacy.json");
+        assert!(stored_at(&missing).await.is_empty());
+
+        let corrupt = dir.path().join("corrupt.json");
+        std::fs::write(&corrupt, b"{ not json").unwrap();
+        assert!(stored_at(&corrupt).await.is_empty());
+
+        let newer = dir.path().join("newer.json");
+        std::fs::write(
+            &newer,
+            format!(
+                r#"{{"schema_version":{},"written_by":"9.9.9","data":{{"telemetry":true}}}}"#,
+                SCHEMA_VERSION + 1
+            ),
+        )
+        .unwrap();
+        assert!(stored_at(&newer).await.is_empty());
     }
 
     #[tokio::test]
