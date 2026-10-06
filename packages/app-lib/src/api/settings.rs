@@ -30,9 +30,7 @@ pub async fn set(mut settings: Settings) -> crate::Result<()> {
     )?;
     settings.apply_legacy_download_source_settings();
     settings.update(&state.pool).await?;
-    state.update_http_client_for_settings(&settings).await?;
-    state.update_download_settings(&settings);
-    crate::util::download::set_active_engine(settings.download_engine);
+    state.apply_runtime_settings(&settings).await?;
 
     Ok(())
 }
@@ -43,7 +41,7 @@ pub async fn set_download_engine(engine: DownloadEngine) -> crate::Result<()> {
     let mut settings = Settings::get(&state.pool).await?;
     settings.download_engine = engine;
     settings.update(&state.pool).await?;
-    crate::util::download::set_active_engine(engine);
+    state.apply_runtime_settings(&settings).await?;
     Ok(())
 }
 

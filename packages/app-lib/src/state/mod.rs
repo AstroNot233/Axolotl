@@ -750,6 +750,17 @@ impl State {
         }
     }
 
+    /// Republishes every piece of runtime state derived from `settings`.
+    pub(crate) async fn apply_runtime_settings(
+        self: &Arc<Self>,
+        settings: &Settings,
+    ) -> crate::Result<()> {
+        self.update_http_client_for_settings(settings).await?;
+        self.update_download_settings(settings);
+        crate::util::download::set_active_engine(settings.download_engine);
+        Ok(())
+    }
+
     async fn run_auto_concurrency_controller(self: Arc<Self>) {
         let mut interval = tokio::time::interval(AUTO_DOWNLOAD_SAMPLE_INTERVAL);
         interval.tick().await;
