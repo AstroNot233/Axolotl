@@ -70,10 +70,11 @@ fn non_empty(value: &str) -> Option<String> {
 
 /// Rejects relative artifact paths that would escape the target directory
 /// (absolute paths, backslashes, or `..`/empty segments).
-fn safe_maven_relative_path(relative: &str) -> bool {
+pub(crate) fn safe_maven_relative_path(relative: &str) -> bool {
     !relative.is_empty()
         && !relative.starts_with('/')
         && !relative.contains('\\')
+        && !relative.contains(':')
         && relative.split('/').all(|segment| {
             !segment.is_empty() && segment != "." && segment != ".."
         })
@@ -297,7 +298,7 @@ pub(crate) fn linked_native_plan(
 /// SHA1 is authoritative when declared; otherwise a declared size still
 /// protects against accepting a partial or truncated file. An unreadable file
 /// counts as not current so it gets replaced.
-async fn file_is_current(
+pub(crate) async fn file_is_current(
     path: &std::path::Path,
     expected_sha1: Option<&str>,
     expected_size: Option<u64>,
@@ -318,6 +319,36 @@ async fn file_is_current(
         },
         None => true,
     }
+}
+
+/// Validates locally supplied runtime artifacts without fetching them from Maven.
+pub(crate) async fn validate_local_runtime_library(
+    direct: &DirectLinkedLaunch,
+    library: &LinkedLibrary,
+    java_arch: &str,
+) -> crate::Result<()> {
+    let mut plans = Vec::new();
+    if library.library.include_in_classpath
+        && let Some(plan) = linked_classpath_plan(direct, library)?
+    {
+        plans.push(plan);
+    }
+    if let Some(plan) = linked_native_plan(direct, library, java_arch)? {
+        plans.push(plan);
+    }
+    for plan in plans {
+        if !file_is_current(&plan.destination, plan.sha1.as_deref(), plan.size)
+            .await
+        {
+            return Err(crate::ErrorKind::LauncherError(format!(
+                "Missing or invalid required runtime artifact {} at {}",
+                plan.label,
+                plan.destination.display()
+            ))
+            .into());
+        }
+    }
+    Ok(())
 }
 
 /// Makes sure one planned file exists in the linked installation. Returns
@@ -705,9 +736,12 @@ pub(crate) async fn ensure_direct_launch_dependencies_with_progress(
             continue;
         }
         if !library.library.downloadable {
+            validate_local_runtime_library(direct, library, java_arch).await?;
             continue;
         }
-        if let Some(plan) = linked_classpath_plan(direct, library)? {
+        if library.library.include_in_classpath
+            && let Some(plan) = linked_classpath_plan(direct, library)?
+        {
             plans.push(plan);
         }
         if let Some(plan) = linked_native_plan(direct, library, java_arch)? {
@@ -1035,16 +1069,17 @@ mod tests {
     fn unsafe_artifact_paths_are_rejected() {
         let root = tempdir().unwrap();
         let direct = direct_for(root.path());
-        let library = linked_library(json!({
-            "name": "evil:escape:1",
-            "downloads": {"artifact": {
-                "path": "../escape.jar", "sha1": "", "size": 0,
-                "url": "https://libraries.minecraft.net/evil/escape/1/escape-1.jar"
-            }}
-        }));
-
-        let error = linked_classpath_plan(&direct, &library).unwrap_err();
-        assert!(error.to_string().contains("evil:escape:1"));
+        for path in ["../escape.jar", "C:/escape.jar", "artifact.jar:stream"] {
+            let library = linked_library(json!({
+                "name": "evil:escape:1",
+                "downloads": {"artifact": {
+                    "path": path, "sha1": "", "size": 0,
+                    "url": "https://libraries.minecraft.net/evil/escape/1/escape-1.jar"
+                }}
+            }));
+            let error = linked_classpath_plan(&direct, &library).unwrap_err();
+            assert!(error.to_string().contains("evil:escape:1"));
+        }
     }
 
     #[test]
@@ -1183,12 +1218,19 @@ mod tests {
                 "org.lwjgl.lwjgl:lwjgl-platform:2.9.4-nightly-20150209:{classifier}"
             )
         );
-        assert!(
-            plan.destination
-                .to_string_lossy()
-                .ends_with(format!("{classifier}.jar").as_str())
+        let declared = &library
+            .library
+            .downloads
+            .as_ref()
+            .unwrap()
+            .classifiers
+            .as_ref()
+            .unwrap()[&classifier];
+        assert_eq!(
+            plan.destination,
+            direct.libraries_dir().join(declared.path.as_ref().unwrap())
         );
-        assert_eq!(plan.sha1.as_deref(), Some("aaa"));
+        assert_eq!(plan.sha1.as_deref(), Some(declared.sha1.as_str()));
     }
 
     #[test]
@@ -1412,6 +1454,43 @@ mod tests {
             hits.lock().unwrap().values().sum::<usize>() == 0,
             "no download may be attempted for a current file"
         );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn generated_library_must_be_supplied_locally_without_maven_requests()
+    {
+        let (_state_temp, state) = ensure_test_state().await;
+        let root = tempdir().unwrap();
+        let direct = direct_for(root.path());
+        let (base, hits, server) = spawn_fixture_server(HashMap::new()).await;
+        let library = linked_library(json!({
+            "name": "net.minecraftforge:forge:1.20.1-47.4.0:client",
+            "downloadable": false,
+            "downloads": {"artifact": {
+                "path": "generated/forge-client.jar", "sha1": "", "size": 0,
+                "url": format!("{base}/never-download.jar")
+            }}
+        }));
+        let info = minimal_version_info();
+        let ensure = || {
+            ensure_direct_launch_dependencies(
+                &state,
+                &direct,
+                std::slice::from_ref(&library),
+                &info,
+                std::env::consts::ARCH,
+                true,
+            )
+        };
+        let error = ensure().await.unwrap_err().to_string();
+        assert!(error.contains(&library.library.name), "{error}");
+        assert!(error.contains("forge-client.jar"), "{error}");
+        let destination = direct.library_path(&library).unwrap();
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        std::fs::write(&destination, b"generated locally").unwrap();
+        ensure().await.unwrap();
+        assert!(hits.lock().unwrap().is_empty());
         server.abort();
     }
 

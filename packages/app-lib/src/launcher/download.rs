@@ -1125,12 +1125,14 @@ pub async fn download_version_info(
             .err_into::<crate::Error>()
             .await
             .and_then(|ref it| Ok(serde_json::from_slice(it)?))?;
+        let normalized_timestamps =
+            normalize_version_timestamps(version, &mut info);
         let normalized =
             normalize_version_info(mod_loader, &version.id, &mut info, "cache");
         let restored_legacy_arguments =
             restore_legacy_minecraft_arguments(st, version, loader, &mut info)
                 .await?;
-        if normalized || restored_legacy_arguments {
+        if normalized_timestamps || normalized || restored_legacy_arguments {
             write_version_info(&path, serde_json::to_vec(&info)?).await?;
         }
         info
@@ -1266,6 +1268,7 @@ pub async fn download_version_info(
             info = d::modded::merge_partial_version(partial, info);
         }
 
+        normalize_version_timestamps(version, &mut info);
         normalize_version_info(mod_loader, &version.id, &mut info, "network");
 
         info.id.clone_from(&version_id);
@@ -1310,12 +1313,14 @@ pub async fn load_local_version_info(
 
     let bytes = io::read(&path).err_into::<crate::Error>().await?;
     let mut info: GameVersionInfo = serde_json::from_slice(&bytes)?;
+    let normalized_timestamps =
+        normalize_version_timestamps(version, &mut info);
     let normalized =
         normalize_version_info(mod_loader, &version.id, &mut info, "cache");
     let restored_legacy_arguments =
         restore_legacy_minecraft_arguments(st, version, loader, &mut info)
             .await?;
-    if normalized || restored_legacy_arguments {
+    if normalized_timestamps || normalized || restored_legacy_arguments {
         write_version_info(&path, serde_json::to_vec(&info)?).await?;
     }
     Ok(info)
@@ -1329,12 +1334,19 @@ async fn write_version_info(path: &Path, data: Vec<u8>) -> crate::Result<()> {
     Ok(())
 }
 
-// Bumped when profile merge semantics change. This forces existing loader
-// caches to be regenerated so duplicate Forge/vanilla libraries regain native
-// classifier metadata.
-// Bump this marker when derived loader metadata changes in a way that requires
-// rebuilding cached versions and re-extracting installer artifacts.
-const DERIVED_VERSION_CACHE_FORMAT: &str = "3";
+/// Bumped when derived loader metadata must be rebuilt from the base profile.
+const DERIVED_VERSION_CACHE_FORMAT: &str = "5";
+
+fn normalize_version_timestamps(
+    version: &GameVersion,
+    info: &mut GameVersionInfo,
+) -> bool {
+    let changed =
+        info.release_time != version.release_time || info.time != version.time;
+    info.release_time = version.release_time;
+    info.time = version.time;
+    changed
+}
 
 fn derived_version_cache_marker_path(path: &Path) -> PathBuf {
     path.with_extension("json.axolotl-format")
@@ -2696,6 +2708,81 @@ mod tests {
         assert_eq!(java.component, "java-runtime-delta");
     }
 
+    #[tokio::test]
+    async fn cached_loader_timestamps_are_corrected_online_and_offline() {
+        let temp = tempfile::tempdir().unwrap();
+        let directories = crate::state::DirectoryInfo {
+            settings_dir: temp.path().join("settings"),
+            config_dir: temp.path().join("config"),
+            app_identifier: "test".to_string(),
+        };
+        std::fs::create_dir_all(directories.instances_dir()).unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        let state = crate::state::test_state(directories, pool).await.unwrap();
+        let version: GameVersion = serde_json::from_value(serde_json::json!({
+			"id": "1.12.2", "type": "release", "url": "invalid://no-network",
+			"releaseTime": "2017-09-18T08:39:46Z", "time": "2021-12-15T15:04:05Z",
+			"sha1": "", "complianceLevel": 0
+		})).unwrap();
+        let loader: LoaderVersion = serde_json::from_value(serde_json::json!({
+            "id": "test-loader", "stable": true, "url": "invalid://no-network"
+        }))
+        .unwrap();
+        let path = state
+            .directories
+            .version_dir("1.12.2-test-loader")
+            .join("1.12.2-test-loader.json");
+        for offline in [false, true] {
+            let mut info = version_info_with_java(None);
+            info.id = "1.12.2-test-loader".to_string();
+            write_version_info(&path, serde_json::to_vec(&info).unwrap())
+                .await
+                .unwrap();
+            if offline {
+                io::write(derived_version_cache_marker_path(&path), "3")
+                    .await
+                    .unwrap();
+            } else {
+                write_derived_version_cache_marker(&path).await.unwrap();
+            }
+            let mut loaded = if offline {
+                load_local_version_info(
+                    &state,
+                    &version,
+                    ModLoader::Forge,
+                    Some(&loader),
+                )
+                .await
+            } else {
+                download_version_info(
+                    &state,
+                    &version,
+                    ModLoader::Forge,
+                    Some(&loader),
+                    None,
+                    None,
+                    None,
+                )
+                .await
+            }
+            .unwrap();
+            assert_eq!(loaded.release_time, version.release_time);
+            assert_eq!(loaded.time, version.time);
+            let saved: GameVersionInfo =
+                serde_json::from_slice(&io::read(&path).await.unwrap())
+                    .unwrap();
+            assert_eq!(saved.release_time, version.release_time);
+            assert_eq!(saved.time, version.time);
+            assert!(!normalize_version_timestamps(&version, &mut loaded));
+            assert_eq!(derived_version_cache_is_current(&path).await, !offline);
+        }
+    }
+
     #[test]
     fn cleanroom_installer_declared_java_is_preserved() {
         let mut info =
@@ -3124,7 +3211,7 @@ mod tests {
         write_version_info(&path, b"{}".to_vec()).await.unwrap();
 
         assert!(!derived_version_cache_is_current(&path).await);
-        io::write(derived_version_cache_marker_path(&path), "0")
+        io::write(derived_version_cache_marker_path(&path), "3")
             .await
             .unwrap();
         assert!(!derived_version_cache_is_current(&path).await);
