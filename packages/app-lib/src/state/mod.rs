@@ -927,10 +927,8 @@ impl State {
         app_identifier: String,
     ) -> crate::Result<Arc<Self>> {
         tracing::info!("Connecting to app database");
-        let database_existed = db::current_app_database_path(&app_identifier)
-            .await?
-            .try_exists()
-            .unwrap_or(false);
+        let database_existed =
+            db::settings_database_exists(&app_identifier).await?;
         let pool = db::connect(&app_identifier).await?;
 
         settings_store::init(&app_identifier);
