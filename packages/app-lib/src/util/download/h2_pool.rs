@@ -314,14 +314,6 @@ async fn connection_slot(authority: &str) -> ConnectionSlot {
         .clone()
 }
 
-async fn batch_connection_slot(authority: &str) -> ConnectionSlot {
-    let mut connections = BATCH_CONNECTIONS.lock().await;
-    connections
-        .entry(authority.to_string())
-        .or_insert_with(|| Arc::new(AsyncMutex::new(None)))
-        .clone()
-}
-
 async fn parallel_connection_pool(authority: &str) -> ParallelConnectionPool {
     let mut connections = PARALLEL_CONNECTIONS.lock().await;
     connections
@@ -944,77 +936,7 @@ pub(crate) async fn shared_batch_connection(
     route: &DownloadRoute,
     reserve_native_budget: bool,
 ) -> Result<Arc<SharedH2Connection>, H2ConnectError> {
-    if !ADDITIONAL_H2_CONNECTIONS_ENABLED {
-        return shared_connection_single(route, reserve_native_budget, true)
-            .await;
-    }
-    if let Some(reason) = super::native::h2_ineligible_reason(route) {
-        return Err(H2ConnectError::new(
-            H2ConnectFailureKind::Protocol,
-            reason.as_str().to_string(),
-        ));
-    }
-    let authority =
-        crate::util::fetch::url_authority(&route.url).ok_or_else(|| {
-            H2ConnectError::new(
-                H2ConnectFailureKind::Protocol,
-                "HTTP/2 route has no authority".to_string(),
-            )
-        })?;
-    let slot = batch_connection_slot(&super::proxy_context::authority_key(
-        &authority,
-        route.proxy,
-    ))
-    .await;
-    let deadline = tokio::time::Instant::now() + CONNECTION_WAIT_TIMEOUT;
-    let mut cached = tokio::time::timeout_at(deadline, slot.lock())
-    .await
-    .map_err(|_| {
-        H2ConnectError::new(
-            H2ConnectFailureKind::Protocol,
-            format!("timed out waiting for asset HTTP/2 connection slot {authority}"),
-        )
-    })?;
-    if let Some(connection) = cached.as_ref().filter(|connection| {
-        !connection.is_dead() && !connection.is_idle_expired()
-    }) {
-        if !reserve_native_budget || connection.has_physical_budget() {
-            tracing::debug!(
-                authority,
-                "Reusing sibling HTTP/2 asset connection"
-            );
-            return Ok(Arc::clone(connection));
-        }
-        return Err(H2ConnectError::new(
-            H2ConnectFailureKind::Protocol,
-            "sibling HTTP/2 connection is not covered by the native connection budget"
-                .to_string(),
-        ));
-    }
-    if cached.as_ref().is_some_and(|connection| {
-        connection.is_dead() || connection.is_idle_expired()
-    }) {
-        if let Some(connection) = cached.as_ref() {
-            connection.evict();
-        }
-        *cached = None;
-    }
-    tracing::debug!(authority, "Establishing sibling HTTP/2 asset connection");
-    let connection = tokio::time::timeout_at(
-        deadline,
-        establish(route, reserve_native_budget),
-    )
-    .await
-    .map_err(|_| {
-        H2ConnectError::new(
-            H2ConnectFailureKind::Tcp,
-            format!(
-                "timed out establishing asset HTTP/2 connection to {authority}"
-            ),
-        )
-    })??;
-    *cached = Some(Arc::clone(&connection));
-    Ok(connection)
+    shared_connection(route, reserve_native_budget, true, true).await
 }
 
 pub(crate) async fn has_live_connection(route: &DownloadRoute) -> bool {
