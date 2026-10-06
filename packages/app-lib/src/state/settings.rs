@@ -764,7 +764,9 @@ impl Settings {
     }
 
     /// The proxy the documents describe, over what this build does by default,
-    /// with the password read from the system credential store.
+    /// with the password read from the system credential store. A document can
+    /// be edited by hand, so an unusable proxy falls back to the default one
+    /// instead of failing every caller that builds a client from it.
     pub(crate) async fn proxy_config() -> ProxyConfig {
         let mut config = ProxyConfig::default();
         let stored = super::settings_store::stored("proxy").await;
@@ -785,6 +787,13 @@ impl Settings {
             config.username = username.to_string();
         }
         config.password = read_proxy_password().unwrap_or_default();
+        if let Err(error) = config.validate() {
+            tracing::warn!(
+                %error,
+                "Ignoring the stored proxy configuration and using the default"
+            );
+            return ProxyConfig::default();
+        }
         config
     }
 
