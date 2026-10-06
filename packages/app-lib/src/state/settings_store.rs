@@ -18,6 +18,8 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+#[cfg(test)]
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -149,6 +151,11 @@ static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 const CONFIG_DIR_ENV: &str = "THESEUS_SETTINGS_CONFIG_DIR";
 
+#[cfg(test)]
+thread_local! {
+    static TEST_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
 pub(crate) fn init(app_identifier: &str) {
     let Some(settings_dir) =
         DirectoryInfo::initial_settings_dir_path(app_identifier)
@@ -163,9 +170,24 @@ pub(crate) fn init(app_identifier: &str) {
     }
 }
 
+/// Where the documents live: the directory startup resolved, or one of this
+/// thread's own while running tests.
+fn settings_root() -> Option<PathBuf> {
+    #[cfg(test)]
+    return TEST_DIR.with(|dir| {
+        let mut dir = dir.borrow_mut();
+        let path =
+            dir.get_or_insert_with(|| tempfile::tempdir().unwrap().keep());
+        Some(path.clone())
+    });
+
+    #[cfg(not(test))]
+    SETTINGS_DIR.get().cloned()
+}
+
 /// Whether the store has a directory to write to, which startup gives it.
 pub(crate) fn is_active() -> bool {
-    SETTINGS_DIR.get().is_some()
+    settings_root().is_some()
 }
 
 /// Whether the row still has to hand its settings over to the documents, which
@@ -191,12 +213,7 @@ async fn needs_seeding_at(
 }
 
 fn local_path(name: &str) -> Option<PathBuf> {
-    Some(
-        SETTINGS_DIR
-            .get()?
-            .join(DIR_NAME)
-            .join(format!("{name}.json")),
-    )
+    Some(settings_root()?.join(DIR_NAME).join(format!("{name}.json")))
 }
 
 fn config_path(name: &str) -> Option<PathBuf> {
