@@ -1255,35 +1255,6 @@ async fn install_minecraft_with_local_source(
     )
     .await?;
 
-    materialize_external_version(instance, &version_jar, &version_info, &state)
-        .await?;
-
-    // Version-isolated external instances are direct-managed from creation.
-    // Complete their external assets/libraries now so the first launch never
-    // falls back to Axolotl's shared runtime directories.
-    let runtime_adapter =
-        InstanceRuntimeAdapter::for_instance(instance, &state.directories)?;
-    if let Some(direct) = runtime_adapter.direct_link() {
-        let resolved = direct.resolve()?;
-        direct_ensure::ensure_direct_launch_dependencies_with_progress(
-            &state,
-            direct,
-            &resolved.merged.libraries,
-            &version_info,
-            java_version
-                .as_ref()
-                .map(|java| java.architecture.as_str())
-                .unwrap_or(std::env::consts::ARCH),
-            minecraft_updated,
-            minecraft_progress.as_ref(),
-        )
-        .await?;
-    }
-
-    if let Some(progress) = minecraft_progress {
-        progress.finish().await?;
-    }
-
     let client_path = state
         .directories
         .version_dir(&version_jar)

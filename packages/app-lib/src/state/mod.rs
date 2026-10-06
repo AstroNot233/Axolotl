@@ -30,7 +30,7 @@ mod settings;
 pub use self::settings::*;
 
 mod game_options;
-pub use self::game_options::*;
+pub(crate) use self::game_options::*;
 
 mod proxy_settings;
 

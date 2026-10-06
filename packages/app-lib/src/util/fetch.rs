@@ -563,8 +563,9 @@ fn route(
 
 fn official_route(url: &str, resource: ResourceClass) -> DownloadRoute {
     let url = url.to_string();
-    let source = Url::parse(&url)
-        .ok()
+    let parsed_url = Url::parse(&url).ok();
+    let source = parsed_url
+        .as_ref()
         .and_then(|url| url.host_str().map(str::to_string))
         .map_or(DownloadRouteSource::Official, |host| match host.as_str() {
             "bmclapi2.bangbang93.com" => DownloadRouteSource::Bmclapi,
@@ -588,8 +589,8 @@ fn official_route(url: &str, resource: ResourceClass) -> DownloadRoute {
     #[cfg(test)]
     let route = {
         let mut route = route;
-        if Url::parse(&url)
-            .ok()
+        if parsed_url
+            .as_ref()
             .and_then(|url| url.host_str().and_then(|host| host.parse().ok()))
             .is_some_and(|address: std::net::IpAddr| address.is_loopback())
         {
