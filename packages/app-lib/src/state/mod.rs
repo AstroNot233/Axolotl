@@ -883,6 +883,10 @@ impl State {
         app_identifier: String,
     ) -> crate::Result<Arc<Self>> {
         tracing::info!("Connecting to app database");
+        let database_existed = db::current_app_database_path(&app_identifier)
+            .await?
+            .try_exists()
+            .unwrap_or(false);
         let pool = db::connect(&app_identifier).await?;
 
         settings_store::init(&app_identifier);
@@ -915,6 +919,11 @@ impl State {
             );
         }
         let proxy_config = Settings::proxy_config(&pool).await?;
+        if settings_store::needs_seeding(database_existed).await {
+            tracing::info!("Handing the stored settings over to the documents");
+            settings_store::store(&settings).await;
+            Settings::store_proxy_config(&proxy_config).await;
+        }
         let configured_http_client =
             crate::util::fetch::build_configured_client(
                 &proxy_config,

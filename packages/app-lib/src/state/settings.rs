@@ -1134,21 +1134,7 @@ impl Settings {
             }
         };
         if super::settings_store::is_active() {
-            super::settings_store::store_in(
-                "proxy",
-                &[
-                    (
-                        "proxy_mode",
-                        serde_json::Value::from(config.mode.as_str()),
-                    ),
-                    ("proxy_url", serde_json::Value::from(config.url.trim())),
-                    (
-                        "proxy_username",
-                        serde_json::Value::from(config.username.trim()),
-                    ),
-                ],
-            )
-            .await;
+            Self::store_proxy_config(&config).await;
             if let Some(password) = fallback_password {
                 sqlx::query(
                     "UPDATE settings SET proxy_password = ? WHERE id = 0",
@@ -1172,6 +1158,23 @@ impl Settings {
         .execute(exec)
         .await?;
         Ok(())
+    }
+
+    /// Writes the proxy the settings carry into its document, which is how the
+    /// row hands it over to the store.
+    pub(crate) async fn store_proxy_config(config: &ProxyConfig) {
+        super::settings_store::store_in(
+            "proxy",
+            &[
+                ("proxy_mode", serde_json::Value::from(config.mode.as_str())),
+                ("proxy_url", serde_json::Value::from(config.url.trim())),
+                (
+                    "proxy_username",
+                    serde_json::Value::from(config.username.trim()),
+                ),
+            ],
+        )
+        .await;
     }
 
     pub fn effective_max_concurrent_downloads(&self) -> usize {

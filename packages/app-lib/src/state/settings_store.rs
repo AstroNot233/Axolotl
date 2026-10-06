@@ -168,6 +168,28 @@ pub(crate) fn is_active() -> bool {
     SETTINGS_DIR.get().is_some()
 }
 
+/// Whether the row still has to hand its settings over to the documents, which
+/// is what an installation that predates them does once: `database_existed`
+/// keeps a fresh installation out, and the directory keeps one that already
+/// took the row over from doing it again.
+pub(crate) async fn needs_seeding(database_existed: bool) -> bool {
+    needs_seeding_at(SETTINGS_DIR.get().map(PathBuf::as_path), database_existed)
+        .await
+}
+
+async fn needs_seeding_at(
+    settings_dir: Option<&Path>,
+    database_existed: bool,
+) -> bool {
+    let Some(settings_dir) = settings_dir else {
+        return false;
+    };
+    database_existed
+        && !tokio::fs::try_exists(settings_dir.join(DIR_NAME))
+            .await
+            .unwrap_or(false)
+}
+
 fn local_path(name: &str) -> Option<PathBuf> {
     Some(
         SETTINGS_DIR
@@ -547,6 +569,26 @@ mod tests {
         stored.accent_color = crate::state::AccentColor::Blue;
         let merged = overlay_from(&path, appearance(), stored).await;
         assert_eq!(merged.accent_color, crate::state::AccentColor::Pink);
+    }
+
+    #[tokio::test]
+    async fn a_fresh_installation_has_nothing_to_hand_over() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!needs_seeding_at(Some(dir.path()), false).await);
+    }
+
+    #[tokio::test]
+    async fn an_installation_without_documents_takes_the_row_over() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(needs_seeding_at(Some(dir.path()), true).await);
+
+        std::fs::create_dir_all(dir.path().join(DIR_NAME)).unwrap();
+        assert!(!needs_seeding_at(Some(dir.path()), true).await);
+    }
+
+    #[tokio::test]
+    async fn a_store_without_a_directory_has_nothing_to_write_to() {
+        assert!(!needs_seeding_at(None, true).await);
     }
 
     #[tokio::test]
