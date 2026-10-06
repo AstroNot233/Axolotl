@@ -52,6 +52,7 @@ const DOMAINS: &[(&str, &[&str])] = &[
             "home_widgets",
             "locale",
             "log_level",
+            "minimal_home_instance_id",
             "mono_font",
             "native_decorations",
             "show_files_tab_in_instances",
@@ -99,6 +100,7 @@ const DOMAINS: &[(&str, &[&str])] = &[
         ],
     ),
     ("backup", &["backup_repository_path"]),
+    ("bootstrap", &["custom_dir", "prev_custom_dir"]),
     (
         "network",
         &[
@@ -363,12 +365,7 @@ async fn store_secret_at(
 /// Writes one key of the domain that lists it, leaving the rest of the
 /// document as it is. Keys no domain lists are ignored.
 pub(crate) async fn store_key(key: &str, value: Value) {
-    let Some((name, _)) = DOMAINS.iter().find(|(_, keys)| keys.contains(&key))
-    else {
-        tracing::debug!(key, "Ignoring a settings key no domain lists");
-        return;
-    };
-    let Some(path) = domain_path(name) else {
+    let Some(path) = key_path(key) else {
         return;
     };
     if let Err(error) = set_key_at(&path, key, value).await {
@@ -378,6 +375,42 @@ pub(crate) async fn store_key(key: &str, value: Value) {
             "Failed to save a setting"
         );
     }
+}
+
+/// Clears `key` while the stored document still holds `value`, which keeps the
+/// settings from referring to something that no longer exists.
+pub(crate) async fn clear_key_if(key: &str, value: &str) {
+    let Some(path) = key_path(key) else {
+        return;
+    };
+    if let Err(error) = clear_key_if_at(&path, key, value).await {
+        tracing::warn!(
+            path = %path.display(),
+            %error,
+            "Failed to clear a setting"
+        );
+    }
+}
+
+async fn clear_key_if_at(
+    path: &Path,
+    key: &str,
+    value: &str,
+) -> crate::Result<()> {
+    if stored_at(path).await.get(key).and_then(Value::as_str) != Some(value) {
+        return Ok(());
+    }
+    set_key_at(path, key, Value::Null).await
+}
+
+/// The document that lists `key`, for the writers that own a single key.
+fn key_path(key: &str) -> Option<PathBuf> {
+    let Some((name, _)) = DOMAINS.iter().find(|(_, keys)| keys.contains(&key))
+    else {
+        tracing::debug!(key, "Ignoring a settings key no domain lists");
+        return None;
+    };
+    domain_path(name)
 }
 
 async fn set_key_at(path: &Path, key: &str, value: Value) -> crate::Result<()> {
@@ -648,6 +681,44 @@ mod tests {
         )
         .unwrap();
         assert!(stored_at(&newer).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_reference_to_something_removed_is_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appearance.json");
+        std::fs::write(
+            &path,
+            document(r#"{"minimal_home_instance_id":"gone","other":1}"#),
+        )
+        .unwrap();
+
+        clear_key_if_at(&path, "minimal_home_instance_id", "gone")
+            .await
+            .unwrap();
+
+        let stored = stored_at(&path).await;
+        assert_eq!(stored.get("minimal_home_instance_id"), Some(&Value::Null));
+        assert_eq!(stored.get("other"), Some(&Value::from(1)));
+    }
+
+    #[tokio::test]
+    async fn a_reference_to_something_else_stays() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appearance.json");
+        std::fs::write(
+            &path,
+            document(r#"{"minimal_home_instance_id":"kept"}"#),
+        )
+        .unwrap();
+
+        clear_key_if_at(&path, "minimal_home_instance_id", "gone")
+            .await
+            .unwrap();
+        assert_eq!(
+            stored_at(&path).await.get("minimal_home_instance_id"),
+            Some(&Value::from("kept"))
+        );
     }
 
     #[tokio::test]
