@@ -294,7 +294,7 @@ impl Default for Settings {
         Self {
             max_concurrent_downloads: 10,
             max_concurrent_writes: 10,
-            download_engine: DownloadEngine::XmclCompat,
+            download_engine: DownloadEngine::Legacy,
             auto_concurrent_downloads: true,
             minecraft_metadata_source: DownloadSourceMode::Auto,
             minecraft_file_source: DownloadSourceMode::Auto,
@@ -1281,9 +1281,22 @@ mod tests {
             panic!("settings serialize to objects");
         };
 
-        for (key, value) in stored {
-            assert_eq!(defaults.get(key), Some(value), "{key}");
-        }
+        let wrong: Vec<String> = stored
+            .iter()
+            .filter(|(key, value)| defaults.get(*key) != Some(*value))
+            .map(|(key, value)| {
+                format!(
+                    "{key}: default {:?}, a fresh database {:?}",
+                    defaults.get(key),
+                    Some(value)
+                )
+            })
+            .collect();
+        assert!(
+            wrong.is_empty(),
+            "the defaults differ:\n{}",
+            wrong.join("\n")
+        );
     }
 
     /// The documents are the only source: a value the row holds reaches the
