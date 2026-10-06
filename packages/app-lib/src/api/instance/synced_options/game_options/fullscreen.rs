@@ -111,13 +111,12 @@ pub(crate) async fn update_shared_fullscreen_from_app(
 pub(super) async fn update_app_fullscreen_setting(
     value: &CanonicalValue,
     sync_enabled: bool,
-) -> crate::Result<()> {
+) {
     if !sync_enabled {
-        return Ok(());
+        return;
     }
     let CanonicalValue::Bool(value) = value else {
-        return Ok(());
+        return;
     };
     crate::state::Settings::set_force_fullscreen(*value).await;
-    Ok(())
 }

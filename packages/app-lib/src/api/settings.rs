@@ -56,8 +56,10 @@ pub async fn set_privacy(
     privacy: PrivacySettings,
 ) -> crate::Result<PrivacySettings> {
     let state = State::get().await?;
-    let mut transaction = state.pool.begin().await?;
+    // A document cannot join the transaction, so the setting the user chose is
+    // written first and the queued events are dropped after it.
     Settings::set_privacy(&privacy).await;
+    let mut transaction = state.pool.begin().await?;
     sqlx::query("DELETE FROM telemetry_outbox")
         .execute(&mut *transaction)
         .await?;
@@ -77,8 +79,10 @@ pub async fn set_privacy(
 #[tracing::instrument]
 pub async fn set_telemetry(enabled: bool) -> crate::Result<PrivacySettings> {
     let state = State::get().await?;
-    let mut transaction = state.pool.begin().await?;
+    // A document cannot join the transaction, so the setting the user chose is
+    // written first and the queued events are dropped after it.
     Settings::set_telemetry(enabled).await;
+    let mut transaction = state.pool.begin().await?;
     sqlx::query("DELETE FROM telemetry_outbox")
         .execute(&mut *transaction)
         .await?;

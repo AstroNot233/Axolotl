@@ -3950,10 +3950,6 @@ async fn move_repository_inner(destination: PathBuf) -> crate::Result<()> {
     };
     let update_result: crate::Result<()> = async {
         let mut tx = state.pool.begin().await?;
-        crate::state::Settings::set_backup_repository_path(
-            stored_path.as_deref(),
-        )
-        .await;
         if source_exists && !same_disk_move {
             sqlx::query(
                 "INSERT INTO pending_backup_repository_cleanups (path, created_at)
@@ -3983,6 +3979,12 @@ async fn move_repository_inner(destination: PathBuf) -> crate::Result<()> {
         }
         return Err(error);
     }
+
+    // A document cannot join the transaction, so the repository the move
+    // committed is recorded once it is through.
+    crate::state::Settings::set_backup_repository_path(stored_path.as_deref())
+        .await;
+
     if source_exists && !same_disk_move {
         let cleanup_succeeded = if source.try_exists()? {
             match io::remove_dir_all(&source).await {
