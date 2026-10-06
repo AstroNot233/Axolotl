@@ -1785,4 +1785,59 @@ mod tests {
                 .is_empty()
         );
     }
+
+    #[tokio::test]
+    async fn privacy_accessors_round_trip() {
+        let pool = migrated_test_pool().await;
+
+        let mut privacy = Settings::privacy(&pool).await.unwrap();
+        assert!(!privacy.telemetry);
+        assert!(privacy.discord_rpc);
+        assert_eq!(privacy.consent_version, 0);
+
+        privacy.telemetry = true;
+        privacy.discord_rpc = false;
+        privacy.consent_version = 2;
+        Settings::set_privacy(&pool, &privacy).await.unwrap();
+        assert_eq!(Settings::privacy(&pool).await.unwrap().consent_version, 2);
+
+        Settings::set_telemetry(&pool, false).await.unwrap();
+        let stored = Settings::privacy(&pool).await.unwrap();
+        assert!(!stored.telemetry);
+        assert!(!stored.discord_rpc);
+
+        Settings::set_discord_rpc(&pool, true).await.unwrap();
+        assert!(Settings::privacy(&pool).await.unwrap().discord_rpc);
+    }
+
+    #[tokio::test]
+    async fn single_column_settings_accessors_round_trip() {
+        let pool = migrated_test_pool().await;
+
+        Settings::set_force_fullscreen(&pool, true).await.unwrap();
+        assert!(Settings::get(&pool).await.unwrap().force_fullscreen);
+
+        Settings::set_backup_repository_path(&pool, Some("/tmp/repo"))
+            .await
+            .unwrap();
+        assert_eq!(
+            Settings::get(&pool)
+                .await
+                .unwrap()
+                .backup_repository_path
+                .as_deref(),
+            Some("/tmp/repo")
+        );
+
+        Settings::set_backup_repository_path(&pool, None)
+            .await
+            .unwrap();
+        assert!(
+            Settings::get(&pool)
+                .await
+                .unwrap()
+                .backup_repository_path
+                .is_none()
+        );
+    }
 }
