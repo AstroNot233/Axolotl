@@ -151,6 +151,10 @@ static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 const CONFIG_DIR_ENV: &str = "THESEUS_SETTINGS_CONFIG_DIR";
 
+/// Serializes the writers, which read a document before writing it back: two
+/// settings changing at once would otherwise lose one of them.
+static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[cfg(test)]
 thread_local! {
     static TEST_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
@@ -249,6 +253,7 @@ async fn overlay_layers(
 /// Persists every domain, without letting a failure reach the caller: the row
 /// keeps the values a document has not taken over yet.
 pub(crate) async fn store(settings: &Settings) {
+    let _writing = WRITES.lock().await;
     for (name, keys) in DOMAINS {
         let Some(path) = local_path(name) else {
             return;
@@ -266,6 +271,7 @@ pub(crate) async fn store(settings: &Settings) {
 /// Drops the keys no domain knows, for documents another version left behind.
 /// Documents written by a newer build are left alone.
 pub async fn sanitise() -> crate::Result<usize> {
+    let _writing = WRITES.lock().await;
     let mut removed = 0;
     for (name, keys) in DOMAINS {
         let Some(path) = local_path(name) else {
@@ -331,12 +337,29 @@ async fn stored_at(path: &Path) -> Map<String, Value> {
 }
 
 async fn read(path: &Path) -> Stored {
-    let Ok(contents) = tokio::fs::read(path).await else {
-        return Stored::Missing;
+    let contents = match tokio::fs::read(path).await {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Stored::Missing;
+        }
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "Could not read a settings document"
+            );
+            return Stored::Unreadable;
+        }
     };
+    if contents.iter().all(u8::is_ascii_whitespace) {
+        return Stored::Missing;
+    }
     let Ok(document) = serde_json::from_slice::<Document>(&contents) else {
         return Stored::Unreadable;
     };
+    if !document.data.is_object() {
+        return Stored::Unreadable;
+    }
     if document.schema_version > SCHEMA_VERSION {
         Stored::Newer(document)
     } else {
@@ -382,7 +405,17 @@ async fn overlay_from(
             target.insert(key.clone(), stored.clone());
         }
     }
-    serde_json::from_value(value).unwrap_or(settings)
+    match serde_json::from_value(value) {
+        Ok(settings) => settings,
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "Keeping the database values of a settings document this build cannot read"
+            );
+            settings
+        }
+    }
 }
 
 async fn store_to(
@@ -411,6 +444,7 @@ pub(crate) async fn store_key(key: &str, value: Value) {
     let Some(path) = key_path(key) else {
         return;
     };
+    let _writing = WRITES.lock().await;
     if let Err(error) = set_key_at(&path, key, value).await {
         tracing::warn!(
             path = %path.display(),
@@ -427,6 +461,7 @@ pub(crate) async fn store_in(domain: &str, entries: &[(&str, Value)]) {
     let Some(path) = local_path(domain) else {
         return;
     };
+    let _writing = WRITES.lock().await;
     if let Err(error) = set_entries_at(&path, entries).await {
         tracing::warn!(
             path = %path.display(),
@@ -442,6 +477,7 @@ pub(crate) async fn clear_key_if(key: &str, value: &str) {
     let Some(path) = key_path(key) else {
         return;
     };
+    let _writing = WRITES.lock().await;
     if let Err(error) = clear_key_if_at(&path, key, value).await {
         tracing::warn!(
             path = %path.display(),
@@ -565,6 +601,21 @@ mod tests {
             for key in *keys {
                 assert!(fields.contains_key(*key), "{name} lists {key}");
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn every_settings_field_belongs_to_a_domain() {
+        let value = serde_json::to_value(fresh_settings().await).unwrap();
+        let fields = value.as_object().unwrap();
+
+        for field in fields.keys() {
+            assert!(
+                DOMAINS
+                    .iter()
+                    .any(|(_, keys)| keys.contains(&field.as_str())),
+                "{field} belongs to no domain"
+            );
         }
     }
 
