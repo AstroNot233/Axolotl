@@ -7,7 +7,7 @@ use super::detect::decode_zip_entry_name;
 use crate::util::io;
 use tokio_util::sync::CancellationToken;
 
-const EXTRACTION_SIZE_LIMIT: u64 = 8 * 1024 * 1024 * 1024;
+pub(crate) const EXTRACTION_SIZE_LIMIT: u64 = 8 * 1024 * 1024 * 1024;
 
 fn archive_error(error: zip::result::ZipError) -> crate::Error {
     crate::ErrorKind::InputError(format!("Modpack archive is invalid: {error}"))

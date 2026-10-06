@@ -5473,25 +5473,20 @@ async fn cache_instance_icon_from_url(
     .await
 }
 
-fn materialize_modpack_overrides(
-    archive_path: &Path,
-    instance_path: &Path,
-    cancellation: Option<&tokio_util::sync::CancellationToken>,
-) -> crate::Result<(
-    u32,
-    crate::api::pack::archive_util::StagedArchiveReplacements,
-)> {
-    let file = std::fs::File::open(archive_path)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(modpack_zip_error)?;
-    let manifest = read_modpack_manifest(&mut archive)?;
-    let prefix = format!("{}/", manifest.overrides.trim_matches('/'));
-    struct OverrideTask {
-        index: usize,
-        target: PathBuf,
-    }
+struct ModpackOverrideTask {
+	index: usize,
+	target: PathBuf,
+	size: u64,
+}
 
-    let mut tasks_by_target = HashMap::<PathBuf, OverrideTask>::new();
-    let mut total_size = 0_u64;
+fn collect_modpack_override_tasks<R: Read + Seek>(
+	archive: &mut zip::ZipArchive<R>,
+	manifest: &CurseForgeModpackManifest,
+	instance_path: &Path,
+	cancellation: Option<&CancellationToken>,
+) -> crate::Result<Vec<ModpackOverrideTask>> {
+	let prefix = format!("{}/", manifest.overrides.trim_matches('/'));
+	let mut tasks_by_target = HashMap::<PathBuf, ModpackOverrideTask>::new();
     for index in 0..archive.len() {
         crate::api::pack::archive_util::check_cancellation(cancellation)?;
         let entry = archive.by_index(index).map_err(modpack_zip_error)?;
@@ -5502,21 +5497,49 @@ fn materialize_modpack_overrides(
         }
         let relative = &entry_name[prefix.len()..];
         let safe_path = safe_archive_relative_path(relative)?;
-        total_size = total_size.saturating_add(entry.size());
-        if total_size > 2 * 1024 * 1024 * 1024 {
-            return Err(ErrorKind::InputError(
-                "CurseForge modpack overrides exceed the extraction limit"
-                    .to_string(),
-            )
-            .into());
-        }
         let target = instance_path.join(safe_path);
         // Preserve archive order semantics for duplicate targets: the last
         // entry wins, while unique targets can be extracted independently.
-        tasks_by_target.insert(target.clone(), OverrideTask { index, target });
+		tasks_by_target.insert(
+			target.clone(),
+			ModpackOverrideTask {
+				index,
+				target,
+				size: entry.size(),
+			},
+		);
     }
+	let total_size = tasks_by_target
+		.values()
+		.fold(0_u64, |total, task| total.saturating_add(task.size));
+	let limit = crate::api::pack::archive_util::EXTRACTION_SIZE_LIMIT;
+	if total_size > limit {
+		return Err(ErrorKind::InputError(format!(
+			"CurseForge modpack overrides exceed the extraction limit: {total_size} unpacked bytes required, limit is {limit} bytes"
+		))
+		.into());
+	}
+	Ok(tasks_by_target.into_values().collect())
+}
+
+fn materialize_modpack_overrides(
+	archive_path: &Path,
+	instance_path: &Path,
+	cancellation: Option<&tokio_util::sync::CancellationToken>,
+) -> crate::Result<(
+	u32,
+	crate::api::pack::archive_util::StagedArchiveReplacements,
+)> {
+	let file = std::fs::File::open(archive_path)?;
+	let mut archive = zip::ZipArchive::new(file).map_err(modpack_zip_error)?;
+	let manifest = read_modpack_manifest(&mut archive)?;
+	let tasks = collect_modpack_override_tasks(
+		&mut archive,
+		&manifest,
+		instance_path,
+		cancellation,
+	)?;
     drop(archive);
-    let tasks = tasks_by_target.into_values().collect::<Vec<_>>();
     if tasks.is_empty() {
         return Ok((
             0,
@@ -10433,6 +10456,113 @@ mod tests {
             !PathBuf::from(format!("{}.installing", second.display())).exists()
         );
     }
+
+	fn write_override_size_test_archive(path: &Path, entries: &[(&str, u32)]) {
+		let contents = entries
+			.iter()
+			.map(|(name, _)| (*name, b"x".as_slice()))
+			.collect::<Vec<_>>();
+		write_override_test_archive(path, &contents);
+		let mut bytes = std::fs::read(path).unwrap();
+		let headers = bytes
+			.windows(4)
+			.enumerate()
+			.filter_map(|(offset, signature)| {
+				(signature == b"PK\x01\x02").then_some(offset)
+			})
+			.collect::<Vec<_>>();
+		assert_eq!(headers.len(), entries.len() + 1);
+		for (offset, (_, size)) in headers.into_iter().skip(1).zip(entries) {
+			bytes[offset + 24..offset + 28].copy_from_slice(&size.to_le_bytes());
+		}
+		std::fs::write(path, bytes).unwrap();
+	}
+
+	#[test]
+	fn curseforge_overrides_accept_sizes_above_two_gib_up_to_shared_limit() {
+		let root = tempfile::tempdir().unwrap();
+		let archive_path = root.path().join("pack.zip");
+		for sizes in [
+			[3 * 1024 * 1024 * 1024, 0, 0],
+			[u32::MAX - 1, u32::MAX - 1, 4],
+		] {
+			write_override_size_test_archive(
+				&archive_path,
+				&[("a", sizes[0]), ("b", sizes[1]), ("c", sizes[2])],
+			);
+			let mut archive = zip::ZipArchive::new(
+				std::fs::File::open(&archive_path).unwrap(),
+			)
+			.unwrap();
+			let manifest = read_modpack_manifest(&mut archive).unwrap();
+			let tasks = collect_modpack_override_tasks(
+				&mut archive,
+				&manifest,
+				root.path(),
+				None,
+			)
+			.unwrap();
+			assert_eq!(tasks.len(), 3);
+			assert_eq!(
+				tasks.iter().map(|task| task.size).sum::<u64>(),
+				sizes.into_iter().map(u64::from).sum::<u64>(),
+			);
+		}
+	}
+
+	#[test]
+	fn curseforge_overrides_reject_above_shared_limit_before_writing() {
+		let root = tempfile::tempdir().unwrap();
+		let archive_path = root.path().join("pack.zip");
+		let instance_path = root.path().join("instance");
+		write_override_size_test_archive(
+			&archive_path,
+			&[("a", u32::MAX - 1), ("b", u32::MAX - 1), ("c", 5)],
+		);
+		let error =
+			materialize_modpack_overrides(&archive_path, &instance_path, None)
+				.err()
+				.unwrap()
+				.to_string();
+		assert!(error.contains("overrides exceed the extraction limit"));
+		assert!(error.contains("8589934593 unpacked bytes"));
+		assert!(error.contains("limit is 8589934592 bytes"));
+		assert!(!instance_path.exists());
+	}
+
+	#[test]
+	fn curseforge_overrides_size_counts_only_final_duplicate_targets() {
+		let root = tempfile::tempdir().unwrap();
+		let archive_path = root.path().join("pack.zip");
+		write_override_size_test_archive(
+			&archive_path,
+			&[
+				("config/a", u32::MAX - 1),
+				("config\\a", 1),
+				("config/b", u32::MAX - 1),
+				("config/c", 5),
+			],
+		);
+		let mut archive = zip::ZipArchive::new(
+			std::fs::File::open(&archive_path).unwrap(),
+		)
+		.unwrap();
+		let manifest = read_modpack_manifest(&mut archive).unwrap();
+		let tasks = collect_modpack_override_tasks(
+			&mut archive,
+			&manifest,
+			root.path(),
+			None,
+		)
+		.unwrap();
+		assert_eq!(tasks.len(), 3);
+		let winner = tasks
+			.iter()
+			.find(|task| task.target == root.path().join("config/a"))
+			.unwrap();
+		assert_eq!(winner.index, 2);
+		assert_eq!(winner.size, 1);
+	}
 
     #[test]
     fn curseforge_overrides_commit_successful_parallel_staging() {
