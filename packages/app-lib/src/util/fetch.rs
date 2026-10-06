@@ -4189,6 +4189,7 @@ async fn download_segment(
     let _range_guard = DownloadRangeGuard(Arc::clone(&range.state));
     let request_started = Instant::now();
     let mut pending_progress = 0_u64;
+	let mut last_progress_at = time::Instant::now();
     let mut final_url = route.url.clone();
     let mut remote_addr = None;
     let mut http_version = None;
@@ -4476,6 +4477,12 @@ async fn download_segment(
                 .map_err(|error| SegmentDownloadError::Fatal(error.into()))?;
             pending_progress += accepted as u64;
             speed.record_bytes(accepted as u64);
+			if pending_progress >= 256 * 1024
+				|| last_progress_at.elapsed() >= time::Duration::from_secs(1)
+			{
+				let _ = progress.send(std::mem::take(&mut pending_progress));
+				last_progress_at = time::Instant::now();
+			}
             if completed {
                 break;
             }
@@ -7985,7 +7992,7 @@ mod tests {
         let _guard = RANGE_SPLITTING_TEST_LOCK.lock().await;
         RANGE_SPLITTING_PROTOCOL_FAILURES.lock().clear();
         RANGE_SPLITTING_SUPPORTED.lock().clear();
-        let size = (SEGMENTED_DOWNLOAD_THRESHOLD + 1024 * 1024) as usize;
+		let size = (SEGMENTED_DOWNLOAD_THRESHOLD * 2 + 1024 * 1024) as usize;
         let data = Arc::new(
             (0..size)
                 .map(|index| (index % 251) as u8)
@@ -8018,6 +8025,12 @@ mod tests {
             .build()
             .unwrap();
         let semaphore = FetchSemaphore(Semaphore::new(8));
+		let progress_samples = Arc::new(Mutex::new(Vec::new()));
+		let samples = Arc::clone(&progress_samples);
+		let mut progress: Box<FetchProgressFn<'_>> = Box::new(move |bytes, _| {
+			samples.lock().push(bytes);
+			Box::pin(async { Ok(()) })
+		});
         let outcome = try_segmented_download(
             SegmentedDownloadContext::new(
                 &request,
@@ -8033,7 +8046,7 @@ mod tests {
                 1,
                 false,
             ),
-            None,
+            Some(&mut progress),
         )
         .await;
         match outcome {
@@ -8042,6 +8055,11 @@ mod tests {
             }
             _ => panic!("segmented fixture download did not succeed"),
         }
+		let samples = progress_samples.lock();
+		assert!(samples.first().is_some_and(|bytes| *bytes <= 512 * 1024));
+		assert!(samples.windows(2).all(|pair| pair[0] <= pair[1]));
+		assert!(samples.iter().all(|bytes| *bytes <= size as u64));
+		drop(samples);
         assert!(
             requests.load(Ordering::Relaxed) >= INITIAL_SEGMENT_CONCURRENCY
         );

@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 // Keep per-file progress responsive without emitting every network chunk.
 const LIVE_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+const LIVE_PROGRESS_MAX_WAIT: Duration = Duration::from_secs(1);
 const LIVE_PROGRESS_MIN_BYTES: u64 = 64 * 1024;
 const CONTENT_CHECKPOINT_FILE_COUNT: usize = 25;
 const CONTENT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(2);
@@ -580,10 +581,10 @@ impl InstallProgressReporter {
             return Ok(());
         }
         let now = Utc::now();
-        let emit_too_soon = state
-            .last_live_emit_at
-            .get(&path)
-            .is_some_and(|last| last.elapsed() < LIVE_PROGRESS_EMIT_INTERVAL);
+		let since_last_emit = state
+			.last_live_emit_at
+			.get(&path)
+			.map_or(LIVE_PROGRESS_MAX_WAIT, Instant::elapsed);
         let Some(active) = state.job.active_downloads.get_mut(&path) else {
             return Ok(());
         };
@@ -614,9 +615,10 @@ impl InstallProgressReporter {
         active.status = DownloadItemStatus::Downloading;
 
         let threshold = LIVE_PROGRESS_MIN_BYTES.max(bytes_total / 200);
-        if bytes.saturating_sub(active.last_reported_bytes) < threshold
-            || emit_too_soon
-        {
+		if since_last_emit < LIVE_PROGRESS_EMIT_INTERVAL
+			|| (bytes.saturating_sub(active.last_reported_bytes) < threshold
+				&& since_last_emit < LIVE_PROGRESS_MAX_WAIT)
+		{
             return Ok(());
         }
         active.last_reported_bytes = bytes;
@@ -1376,6 +1378,79 @@ mod tests {
         app_state.install_job_cancellations.remove(&job_id);
         InstallProgressReporter::reset_job(job_id);
     }
+
+	#[cfg(not(feature = "tauri"))]
+	#[tokio::test]
+	async fn download_progress_emits_small_samples_on_time() {
+		let mib = 1024 * 1024;
+		for (elapsed, bytes, should_emit) in [
+			(None, 100, true),
+			(Some(Duration::from_secs(2)), 100, true),
+			(Some(Duration::from_millis(500)), 100, false),
+			(Some(Duration::from_millis(500)), mib, true),
+			(Some(Duration::from_millis(50)), mib, false),
+		] {
+			let job_id = Uuid::new_v4();
+			let reporter = InstallProgressReporter::new(
+				job_id,
+				InstallJobState::new(InstallRequest::CreateInstance {
+					name: "Slow download test".to_string(),
+					game_version: "1.21.1".to_string(),
+					loader: ModLoader::Vanilla,
+					loader_version: None,
+					adjuncts: Vec::new(),
+					icon_path: None,
+					link: InstanceLink::Unmanaged,
+					game_dir_override: None,
+				}),
+			);
+			{
+				let mut state = reporter.state.lock().await;
+				state.initialized_from_store = true;
+				state.job.progress.phase = InstallPhaseId::DownloadingContent;
+				state.pending_stall_checks.insert("file".to_string());
+				if let Some(elapsed) = elapsed {
+					state.last_live_emit_at.insert(
+						"file".to_string(),
+						Instant::now() - elapsed,
+					);
+				}
+				state.job.active_downloads.insert(
+					"file".to_string(),
+					ActiveDownloadState {
+						name: "file".to_string(),
+						url: String::new(),
+						source: String::new(),
+						bytes_downloaded: 0,
+						bytes_total: Some(100 * mib),
+						attempt: 1,
+						max_attempts: 1,
+						status: DownloadItemStatus::Downloading,
+						last_reported_bytes: 0,
+						last_progress_at: Utc::now(),
+						speed_bytes_per_second: None,
+						speed_sample_started_at: Utc::now()
+							- chrono::TimeDelta::seconds(1),
+						speed_sample_started_bytes: 0,
+					},
+				);
+			}
+			reporter
+				.record_download_progress("file", bytes, 100 * mib)
+				.await
+				.unwrap();
+			let state = reporter.state.lock().await;
+			assert_eq!(
+				state.job.active_downloads["file"].last_reported_bytes,
+				if should_emit { bytes } else { 0 }
+			);
+			assert!(
+				live_download_metrics(&state.job)
+					.0
+					.is_some_and(|speed| speed > 0)
+			);
+		}
+	}
 
     #[tokio::test]
     async fn download_progress_speed_drops_without_retaining_the_peak() {

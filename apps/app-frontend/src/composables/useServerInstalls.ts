@@ -101,14 +101,18 @@ export async function startModpackServerInstall(
 
 		const now2 = performance.now()
 		const dt = (now2 - prevTime) / 1000
-		if (dt > 0.3 && prevBytes > 0 && payload.downloaded >= prevBytes) {
+		if (payload.downloaded < prevBytes) {
+			smoothedSpeed = 0
+			prevBytes = payload.downloaded
+			prevTime = now2
+		} else if (dt >= 0.3) {
 			const rawSpeed = (payload.downloaded - prevBytes) / dt
 			smoothedSpeed = smoothedSpeed === 0 ? rawSpeed : smoothedSpeed * 0.7 + rawSpeed * 0.3
+			prevBytes = payload.downloaded
+			prevTime = now2
 		}
-		prevBytes = payload.downloaded
-		prevTime = now2
 
-		const speed = smoothedSpeed > 100 ? smoothedSpeed : null
+		const speed = smoothedSpeed > 0 ? smoothedSpeed : null
 		const total = payload.total ?? null
 		const eta =
 			speed && total != null && total > payload.downloaded

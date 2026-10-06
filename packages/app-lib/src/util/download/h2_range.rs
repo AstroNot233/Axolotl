@@ -11,6 +11,7 @@ use bytes::Bytes;
 use futures::stream::{BoxStream, StreamExt};
 use http::header::{ACCEPT_ENCODING, RANGE};
 use http::{HeaderValue, StatusCode, Uri};
+use parking_lot::Mutex;
 use sha2::Digest;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -446,7 +447,7 @@ async fn run_download(
     let ranges = journal.ranges().await;
     let downloaded =
         AtomicU64::new(ranges.iter().map(|range| range.written).sum());
-    let reported = AtomicU64::new(0);
+	let reported = Mutex::new(super::h2_receive::H2ProgressGate::new(size));
     let workers = concurrency.clamp(1, 8);
     let mut tasks = futures::stream::iter(ranges.into_iter().enumerate())
         .map(|(index, range)| {
@@ -555,7 +556,7 @@ async fn recover_range(
     index: usize,
     range: Checkpoint,
     downloaded: &AtomicU64,
-    reported: &AtomicU64,
+	reported: &Mutex<super::h2_receive::H2ProgressGate>,
     total_size: u64,
 ) -> Result<(), H2DownloadFailure> {
     if range.start + range.written == range.end {
@@ -612,10 +613,8 @@ async fn recover_range(
             let current = downloaded
                 .fetch_add(chunk.len() as u64, Ordering::Relaxed)
                 + chunk.len() as u64;
-            let bucket = current / (total_size / 200).max(256 * 1024);
-            if current >= total_size
-                || bucket > reported.fetch_max(bucket, Ordering::Relaxed)
-            {
+			let should_report = reported.lock().should_report(current, total_size);
+			if should_report {
                 super::h2_download::record_install_progress(
                     request,
                     current.min(total_size),
