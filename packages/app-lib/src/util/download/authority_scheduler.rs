@@ -15,6 +15,8 @@ pub(crate) struct AuthorityScheduler {
     target: usize,
     stable_since: Option<Instant>,
     cooldown_until: Option<Instant>,
+    last_byte_sample: usize,
+    last_byte_sample_at: Instant,
     connecting: Arc<tokio::sync::Semaphore>,
 }
 
@@ -25,6 +27,8 @@ impl Default for AuthorityScheduler {
             target: INITIAL_CONNECTION_TARGET,
             stable_since: None,
             cooldown_until: None,
+            last_byte_sample: 0,
+            last_byte_sample_at: Instant::now(),
             connecting: Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }
@@ -81,6 +85,20 @@ impl AuthorityScheduler {
     }
 
     pub(crate) fn observe(&mut self, now: Instant) {
+        let total_bytes = self
+            .connections
+            .iter()
+            .map(|connection| connection.bytes_transferred_for_scheduler())
+            .sum();
+        if now.duration_since(self.last_byte_sample_at) >= STABILITY_WINDOW {
+            if total_bytes == self.last_byte_sample {
+                self.stable_since = None;
+                self.last_byte_sample_at = now;
+                return;
+            }
+            self.last_byte_sample = total_bytes;
+            self.last_byte_sample_at = now;
+        }
         let Some(since) = self.stable_since else {
             self.stable_since = Some(now);
             return;

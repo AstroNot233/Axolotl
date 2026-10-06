@@ -140,6 +140,10 @@ impl SharedH2Connection {
         self.bytes_transferred.fetch_add(bytes, Ordering::Relaxed);
     }
 
+    pub(crate) fn bytes_transferred_for_scheduler(&self) -> usize {
+        self.bytes_transferred.load(Ordering::Relaxed)
+    }
+
     pub(crate) fn assigned_streams_for_scheduler(&self) -> usize {
         self.active_streams() + self.reserved_streams.load(Ordering::Acquire)
     }
@@ -295,13 +299,6 @@ type ConnectionSlot = Arc<AsyncMutex<Option<Arc<SharedH2Connection>>>>;
 
 /// Registry of live shared connections, keyed by authority.
 static CONNECTIONS: std::sync::LazyLock<
-    AsyncMutex<HashMap<String, ConnectionSlot>>,
-> = std::sync::LazyLock::new(|| AsyncMutex::new(HashMap::new()));
-
-/// A bounded sibling connection for saturated asset batches. Normal file
-/// downloads always use `CONNECTIONS`; a second TCP congestion domain is only
-/// created by the asset scheduler after it observes sustained pressure.
-static BATCH_CONNECTIONS: std::sync::LazyLock<
     AsyncMutex<HashMap<String, ConnectionSlot>>,
 > = std::sync::LazyLock::new(|| AsyncMutex::new(HashMap::new()));
 
@@ -661,21 +658,19 @@ async fn wait_for_idle(
 }
 
 pub(crate) async fn evict_idle_connections(scope: Option<&str>) {
-    for registry in [&*CONNECTIONS, &*BATCH_CONNECTIONS] {
-        let slots = registry
-            .lock()
-            .await
-            .iter()
-            .filter(|(key, _)| scope.is_none_or(|scope| key.as_str() == scope))
-            .map(|(_, slot)| slot.clone())
-            .collect::<Vec<_>>();
-        for slot in slots {
-            if let Ok(cached) = slot.try_lock()
-                && let Some(connection) = cached.as_ref()
-                && connection.active_streams() == 0
-            {
-                connection.evict();
-            }
+    let slots = CONNECTIONS
+        .lock()
+        .await
+        .iter()
+        .filter(|(key, _)| scope.is_none_or(|scope| key.as_str() == scope))
+        .map(|(_, slot)| slot.clone())
+        .collect::<Vec<_>>();
+    for slot in slots {
+        if let Ok(cached) = slot.try_lock()
+            && let Some(connection) = cached.as_ref()
+            && connection.active_streams() == 0
+        {
+            connection.evict();
         }
     }
     let pools = PARALLEL_CONNECTIONS
