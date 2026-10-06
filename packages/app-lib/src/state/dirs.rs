@@ -696,7 +696,7 @@ impl DirectoryInfo {
             settings.prev_custom_dir.clone(),
         );
         if current_dirs != original_dirs {
-            settings.update().await?;
+            settings.update().await;
         }
 
         Ok(())

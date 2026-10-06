@@ -587,31 +587,27 @@ impl Settings {
         settings
     }
 
-    /// Persists the settings, which the store owns.
-    pub async fn update(&self) -> crate::Result<()> {
+    /// Persists the settings, which the store owns. A write that fails leaves
+    /// the previous document in place and is reported in the log.
+    pub async fn update(&self) {
         super::settings_store::store(self).await;
-        Ok(())
     }
 
-    pub(crate) async fn set_force_fullscreen(value: bool) -> crate::Result<()> {
+    pub(crate) async fn set_force_fullscreen(value: bool) {
         super::settings_store::store_key(
             "force_fullscreen",
             serde_json::Value::Bool(value),
         )
         .await;
-        Ok(())
     }
 
-    pub(crate) async fn set_backup_repository_path(
-        path: Option<&str>,
-    ) -> crate::Result<()> {
+    pub(crate) async fn set_backup_repository_path(path: Option<&str>) {
         let stored = match path {
             Some(path) => serde_json::Value::String(path.to_string()),
             None => serde_json::Value::Null,
         };
         super::settings_store::store_key("backup_repository_path", stored)
             .await;
-        Ok(())
     }
 
     pub(crate) async fn privacy<'a, E>(
@@ -645,9 +641,7 @@ impl Settings {
         })
     }
 
-    pub(crate) async fn set_privacy(
-        privacy: &PrivacySettings,
-    ) -> crate::Result<()> {
+    pub(crate) async fn set_privacy(privacy: &PrivacySettings) {
         super::settings_store::store_key(
             "telemetry",
             serde_json::Value::Bool(privacy.telemetry),
@@ -663,25 +657,22 @@ impl Settings {
             serde_json::Value::from(privacy.consent_version),
         )
         .await;
-        Ok(())
     }
 
-    pub(crate) async fn set_telemetry(enabled: bool) -> crate::Result<()> {
+    pub(crate) async fn set_telemetry(enabled: bool) {
         super::settings_store::store_key(
             "telemetry",
             serde_json::Value::Bool(enabled),
         )
         .await;
-        Ok(())
     }
 
-    pub(crate) async fn set_discord_rpc(enabled: bool) -> crate::Result<()> {
+    pub(crate) async fn set_discord_rpc(enabled: bool) {
         super::settings_store::store_key(
             "discord_rpc",
             serde_json::Value::Bool(enabled),
         )
         .await;
-        Ok(())
     }
 
     pub(crate) async fn proxy_config<'a, E>(
@@ -887,7 +878,7 @@ impl Settings {
             }
         }
 
-        settings.update().await?;
+        settings.update().await;
 
         Ok(())
     }
@@ -1326,7 +1317,7 @@ mod tests {
         assert!(settings.bypass_curseforge_download_restrictions);
 
         settings.bypass_curseforge_download_restrictions = false;
-        settings.update().await.unwrap();
+        settings.update().await;
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(!reloaded.bypass_curseforge_download_restrictions);
@@ -1340,7 +1331,7 @@ mod tests {
         assert!(!settings.ignore_ssl_errors);
 
         settings.ignore_ssl_errors = true;
-        settings.update().await.unwrap();
+        settings.update().await;
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(reloaded.ignore_ssl_errors);
@@ -1354,7 +1345,7 @@ mod tests {
         assert!(!settings.memory.optimize_before_launch);
 
         settings.memory.optimize_before_launch = true;
-        settings.update().await.unwrap();
+        settings.update().await;
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(reloaded.memory.optimize_before_launch);
@@ -1368,7 +1359,7 @@ mod tests {
         assert!(!settings.enter_lightweight_mode_on_game_launch);
 
         settings.enter_lightweight_mode_on_game_launch = true;
-        settings.update().await.unwrap();
+        settings.update().await;
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(reloaded.enter_lightweight_mode_on_game_launch);
@@ -1428,7 +1419,7 @@ mod tests {
         });
         let mut settings = Settings::get(&pool).await.unwrap();
         settings.home_widgets = Some(expected.clone());
-        settings.update().await.unwrap();
+        settings.update().await;
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert_eq!(reloaded.home_widgets, Some(expected));
@@ -1482,14 +1473,14 @@ mod tests {
 
         settings.ui_font = Some("  Microsoft YaHei  ".to_string());
         settings.mono_font = Some("JetBrains Mono".to_string());
-        settings.update().await.unwrap();
+        settings.update().await;
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert_eq!(reloaded.ui_font.as_deref(), Some("Microsoft YaHei"));
         assert_eq!(reloaded.mono_font.as_deref(), Some("JetBrains Mono"));
 
         settings.mono_font = Some("   ".to_string());
-        settings.update().await.unwrap();
+        settings.update().await;
 
         let cleared = Settings::get(&pool).await.unwrap();
         assert_eq!(cleared.mono_font, None);
@@ -1506,7 +1497,7 @@ mod tests {
         );
 
         settings.terracotta_public_nodes.clear();
-        settings.update().await.unwrap();
+        settings.update().await;
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(reloaded.terracotta_public_nodes.is_empty());
@@ -1519,7 +1510,7 @@ mod tests {
         let mut settings = Settings::get(&pool).await.unwrap();
         assert_eq!(settings.mojang_auth_source, DownloadSourceMode::Auto);
         settings.mojang_auth_source = DownloadSourceMode::MirrorPreferred;
-        settings.update().await.unwrap();
+        settings.update().await;
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert_eq!(
@@ -1678,15 +1669,15 @@ mod tests {
         privacy.telemetry = true;
         privacy.discord_rpc = false;
         privacy.consent_version = 2;
-        Settings::set_privacy(&privacy).await.unwrap();
+        Settings::set_privacy(&privacy).await;
         assert_eq!(Settings::privacy(&pool).await.unwrap().consent_version, 2);
 
-        Settings::set_telemetry(false).await.unwrap();
+        Settings::set_telemetry(false).await;
         let stored = Settings::privacy(&pool).await.unwrap();
         assert!(!stored.telemetry);
         assert!(!stored.discord_rpc);
 
-        Settings::set_discord_rpc(true).await.unwrap();
+        Settings::set_discord_rpc(true).await;
         assert!(Settings::privacy(&pool).await.unwrap().discord_rpc);
     }
 
@@ -1694,12 +1685,10 @@ mod tests {
     async fn single_column_settings_accessors_round_trip() {
         let pool = migrated_test_pool().await;
 
-        Settings::set_force_fullscreen(true).await.unwrap();
+        Settings::set_force_fullscreen(true).await;
         assert!(Settings::get(&pool).await.unwrap().force_fullscreen);
 
-        Settings::set_backup_repository_path(Some("/tmp/repo"))
-            .await
-            .unwrap();
+        Settings::set_backup_repository_path(Some("/tmp/repo")).await;
         assert_eq!(
             Settings::get(&pool)
                 .await
@@ -1709,7 +1698,7 @@ mod tests {
             Some("/tmp/repo")
         );
 
-        Settings::set_backup_repository_path(None).await.unwrap();
+        Settings::set_backup_repository_path(None).await;
         assert!(
             Settings::get(&pool)
                 .await

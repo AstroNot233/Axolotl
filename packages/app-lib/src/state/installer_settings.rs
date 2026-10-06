@@ -140,7 +140,7 @@ mod windows {
                 );
                 settings.custom_dir = Some(custom_dir);
                 settings.prev_custom_dir = Some(prev_custom_dir);
-                settings.update().await?;
+                settings.update().await;
                 clear_pending_directory(&key)?;
             }
             PendingDirectoryDecision::Clear => {

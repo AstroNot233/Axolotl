@@ -118,6 +118,6 @@ pub(super) async fn update_app_fullscreen_setting(
     let CanonicalValue::Bool(value) = value else {
         return Ok(());
     };
-    crate::state::Settings::set_force_fullscreen(*value).await?;
+    crate::state::Settings::set_force_fullscreen(*value).await;
     Ok(())
 }

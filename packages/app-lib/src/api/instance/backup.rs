@@ -3953,7 +3953,7 @@ async fn move_repository_inner(destination: PathBuf) -> crate::Result<()> {
         crate::state::Settings::set_backup_repository_path(
             stored_path.as_deref(),
         )
-        .await?;
+        .await;
         if source_exists && !same_disk_move {
             sqlx::query(
                 "INSERT INTO pending_backup_repository_cleanups (path, created_at)
