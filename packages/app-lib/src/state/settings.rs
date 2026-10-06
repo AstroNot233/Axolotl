@@ -1,6 +1,7 @@
 //! Theseus settings file
 
 use crate::util::download::DownloadEngine;
+use crate::util::proxy::{ProxyConfig, ProxyMode};
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Row, Sqlite};
 use std::collections::HashMap;
@@ -958,6 +959,49 @@ impl Settings {
             .bind(enabled)
             .execute(exec)
             .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn proxy_config<'a, E>(
+        exec: E,
+    ) -> crate::Result<ProxyConfig>
+    where
+        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        let (mode, url, username, password): (String, String, String, String) =
+            sqlx::query_as(
+                "SELECT proxy_mode, proxy_url, proxy_username, proxy_password
+                 FROM settings WHERE id = 0",
+            )
+            .fetch_one(exec)
+            .await?;
+        Ok(ProxyConfig {
+            mode: ProxyMode::from_string(&mode),
+            url,
+            username,
+            password,
+        })
+    }
+
+    pub(crate) async fn set_proxy_config<'a, E>(
+        exec: E,
+        config: &ProxyConfig,
+    ) -> crate::Result<()>
+    where
+        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        config.validate()?;
+        sqlx::query(
+            "UPDATE settings
+             SET proxy_mode = ?, proxy_url = ?, proxy_username = ?, proxy_password = ?
+             WHERE id = 0",
+        )
+        .bind(config.mode.as_str())
+        .bind(config.url.trim())
+        .bind(config.username.trim())
+        .bind(config.password.clone())
+        .execute(exec)
+        .await?;
         Ok(())
     }
 

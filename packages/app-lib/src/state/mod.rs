@@ -32,8 +32,6 @@ pub use self::settings::*;
 mod game_options;
 pub use self::game_options::*;
 
-mod proxy_settings;
-
 mod installer_settings;
 
 mod process;
@@ -644,7 +642,7 @@ impl State {
     pub async fn proxy_config(
         &self,
     ) -> crate::Result<crate::util::proxy::ProxyConfig> {
-        crate::state::proxy_settings::get(&self.pool).await
+        Settings::proxy_config(&self.pool).await
     }
 
     pub async fn update_proxy_config(
@@ -657,7 +655,7 @@ impl State {
             config,
             settings.ignore_ssl_errors,
         )?;
-        crate::state::proxy_settings::set(&self.pool, config).await?;
+        Settings::set_proxy_config(&self.pool, config).await?;
         *self.configured_http_client.write() = client;
         Ok(())
     }
@@ -667,7 +665,7 @@ impl State {
         settings: &Settings,
     ) -> crate::Result<()> {
         let _update = self.configured_http_client_update.lock().await;
-        let proxy = crate::state::proxy_settings::get(&self.pool).await?;
+        let proxy = Settings::proxy_config(&self.pool).await?;
         let client = crate::util::fetch::build_configured_client(
             &proxy,
             settings.ignore_ssl_errors,
@@ -906,7 +904,7 @@ impl State {
         let api_semaphore =
             FetchSemaphore(Semaphore::new(download_concurrency));
         let auto_prefers_mirror = settings.auto_prefers_mirror();
-        let proxy_config = proxy_settings::get(&pool).await?;
+        let proxy_config = Settings::proxy_config(&pool).await?;
         let configured_http_client =
             crate::util::fetch::build_configured_client(
                 &proxy_config,
@@ -1060,7 +1058,7 @@ pub(crate) async fn test_state(
     pool: SqlitePool,
 ) -> crate::Result<Arc<State>> {
     let file_watcher = instances::watcher::init_watcher().await?;
-    let proxy_config = proxy_settings::get(&pool).await?;
+    let proxy_config = Settings::proxy_config(&pool).await?;
     let settings = Settings::get(&pool).await?;
     let configured_http_client = crate::util::fetch::build_configured_client(
         &proxy_config,
