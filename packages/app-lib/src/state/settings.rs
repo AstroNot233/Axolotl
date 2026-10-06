@@ -1286,6 +1286,20 @@ mod tests {
         }
     }
 
+    /// The documents are the only source: a value the row holds reaches the
+    /// settings through the handover, never through a read.
+    #[tokio::test]
+    async fn a_read_never_sees_the_row() {
+        let pool = migrated_test_pool().await;
+        sqlx::query("UPDATE settings SET locale = 'xx-XX' WHERE id = 0")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(Settings::read_row(&pool).await.unwrap().locale, "xx-XX");
+        assert_eq!(Settings::get().await.locale, String::new());
+    }
+
     #[tokio::test]
     async fn the_row_hands_its_proxy_over() {
         let pool = migrated_test_pool().await;
