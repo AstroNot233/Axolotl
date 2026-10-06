@@ -294,6 +294,97 @@ pub enum FeatureFlag {
     AutoInstallDependencies,
 }
 
+/// What an installation that has stored nothing uses, and the base every read
+/// starts from. These are the values a fresh database produces, which
+/// `the_defaults_match_a_fresh_database` keeps them equal to.
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            max_concurrent_downloads: 10,
+            max_concurrent_writes: 10,
+            download_engine: DownloadEngine::XmclCompat,
+            auto_concurrent_downloads: true,
+            minecraft_metadata_source: DownloadSourceMode::Auto,
+            minecraft_file_source: DownloadSourceMode::Auto,
+            modrinth_source: DownloadSourceMode::Auto,
+            curseforge_source: DownloadSourceMode::Auto,
+            bypass_curseforge_download_restrictions: true,
+            ignore_ssl_errors: false,
+            mojang_auth_source: DownloadSourceMode::Auto,
+            theme: Theme::Dark,
+            accent_color: AccentColor::Pink,
+            locale: String::new(),
+            default_page: DefaultPage::Home,
+            collapsed_navigation: true,
+            hide_nametag_skins_page: false,
+            advanced_rendering: true,
+            native_decorations: false,
+            toggle_sidebar: false,
+            custom_background_path: None,
+            custom_background_blur: 12,
+            custom_background_opacity: 65,
+            custom_background_component_opacity:
+                default_custom_background_component_opacity(),
+            ui_font: None,
+            mono_font: None,
+            transparent_background: false,
+            transparent_background_opacity: 55,
+            transparent_background_blur: false,
+            sidebar_instance_count: 0,
+            close_behavior: "ask".to_string(),
+            log_level: default_log_level(),
+            auto_hide_downloads_button: false,
+            home_layout: HomeLayout::default(),
+            minimal_home_instance_id: None,
+            home_widgets: None,
+            home_widget_background_opacity:
+                default_home_widget_background_opacity(),
+            hidden_nav_items: Vec::new(),
+            custom_window_title_enabled: false,
+            default_window_title: default_window_title(),
+            terracotta_public_nodes: default_terracotta_public_nodes(),
+            telemetry: false,
+            telemetry_consent_version: 0,
+            discord_rpc: true,
+            onboarded: false,
+            onboarding_version: 0,
+            onboarding_instance_tour_completed: true,
+            extra_launch_args: Vec::new(),
+            custom_env_vars: Vec::new(),
+            memory: MemorySettings {
+                maximum: crate::api::jre::default_memory_max_mb(),
+                automatic: true,
+                optimize_before_launch: false,
+            },
+            force_fullscreen: false,
+            maximize_window: false,
+            game_resolution: WindowSize(854, 480),
+            hide_on_process_start: false,
+            enter_lightweight_mode_on_game_launch: false,
+            auto_set_java_high_performance_mode: true,
+            hooks: Hooks::default(),
+            custom_dir: None,
+            prev_custom_dir: None,
+            backup_repository_path: None,
+            migrated: false,
+            developer_mode: false,
+            feature_flags: HashMap::new(),
+            sync_features_across_devices: false,
+            show_files_tab_in_instances: true,
+            show_worlds_tab_in_instances: true,
+            show_screenshots_tab_in_instances: false,
+            show_skin_selector_in_sidebar: true,
+            pending_update_toast_for_version: None,
+            allow_external_scheme: true,
+            allow_privileged_scheme: false,
+            version: Self::CURRENT_VERSION,
+            legacy_use_minecraft_mirror: None,
+            legacy_use_modrinth_mirror: None,
+            legacy_use_curseforge_mirror: None,
+        }
+    }
+}
+
 impl Settings {
     const CURRENT_VERSION: usize = 3;
 
@@ -1182,6 +1273,27 @@ impl DefaultPage {
 mod tests {
     use super::*;
     use crate::state::db::{migrated_test_pool, test_pool};
+
+    #[tokio::test]
+    async fn the_defaults_match_a_fresh_database() {
+        let pool = migrated_test_pool().await;
+        let mut stored = Settings::read_row(&pool).await.unwrap();
+        while stored.version < Settings::CURRENT_VERSION {
+            stored.perform_migration().unwrap();
+        }
+
+        let defaults = serde_json::to_value(Settings::default()).unwrap();
+        let stored = serde_json::to_value(&stored).unwrap();
+        let (Some(defaults), Some(stored)) =
+            (defaults.as_object(), stored.as_object())
+        else {
+            panic!("settings serialize to objects");
+        };
+
+        for (key, value) in stored {
+            assert_eq!(defaults.get(key), Some(value), "{key}");
+        }
+    }
 
     #[test]
     fn home_layout_uses_stable_wire_values() {
