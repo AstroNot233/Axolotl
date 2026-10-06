@@ -134,7 +134,7 @@ import { cancelLogin, get as getCreds, login, logout } from '@/helpers/mr_auth.t
 import { getNavShortcutEnabled } from '@/helpers/nav-shortcut-state'
 import { runWhenIdle } from '@/helpers/page-transition'
 import { get_by_instance_id, kill as killProcess } from '@/helpers/process.js'
-import { mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
+import { getExternalLinkUrl, mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
 import { getQuickScrollEnabled, getShowScrollTop } from '@/helpers/scroll-top-state'
 import {
 	get as getSettings,
@@ -2800,23 +2800,15 @@ function handleClick(e) {
 			// RouterLinks and same-origin SPA paths must keep default handling /
 			// vue-router click; only intercept true external protocol links.
 			const href = target.getAttribute('href') ?? ''
-			const isRouterLink = target.classList.contains('router-link-active') || href.startsWith('/')
-			const isLocalhost =
-				target.href.startsWith('http://localhost') ||
-				target.href.startsWith('https://tauri.localhost') ||
-				target.href.startsWith('http://tauri.localhost')
-			if (
-				!isRouterLink &&
-				target.href &&
-				['http://', 'https://', 'mailto:', 'tel:'].some((v) => target.href.startsWith(v)) &&
-				!target.classList.contains('router-link-active') &&
-				!isLocalhost
-			) {
-				const parsed = parseModrinthLink(target.href)
+			const externalUrl = getExternalLinkUrl(href, target.href)
+			const isRouterLink =
+				target.classList.contains('router-link-active') || (href.startsWith('/') && !externalUrl)
+			if (!isRouterLink && externalUrl && !target.classList.contains('router-link-active')) {
+				const parsed = parseModrinthLink(externalUrl)
 				if (target.target !== '_blank' && parsed) {
 					void openModrinthProjectLinkInApp(parsed)
 				} else {
-					openUrl(target.href)
+					openUrl(externalUrl)
 				}
 				e.preventDefault()
 			}

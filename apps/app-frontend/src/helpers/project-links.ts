@@ -23,6 +23,8 @@ export function createProjectBrowseLocation(
 
 const MODRINTH_HOSTNAMES = new Set(['modrinth.com', 'www.modrinth.com'])
 
+const APP_LOCAL_HOSTNAMES = new Set(['localhost', 'tauri.localhost'])
+
 const SUPPORTED_PROJECT_TYPES = new Set([
 	'mod',
 	'modpack',
@@ -68,6 +70,85 @@ export function parseModrinthLink(
 		return { slug, pathSuffix, url }
 	} else {
 		return null
+	}
+}
+
+/**
+ * Returns the URL that should be handed to the native browser opener for an
+ * anchor, or null when the anchor belongs to the launcher web view.
+ *
+ * Links without a scheme are resolved by Tauri against tauri.localhost. Use
+ * the original href to recover the intended external host before opening it.
+ */
+export function getExternalLinkUrl(href: string, resolvedHref: string): string | null {
+	const rawHref = href.trim()
+	if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('?')) {
+		return null
+	}
+
+	const linkoutUrl = getLinkoutUrl(rawHref, resolvedHref)
+	if (linkoutUrl) return linkoutUrl
+
+	if (rawHref.startsWith('/')) return null
+
+	if (/^(?:https?:|mailto:|tel:)/i.test(rawHref) || rawHref.startsWith('//')) {
+		return isAppLocalUrl(resolvedHref) ? null : resolvedHref
+	}
+
+	if (!isAppLocalUrl(resolvedHref)) return null
+
+	try {
+		const url = new URL(`https://${rawHref}`)
+		if (
+			!url.hostname.includes('.') ||
+			url.hostname === 'localhost' ||
+			url.hostname.endsWith('.localhost')
+		) {
+			return null
+		}
+		return url.toString()
+	} catch {
+		return null
+	}
+}
+
+function getLinkoutUrl(href: string, resolvedHref: string): string | null {
+	let url: URL
+	try {
+		url = new URL(href, resolvedHref)
+	} catch {
+		return null
+	}
+
+	if (!isAppLocalUrl(url.href) || url.pathname !== '/linkout') return null
+
+	const remoteUrl = url.searchParams.get('remoteUrl')
+	if (!remoteUrl) return null
+
+	let decodedUrl = remoteUrl
+	for (let i = 0; i < 3; i++) {
+		try {
+			const nextUrl = decodeURIComponent(decodedUrl)
+			if (nextUrl === decodedUrl) break
+			decodedUrl = nextUrl
+		} catch {
+			return null
+		}
+	}
+
+	try {
+		const parsedUrl = new URL(decodedUrl)
+		return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:' ? parsedUrl.href : null
+	} catch {
+		return null
+	}
+}
+
+function isAppLocalUrl(href: string): boolean {
+	try {
+		return APP_LOCAL_HOSTNAMES.has(new URL(href).hostname.toLowerCase())
+	} catch {
+		return false
 	}
 }
 
