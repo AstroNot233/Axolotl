@@ -788,6 +788,33 @@ impl Settings {
         config
     }
 
+    /// The proxy the row holds, which startup reads once to hand it over to the
+    /// document: every other reader goes through `proxy_config`.
+    pub(crate) async fn read_row_proxy_config<'a, E>(
+        exec: E,
+    ) -> crate::Result<ProxyConfig>
+    where
+        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        let (mode, url, username, stored_password): (
+            String,
+            String,
+            String,
+            String,
+        ) = sqlx::query_as(
+            "SELECT proxy_mode, proxy_url, proxy_username, proxy_password
+             FROM settings WHERE id = 0",
+        )
+        .fetch_one(exec)
+        .await?;
+        Ok(ProxyConfig {
+            mode: ProxyMode::from_string(&mode),
+            url,
+            username,
+            password: read_proxy_password().unwrap_or(stored_password),
+        })
+    }
+
     /// Moves a password an older build left in the row into the system
     /// credential store, so the row stops carrying it.
     pub(crate) async fn migrate_proxy_password<'a, E>(

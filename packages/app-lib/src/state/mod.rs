@@ -895,7 +895,10 @@ impl State {
             tracing::info!("Handing the stored settings over to the documents");
             let stored = Settings::read_row(&pool).await?;
             settings_store::store(&stored).await;
-            Settings::store_proxy_config(&Settings::proxy_config().await).await;
+            Settings::store_proxy_config(
+                &Settings::read_row_proxy_config(&pool).await?,
+            )
+            .await;
         }
 
         settings_store::prune_redundant().await;
