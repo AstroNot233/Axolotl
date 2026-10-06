@@ -98,13 +98,8 @@ async fn run_cycle(
 }
 
 async fn is_enabled(state: &State) -> crate::Result<bool> {
-    let row = sqlx::query(
-		"SELECT telemetry, telemetry_consent_version FROM settings WHERE id = 0",
-	)
-	.fetch_one(&state.pool)
-	.await?;
-    Ok(row.get::<i64, _>("telemetry") == 1
-        && row.get::<i64, _>("telemetry_consent_version") > 0)
+    let privacy = crate::state::Settings::privacy(&state.pool).await?;
+    Ok(privacy.telemetry && privacy.consent_version > 0)
 }
 
 async fn ensure_identity(pool: &sqlx::SqlitePool) -> crate::Result<String> {

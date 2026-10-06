@@ -48,12 +48,7 @@ pub async fn set_download_engine(engine: DownloadEngine) -> crate::Result<()> {
 #[tracing::instrument]
 pub async fn get_privacy() -> crate::Result<PrivacySettings> {
     let state = State::get().await?;
-    let settings = Settings::get(&state.pool).await?;
-    Ok(PrivacySettings {
-        telemetry: settings.telemetry,
-        discord_rpc: settings.discord_rpc,
-        consent_version: settings.telemetry_consent_version,
-    })
+    Settings::privacy(&state.pool).await
 }
 
 #[tracing::instrument]

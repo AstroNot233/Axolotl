@@ -893,6 +893,26 @@ impl Settings {
         Ok(())
     }
 
+    pub(crate) async fn privacy<'a, E>(
+        exec: E,
+    ) -> crate::Result<PrivacySettings>
+    where
+        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        let (telemetry, discord_rpc, consent_version): (i64, i64, i64) =
+            sqlx::query_as(
+                "SELECT telemetry, discord_rpc, telemetry_consent_version
+                 FROM settings WHERE id = 0",
+            )
+            .fetch_one(exec)
+            .await?;
+        Ok(PrivacySettings {
+            telemetry: telemetry == 1,
+            discord_rpc: discord_rpc == 1,
+            consent_version: consent_version as u32,
+        })
+    }
+
     pub fn effective_max_concurrent_downloads(&self) -> usize {
         if self.auto_concurrent_downloads {
             64
