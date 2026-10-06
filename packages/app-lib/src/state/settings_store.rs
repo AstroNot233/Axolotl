@@ -8,7 +8,7 @@
 //! which is the only place that applies the stored values.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -106,6 +106,13 @@ struct Document {
     data: Value,
 }
 
+enum Stored {
+    Missing,
+    Unreadable,
+    Newer(Document),
+    Ready(Document),
+}
+
 /// The settings directory, resolved before `State` exists.
 static SETTINGS_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -157,29 +164,44 @@ pub(crate) async fn store(settings: &Settings) {
     }
 }
 
+async fn read(path: &Path) -> Stored {
+    let Ok(contents) = tokio::fs::read(path).await else {
+        return Stored::Missing;
+    };
+    let Ok(document) = serde_json::from_slice::<Document>(&contents) else {
+        return Stored::Unreadable;
+    };
+    if document.schema_version > SCHEMA_VERSION {
+        Stored::Newer(document)
+    } else {
+        Stored::Ready(document)
+    }
+}
+
 async fn overlay_from(
     path: &Path,
     keys: &[&str],
     settings: Settings,
 ) -> Settings {
-    let Ok(contents) = tokio::fs::read(path).await else {
-        return settings;
+    let document = match read(path).await {
+        Stored::Ready(document) => document,
+        Stored::Missing => return settings,
+        Stored::Unreadable => {
+            tracing::warn!(
+                path = %path.display(),
+                "Ignoring a settings document that cannot be read"
+            );
+            return settings;
+        }
+        Stored::Newer(document) => {
+            tracing::warn!(
+                path = %path.display(),
+                version = document.schema_version,
+                "Ignoring a settings document written by a newer build"
+            );
+            return settings;
+        }
     };
-    let Ok(document) = serde_json::from_slice::<Document>(&contents) else {
-        tracing::warn!(
-            path = %path.display(),
-            "Ignoring a settings document that cannot be read"
-        );
-        return settings;
-    };
-    if document.schema_version > SCHEMA_VERSION {
-        tracing::warn!(
-            path = %path.display(),
-            version = document.schema_version,
-            "Ignoring a settings document written by a newer build"
-        );
-        return settings;
-    }
 
     let (Ok(mut value), Some(stored)) =
         (serde_json::to_value(&settings), document.data.as_object())
@@ -202,6 +224,16 @@ async fn store_to(
     keys: &[&str],
     settings: &Settings,
 ) -> crate::Result<()> {
+    let stored = read(path).await;
+    if let Stored::Newer(document) = &stored {
+        tracing::warn!(
+            path = %path.display(),
+            version = document.schema_version,
+            "Leaving a settings document written by a newer build alone"
+        );
+        return Ok(());
+    }
+
     let normalized = settings.normalized();
     let mut value = serde_json::to_value(&normalized)?;
     let Some(fields) = value.as_object_mut() else {
@@ -209,10 +241,21 @@ async fn store_to(
     };
     fields.retain(|key, _| keys.contains(&key.as_str()));
 
+    // Keep the keys this build does not know, so a document another version
+    // wrote is not stripped of them.
+    let mut data = match stored {
+        Stored::Ready(document) => document.data,
+        _ => Value::Object(Map::new()),
+    }
+    .as_object()
+    .cloned()
+    .unwrap_or_default();
+    data.extend(fields.iter().map(|(k, v)| (k.clone(), v.clone())));
+
     let document = Document {
         schema_version: SCHEMA_VERSION,
         written_by: env!("CARGO_PKG_VERSION").to_string(),
-        data: value,
+        data: Value::Object(data),
     };
     if let Some(parent) = path.parent() {
         crate::util::io::create_dir_all(parent).await?;
@@ -232,6 +275,12 @@ mod tests {
 
     fn appearance() -> &'static [&'static str] {
         DOMAINS[0].1
+    }
+
+    fn document(data: &str) -> String {
+        format!(
+            r#"{{"schema_version":{SCHEMA_VERSION},"written_by":"9.9.9","data":{data}}}"#
+        )
     }
 
     #[tokio::test]
@@ -279,6 +328,44 @@ mod tests {
         stored.custom_dir = Some("/tmp/row".to_string());
         let merged = overlay_from(&path, appearance(), stored).await;
         assert_eq!(merged.custom_dir.as_deref(), Some("/tmp/row"));
+    }
+
+    #[tokio::test]
+    async fn a_write_keeps_the_keys_this_build_does_not_know() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appearance.json");
+        std::fs::write(
+            &path,
+            document(r#"{"theme":"oled","from_a_newer_build":7}"#),
+        )
+        .unwrap();
+
+        store_to(&path, appearance(), &fresh_settings().await)
+            .await
+            .unwrap();
+
+        let stored: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
+                .unwrap();
+        assert_eq!(stored["data"]["from_a_newer_build"], 7);
+        assert!(stored["data"]["accent_color"].is_string());
+        assert_eq!(stored["written_by"], env!("CARGO_PKG_VERSION"));
+    }
+
+    #[tokio::test]
+    async fn a_document_from_a_newer_build_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appearance.json");
+        let newer = format!(
+            r#"{{"schema_version":{},"written_by":"9.9.9","data":{{"theme":"oled"}}}}"#,
+            SCHEMA_VERSION + 1
+        );
+        std::fs::write(&path, &newer).unwrap();
+
+        store_to(&path, appearance(), &fresh_settings().await)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), newer);
     }
 
     #[tokio::test]
