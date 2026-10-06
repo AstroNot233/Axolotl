@@ -336,6 +336,22 @@ pub(crate) async fn store_key(key: &str, value: Value) {
     }
 }
 
+/// Writes entries of a document the domain table does not derive, which is how
+/// a domain that owns its keys is stored. Such a document is left out of
+/// `sanitise`, since no domain lists its keys.
+pub(crate) async fn store_in(domain: &str, entries: &[(&str, Value)]) {
+    let Some(path) = domain_path(domain) else {
+        return;
+    };
+    if let Err(error) = set_entries_at(&path, entries).await {
+        tracing::warn!(
+            path = %path.display(),
+            %error,
+            "Failed to save the {domain} settings"
+        );
+    }
+}
+
 /// Clears `key` while the stored document still holds `value`, which keeps the
 /// settings from referring to something that no longer exists.
 pub(crate) async fn clear_key_if(key: &str, value: &str) {
@@ -377,6 +393,21 @@ async fn set_key_at(path: &Path, key: &str, value: Value) -> crate::Result<()> {
         return Ok(());
     };
     data.insert(key.to_string(), value);
+    write_document(path, data).await
+}
+
+async fn set_entries_at(
+    path: &Path,
+    entries: &[(&str, Value)],
+) -> crate::Result<()> {
+    let Some(mut data) = base_data(path).await else {
+        return Ok(());
+    };
+    data.extend(
+        entries
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.clone())),
+    );
     write_document(path, data).await
 }
 
@@ -579,6 +610,30 @@ mod tests {
         assert_eq!(stored["data"]["force_fullscreen"], true);
         assert_eq!(stored["data"]["theme"], "oled");
         assert_eq!(stored["data"]["from_a_newer_build"], 7);
+    }
+
+    #[tokio::test]
+    async fn entries_a_domain_owns_are_stored_alongside_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proxy.json");
+        std::fs::write(&path, document(r#"{"proxy_mode":"system"}"#)).unwrap();
+
+        set_entries_at(
+            &path,
+            &[
+                ("proxy_mode", Value::from("custom")),
+                ("proxy_url", Value::from("http://localhost:8080")),
+            ],
+        )
+        .await
+        .unwrap();
+
+        let stored = stored_at(&path).await;
+        assert_eq!(stored.get("proxy_mode"), Some(&Value::from("custom")));
+        assert_eq!(
+            stored.get("proxy_url"),
+            Some(&Value::from("http://localhost:8080"))
+        );
     }
 
     #[tokio::test]

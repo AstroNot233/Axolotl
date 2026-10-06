@@ -1060,12 +1060,30 @@ impl Settings {
         .fetch_one(exec)
         .await?;
         let password = read_proxy_password().unwrap_or(stored_password);
-        Ok(ProxyConfig {
+        let mut config = ProxyConfig {
             mode: ProxyMode::from_string(&mode),
             url,
             username,
             password,
-        })
+        };
+        let stored = super::settings_store::stored("proxy").await;
+        if let Some(mode) =
+            stored.get("proxy_mode").and_then(serde_json::Value::as_str)
+        {
+            config.mode = ProxyMode::from_string(mode);
+        }
+        if let Some(url) =
+            stored.get("proxy_url").and_then(serde_json::Value::as_str)
+        {
+            config.url = url.to_string();
+        }
+        if let Some(username) = stored
+            .get("proxy_username")
+            .and_then(serde_json::Value::as_str)
+        {
+            config.username = username.to_string();
+        }
+        Ok(config)
     }
 
     /// Moves a password an older build left in the row into the system
@@ -1105,16 +1123,43 @@ impl Settings {
         config.validate()?;
         // The password belongs in the system credential store; the row keeps it
         // only where that store is unavailable.
-        let stored = match write_proxy_password(&config.password) {
-            Ok(()) => String::new(),
+        let fallback_password = match write_proxy_password(&config.password) {
+            Ok(()) => None,
             Err(error) => {
                 tracing::warn!(
                     %error,
                     "Storing the proxy password in the settings row instead"
                 );
-                config.password.clone()
+                Some(config.password.clone())
             }
         };
+        if super::settings_store::is_active() {
+            super::settings_store::store_in(
+                "proxy",
+                &[
+                    (
+                        "proxy_mode",
+                        serde_json::Value::from(config.mode.as_str()),
+                    ),
+                    ("proxy_url", serde_json::Value::from(config.url.trim())),
+                    (
+                        "proxy_username",
+                        serde_json::Value::from(config.username.trim()),
+                    ),
+                ],
+            )
+            .await;
+            if let Some(password) = fallback_password {
+                sqlx::query(
+                    "UPDATE settings SET proxy_password = ? WHERE id = 0",
+                )
+                .bind(password)
+                .execute(exec)
+                .await?;
+            }
+            return Ok(());
+        }
+
         sqlx::query(
             "UPDATE settings
              SET proxy_mode = ?, proxy_url = ?, proxy_username = ?, proxy_password = ?
@@ -1123,7 +1168,7 @@ impl Settings {
         .bind(config.mode.as_str())
         .bind(config.url.trim())
         .bind(config.username.trim())
-        .bind(stored)
+        .bind(fallback_password.unwrap_or_default())
         .execute(exec)
         .await?;
         Ok(())
