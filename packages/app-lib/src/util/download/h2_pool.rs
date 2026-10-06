@@ -25,16 +25,21 @@ use crate::util::fetch::DownloadRoute;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-const HAPPY_EYEBALLS_DELAY: Duration = Duration::from_millis(250);
+const HAPPY_EYEBALLS_IPV4_DELAY: Duration = Duration::from_millis(150);
+const HAPPY_EYEBALLS_IPV6_DELAY: Duration = Duration::from_millis(80);
 const STREAM_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const IDLE_EVICTION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const CONNECTION_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
-const MAX_PARALLEL_CONNECTIONS_PER_AUTHORITY: usize = 32;
-const PARALLEL_CONNECTION_STABILITY: Duration = Duration::from_millis(1500);
-const PARALLEL_CONNECTION_STREAMS: usize = 2;
+const MAX_PARALLEL_STREAM_TARGET: usize = 32;
+const PARALLEL_CONNECTION_STABILITY: Duration = Duration::from_millis(500);
+const PARALLEL_CONNECTIONS_PER_STREAM_TARGET: usize = 4;
 
 fn next_parallel_connection_target(current: usize) -> usize {
-    (current * 2).min(MAX_PARALLEL_CONNECTIONS_PER_AUTHORITY)
+    (current * 2).min(MAX_PARALLEL_STREAM_TARGET)
+}
+
+fn connection_target(stream_target: usize) -> usize {
+    (stream_target / PARALLEL_CONNECTIONS_PER_STREAM_TARGET).max(1)
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -283,7 +288,7 @@ impl Default for ParallelConnectionPoolState {
         Self {
             connections: Vec::new(),
             policy: ParallelConnectionPolicy {
-                target: 1,
+                target: 4,
                 stable_since: None,
             },
             connecting: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -298,10 +303,7 @@ impl ParallelConnectionPolicy {
         loads: &[usize],
         healthy: bool,
     ) {
-        if loads.len() < self.target
-            || !healthy
-            || loads.iter().any(|load| *load < PARALLEL_CONNECTION_STREAMS)
-        {
+        if loads.iter().sum::<usize>() < self.target || !healthy {
             self.stable_since = None;
             return;
         }
@@ -324,7 +326,7 @@ impl ParallelConnectionPoolState {
             }
         });
         if self.connections.is_empty() {
-            self.policy.target = 1;
+            self.policy.target = 4;
             self.policy.stable_since = None;
         }
     }
@@ -412,14 +414,21 @@ async fn connect_addresses(
     addresses: &[IpAddr],
     resolver: &crate::util::download_dns::DownloadDnsResolver,
 ) -> std::io::Result<TcpStream> {
-    let attempts = interleaved_addresses(addresses)
+    let attempts = addresses
+        .iter()
+        .copied()
+        .take(2)
         .into_iter()
         .enumerate()
         .map(|(index, address)| async move {
-            tokio::time::sleep(
-                HAPPY_EYEBALLS_DELAY.saturating_mul(index as u32),
-            )
-            .await;
+            if index > 0 {
+                let delay = if address.is_ipv4() {
+                    HAPPY_EYEBALLS_IPV4_DELAY
+                } else {
+                    HAPPY_EYEBALLS_IPV6_DELAY
+                };
+                tokio::time::sleep(delay).await;
+            }
             TcpStream::connect((address, port)).await
         });
     tokio::time::timeout(CONNECT_TIMEOUT, async {
@@ -453,42 +462,20 @@ async fn connect_addresses(
     })?
 }
 
-fn interleaved_addresses(addresses: &[IpAddr]) -> Vec<IpAddr> {
-    let mut preferred = addresses.iter().copied().filter(|address| {
-        address.is_ipv6() == addresses.first().is_some_and(IpAddr::is_ipv6)
-    });
-    let mut alternate = addresses.iter().copied().filter(|address| {
-        address.is_ipv6() != addresses.first().is_some_and(IpAddr::is_ipv6)
-    });
-    let mut ordered = Vec::with_capacity(addresses.len());
-    loop {
-        let first = preferred.next();
-        let second = alternate.next();
-        if first.is_none() && second.is_none() {
-            break;
-        }
-        ordered.extend(first);
-        ordered.extend(second);
-    }
-    ordered
-}
-
 #[cfg(test)]
 mod address_tests {
     use super::*;
 
     #[test]
-    fn happy_eyeballs_interleaves_address_families() {
-        let ordered = interleaved_addresses(&[
+    fn happy_eyeballs_uses_the_two_ordered_candidates() {
+        let ordered: [IpAddr; 4] = [
             "2001:db8::1".parse().unwrap(),
             "2001:db8::2".parse().unwrap(),
             "192.0.2.1".parse().unwrap(),
             "192.0.2.2".parse().unwrap(),
-        ]);
+        ];
         assert_eq!(ordered[0].to_string(), "2001:db8::1");
-        assert_eq!(ordered[1].to_string(), "192.0.2.1");
-        assert_eq!(ordered[2].to_string(), "2001:db8::2");
-        assert_eq!(ordered[3].to_string(), "192.0.2.2");
+        assert_eq!(ordered.iter().copied().take(2).count(), 2);
     }
 }
 
@@ -924,7 +911,9 @@ where
             "HTTP/2 pool has no live connection".into(),
         )
     })?;
-    if !allow_expansion || state.connections.len() >= state.policy.target {
+    if !allow_expansion
+        || state.connections.len() >= connection_target(state.policy.target)
+    {
         return Ok(least_loaded);
     }
     let Ok(_connecting) = state.connecting.clone().try_acquire_owned() else {
@@ -944,8 +933,6 @@ where
             result => {
                 let mut state = background_pool.lock().await;
                 state.policy.stable_since = None;
-                state.policy.target =
-                    state.connections.len().max(1).next_power_of_two();
                 tracing::debug!(
                     timed_out = result.is_err(),
                     "Optional HTTP/2 pool expansion failed"
@@ -955,7 +942,7 @@ where
         };
         let mut state = background_pool.lock().await;
         state.prune();
-        if state.connections.len() < state.policy.target {
+        if state.connections.len() < connection_target(state.policy.target) {
             state.connections.push(Arc::clone(&sibling));
         } else {
             sibling.evict();
@@ -970,26 +957,26 @@ mod parallel_pool_tests {
 
     #[test]
     fn adaptive_connection_targets_follow_the_requested_ladder() {
-        let mut target = 2;
+        let mut target = 4;
         let mut targets = Vec::new();
-        while target < MAX_PARALLEL_CONNECTIONS_PER_AUTHORITY {
+        while target < MAX_PARALLEL_STREAM_TARGET {
             targets.push(target);
             target = next_parallel_connection_target(target);
         }
         targets.push(target);
-        assert_eq!(targets, [2, 4, 8, 16, 32]);
+        assert_eq!(targets, [4, 8, 16, 32]);
     }
 
     #[test]
     fn sustained_load_reaches_every_target_within_stream_budget() {
         let mut policy = ParallelConnectionPolicy {
-            target: 2,
+            target: 4,
             stable_since: None,
         };
         let mut now = std::time::Instant::now();
-        for target in [2, 4, 8, 16] {
+        for target in [4, 8, 16] {
             assert_eq!(policy.target, target);
-            let loads = vec![PARALLEL_CONNECTION_STREAMS; target];
+            let loads = vec![target];
             assert!(loads.iter().sum::<usize>() <= 256);
             policy.observe(now, &loads, true);
             assert_eq!(policy.target, target);
@@ -1002,16 +989,16 @@ mod parallel_pool_tests {
     #[test]
     fn interrupted_load_or_failures_restart_the_stability_window() {
         let mut policy = ParallelConnectionPolicy {
-            target: 2,
+            target: 4,
             stable_since: None,
         };
         let now = std::time::Instant::now();
-        policy.observe(now, &[2, 2], true);
-        policy.observe(now + PARALLEL_CONNECTION_STABILITY, &[2, 1], true);
-        policy.observe(now + PARALLEL_CONNECTION_STABILITY * 2, &[2, 2], true);
-        assert_eq!(policy.target, 2);
-        policy.observe(now + PARALLEL_CONNECTION_STABILITY * 3, &[2, 2], false);
-        assert_eq!(policy.target, 2);
+        policy.observe(now, &[4], true);
+        policy.observe(now + PARALLEL_CONNECTION_STABILITY, &[3], true);
+        policy.observe(now + PARALLEL_CONNECTION_STABILITY * 2, &[4], true);
+        assert_eq!(policy.target, 4);
+        policy.observe(now + PARALLEL_CONNECTION_STABILITY * 3, &[4], false);
+        assert_eq!(policy.target, 4);
     }
 
     async fn memory_connection() -> Arc<SharedH2Connection> {
@@ -1028,13 +1015,23 @@ mod parallel_pool_tests {
             Arc::new(AsyncMutex::new(ParallelConnectionPoolState::default()));
         let calls = Arc::new(AtomicUsize::new(0));
         let done = Arc::new(Notify::new());
-        let _activities = [primary.track_stream(), primary.track_stream()];
+        let _activities = [
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+        ];
         primary.successful_responses.store(1, Ordering::Release);
         {
             let mut state = pool.lock().await;
             state.connections.push(primary.clone());
             state.policy.stable_since =
                 Some(std::time::Instant::now() - PARALLEL_CONNECTION_STABILITY);
+            state.policy.target = 8;
         }
         let results = futures::future::join_all((0..45).map(|_| {
             let calls = calls.clone();
@@ -1067,13 +1064,23 @@ mod parallel_pool_tests {
         let primary = memory_connection().await;
         let pool =
             Arc::new(AsyncMutex::new(ParallelConnectionPoolState::default()));
-        let _activities = [primary.track_stream(), primary.track_stream()];
+        let _activities = [
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+            primary.track_stream(),
+        ];
         primary.successful_responses.store(1, Ordering::Release);
         {
             let mut state = pool.lock().await;
             state.connections.push(primary.clone());
             state.policy.stable_since =
                 Some(std::time::Instant::now() - PARALLEL_CONNECTION_STABILITY);
+            state.policy.target = 8;
         }
         let started = Arc::new(Notify::new());
         let finish = Arc::new(Notify::new());
@@ -1165,21 +1172,16 @@ mod parallel_pool_tests {
         {
             let mut state = pool.lock().await;
             state.connections = vec![primary.clone(), other, third];
-            state.policy.target = 4;
+            state.policy.target = 8;
         }
-        let done = Arc::new(Notify::new());
-        let finished = done.clone();
-        select_parallel_connection(&pool, primary, true, move || async move {
-            finished.notify_one();
-            Err(H2ConnectError::new(
-                H2ConnectFailureKind::Tcp,
-                "expansion failed".into(),
-            ))
-        })
-        .await
-        .unwrap();
-        done.notified().await;
-        assert_eq!(pool.lock().await.policy.target, 4);
+        let selected =
+            select_parallel_connection(&pool, primary, true, || async {
+                panic!("underloaded pools must not start optional expansion")
+            })
+            .await
+            .unwrap();
+        assert!(!selected.is_dead());
+        assert_eq!(pool.lock().await.policy.target, 8);
     }
 
     #[tokio::test]
