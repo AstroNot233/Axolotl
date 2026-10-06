@@ -50,8 +50,6 @@ export type UpdatePreferences = {
 }
 export type DownloadSourceMode =
 	'auto' | 'official_only' | 'mirror_preferred' | 'official_preferred'
-export type DownloadEngine = 'legacy' | 'xmcl'
-
 export type ProxyMode = 'none' | 'system' | 'custom'
 export type ProxyConfig = {
 	mode: ProxyMode
@@ -63,6 +61,9 @@ export type ProxyTestResult = {
 	success: boolean
 	latency_ms: number | null
 	message: string
+}
+export type DohSettings = {
+	doh_enabled: boolean
 }
 
 export async function getUpdateChannel(): Promise<UpdateChannel> {
@@ -134,10 +135,9 @@ export function setBrowseDefaultInstanceId(instanceId: string | null) {
 	}
 }
 
-export type AppSettings = {
+export type AppSettings = DohSettings & {
 	max_concurrent_downloads: number
 	max_concurrent_writes: number
-	download_engine: DownloadEngine
 	auto_concurrent_downloads: boolean
 	minecraft_metadata_source: DownloadSourceMode
 	minecraft_file_source: DownloadSourceMode
@@ -245,7 +245,6 @@ function normalizeDownloadSettings(settings: AppSettings & LegacyMirrorSettings)
 		enabled ? 'mirror_preferred' : 'official_only'
 
 	settings.auto_concurrent_downloads ??= true
-	settings.download_engine ??= 'legacy'
 	settings.auto_set_java_high_performance_mode ??= true
 	settings.minecraft_metadata_source ??=
 		usesLegacyDefaults || !hasLegacySettings ? 'auto' : legacySource(settings.use_minecraft_mirror)

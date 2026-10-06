@@ -1861,8 +1861,7 @@ pub async fn download_assets(
             ResourceClass::MinecraftAsset,
             source_mode,
         );
-        let apply_native_policy = crate::util::download::active_engine()
-            != crate::util::download::DownloadEngine::XmclCompat;
+        let apply_native_policy = true;
         if apply_native_policy {
             let probe_request =
                 DownloadRequest::new(&first_url, ResourceClass::MinecraftAsset)
@@ -1873,7 +1872,7 @@ pub async fn download_assets(
             prepare_native_download_routes(
                 &probe_request,
                 &mut routes,
-                &st.fetch_semaphore,
+                &st.download_semaphore,
             )
             .await;
         }
@@ -1935,9 +1934,9 @@ pub async fn download_assets(
             let failed = download_asset_batch_via_h2(
                 &route,
                 batch_items,
-                ASSET_BATCH_CONCURRENCY,
+                ASSET_BATCH_CONCURRENCY.min(st.download_concurrency()),
                 apply_native_policy,
-                apply_native_policy.then_some(&st.fetch_semaphore),
+                apply_native_policy.then_some(&st.download_semaphore),
                 callback,
             )
             .await?;
@@ -1999,7 +1998,6 @@ pub async fn download_assets(
     let fallback_assets = coalesce_fallback_assets(fallback_assets);
     if !fallback_assets.is_empty() {
         let limit = crate::util::download::task_concurrency_limit(st)
-            .map(|limit| limit.saturating_mul(2))
             .unwrap_or(ASSET_BATCH_CONCURRENCY);
         futures::stream::iter(fallback_assets)
             .map(Ok::<FallbackAsset, crate::Error>)
@@ -2174,7 +2172,7 @@ pub async fn download_libraries(
     let num_files = tasks.len();
     loading_try_for_each_concurrent(
 		stream::iter(tasks).map(Ok::<LibraryDownloadTask<'_>, crate::Error>),
-		crate::util::download::task_concurrency_limit(&st).map(|limit| limit.saturating_mul(2)),
+		crate::util::download::task_concurrency_limit(&st),
         loading_bar,
         loading_amount,
         num_files,

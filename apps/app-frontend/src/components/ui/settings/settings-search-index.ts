@@ -124,15 +124,6 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
 		),
 	},
 	{
-		id: 'appearance-auto-hide-downloads',
-		categoryId: 'home-navigation',
-		targetId: 'settings-target-appearance-auto-hide-downloads',
-		label: message(
-			'app.appearance-settings.auto-hide-downloads-button.title',
-			'Auto-hide downloads button',
-		),
-	},
-	{
 		id: 'defaults-window-title',
 		categoryId: 'launch-defaults',
 		targetId: 'settings-target-defaults-window-title',
@@ -589,12 +580,6 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
 		targetId: 'settings-target-resources-download-mirrors',
 		label: message('app.settings.resources.download-mirrors', 'Download mirrors'),
 		keywords: [message('app.settings.tabs.resource-management', 'Resource management')],
-	},
-	{
-		id: 'resources-download-engine',
-		categoryId: 'content-downloads',
-		targetId: 'settings-target-resources-download-engine',
-		label: message('app.settings.resources.download-engine', 'Download engine'),
 	},
 	{
 		id: 'resources-data-storage',

@@ -18,7 +18,7 @@
 				ref="content"
 				:side="side"
 				:align="align"
-				:side-offset="4"
+				:side-offset="sideOffset"
 				:class="[dropdownClass, 'menu-surface']"
 				@open-auto-focus="focusFirstContent"
 			>
@@ -48,6 +48,7 @@ const props = withDefaults(
 	defineProps<{
 		dropdownId?: string
 		dropdownClass?: string
+		sideOffset?: number
 		tooltip?: string
 		placement?: string
 		container?: string | HTMLElement | boolean
@@ -55,6 +56,7 @@ const props = withDefaults(
 	{
 		dropdownId: undefined,
 		dropdownClass: undefined,
+		sideOffset: 4,
 		tooltip: undefined,
 		placement: 'bottom-end',
 		container: undefined,

@@ -3,7 +3,6 @@ import { AuthFeature, TauriModrinthClient, VerboseLoggingFeature } from '@modrin
 import {
 	ChangeSkinIcon,
 	CompassIcon,
-	DownloadIcon,
 	ExternalIcon,
 	FlaskConicalIcon,
 	FolderOpenIcon,
@@ -2990,24 +2989,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 					:is-primary="(r) => r.path.startsWith('/lab')"
 				>
 					<FlaskConicalIcon />
-				</NavButton>
-				<NavButton
-					v-if="
-						!themeStore.isNavItemHidden('downloads') &&
-						(!themeStore.autoHideDownloadsButton || downloadManager.activeCount.value > 0)
-					"
-					v-tooltip.right="formatMessage(messages.downloads)"
-					data-onboarding-id="nav-downloads"
-					to="/downloads"
-					class="relative"
-				>
-					<DownloadIcon />
-					<span
-						v-if="downloadManager.activeCount.value > 0"
-						class="absolute right-0 top-0 min-w-4 rounded-full bg-brand px-1 text-center text-[10px] font-bold leading-4 text-white"
-					>
-						{{ Math.min(downloadManager.activeCount.value, 99) }}
-					</span>
 				</NavButton>
 			</NavRail>
 			<div class="h-px w-6 mx-auto my-2 bg-surface-5"></div>

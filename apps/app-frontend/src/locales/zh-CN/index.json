@@ -11,6 +11,48 @@
   "app.action-bar.downloads": {
     "message": "下载"
   },
+  "app.action-bar.downloads.cancel": {
+    "message": "取消下载"
+  },
+  "app.action-bar.downloads.empty": {
+    "message": "没有正在进行的下载"
+  },
+  "app.action-bar.downloads.legacy": {
+    "message": "正在下载。"
+  },
+  "app.action-bar.downloads.phase.downloading-content": {
+    "message": "正在下载内容"
+  },
+  "app.action-bar.downloads.phase.downloading-minecraft": {
+    "message": "正在下载 Minecraft"
+  },
+  "app.action-bar.downloads.phase.downloading-pack": {
+    "message": "正在下载整合包"
+  },
+  "app.action-bar.downloads.phase.finalizing": {
+    "message": "正在完成"
+  },
+  "app.action-bar.downloads.phase.preparing-instance": {
+    "message": "正在准备实例"
+  },
+  "app.action-bar.downloads.phase.preparing-java": {
+    "message": "正在准备 Java"
+  },
+  "app.action-bar.downloads.phase.resolving-pack": {
+    "message": "正在解析整合包"
+  },
+  "app.action-bar.downloads.phase.unknown": {
+    "message": "处理中"
+  },
+  "app.action-bar.downloads.phase.verifying": {
+    "message": "正在验证"
+  },
+  "app.action-bar.downloads.view-details": {
+    "message": "查看详情"
+  },
+  "app.action-bar.downloads.view-history": {
+    "message": "查看下载历史"
+  },
   "app.action-bar.active-backups": {
     "message": "正在进行的备份任务"
   },
@@ -487,12 +529,6 @@
   },
   "app.appearance-settings.advanced-rendering.title": {
     "message": "高级渲染"
-  },
-  "app.appearance-settings.auto-hide-downloads-button.description": {
-    "message": "没有进行中的下载任务时隐藏侧边栏中的下载按钮，有任务时自动显示。"
-  },
-  "app.appearance-settings.auto-hide-downloads-button.title": {
-    "message": "自动隐藏下载按钮"
   },
   "app.appearance-settings.auto-install-dependencies.description": {
     "message": "安装内容时自动下载所需前置。每次安装前仍可在确认对话框中调整选择。"
@@ -9347,17 +9383,14 @@
   "app.settings.resources.database-backups-description": {
     "message": "重要应用数据的备份存储在此处，以便日后需要时恢复。"
   },
-  "app.settings.resources.download-engine": {
-    "message": "下载引擎"
+  "app.settings.resources.doh-enabled": {
+    "message": "使用 DNS over HTTPS"
   },
-  "app.settings.resources.download-engine-description": {
-    "message": "选择启动器使用的下载引擎。"
+  "app.settings.resources.doh-settings": {
+    "message": "DNS over HTTPS"
   },
-  "app.settings.resources.download-engine.legacy": {
-    "message": "原生引擎"
-  },
-  "app.settings.resources.download-engine.xmcl": {
-    "message": "XMCL"
+  "app.settings.resources.doh-settings-description": {
+    "message": "通过内置的加密 DNS 服务池解析下载域名。"
   },
   "app.settings.resources.download-mirrors": {
     "message": "下载源"
@@ -9541,9 +9574,6 @@
   },
   "app.settings.resources.source.open-bmcl-api": {
     "message": "优先 OpenBMCLAPI"
-  },
-  "app.settings.resources.source.tianpao": {
-    "message": "优先 Tianpao"
   },
   "app.settings.resources.system-downloads-directory": {
     "message": "系统 Downloads 文件夹"

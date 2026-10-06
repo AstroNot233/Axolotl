@@ -660,16 +660,6 @@ export const onboardingTours: Record<OnboardingMode, OnboardingStep[]> = {
 			onboardingMessages.labRecipeGeneratorTitle,
 			onboardingMessages.labRecipeGeneratorDescription,
 		),
-		step(
-			'downloads-navigation',
-			'navigate',
-			copy(
-				onboardingMessages.downloadsTitle,
-				onboardingMessages.downloadsDescription,
-				onboardingMessages.clickDownloads,
-			),
-			control('nav-downloads', '/downloads'),
-		),
 		inspect(
 			'downloads-tabs',
 			'downloads-tabs',

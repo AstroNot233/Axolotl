@@ -65,6 +65,48 @@
   "app.action-bar.downloads": {
     "message": "Downloads"
   },
+  "app.action-bar.downloads.cancel": {
+    "message": "Cancel download"
+  },
+  "app.action-bar.downloads.empty": {
+    "message": "No active downloads"
+  },
+  "app.action-bar.downloads.legacy": {
+    "message": "A download is in progress."
+  },
+  "app.action-bar.downloads.phase.downloading-content": {
+    "message": "Downloading content"
+  },
+  "app.action-bar.downloads.phase.downloading-minecraft": {
+    "message": "Downloading Minecraft"
+  },
+  "app.action-bar.downloads.phase.downloading-pack": {
+    "message": "Downloading modpack"
+  },
+  "app.action-bar.downloads.phase.finalizing": {
+    "message": "Finalizing"
+  },
+  "app.action-bar.downloads.phase.preparing-instance": {
+    "message": "Preparing instance"
+  },
+  "app.action-bar.downloads.phase.preparing-java": {
+    "message": "Preparing Java"
+  },
+  "app.action-bar.downloads.phase.resolving-pack": {
+    "message": "Resolving modpack"
+  },
+  "app.action-bar.downloads.phase.unknown": {
+    "message": "Working"
+  },
+  "app.action-bar.downloads.phase.verifying": {
+    "message": "Verifying"
+  },
+  "app.action-bar.downloads.view-details": {
+    "message": "View details"
+  },
+  "app.action-bar.downloads.view-history": {
+    "message": "View download history"
+  },
   "app.action-bar.exporting-modpack": {
     "message": "Exporting modpack"
   },
@@ -487,12 +529,6 @@
   },
   "app.appearance-settings.advanced-rendering.title": {
     "message": "Advanced rendering"
-  },
-  "app.appearance-settings.auto-hide-downloads-button.description": {
-    "message": "Hide the downloads button in the sidebar when there are no active download tasks."
-  },
-  "app.appearance-settings.auto-hide-downloads-button.title": {
-    "message": "Auto-hide downloads button"
   },
   "app.appearance-settings.auto-install-dependencies.description": {
     "message": "Download required dependencies when installing content. You can adjust the selection in the confirmation dialog before each install."
@@ -9356,17 +9392,14 @@
   "app.settings.resources.database-backups-description": {
     "message": "Backups of important app data are stored here in case you need to recover them later."
   },
-  "app.settings.resources.download-engine": {
-    "message": "Download engine"
+  "app.settings.resources.doh-enabled": {
+    "message": "Use DNS over HTTPS"
   },
-  "app.settings.resources.download-engine-description": {
-    "message": "Choose which download engine the launcher uses."
+  "app.settings.resources.doh-settings": {
+    "message": "DNS over HTTPS"
   },
-  "app.settings.resources.download-engine.legacy": {
-    "message": "Native engine"
-  },
-  "app.settings.resources.download-engine.xmcl": {
-    "message": "XMCL-compatible"
+  "app.settings.resources.doh-settings-description": {
+    "message": "Resolve download hosts through a built-in pool of encrypted DNS services."
   },
   "app.settings.resources.download-mirrors": {
     "message": "Download sources"
@@ -9562,9 +9595,6 @@
   },
   "app.settings.resources.source.open-bmcl-api": {
     "message": "Prefer OpenBMCLAPI"
-  },
-  "app.settings.resources.source.tianpao": {
-    "message": "Prefer Tianpao"
   },
   "app.settings.resources.system-downloads-directory": {
     "message": "System Downloads folder"

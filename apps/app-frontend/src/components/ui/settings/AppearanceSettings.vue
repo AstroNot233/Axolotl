@@ -409,15 +409,6 @@ const messages = defineMessages({
 		id: 'app.appearance-settings.sidebar-instance-count.description',
 		defaultMessage: 'Maximum number of instances to show in the sidebar. Set to 0 to show all.',
 	},
-	autoHideDownloadsButtonTitle: {
-		id: 'app.appearance-settings.auto-hide-downloads-button.title',
-		defaultMessage: 'Auto-hide downloads button',
-	},
-	autoHideDownloadsButtonDescription: {
-		id: 'app.appearance-settings.auto-hide-downloads-button.description',
-		defaultMessage:
-			'Hide the downloads button in the sidebar when there are no active download tasks.',
-	},
 	hiddenNavItemsTitle: {
 		id: 'app.appearance-settings.hidden-nav-items.title',
 		defaultMessage: 'Navigation items',
@@ -458,7 +449,6 @@ const messages = defineMessages({
 	navMultiplayer: { id: 'app.navigation.multiplayer', defaultMessage: 'Multiplayer' },
 	navSkins: { id: 'app.navigation.skin-selector', defaultMessage: 'Skin selector' },
 	navLab: { id: 'app.navigation.lab', defaultMessage: 'Lab' },
-	navDownloads: { id: 'app.navigation.downloads', defaultMessage: 'Downloads' },
 	fontsTitle: { id: 'app.appearance-settings.fonts.title', defaultMessage: 'Fonts' },
 	fontsDescription: {
 		id: 'app.appearance-settings.fonts.description',
@@ -547,7 +537,6 @@ const NAV_TREE_ITEMS: NavTreeItem[] = [
 	{ id: 'multiplayer', label: messages.navMultiplayer, group: 'play' },
 	{ id: 'skins', label: messages.navSkins, group: 'play' },
 	{ id: 'lab', label: messages.navLab, group: 'tools' },
-	{ id: 'downloads', label: messages.navDownloads, group: 'tools' },
 ]
 
 const NAV_TREE_GROUPS = [
@@ -1618,28 +1607,6 @@ watch(
 							</div>
 						</div>
 					</div>
-				</template>
-			</SettingsRow>
-			<SettingsRow>
-				<template #label>
-					<span id="settings-target-appearance-auto-hide-downloads" tabindex="-1">
-						{{ formatMessage(messages.autoHideDownloadsButtonTitle) }}
-					</span>
-				</template>
-				<template #description>
-					{{ formatMessage(messages.autoHideDownloadsButtonDescription) }}
-				</template>
-				<template #control>
-					<Toggle
-						id="auto-hide-downloads-button"
-						:model-value="themeStore.autoHideDownloadsButton"
-						@update:model-value="
-							(value) => {
-								themeStore.autoHideDownloadsButton = !!value
-								settings.auto_hide_downloads_button = themeStore.autoHideDownloadsButton
-							}
-						"
-					/>
 				</template>
 			</SettingsRow>
 			<SettingsRow>

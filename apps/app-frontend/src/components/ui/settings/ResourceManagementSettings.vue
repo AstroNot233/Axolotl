@@ -224,10 +224,6 @@ const messages = defineMessages({
 		id: 'app.settings.resources.source.open-bmcl-api',
 		defaultMessage: 'Prefer OpenBMCLAPI',
 	},
-	tianpaoSource: {
-		id: 'app.settings.resources.source.tianpao',
-		defaultMessage: 'Prefer Tianpao',
-	},
 	minecraftMetadataSource: {
 		id: 'app.settings.resources.minecraft-metadata-source',
 		defaultMessage: 'Minecraft metadata',
@@ -294,14 +290,6 @@ const messages = defineMessages({
 		id: 'app.settings.resources.maximum-downloads',
 		defaultMessage: 'Maximum concurrent downloads',
 	},
-	downloadEngine: {
-		id: 'app.settings.resources.download-engine',
-		defaultMessage: 'Download engine',
-	},
-	downloadEngineDescription: {
-		id: 'app.settings.resources.download-engine-description',
-		defaultMessage: 'Choose which download engine the launcher uses.',
-	},
 	ignoreSslErrors: {
 		id: 'app.settings.resources.ignore-ssl-errors',
 		defaultMessage: 'Ignore SSL certificate errors',
@@ -310,14 +298,6 @@ const messages = defineMessages({
 		id: 'app.settings.resources.ignore-ssl-errors-description',
 		defaultMessage:
 			'Allows downloads through proxies or network tools that replace HTTPS certificates. This disables certificate verification and can expose downloads to tampering. Enable it only when necessary.',
-	},
-	legacyEngine: {
-		id: 'app.settings.resources.download-engine.legacy',
-		defaultMessage: 'Native engine',
-	},
-	xmclEngine: {
-		id: 'app.settings.resources.download-engine.xmcl',
-		defaultMessage: 'XMCL-compatible',
 	},
 	maximumDownloadsDescription: {
 		id: 'app.settings.resources.maximum-downloads-description',
@@ -409,6 +389,18 @@ const messages = defineMessages({
 	proxyTestFailed: {
 		id: 'app.settings.resources.proxy-test-failed',
 		defaultMessage: 'Connection failed',
+	},
+	dohSettings: {
+		id: 'app.settings.resources.doh-settings',
+		defaultMessage: 'DNS over HTTPS',
+	},
+	dohSettingsDescription: {
+		id: 'app.settings.resources.doh-settings-description',
+		defaultMessage: 'Resolve download hosts through a built-in pool of encrypted DNS services.',
+	},
+	dohEnabled: {
+		id: 'app.settings.resources.doh-enabled',
+		defaultMessage: 'Use DNS over HTTPS',
 	},
 	missingContentAutoImport: {
 		id: 'app.settings.resources.missing-content-auto-import',
@@ -552,13 +544,11 @@ const minecraftDirectoryModeOptions = computed(() => [
 const modrinthSourceOptions = computed(() => [
 	automaticSourceOption.value,
 	officialPreferredSourceOption.value,
-	{ value: 'mirror_preferred', label: formatMessage(messages.tianpaoSource) },
 	officialOnlySourceOption.value,
 ])
 const curseforgeSourceOptions = computed(() => [
 	automaticSourceOption.value,
 	officialPreferredSourceOption.value,
-	{ value: 'mirror_preferred', label: formatMessage(messages.tianpaoSource) },
 	officialOnlySourceOption.value,
 ])
 const mojangAuthSource = downloadSourceModel('mojang_auth_source')
@@ -584,23 +574,6 @@ const downloadConcurrencyOptions = computed(() => [
 		label: formatMessage(messages.manualConcurrency),
 	},
 ])
-const downloadEngine = computed({
-	get: () => settings.value.download_engine,
-	set: (engine) => {
-		settings.value.download_engine = engine
-	},
-})
-const downloadEngineOptions = computed(() => [
-	{
-		value: 'legacy',
-		label: formatMessage(messages.legacyEngine),
-	},
-	{
-		value: 'xmcl',
-		label: formatMessage(messages.xmclEngine),
-	},
-])
-
 const proxyModeOptions = computed(() => [
 	{
 		value: 'none',
@@ -615,6 +588,7 @@ const proxyModeOptions = computed(() => [
 		label: formatMessage(messages.proxyModeCustom),
 	},
 ])
+let settingsSave = Promise.resolve()
 
 const appDirectoryDescriptionText = computed(() =>
 	isPortable.value
@@ -624,14 +598,15 @@ const appDirectoryDescriptionText = computed(() =>
 
 watch(
 	settings,
-	async () => {
+	() => {
 		const setSettings = JSON.parse(JSON.stringify(settings.value))
 
 		if (!setSettings.custom_dir) {
 			setSettings.custom_dir = null
 		}
 
-		await set(setSettings)
+		settingsSave = settingsSave.catch(() => {}).then(() => set(setSettings))
+		void settingsSave.catch(handleError)
 	},
 	{ deep: true },
 )
@@ -959,19 +934,6 @@ function validateMinecraftDirectory(_value) {
 		>
 			<SettingsRow>
 				<template #label>
-					<span id="settings-target-resources-download-engine" tabindex="-1">
-						{{ formatMessage(messages.downloadEngine) }}
-					</span>
-				</template>
-				<template #description>{{ formatMessage(messages.downloadEngineDescription) }}</template>
-				<template #control>
-					<div class="w-full">
-						<Combobox v-model="downloadEngine" :options="downloadEngineOptions" />
-					</div>
-				</template>
-			</SettingsRow>
-			<SettingsRow>
-				<template #label>
 					<span id="settings-target-resources-ignore-ssl-errors" tabindex="-1">
 						{{ formatMessage(messages.ignoreSslErrors) }}
 					</span>
@@ -1037,6 +999,23 @@ function validateMinecraftDirectory(_value) {
 					<div class="w-full">
 						<Combobox v-model="mojangAuthSource" :options="mojangAuthSourceOptions" />
 					</div>
+				</template>
+			</SettingsRow>
+		</SettingsSection>
+
+		<SettingsSection
+			v-if="props.scope === 'content-downloads'"
+			:title="formatMessage(messages.dohSettings)"
+		>
+			<template #header>
+				<p class="m-0 mt-1 text-sm leading-relaxed text-[var(--color-text-tertiary)]">
+					{{ formatMessage(messages.dohSettingsDescription) }}
+				</p>
+			</template>
+			<SettingsRow>
+				<template #label>{{ formatMessage(messages.dohEnabled) }}</template>
+				<template #control>
+					<Toggle id="doh-enabled" v-model="settings.doh_enabled" />
 				</template>
 			</SettingsRow>
 		</SettingsSection>

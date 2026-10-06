@@ -94,6 +94,7 @@
 				class="absolute right-0 top-0 size-2 rounded-full bg-red ring-2 ring-bg-raised"
 			/>
 		</Button>
+		<DownloadCenterButton />
 		<PopoutMenu v-if="activeBackupOperations.length > 0" placement="bottom-end">
 			<template #trigger>
 				<Button
@@ -140,16 +141,6 @@
 				</div>
 			</template>
 		</PopoutMenu>
-		<Button
-			v-if="!isDownloadsPage && hasActiveDownloads && !hasVisibleActiveDownloadToasts"
-			v-tooltip="formatMessage(messages.viewActiveDownloads)"
-			type="quiet"
-			color="brand"
-			circular
-			icon-only
-			@click="goToDownloads"
-			><DownloadIcon />
-		</Button>
 		<div v-if="offline" class="flex items-center gap-1">
 			<UnplugIcon class="text-[var(--color-text-tertiary)]" />
 			<span class="text-sm text-[var(--color-text-primary)]">
@@ -263,7 +254,6 @@
 import {
 	BellIcon,
 	DatabaseBackupIcon,
-	DownloadIcon,
 	DropdownIcon,
 	NewspaperIcon,
 	OnlineIndicatorIcon,
@@ -289,6 +279,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppUpdateButton from '@/components/ui/app-update-button/index.vue'
+import DownloadCenterButton from '@/components/ui/DownloadCenterButton.vue'
 import { useInstallJobNotifications } from '@/composables/browse/install-job-notifications'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { trackEvent } from '@/helpers/analytics'
@@ -308,7 +299,7 @@ import {
 import type { LoadingBar } from '@/helpers/state'
 import { progress_bars_list } from '@/helpers/state'
 import type { GameInstance } from '@/helpers/types'
-import { downloadBarTypes, injectDownloadManager } from '@/providers/download-manager'
+import { injectDownloadManager } from '@/providers/download-manager'
 
 const notificationManager = injectNotificationManager()
 const { addNotification, handleError } = notificationManager
@@ -919,15 +910,6 @@ function buildDownloadItems(): PopupNotificationProgressItem[] {
 	]
 }
 
-const hasVisibleActiveDownloadToasts = computed(() => {
-	const notification = getNotification()
-	return !!notification && !notification.collapsed
-})
-const hasActiveDownloads = computed(
-	() =>
-		installJobNotifications.active.value ||
-		currentLoadingBars.value.some((bar) => downloadBarTypes.has(bar.bar_type?.type ?? '')),
-)
 const hasDownloadNotificationItems = computed(
 	() => installJobNotifications.hasItems.value || currentLoadingBars.value.length > 0,
 )
