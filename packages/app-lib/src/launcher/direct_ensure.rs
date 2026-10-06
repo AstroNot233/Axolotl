@@ -532,18 +532,31 @@ async fn ensure_linked_assets_from_with_progress(
     };
 
     let objects_dir = direct.assets_dir().join("objects");
-    let mut missing = Vec::new();
-    for asset in index.objects.values() {
-        let hash = &asset.hash;
-        if hash.len() < 2 {
-            continue;
-        }
-        let destination = objects_dir.join(&hash[..2]).join(hash);
-        let size = u64::from(asset.size);
-        if !file_is_current(&destination, Some(hash), Some(size)).await {
-            missing.push((hash.clone(), size, destination));
-        }
-    }
+    let limit = download_util::task_concurrency_limit(st)
+        .unwrap_or(FALLBACK_CONCURRENCY);
+    let asset_plans = index
+        .objects
+        .values()
+        .filter_map(|asset| {
+            let hash = &asset.hash;
+            (hash.len() >= 2).then(|| {
+                (
+                    hash.clone(),
+                    u64::from(asset.size),
+                    objects_dir.join(&hash[..2]).join(hash),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let missing = stream::iter(asset_plans)
+        .map(|(hash, size, destination)| async move {
+            (!file_is_current(&destination, Some(&hash), Some(size)).await)
+                .then_some((hash, size, destination))
+        })
+        .buffer_unordered(limit)
+        .filter_map(|item| async move { item })
+        .collect::<Vec<_>>()
+        .await;
     if !missing.is_empty() {
         tracing::info!(
             count = missing.len(),
@@ -555,9 +568,6 @@ async fn ensure_linked_assets_from_with_progress(
                 .await?;
         }
 
-        let limit = download_util::task_concurrency_limit(st)
-            .map(|limit| limit.saturating_mul(2))
-            .unwrap_or(FALLBACK_CONCURRENCY);
         stream::iter(missing)
             .map(Ok::<_, crate::Error>)
             .try_for_each_concurrent(
@@ -741,22 +751,27 @@ pub(crate) async fn ensure_direct_launch_dependencies_with_progress(
 
     // Only fetch what is actually missing so a healthy installation performs
     // zero network requests.
-    let mut pending = Vec::new();
-    for plan in plans {
-        if !file_is_current(&plan.destination, plan.sha1.as_deref(), plan.size)
-            .await
-        {
-            pending.push(plan);
-        }
-    }
+    let limit = download_util::task_concurrency_limit(st)
+        .unwrap_or(FALLBACK_CONCURRENCY);
+    let pending = stream::iter(plans)
+        .map(|plan| async move {
+            (!file_is_current(
+                &plan.destination,
+                plan.sha1.as_deref(),
+                plan.size,
+            )
+            .await)
+                .then_some(plan)
+        })
+        .buffer_unordered(limit)
+        .filter_map(|plan| async move { plan })
+        .collect::<Vec<_>>()
+        .await;
     if !pending.is_empty() {
         tracing::info!(
             count = pending.len(),
             "Completing missing dependencies in the linked installation"
         );
-        let limit = download_util::task_concurrency_limit(st)
-            .map(|limit| limit.saturating_mul(2))
-            .unwrap_or(FALLBACK_CONCURRENCY);
         stream::iter(pending)
             .map(Ok::<_, crate::Error>)
             .try_for_each_concurrent(limit, |plan| async move {

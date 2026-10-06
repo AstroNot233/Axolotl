@@ -277,10 +277,8 @@ fn cache_read_failure(
         }
         _ => None,
     };
-    let remote_suffix = remote_error
-        .is_some()
-        .then_some("; remote replacement data was unavailable")
-        .unwrap_or_default();
+    let remote_suffix = if remote_error
+        .is_some() { "; remote replacement data was unavailable" } else { Default::default() };
     crate::ErrorKind::CacheReadError {
         cache_type: cache_type.as_str().to_string(),
         message: format!("{cache_error}{remote_suffix}"),
@@ -2792,8 +2790,7 @@ impl CachedEntry {
                     }
                     if let Some((instance_path, _)) =
                         path.split_once('/').or_else(|| path.split_once('\\'))
-                    {
-                        if !base_dirs.contains_key(instance_path) {
+                        && !base_dirs.contains_key(instance_path) {
                             let override_dir = crate::state::instances::adapters::sqlite::instance_rows::get_game_dir_override_by_path(
                                     instance_path,
                                     &state.pool,
@@ -2807,7 +2804,6 @@ impl CachedEntry {
                                 ),
                             );
                         }
-                    }
                 }
 
                 async fn hash_file(

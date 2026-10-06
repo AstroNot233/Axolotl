@@ -369,9 +369,7 @@ fn resolve_source_path(
             find_pcl_source(config_name, &pcl::get_pcl_instances())
                 .or_else(|| {
                     find_pcl_source(config_name, &pcl::get_pclce_instances())
-                })
-                .map(PathBuf::from)
-                .or_else(|| {
+                }).or_else(|| {
                     (config_name == ".minecraft")
                         .then(|| base_path.join(".minecraft"))
                         .filter(|path| path.is_dir())

@@ -612,8 +612,8 @@ async fn publish_downloaded_action(
         let file = &action.files[index];
         let primary =
             file.role == crate::install::ContentChangeFileRole::Primary;
-        if !primary {
-            if let Some(entry) =
+        if !primary
+            && let Some(entry) =
                 content_rows::get_content_entry_by_provider_ref(
                     &scope.content_set_id,
                     file.provider,
@@ -631,14 +631,11 @@ async fn publish_downloaded_action(
                 .await?;
                 if let Some(path) =
                     target.and_then(|target| target.relative_path)
-                {
-                    if base.join(&path).is_file() {
+                    && base.join(&path).is_file() {
                         paths[index] = path;
                         continue;
                     }
-                }
             }
-        }
         let artifact = downloaded.get(&file.id).ok_or_else(|| {
             crate::ErrorKind::InputError(format!(
                 "Missing staged content {}",
@@ -695,8 +692,8 @@ async fn publish_downloaded_action(
                 .await?
             }
         };
-        if !primary {
-            if let Some(entry) =
+        if !primary
+            && let Some(entry) =
                 content_rows::get_content_entry_by_relative_path(
                     &scope.content_set_id,
                     &path,
@@ -711,7 +708,6 @@ async fn publish_downloaded_action(
                 )
                 .await?;
             }
-        }
         paths[index] = path;
     }
     content::finalize_updated_project_path(

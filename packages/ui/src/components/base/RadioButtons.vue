@@ -21,28 +21,28 @@ import { RadioButtonCheckedIcon, RadioButtonIcon } from '@modrinth/assets'
 import { computed } from 'vue'
 
 const props = withDefaults(
-	defineProps<{
-		modelValue: T
-		items: T[]
-		forceSelection?: boolean
-	}>(),
-	{
-		forceSelection: false,
-	},
+    defineProps<{
+        modelValue: T
+        items: T[]
+        forceSelection?: boolean
+    }>(),
+    {
+        forceSelection: false,
+    },
 )
 
 const emit = defineEmits(['update:modelValue'])
 
 const selected = computed({
-	get() {
-		return props.modelValue
-	},
-	set(value) {
-		emit('update:modelValue', value)
-	},
+    get() {
+        return props.modelValue
+    },
+    set(value) {
+        emit('update:modelValue', value)
+    },
 })
 
 if (props.items.length > 0 && props.forceSelection && !props.modelValue) {
-	selected.value = props.items[0]
+    selected.value = props.items[0]
 }
 </script>

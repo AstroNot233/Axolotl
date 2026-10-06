@@ -193,8 +193,8 @@ pub async fn apply_cleanup(
 ) -> crate::Result<()> {
     match job_state.cleanup.clone() {
         InstallCleanup::DeleteNewInstance { instance_id } => {
-            if let Some(instance_id) = instance_id {
-                if !job_state.instance_deleted() {
+            if let Some(instance_id) = instance_id
+                && !job_state.instance_deleted() {
                     let preserve_external_files = matches!(
                         &job_state.request,
                         InstallRequest::ImportInstance { symlink: true, .. }
@@ -227,7 +227,6 @@ pub async fn apply_cleanup(
                         );
                     }
                 }
-            }
         }
         InstallCleanup::RestoreExistingInstance { instance_id } => {
             if job_state.rollback.is_some() {

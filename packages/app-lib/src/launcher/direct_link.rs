@@ -378,7 +378,7 @@ impl DirectLinkedLaunch {
             self.version_id,
             self.version_json
                 .as_deref()
-                .unwrap_or_else(|| self.dot_minecraft.as_path())
+                .unwrap_or(self.dot_minecraft.as_path())
                 .display()
         );
         format!(
@@ -568,7 +568,7 @@ pub(crate) fn conservative_launch_facts(
     let modern = merged
         .java_version
         .as_ref()
-        .map_or(true, |java| java.major_version >= 17);
+        .is_none_or(|java| java.major_version >= 17);
     (
         modern,
         super::QuickPlayVersion {
