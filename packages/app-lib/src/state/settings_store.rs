@@ -331,7 +331,8 @@ async fn store_secret_at(
 
 /// The stored entries as a base, so a document another version wrote keeps the
 /// entries this build does not know. `None` means the document must not be
-/// written, which keeps one from a newer build read-only.
+/// written, which keeps one from a newer build read-only and leaves one that
+/// cannot be read for its owner to sort out.
 async fn base_data(path: &Path) -> Option<Map<String, Value>> {
     match read(path).await {
         Stored::Ready(document) => document.data.as_object().cloned(),
@@ -343,7 +344,14 @@ async fn base_data(path: &Path) -> Option<Map<String, Value>> {
             );
             None
         }
-        Stored::Missing | Stored::Unreadable => Some(Map::new()),
+        Stored::Unreadable => {
+            tracing::warn!(
+                path = %path.display(),
+                "Leaving a settings document that cannot be read alone"
+            );
+            None
+        }
+        Stored::Missing => Some(Map::new()),
     }
 }
 
@@ -568,5 +576,18 @@ mod tests {
         let merged = overlay_from(&path, appearance(), stored).await;
         assert_eq!(merged.locale, "fr-FR");
         assert!(path.exists());
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_document_is_neither_written_nor_cleaned() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appearance.json");
+        std::fs::write(&path, b"{ not json").unwrap();
+
+        store_to(&path, appearance(), &fresh_settings().await)
+            .await
+            .unwrap();
+        assert_eq!(sanitise_at(&path, appearance()).await.unwrap(), 0);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
     }
 }
