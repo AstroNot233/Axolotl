@@ -580,6 +580,11 @@ impl Settings {
             self.custom_background_component_opacity.clamp(0, 100);
         settings.ui_font = sanitize_font_family(self.ui_font.clone());
         settings.mono_font = sanitize_font_family(self.mono_font.clone());
+        settings.log_level =
+            match crate::logger::normalize_log_level(&self.log_level) {
+                Ok(level) => level.to_string(),
+                Err(_) => crate::logger::DEFAULT_LOG_LEVEL.to_string(),
+            };
         settings.default_window_title =
             self.default_window_title.trim().to_string();
         settings
