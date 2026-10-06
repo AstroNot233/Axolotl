@@ -13,7 +13,8 @@
 //!
 //! Bump `SCHEMA_VERSION` whenever a domain's key set changes, including when
 //! a key is dropped: that is what stops a build which still knows the removed
-//! key from writing the document again.
+//! key from writing the document again. It versions the shape of a document,
+//! unlike the `version` the `state` domain carries, which moves values.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
