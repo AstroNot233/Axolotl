@@ -891,6 +891,14 @@ impl State {
 
         settings_store::init(&app_identifier);
 
+        if settings_store::needs_seeding(database_existed).await {
+            tracing::info!("Handing the stored settings over to the documents");
+            let stored = Settings::read_row(&pool).await?;
+            settings_store::store(&stored).await;
+            Settings::store_proxy_config(&Settings::proxy_config(&pool).await?)
+                .await;
+        }
+
         legacy_converter::migrate_legacy_data(&pool).await?;
 
         tracing::info!("Fetching app settings");
@@ -919,11 +927,6 @@ impl State {
             );
         }
         let proxy_config = Settings::proxy_config(&pool).await?;
-        if settings_store::needs_seeding(database_existed).await {
-            tracing::info!("Handing the stored settings over to the documents");
-            settings_store::store(&settings).await;
-            Settings::store_proxy_config(&proxy_config).await;
-        }
         let configured_http_client =
             crate::util::fetch::build_configured_client(
                 &proxy_config,

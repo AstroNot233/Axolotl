@@ -301,6 +301,16 @@ impl Settings {
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
     {
+        let settings = Self::read_row(exec).await?;
+        Ok(super::settings_store::overlay(settings).await.normalized())
+    }
+
+    /// The settings the row holds, which startup reads once to hand them over to
+    /// the documents: every other reader goes through `get`.
+    pub(crate) async fn read_row<'a, E>(exec: E) -> crate::Result<Self>
+    where
+        E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
+    {
         let res = sqlx::query!(
             "
             SELECT
@@ -558,7 +568,7 @@ impl Settings {
             .unwrap_or(false),
             version: res.version as usize,
         };
-        Ok(super::settings_store::overlay(settings).await.normalized())
+        Ok(settings)
     }
 
     /// The values every read returns and `update` persists: clamped, trimmed
