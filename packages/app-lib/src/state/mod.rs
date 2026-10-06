@@ -29,6 +29,8 @@ pub use self::instances::*;
 mod settings;
 pub use self::settings::*;
 
+mod settings_store;
+
 mod game_options;
 pub use self::game_options::*;
 
@@ -882,6 +884,8 @@ impl State {
     ) -> crate::Result<Arc<Self>> {
         tracing::info!("Connecting to app database");
         let pool = db::connect(&app_identifier).await?;
+
+        settings_store::init(&app_identifier);
 
         legacy_converter::migrate_legacy_data(&pool).await?;
 

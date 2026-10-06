@@ -565,12 +565,12 @@ impl Settings {
             .unwrap_or(false),
             version: res.version as usize,
         };
-        Ok(settings)
+        Ok(super::settings_store::overlay(settings).await)
     }
 
     /// The values `update` persists: clamped, trimmed and with the core nav
     /// items kept visible, matching what `get` applies when it reads back.
-    fn normalized(&self) -> Self {
+    pub(crate) fn normalized(&self) -> Self {
         let mut settings = self.clone();
         settings.max_concurrent_downloads =
             self.max_concurrent_downloads.clamp(1, 256);
@@ -883,6 +883,8 @@ impl Settings {
         .bind(self.allow_privileged_scheme)
         .execute(exec)
         .await?;
+
+        super::settings_store::store(self).await;
 
         Ok(())
     }
