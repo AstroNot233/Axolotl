@@ -3,7 +3,7 @@
 		<button
 			v-for="(item, index) in items"
 			:key="`radio-button-${index}`"
-			class="p-0 py-2 px-2 border-0 font-medium flex gap-2 transition-all items-center cursor-pointer active:scale-95 hover:bg-surface-4 rounded-xl"
+			class="p-0 py-2 px-2 border-0 font-medium flex gap-2 transition-all items-center cursor-pointer active:scale-95 hover:bg-surface-4 rounded-xl text-left"
 			:class="{
 				'text-[var(--color-text-primary)] bg-surface-4': selected === item,
 				'text-[var(--color-text-default)] bg-transparent': selected !== item,
