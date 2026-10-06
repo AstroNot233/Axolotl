@@ -8,6 +8,11 @@
 //! deployment ships, which are read before the local ones and the row; only the
 //! local directory is ever written.
 //!
+//! A local document carries what differs from those shipped defaults: a key
+//! whose value is what the deployment already provides is left out of it, so
+//! that changing that default later still reaches the settings, and a key that
+//! returns to its default leaves the document again.
+//!
 //! Keys are only listed here once every reader goes through `Settings::get`,
 //! which is the only place that applies the stored values.
 //!
@@ -163,6 +168,7 @@ static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 #[cfg(test)]
 thread_local! {
     static TEST_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    static TEST_CONFIG_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
 pub(crate) fn init(app_identifier: &str) {
@@ -221,7 +227,45 @@ fn local_path(name: &str) -> Option<PathBuf> {
 }
 
 fn config_path(name: &str) -> Option<PathBuf> {
-    Some(CONFIG_DIR.get()?.join(format!("{name}.json")))
+    Some(config_dir()?.join(format!("{name}.json")))
+}
+
+/// The directory a deployment's defaults live in: the one the environment
+/// named, or the one a test gave this thread.
+fn config_dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(dir) = TEST_CONFIG_DIR.with(|dir| dir.borrow().clone()) {
+        return Some(dir);
+    }
+    CONFIG_DIR.get().cloned()
+}
+
+/// The defaults a deployment ships for the document at `path`, which a write
+/// leaves where they are.
+async fn shipped_defaults(path: &Path) -> Map<String, Value> {
+    match path.file_stem().and_then(|name| name.to_str()) {
+        Some(name) => match config_path(name) {
+            Some(config) => stored_at(&config).await,
+            None => Map::new(),
+        },
+        None => Map::new(),
+    }
+}
+
+/// Gives `key` to the document, or takes it away when its value is what the
+/// deployment already ships: a key that returns to a shipped default leaves the
+/// document again, so changing that default still reaches the settings.
+fn write_key(
+    data: &mut Map<String, Value>,
+    key: &str,
+    value: Value,
+    defaults: &Map<String, Value>,
+) {
+    if defaults.get(key) == Some(&value) {
+        data.remove(key);
+    } else {
+        data.insert(key.to_string(), value);
+    }
 }
 
 /// Applies the stored keys on top of `settings`, keeping the database value
@@ -431,6 +475,7 @@ async fn store_to(
     let Some(mut data) = base_data(path).await else {
         return Ok(());
     };
+    let defaults = shipped_defaults(path).await;
 
     let normalized = settings.normalized();
     let mut value = serde_json::to_value(&normalized)?;
@@ -438,7 +483,10 @@ async fn store_to(
         return Ok(());
     };
     fields.retain(|key, _| keys.contains(&key.as_str()));
-    data.extend(fields.iter().map(|(k, v)| (k.clone(), v.clone())));
+
+    for (key, value) in fields.iter() {
+        write_key(&mut data, key, value.clone(), &defaults);
+    }
 
     write_document(path, data).await
 }
@@ -517,7 +565,8 @@ async fn set_key_at(path: &Path, key: &str, value: Value) -> crate::Result<()> {
     let Some(mut data) = base_data(path).await else {
         return Ok(());
     };
-    data.insert(key.to_string(), value);
+    let defaults = shipped_defaults(path).await;
+    write_key(&mut data, key, value, &defaults);
     write_document(path, data).await
 }
 
@@ -528,11 +577,10 @@ async fn set_entries_at(
     let Some(mut data) = base_data(path).await else {
         return Ok(());
     };
-    data.extend(
-        entries
-            .iter()
-            .map(|(key, value)| (key.to_string(), value.clone())),
-    );
+    let defaults = shipped_defaults(path).await;
+    for (key, value) in entries {
+        write_key(&mut data, key, value.clone(), &defaults);
+    }
     write_document(path, data).await
 }
 
@@ -657,6 +705,90 @@ mod tests {
     #[tokio::test]
     async fn a_store_without_a_directory_has_nothing_to_write_to() {
         assert!(!needs_seeding_at(None, true).await);
+    }
+
+    #[tokio::test]
+    async fn a_key_the_deployment_ships_stays_out_of_the_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let shipped = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appearance.json");
+        std::fs::write(
+            &shipped.path().join("appearance.json"),
+            document(r#"{"theme":"oled"}"#),
+        )
+        .unwrap();
+        TEST_CONFIG_DIR.with(|current| {
+            *current.borrow_mut() = Some(shipped.path().to_path_buf());
+        });
+
+        let mut settings = fresh_settings().await;
+        settings.theme = crate::state::Theme::Oled;
+        settings.locale = "de-DE".to_string();
+        store_to(&path, appearance(), &settings).await.unwrap();
+
+        let stored = stored_at(&path).await;
+        assert!(!stored.contains_key("theme"));
+        assert_eq!(stored.get("locale"), Some(&Value::from("de-DE")));
+
+        TEST_CONFIG_DIR.with(|current| *current.borrow_mut() = None);
+    }
+
+    #[tokio::test]
+    async fn a_key_that_returns_to_a_shipped_default_leaves_the_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let shipped = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appearance.json");
+        std::fs::write(&path, document(r#"{"theme":"oled","locale":"de-DE"}"#))
+            .unwrap();
+        std::fs::write(
+            &shipped.path().join("appearance.json"),
+            document(r#"{"theme":"dark"}"#),
+        )
+        .unwrap();
+        TEST_CONFIG_DIR.with(|current| {
+            *current.borrow_mut() = Some(shipped.path().to_path_buf());
+        });
+
+        let mut settings = fresh_settings().await;
+        settings.theme = crate::state::Theme::Dark;
+        settings.locale = "de-DE".to_string();
+        store_to(&path, appearance(), &settings).await.unwrap();
+
+        let stored = stored_at(&path).await;
+        assert!(!stored.contains_key("theme"));
+        assert_eq!(stored.get("locale"), Some(&Value::from("de-DE")));
+
+        TEST_CONFIG_DIR.with(|current| *current.borrow_mut() = None);
+    }
+
+    #[tokio::test]
+    async fn a_single_key_write_leaves_a_shipped_default_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let shipped = tempfile::tempdir().unwrap();
+        let path = dir.path().join("privacy.json");
+        std::fs::write(
+            &shipped.path().join("privacy.json"),
+            document(r#"{"telemetry":true}"#),
+        )
+        .unwrap();
+        TEST_CONFIG_DIR.with(|current| {
+            *current.borrow_mut() = Some(shipped.path().to_path_buf());
+        });
+
+        set_key_at(&path, "telemetry", Value::Bool(true))
+            .await
+            .unwrap();
+        assert!(!stored_at(&path).await.contains_key("telemetry"));
+
+        set_key_at(&path, "telemetry", Value::Bool(false))
+            .await
+            .unwrap();
+        assert_eq!(
+            stored_at(&path).await.get("telemetry"),
+            Some(&Value::Bool(false))
+        );
+
+        TEST_CONFIG_DIR.with(|current| *current.borrow_mut() = None);
     }
 
     #[tokio::test]
