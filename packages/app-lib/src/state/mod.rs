@@ -557,7 +557,7 @@ impl State {
             let res = tokio::try_join!(
                 state.discord_rpc.clear_to_default(true),
                 instances::refresh_all_instances(),
-                Settings::migrate(&state.pool),
+                Settings::migrate(),
                 ModrinthCredentials::refresh_all(),
             );
 
@@ -644,7 +644,7 @@ impl State {
     pub async fn proxy_config(
         &self,
     ) -> crate::Result<crate::util::proxy::ProxyConfig> {
-        Settings::proxy_config(&self.pool).await
+        Ok(Settings::proxy_config().await)
     }
 
     pub async fn update_proxy_config(
@@ -652,7 +652,7 @@ impl State {
         config: &crate::util::proxy::ProxyConfig,
     ) -> crate::Result<()> {
         let _update = self.configured_http_client_update.lock().await;
-        let settings = Settings::get(&self.pool).await?;
+        let settings = Settings::get().await;
         let client = crate::util::fetch::build_configured_client(
             config,
             settings.ignore_ssl_errors,
@@ -667,7 +667,7 @@ impl State {
         settings: &Settings,
     ) -> crate::Result<()> {
         let _update = self.configured_http_client_update.lock().await;
-        let proxy = Settings::proxy_config(&self.pool).await?;
+        let proxy = Settings::proxy_config().await;
         let client = crate::util::fetch::build_configured_client(
             &proxy,
             settings.ignore_ssl_errors,
@@ -895,14 +895,13 @@ impl State {
             tracing::info!("Handing the stored settings over to the documents");
             let stored = Settings::read_row(&pool).await?;
             settings_store::store(&stored).await;
-            Settings::store_proxy_config(&Settings::proxy_config(&pool).await?)
-                .await;
+            Settings::store_proxy_config(&Settings::proxy_config().await).await;
         }
 
         legacy_converter::migrate_legacy_data(&pool).await?;
 
         tracing::info!("Fetching app settings");
-        let mut settings = Settings::get(&pool).await?;
+        let mut settings = Settings::get().await;
         installer_settings::apply_pending_installer_directory(
             &mut settings,
             &pool,
@@ -926,7 +925,7 @@ impl State {
                 "Could not move the proxy password to the credential store"
             );
         }
-        let proxy_config = Settings::proxy_config(&pool).await?;
+        let proxy_config = Settings::proxy_config().await;
         let configured_http_client =
             crate::util::fetch::build_configured_client(
                 &proxy_config,
@@ -1080,8 +1079,8 @@ pub(crate) async fn test_state(
     pool: SqlitePool,
 ) -> crate::Result<Arc<State>> {
     let file_watcher = instances::watcher::init_watcher().await?;
-    let proxy_config = Settings::proxy_config(&pool).await?;
-    let settings = Settings::get(&pool).await?;
+    let proxy_config = Settings::proxy_config().await;
+    let settings = Settings::get().await;
     let configured_http_client = crate::util::fetch::build_configured_client(
         &proxy_config,
         settings.ignore_ssl_errors,

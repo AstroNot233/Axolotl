@@ -12,16 +12,15 @@ pub use crate::{
 /// Gets entire settings
 #[tracing::instrument]
 pub async fn get() -> crate::Result<Settings> {
-    let state = State::get().await?;
-    let settings = Settings::get(&state.pool).await?;
-    Ok(settings)
+    State::get().await?;
+    Ok(Settings::get().await)
 }
 
 /// Sets entire settings
 #[tracing::instrument]
 pub async fn set(mut settings: Settings) -> crate::Result<()> {
     let state = State::get().await?;
-    let current = Settings::get(&state.pool).await?;
+    let current = Settings::get().await;
     settings.telemetry = current.telemetry;
     settings.telemetry_consent_version = current.telemetry_consent_version;
     settings.discord_rpc = current.discord_rpc;
@@ -38,7 +37,7 @@ pub async fn set(mut settings: Settings) -> crate::Result<()> {
 #[tracing::instrument]
 pub async fn set_download_engine(engine: DownloadEngine) -> crate::Result<()> {
     let state = State::get().await?;
-    let mut settings = Settings::get(&state.pool).await?;
+    let mut settings = Settings::get().await;
     settings.download_engine = engine;
     settings.update().await;
     state.apply_runtime_settings(&settings).await?;
@@ -47,8 +46,8 @@ pub async fn set_download_engine(engine: DownloadEngine) -> crate::Result<()> {
 
 #[tracing::instrument]
 pub async fn get_privacy() -> crate::Result<PrivacySettings> {
-    let state = State::get().await?;
-    Settings::privacy(&state.pool).await
+    State::get().await?;
+    Ok(Settings::privacy().await)
 }
 
 #[tracing::instrument]
@@ -109,8 +108,8 @@ pub async fn cancel_directory_change(
 ) -> crate::Result<()> {
     // This is called to handle state initialization errors due to folder migrations
     // failing, so fetching a DB connection pool from `State::get` is not reliable here
-    let pool = crate::state::db::connect(app_identifier).await?;
-    let mut settings = Settings::get(&pool).await?;
+    crate::state::db::connect(app_identifier).await?;
+    let mut settings = Settings::get().await;
 
     if let Some(prev_custom_dir) = settings.prev_custom_dir {
         settings.prev_custom_dir = None;

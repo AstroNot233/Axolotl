@@ -268,10 +268,11 @@ fn write_key(
     }
 }
 
-/// Applies the stored keys on top of `settings`, keeping the database value
-/// for every key no document carries.
-pub(crate) async fn overlay(settings: Settings) -> Settings {
-    let mut settings = settings;
+/// The settings the documents describe: what a build carries by default, then
+/// the documents a deployment ships, then the local ones. The database is not
+/// part of this, since startup hands it over to the documents once.
+pub(crate) async fn read_settings() -> Settings {
+    let mut settings = Settings::default();
     for (name, keys) in DOMAINS {
         settings = overlay_layers(
             config_path(name).as_deref(),
@@ -285,7 +286,7 @@ pub(crate) async fn overlay(settings: Settings) -> Settings {
 }
 
 /// Layers the documents of one domain, so a default gives way to the local file
-/// and to the row.
+/// and to the ones a deployment ships.
 async fn overlay_layers(
     defaults: Option<&Path>,
     local: Option<&Path>,
@@ -631,8 +632,7 @@ mod tests {
     use super::*;
 
     async fn fresh_settings() -> Settings {
-        let pool = crate::state::db::migrated_test_pool().await;
-        Settings::get(&pool).await.unwrap()
+        Settings::get().await
     }
 
     fn appearance() -> &'static [&'static str] {

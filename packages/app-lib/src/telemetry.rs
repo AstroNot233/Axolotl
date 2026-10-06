@@ -72,7 +72,7 @@ async fn run_cycle(
     state: &State,
     client: &reqwest::Client,
 ) -> crate::Result<()> {
-    if !is_enabled(state).await? {
+    if !is_enabled().await? {
         let _database_permit = state.acquire_install_db_permit().await?;
         sqlx::query("DELETE FROM telemetry_outbox")
             .execute(&state.pool)
@@ -97,8 +97,8 @@ async fn run_cycle(
     Ok(())
 }
 
-async fn is_enabled(state: &State) -> crate::Result<bool> {
-    let privacy = crate::state::Settings::privacy(&state.pool).await?;
+async fn is_enabled() -> crate::Result<bool> {
+    let privacy = crate::state::Settings::privacy().await;
     Ok(privacy.telemetry && privacy.consent_version > 0)
 }
 

@@ -144,7 +144,7 @@ mod windows {
                 // A write reports nothing, so the pending value is what keeps
                 // the choice until the settings carry the directory the
                 // installer selected.
-                let stored = Settings::get(pool).await?;
+                let stored = Settings::get().await;
                 if stored.custom_dir != settings.custom_dir
                     || stored.prev_custom_dir != settings.prev_custom_dir
                 {

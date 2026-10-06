@@ -3,7 +3,7 @@
 use crate::util::download::DownloadEngine;
 use crate::util::proxy::{ProxyConfig, ProxyMode};
 use serde::{Deserialize, Serialize};
-use sqlx::{Pool, Row, Sqlite};
+use sqlx::Row;
 use std::collections::HashMap;
 
 // Types
@@ -45,14 +45,6 @@ impl DownloadSourceMode {
             2 => Self::MirrorPreferred,
             3 => Self::OfficialPreferred,
             _ => Self::Auto,
-        }
-    }
-
-    pub(crate) fn prefers_mirror(self, auto_prefers_mirror: bool) -> bool {
-        match self {
-            Self::Auto => auto_prefers_mirror,
-            Self::OfficialOnly | Self::OfficialPreferred => false,
-            Self::MirrorPreferred => true,
         }
     }
 }
@@ -388,12 +380,10 @@ impl Default for Settings {
 impl Settings {
     const CURRENT_VERSION: usize = 3;
 
-    pub async fn get<'a, E>(exec: E) -> crate::Result<Self>
-    where
-        E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
-    {
-        let settings = Self::read_row(exec).await?;
-        Ok(super::settings_store::overlay(settings).await.normalized())
+    /// The settings the launcher runs with, which come from the documents: the
+    /// database is only read when an installation hands it over to them.
+    pub async fn get() -> Self {
+        super::settings_store::read_settings().await.normalized()
     }
 
     /// The settings the row holds, which startup reads once to hand them over to
@@ -717,35 +707,26 @@ impl Settings {
             .await;
     }
 
-    pub(crate) async fn privacy<'a, E>(
-        exec: E,
-    ) -> crate::Result<PrivacySettings>
-    where
-        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
-    {
-        let (telemetry, discord_rpc, consent_version): (i64, i64, i64) =
-            sqlx::query_as(
-                "SELECT telemetry, discord_rpc, telemetry_consent_version
-                 FROM settings WHERE id = 0",
-            )
-            .fetch_one(exec)
-            .await?;
+    /// The privacy preferences the documents describe, over what this build
+    /// does by default.
+    pub(crate) async fn privacy() -> PrivacySettings {
+        let defaults = Settings::default();
         let stored = super::settings_store::stored("privacy").await;
-        Ok(PrivacySettings {
+        PrivacySettings {
             telemetry: stored
                 .get("telemetry")
                 .and_then(serde_json::Value::as_bool)
-                .unwrap_or(telemetry == 1),
+                .unwrap_or(defaults.telemetry),
             discord_rpc: stored
                 .get("discord_rpc")
                 .and_then(serde_json::Value::as_bool)
-                .unwrap_or(discord_rpc == 1),
+                .unwrap_or(defaults.discord_rpc),
             consent_version: stored
                 .get("telemetry_consent_version")
                 .and_then(serde_json::Value::as_u64)
                 .map(|value| value as u32)
-                .unwrap_or(consent_version as u32),
-        })
+                .unwrap_or(defaults.telemetry_consent_version),
+        }
     }
 
     pub(crate) async fn set_privacy(privacy: &PrivacySettings) {
@@ -782,30 +763,10 @@ impl Settings {
         .await;
     }
 
-    pub(crate) async fn proxy_config<'a, E>(
-        exec: E,
-    ) -> crate::Result<ProxyConfig>
-    where
-        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
-    {
-        let (mode, url, username, stored_password): (
-            String,
-            String,
-            String,
-            String,
-        ) = sqlx::query_as(
-            "SELECT proxy_mode, proxy_url, proxy_username, proxy_password
-                 FROM settings WHERE id = 0",
-        )
-        .fetch_one(exec)
-        .await?;
-        let password = read_proxy_password().unwrap_or(stored_password);
-        let mut config = ProxyConfig {
-            mode: ProxyMode::from_string(&mode),
-            url,
-            username,
-            password,
-        };
+    /// The proxy the documents describe, over what this build does by default,
+    /// with the password read from the system credential store.
+    pub(crate) async fn proxy_config() -> ProxyConfig {
+        let mut config = ProxyConfig::default();
         let stored = super::settings_store::stored("proxy").await;
         if let Some(mode) =
             stored.get("proxy_mode").and_then(serde_json::Value::as_str)
@@ -823,7 +784,8 @@ impl Settings {
         {
             config.username = username.to_string();
         }
-        Ok(config)
+        config.password = read_proxy_password().unwrap_or_default();
+        config
     }
 
     /// Moves a password an older build left in the row into the system
@@ -965,8 +927,10 @@ impl Settings {
                 .any(|value| locale_prefers_mirror(&value))
     }
 
-    pub async fn migrate(exec: &Pool<Sqlite>) -> crate::Result<()> {
-        let mut settings = Self::get(exec).await?;
+    /// Moves settings an older build stored to what this one expects, which
+    /// startup runs once against the documents the row was handed over to.
+    pub async fn migrate() -> crate::Result<()> {
+        let mut settings = Self::get().await;
 
         if settings.version >= Settings::CURRENT_VERSION {
             return Ok(());
@@ -1404,24 +1368,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn official_preferred_sources_round_trip_in_a_fresh_database() {
-        let pool = migrated_test_pool().await;
-        sqlx::query(
-            "
-            UPDATE settings
-            SET
-                minecraft_metadata_source = 'official_preferred',
-                minecraft_file_source = 'official_preferred',
-                modrinth_source = 'official_preferred',
-                curseforge_source = 'official_preferred'
-            WHERE id = 0
-            ",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+    async fn official_preferred_sources_round_trip() {
+        let mut settings = Settings::get().await;
+        settings.minecraft_metadata_source =
+            DownloadSourceMode::OfficialPreferred;
+        settings.minecraft_file_source = DownloadSourceMode::OfficialPreferred;
+        settings.modrinth_source = DownloadSourceMode::OfficialPreferred;
+        settings.curseforge_source = DownloadSourceMode::OfficialPreferred;
+        settings.update().await;
 
-        let settings = Settings::get(&pool).await.unwrap();
+        let settings = Settings::get().await;
         assert_eq!(
             settings.minecraft_metadata_source,
             DownloadSourceMode::OfficialPreferred
@@ -1442,57 +1398,49 @@ mod tests {
 
     #[tokio::test]
     async fn curseforge_bypass_defaults_on_and_round_trips() {
-        let pool = migrated_test_pool().await;
-
-        let mut settings = Settings::get(&pool).await.unwrap();
+        let mut settings = Settings::get().await;
         assert!(settings.bypass_curseforge_download_restrictions);
 
         settings.bypass_curseforge_download_restrictions = false;
         settings.update().await;
 
-        let reloaded = Settings::get(&pool).await.unwrap();
+        let reloaded = Settings::get().await;
         assert!(!reloaded.bypass_curseforge_download_restrictions);
     }
 
     #[tokio::test]
     async fn ignore_ssl_errors_defaults_off_and_round_trips() {
-        let pool = migrated_test_pool().await;
-
-        let mut settings = Settings::get(&pool).await.unwrap();
+        let mut settings = Settings::get().await;
         assert!(!settings.ignore_ssl_errors);
 
         settings.ignore_ssl_errors = true;
         settings.update().await;
 
-        let reloaded = Settings::get(&pool).await.unwrap();
+        let reloaded = Settings::get().await;
         assert!(reloaded.ignore_ssl_errors);
     }
 
     #[tokio::test]
     async fn memory_optimization_round_trips_in_a_fresh_database() {
-        let pool = migrated_test_pool().await;
-
-        let mut settings = Settings::get(&pool).await.unwrap();
+        let mut settings = Settings::get().await;
         assert!(!settings.memory.optimize_before_launch);
 
         settings.memory.optimize_before_launch = true;
         settings.update().await;
 
-        let reloaded = Settings::get(&pool).await.unwrap();
+        let reloaded = Settings::get().await;
         assert!(reloaded.memory.optimize_before_launch);
     }
 
     #[tokio::test]
     async fn lightweight_mode_setting_defaults_off_and_round_trips() {
-        let pool = migrated_test_pool().await;
-
-        let mut settings = Settings::get(&pool).await.unwrap();
+        let mut settings = Settings::get().await;
         assert!(!settings.enter_lightweight_mode_on_game_launch);
 
         settings.enter_lightweight_mode_on_game_launch = true;
         settings.update().await;
 
-        let reloaded = Settings::get(&pool).await.unwrap();
+        let reloaded = Settings::get().await;
         assert!(reloaded.enter_lightweight_mode_on_game_launch);
     }
 
@@ -1536,8 +1484,6 @@ mod tests {
 
     #[tokio::test]
     async fn home_widgets_round_trip_in_a_fresh_database() {
-        let pool = migrated_test_pool().await;
-
         let expected = serde_json::json!({
             "version": 1,
             "widgets": [
@@ -1548,11 +1494,11 @@ mod tests {
                 }
             ]
         });
-        let mut settings = Settings::get(&pool).await.unwrap();
+        let mut settings = Settings::get().await;
         settings.home_widgets = Some(expected.clone());
         settings.update().await;
 
-        let reloaded = Settings::get(&pool).await.unwrap();
+        let reloaded = Settings::get().await;
         assert_eq!(reloaded.home_widgets, Some(expected));
     }
 
@@ -1596,9 +1542,7 @@ mod tests {
 
     #[tokio::test]
     async fn fonts_default_to_none_and_round_trip_in_a_fresh_database() {
-        let pool = migrated_test_pool().await;
-
-        let mut settings = Settings::get(&pool).await.unwrap();
+        let mut settings = Settings::get().await;
         assert_eq!(settings.ui_font, None);
         assert_eq!(settings.mono_font, None);
 
@@ -1606,22 +1550,20 @@ mod tests {
         settings.mono_font = Some("JetBrains Mono".to_string());
         settings.update().await;
 
-        let reloaded = Settings::get(&pool).await.unwrap();
+        let reloaded = Settings::get().await;
         assert_eq!(reloaded.ui_font.as_deref(), Some("Microsoft YaHei"));
         assert_eq!(reloaded.mono_font.as_deref(), Some("JetBrains Mono"));
 
         settings.mono_font = Some("   ".to_string());
         settings.update().await;
 
-        let cleared = Settings::get(&pool).await.unwrap();
+        let cleared = Settings::get().await;
         assert_eq!(cleared.mono_font, None);
     }
 
     #[tokio::test]
     async fn terracotta_public_nodes_default_and_empty_list_round_trip() {
-        let pool = migrated_test_pool().await;
-
-        let mut settings = Settings::get(&pool).await.unwrap();
+        let mut settings = Settings::get().await;
         assert_eq!(
             settings.terracotta_public_nodes,
             default_terracotta_public_nodes()
@@ -1630,20 +1572,18 @@ mod tests {
         settings.terracotta_public_nodes.clear();
         settings.update().await;
 
-        let reloaded = Settings::get(&pool).await.unwrap();
+        let reloaded = Settings::get().await;
         assert!(reloaded.terracotta_public_nodes.is_empty());
     }
 
     #[tokio::test]
     async fn mojang_auth_source_round_trip_in_a_fresh_database() {
-        let pool = migrated_test_pool().await;
-
-        let mut settings = Settings::get(&pool).await.unwrap();
+        let mut settings = Settings::get().await;
         assert_eq!(settings.mojang_auth_source, DownloadSourceMode::Auto);
         settings.mojang_auth_source = DownloadSourceMode::MirrorPreferred;
         settings.update().await;
 
-        let reloaded = Settings::get(&pool).await.unwrap();
+        let reloaded = Settings::get().await;
         assert_eq!(
             reloaded.mojang_auth_source,
             DownloadSourceMode::MirrorPreferred
@@ -1661,8 +1601,7 @@ mod tests {
 
     #[tokio::test]
     async fn legacy_mirror_settings_keep_their_previous_intent() {
-        let pool = migrated_test_pool().await;
-        let settings = Settings::get(&pool).await.unwrap();
+        let settings = Settings::get().await;
         assert!(settings.auto_concurrent_downloads);
         assert!(settings.auto_set_java_high_performance_mode);
         assert!(!settings.auto_hide_downloads_button);
@@ -1728,20 +1667,30 @@ mod tests {
         .await
         .unwrap();
 
-        let settings = Settings::get(&pool).await.unwrap();
+        let sources: (String, String, String, String) = sqlx::query_as(
+            "SELECT
+                minecraft_metadata_source, minecraft_file_source,
+                modrinth_source, curseforge_source
+             FROM settings WHERE id = 0",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
-            settings.minecraft_metadata_source,
-            DownloadSourceMode::Auto
+            sources,
+            (
+                "auto".to_string(),
+                "auto".to_string(),
+                "auto".to_string(),
+                "auto".to_string()
+            )
         );
-        assert_eq!(settings.minecraft_file_source, DownloadSourceMode::Auto);
-        assert_eq!(settings.modrinth_source, DownloadSourceMode::Auto);
-        assert_eq!(settings.curseforge_source, DownloadSourceMode::Auto);
     }
 
     #[tokio::test]
     async fn telemetry_schema_migrates_fresh_and_existing_settings_databases() {
         let fresh = migrated_test_pool().await;
-        let settings = Settings::get(&fresh).await.unwrap();
+        let settings = Settings::get().await;
         assert!(!settings.telemetry);
         assert_eq!(settings.telemetry_consent_version, 0);
         assert!(
@@ -1790,9 +1739,7 @@ mod tests {
 
     #[tokio::test]
     async fn privacy_accessors_round_trip() {
-        let pool = migrated_test_pool().await;
-
-        let mut privacy = Settings::privacy(&pool).await.unwrap();
+        let mut privacy = Settings::privacy().await;
         assert!(!privacy.telemetry);
         assert!(privacy.discord_rpc);
         assert_eq!(privacy.consent_version, 0);
@@ -1801,41 +1748,29 @@ mod tests {
         privacy.discord_rpc = false;
         privacy.consent_version = 2;
         Settings::set_privacy(&privacy).await;
-        assert_eq!(Settings::privacy(&pool).await.unwrap().consent_version, 2);
+        assert_eq!(Settings::privacy().await.consent_version, 2);
 
         Settings::set_telemetry(false).await;
-        let stored = Settings::privacy(&pool).await.unwrap();
+        let stored = Settings::privacy().await;
         assert!(!stored.telemetry);
         assert!(!stored.discord_rpc);
 
         Settings::set_discord_rpc(true).await;
-        assert!(Settings::privacy(&pool).await.unwrap().discord_rpc);
+        assert!(Settings::privacy().await.discord_rpc);
     }
 
     #[tokio::test]
     async fn single_column_settings_accessors_round_trip() {
-        let pool = migrated_test_pool().await;
-
         Settings::set_force_fullscreen(true).await;
-        assert!(Settings::get(&pool).await.unwrap().force_fullscreen);
+        assert!(Settings::get().await.force_fullscreen);
 
         Settings::set_backup_repository_path(Some("/tmp/repo")).await;
         assert_eq!(
-            Settings::get(&pool)
-                .await
-                .unwrap()
-                .backup_repository_path
-                .as_deref(),
+            Settings::get().await.backup_repository_path.as_deref(),
             Some("/tmp/repo")
         );
 
         Settings::set_backup_repository_path(None).await;
-        assert!(
-            Settings::get(&pool)
-                .await
-                .unwrap()
-                .backup_repository_path
-                .is_none()
-        );
+        assert!(Settings::get().await.backup_repository_path.is_none());
     }
 }

@@ -293,7 +293,7 @@ fn default_repository_path(state: &State) -> PathBuf {
 }
 
 async fn repository_path(state: &State) -> crate::Result<PathBuf> {
-    let settings = Settings::get(&state.pool).await?;
+    let settings = Settings::get().await;
     Ok(settings
         .backup_repository_path
         .filter(|path| !path.trim().is_empty())
