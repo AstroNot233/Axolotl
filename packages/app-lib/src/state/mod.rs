@@ -673,9 +673,12 @@ impl State {
             settings.ignore_ssl_errors,
             settings.doh_enabled,
         )?;
-        Settings::set_proxy_config(config).await?;
+        // The proxy document is written even where the credential store refuses
+        // the password, so the client follows what it holds and only the store's
+        // own failure reaches the caller.
+        let stored = Settings::set_proxy_config(config).await;
         *self.configured_http_client.write() = client;
-        Ok(())
+        stored
     }
 
     pub(crate) async fn update_http_client_for_settings(

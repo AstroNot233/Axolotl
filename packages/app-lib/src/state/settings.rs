@@ -860,16 +860,12 @@ impl Settings {
         config: &ProxyConfig,
     ) -> crate::Result<()> {
         config.validate()?;
-        // The password lives in the system credential store alone: the row is
-        // no longer written, so it must never hold a plaintext fallback.
-        if let Err(error) = write_proxy_password(&config.password) {
-            tracing::warn!(
-                %error,
-                "Could not store the proxy password in the system credential store"
-            );
-        }
         Self::store_proxy_config(config).await;
-        Ok(())
+        // The password lives in the system credential store alone: the row is
+        // no longer written, so a store that refuses it has to reach the
+        // caller, which would otherwise report a password as saved that no
+        // later start can read back.
+        write_proxy_password(&config.password)
     }
 
     /// Writes the proxy the settings carry into its document.
