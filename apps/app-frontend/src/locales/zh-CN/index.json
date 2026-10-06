@@ -10715,6 +10715,18 @@
   "app.warning.running-as-admin": {
     "message": "Axolotl 正在以管理员身份运行。此模式下无法拖拽导入文件，请以普通权限重新启动启动器。"
   },
+  "app.window-controls.close": {
+    "message": "关闭"
+  },
+  "app.window-controls.maximize": {
+    "message": "最大化"
+  },
+  "app.window-controls.minimize": {
+    "message": "最小化"
+  },
+  "app.window-controls.restore": {
+    "message": "还原"
+  },
   "app.world-editor.allow-commands.label": {
     "message": "允许作弊"
   },
