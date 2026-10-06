@@ -568,25 +568,52 @@ impl Settings {
         Ok(settings)
     }
 
+    /// The values `update` persists: clamped, trimmed and with the core nav
+    /// items kept visible, matching what `get` applies when it reads back.
+    fn normalized(&self) -> Self {
+        let mut settings = self.clone();
+        settings.max_concurrent_downloads =
+            self.max_concurrent_downloads.clamp(1, 256);
+        settings.custom_background_blur = self.custom_background_blur.min(40);
+        settings.custom_background_opacity =
+            self.custom_background_opacity.clamp(10, 100);
+        settings.transparent_background_opacity =
+            self.transparent_background_opacity.min(100);
+        settings.sidebar_instance_count = self.sidebar_instance_count.min(50);
+        settings.home_widget_background_opacity =
+            self.home_widget_background_opacity.clamp(0, 100);
+        settings.custom_background_component_opacity =
+            self.custom_background_component_opacity.clamp(0, 100);
+        settings.ui_font = sanitize_font_family(self.ui_font.clone());
+        settings.mono_font = sanitize_font_family(self.mono_font.clone());
+        settings.default_window_title =
+            self.default_window_title.trim().to_string();
+        settings
+            .hidden_nav_items
+            .retain(|id| id != "home" && id != "library");
+        settings
+    }
+
     pub async fn update<'a, E>(&self, exec: E) -> crate::Result<()>
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
     {
+        let normalized = self.normalized();
         let max_concurrent_writes = self.max_concurrent_writes as i32;
         let max_concurrent_downloads =
-            self.max_concurrent_downloads.clamp(1, 256) as i32;
+            normalized.max_concurrent_downloads as i32;
         let theme = self.theme.as_str();
         let accent_color = self.accent_color.as_str();
         let default_page = self.default_page.as_str();
         let extra_launch_args = serde_json::to_string(&self.extra_launch_args)?;
         let custom_env_vars = serde_json::to_string(&self.custom_env_vars)?;
         let feature_flags = serde_json::to_string(&self.feature_flags)?;
-        let custom_background_blur = self.custom_background_blur.min(40) as i32;
+        let custom_background_blur = normalized.custom_background_blur as i32;
         let custom_background_opacity =
-            self.custom_background_opacity.clamp(10, 100) as i32;
+            normalized.custom_background_opacity as i32;
         let transparent_background_opacity =
-            self.transparent_background_opacity.min(100) as i32;
-        let sidebar_instance_count = self.sidebar_instance_count.min(50) as i32;
+            normalized.transparent_background_opacity as i32;
+        let sidebar_instance_count = normalized.sidebar_instance_count as i32;
         let home_layout = self.home_layout.as_str();
         let home_widgets = self
             .home_widgets
@@ -771,31 +798,27 @@ impl Settings {
         sqlx::query(
             "UPDATE settings SET home_widget_background_opacity = ? WHERE id = 0",
         )
-        .bind(self.home_widget_background_opacity.clamp(0, 100) as i64)
+        .bind(normalized.home_widget_background_opacity as i64)
         .execute(exec)
         .await?;
 
         sqlx::query(
             "UPDATE settings SET custom_background_component_opacity = ? WHERE id = 0",
         )
-        .bind(self.custom_background_component_opacity.clamp(0, 100) as i64)
+        .bind(normalized.custom_background_component_opacity as i64)
         .execute(exec)
         .await?;
 
         sqlx::query(
             "UPDATE settings SET ui_font = ?, mono_font = ? WHERE id = 0",
         )
-        .bind(sanitize_font_family(self.ui_font.clone()))
-        .bind(sanitize_font_family(self.mono_font.clone()))
+        .bind(normalized.ui_font.clone())
+        .bind(normalized.mono_font.clone())
         .execute(exec)
         .await?;
 
-        let mut hidden_nav_items = self.hidden_nav_items.clone();
-        // Boundary guard: never persist core nav items as hidden.
-        hidden_nav_items.retain(|id| id != "home" && id != "library");
-
         sqlx::query("UPDATE settings SET hidden_nav_items = ? WHERE id = 0")
-            .bind(serde_json::to_string(&hidden_nav_items)?)
+            .bind(serde_json::to_string(&normalized.hidden_nav_items)?)
             .execute(exec)
             .await?;
 
@@ -809,7 +832,7 @@ impl Settings {
         sqlx::query(
             "UPDATE settings SET default_window_title = ? WHERE id = 0",
         )
-        .bind(self.default_window_title.trim())
+        .bind(normalized.default_window_title.as_str())
         .execute(exec)
         .await?;
 
