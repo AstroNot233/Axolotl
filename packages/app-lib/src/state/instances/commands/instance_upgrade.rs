@@ -3060,7 +3060,7 @@ fn candidates_for_requirement<'a>(
     confirmed_prereleases: &HashSet<(NodeKey, String)>,
 ) -> Vec<&'a UpgradeCandidate> {
     let root = roots.iter().find(|root| root.key == requirement.key);
-    
+
     catalog
         .get(&requirement.key)
         .into_iter()

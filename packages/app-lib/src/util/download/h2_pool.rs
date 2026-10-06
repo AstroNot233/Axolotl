@@ -371,12 +371,8 @@ async fn connect_addresses(
     addresses: &[IpAddr],
     resolver: &crate::util::download_dns::DownloadDnsResolver,
 ) -> std::io::Result<TcpStream> {
-    let attempts = addresses
-        .iter()
-        .copied()
-        .take(2)
-        .enumerate()
-        .map(|(index, address)| async move {
+    let attempts = addresses.iter().copied().take(2).enumerate().map(
+        |(index, address)| async move {
             if index > 0 {
                 let delay = if address.is_ipv4() {
                     HAPPY_EYEBALLS_IPV4_DELAY
@@ -386,7 +382,8 @@ async fn connect_addresses(
                 tokio::time::sleep(delay).await;
             }
             TcpStream::connect((address, port)).await
-        });
+        },
+    );
     tokio::time::timeout(CONNECT_TIMEOUT, async {
         let mut pending = attempts.collect::<FuturesUnordered<_>>();
         let mut last_error = None;
@@ -954,9 +951,8 @@ pub(crate) async fn has_live_connection(route: &DownloadRoute) -> bool {
         return false;
     };
     drop(connections);
-    
-    slot
-        .lock()
+
+    slot.lock()
         .await
         .as_ref()
         .is_some_and(|connection| !connection.is_dead())

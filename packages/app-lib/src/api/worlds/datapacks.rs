@@ -455,14 +455,16 @@ fn read_zip_pack_meta(
     {
         let cache = ZIP_DATAPACK_META_CACHE.lock().unwrap();
         if let Some(cached) = cache.get(&cache_key)
-            && cached.len == signature.0 && cached.modified == signature.1 {
-                return Ok((
-                    cached.pack_format,
-                    cached.supported_formats.clone(),
-                    cached.description.clone(),
-                    cached.icon.clone(),
-                ));
-            }
+            && cached.len == signature.0
+            && cached.modified == signature.1
+        {
+            return Ok((
+                cached.pack_format,
+                cached.supported_formats.clone(),
+                cached.description.clone(),
+                cached.icon.clone(),
+            ));
+        }
     }
 
     let parsed = read_zip_pack_meta_uncached(path)?;

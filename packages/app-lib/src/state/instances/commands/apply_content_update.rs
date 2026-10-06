@@ -284,14 +284,10 @@ pub(crate) async fn update_all_projects(
                     )
                     .await?
                     .is_none()
-                    {
-                        remove_project(
-                            instance_id,
-                            &update.relative_path,
-                            state,
-                        )
+                {
+                    remove_project(instance_id, &update.relative_path, state)
                         .await?;
-                    }
+                }
 
                 applied.push(AppliedBulkItem {
                     project_id: update.project_id,

@@ -622,20 +622,20 @@ async fn publish_downloaded_action(
                     &state.pool,
                 )
                 .await?
+        {
+            let target = content_rows::get_content_mutation_target(
+                instance_id,
+                &entry.id,
+                &state.pool,
+            )
+            .await?;
+            if let Some(path) = target.and_then(|target| target.relative_path)
+                && base.join(&path).is_file()
             {
-                let target = content_rows::get_content_mutation_target(
-                    instance_id,
-                    &entry.id,
-                    &state.pool,
-                )
-                .await?;
-                if let Some(path) =
-                    target.and_then(|target| target.relative_path)
-                    && base.join(&path).is_file() {
-                        paths[index] = path;
-                        continue;
-                    }
+                paths[index] = path;
+                continue;
             }
+        }
         let artifact = downloaded.get(&file.id).ok_or_else(|| {
             crate::ErrorKind::InputError(format!(
                 "Missing staged content {}",
@@ -700,14 +700,14 @@ async fn publish_downloaded_action(
                     &state.pool,
                 )
                 .await?
-            {
-                content_rows::set_content_entry_auto_dependency(
-                    &entry.id,
-                    true,
-                    &state.pool,
-                )
-                .await?;
-            }
+        {
+            content_rows::set_content_entry_auto_dependency(
+                &entry.id,
+                true,
+                &state.pool,
+            )
+            .await?;
+        }
         paths[index] = path;
     }
     content::finalize_updated_project_path(

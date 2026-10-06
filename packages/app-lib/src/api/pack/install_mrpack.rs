@@ -874,15 +874,17 @@ where
         size += bytes_read as u64;
         pending_progress += bytes_read as u64;
         if let Some(progress) = progress.as_mut()
-            && pending_progress >= PROGRESS_GRANULARITY {
-                progress(pending_progress).await?;
-                pending_progress = 0;
-            }
+            && pending_progress >= PROGRESS_GRANULARITY
+        {
+            progress(pending_progress).await?;
+            pending_progress = 0;
+        }
     }
     if let Some(progress) = progress.as_mut()
-        && pending_progress > 0 {
-            progress(pending_progress).await?;
-        }
+        && pending_progress > 0
+    {
+        progress(pending_progress).await?;
+    }
     drop(file);
 
     if reader.compute_hash() != expected_crc32 {
@@ -1867,8 +1869,8 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
     let mut seen_override_targets = HashSet::new();
     let override_targets = override_specs
         .iter()
-        .filter(|&spec| seen_override_targets
-                .insert(spec.target_path.clone())).map(|spec| spec.target_path.clone())
+        .filter(|&spec| seen_override_targets.insert(spec.target_path.clone()))
+        .map(|spec| spec.target_path.clone())
         .collect::<Vec<_>>();
     let override_groups = Arc::new(Mutex::new(VecDeque::from(
         override_extraction_groups(override_specs),

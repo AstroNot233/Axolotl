@@ -37,9 +37,10 @@ pub(super) fn address_host(address: &str) -> &str {
         return trimmed;
     }
     if let Some(rest) = trimmed.strip_prefix('[')
-        && let Some(end) = rest.find(']') {
-            return &rest[..end];
-        }
+        && let Some(end) = rest.find(']')
+    {
+        return &rest[..end];
+    }
     match trimmed.rsplit_once(':') {
         Some((host, port))
             if !host.is_empty() && port.chars().all(|c| c.is_ascii_digit()) =>
@@ -147,9 +148,10 @@ async fn connect_within(target: &SocketAddr, deadline: Instant) -> bool {
 fn readiness_targets(port: u16, bind: Option<&str>) -> Vec<SocketAddr> {
     let mut targets = Vec::new();
     if let Some(ip) = bind.and_then(|value| value.trim().parse::<IpAddr>().ok())
-        && !ip.is_unspecified() {
-            targets.push(SocketAddr::new(ip, port));
-        }
+        && !ip.is_unspecified()
+    {
+        targets.push(SocketAddr::new(ip, port));
+    }
     for loopback in [
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         IpAddr::V6(Ipv6Addr::LOCALHOST),

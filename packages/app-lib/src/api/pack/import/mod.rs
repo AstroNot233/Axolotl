@@ -402,9 +402,10 @@ async fn get_unknown_launcher_instances(
 
     // Also check for a .minecraft folder next to the launcher executable.
     if pe_info::folder_has_product(base_path, "Plain Craft Launcher")
-        && let Some(entry) = pcl::get_local_dotminecraft(base_path) {
-            collect_launcher_instances(&mut collector, vec![entry]).await;
-        }
+        && let Some(entry) = pcl::get_local_dotminecraft(base_path)
+    {
+        collect_launcher_instances(&mut collector, vec![entry]).await;
+    }
 
     // HMCL
     if hmcl::config_exists(base_path) {
@@ -1262,9 +1263,9 @@ async fn copy_files_with_progress(
                             details.clone(),
                         )
                         .await
-                    {
-                        first_error = Some(error);
-                    }
+                {
+                    first_error = Some(error);
+                }
             }
             Err(error) => {
                 if first_error.is_none() {

@@ -965,14 +965,14 @@ fn missing_library_bytes(
         if is_native_library(library)
             && let Some(classifier) =
                 library_native_classifier(library, java_arch)
-                && let Some(native) = library
-                    .downloads
-                    .as_ref()
-                    .and_then(|downloads| downloads.classifiers.as_ref())
-                    .and_then(|classifiers| classifiers.get(&classifier))
-            {
-                total += native.size as u64;
-            }
+            && let Some(native) = library
+                .downloads
+                .as_ref()
+                .and_then(|downloads| downloads.classifiers.as_ref())
+                .and_then(|classifiers| classifiers.get(&classifier))
+        {
+            total += native.size as u64;
+        }
 
         // Java artifact size. Mixed libraries carry both.
         if needs_java_artifact(library) {
@@ -984,10 +984,10 @@ fn missing_library_bytes(
                     .downloads
                     .as_ref()
                     .and_then(|downloads| downloads.artifact.as_ref())
-                    && !artifact.url.is_empty()
-                {
-                    total += artifact.size as u64;
-                }
+                && !artifact.url.is_empty()
+            {
+                total += artifact.size as u64;
+            }
         }
     }
 

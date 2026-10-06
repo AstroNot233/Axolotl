@@ -786,11 +786,15 @@ fn order_auto_routes(
                     .cmp(&right_health.consecutive_failures)
             })
             .then_with(|| {
-                if force_mirror_first { {
+                if force_mirror_first {
+                    {
                         let left_mirror_rank = !left.is_mirror;
                         let right_mirror_rank = !right.is_mirror;
                         left_mirror_rank.cmp(&right_mirror_rank)
-                    } } else { std::cmp::Ordering::Equal }
+                    }
+                } else {
+                    std::cmp::Ordering::Equal
+                }
             })
             .then_with(|| {
                 // Automatic content downloads start from the supplied
@@ -1172,7 +1176,10 @@ impl DownloadClients {
         direct: &reqwest::Client,
     ) -> Self {
         if let Some(mut clients) = super::download::proxy_context::clients() {
-            if std::ptr::eq(system, &raw const *HTTP1_NO_REDIRECT_REQWEST_CLIENT) {
+            if std::ptr::eq(
+                system,
+                &raw const *HTTP1_NO_REDIRECT_REQWEST_CLIENT,
+            ) {
                 clients.system = clients.http1_system.clone();
                 clients.direct = clients.http1_direct.clone();
             }
@@ -8969,11 +8976,8 @@ async fn run_native_route_attempts(
             wait_ms = resource_wait_started.elapsed().as_millis(),
             "Acquired native download resources"
         );
-        record_install_download_stage(
-            request,
-            DownloadItemStatus::Downloading,
-        )
-        .await;
+        record_install_download_stage(request, DownloadItemStatus::Downloading)
+            .await;
         let request_started = Instant::now();
         let first_byte_timeout =
             native_first_byte_timeout(route, can_switch_route);
@@ -9428,8 +9432,7 @@ async fn run_native_route_attempts(
             }
         }
         drop(alternate_probe);
-        record_install_download_progress(request, downloaded, total_size)
-            .await;
+        record_install_download_progress(request, downloaded, total_size).await;
         super::download::local_resources::write(part_path, 0, file.flush())
             .await
             .map_err(|error| IOError::with_path(error, part_path))?;

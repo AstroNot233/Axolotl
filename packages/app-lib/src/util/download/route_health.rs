@@ -69,10 +69,10 @@ impl Drop for TaskProbeGuard {
                 .in_flight
                 .as_ref()
                 .is_some_and(|v| Arc::ptr_eq(v, &self.notify))
-            {
-                entry.in_flight = None;
-                entry.last_probed = None;
-            }
+        {
+            entry.in_flight = None;
+            entry.last_probed = None;
+        }
     }
 }
 pub(crate) static ROUTE_EFFECTIVE_AUTHORITIES: LazyLock<

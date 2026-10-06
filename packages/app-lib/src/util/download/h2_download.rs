@@ -411,17 +411,18 @@ pub(crate) fn request_headers(
         && (!name.eq_ignore_ascii_case("x-api-key")
             || route_host.as_deref() == Some("api.curseforge.com"))
         && let Ok(name) = http::header::HeaderName::from_str(name)
-            && let Ok(value) = HeaderValue::from_str(value) {
-                headers.insert(name, value);
-            }
+        && let Ok(value) = HeaderValue::from_str(value)
+    {
+        headers.insert(name, value);
+    }
     if route.source == DownloadRouteSource::Official
         && fetch::is_official_modrinth_download_url(&request.url)
         && let Some(download_meta) = &request.download_meta
         && let Ok(value) =
             HeaderValue::from_str(&download_meta.to_header_value())
-        {
-            headers.insert("modrinth-download-meta", value);
-        }
+    {
+        headers.insert("modrinth-download-meta", value);
+    }
     headers
 }
 

@@ -689,7 +689,8 @@ impl State {
             current.proxy == proxy
                 && current.ignore_ssl_errors == settings.ignore_ssl_errors
                 && current.doh_enabled == settings.doh_enabled
-        }; if res {
+        };
+        if res {
             return Ok(());
         }
         let client = crate::util::fetch::DownloadClients::build(

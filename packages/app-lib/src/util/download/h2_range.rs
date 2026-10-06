@@ -275,15 +275,15 @@ pub(crate) async fn download(
     .await;
     if let H2DownloadOutcome::Completed(result) = &outcome
         && !transport.used_http1.load(Ordering::Relaxed)
-            && let Some(authority) = fetch::url_authority(&route.url)
-        {
-            super::native_reputation::record_transport_success(
-                &authority,
-                route.proxy,
-                super::native_reputation::NativeTransport::H2MultiRange,
-                result.size as f64 / started.elapsed().as_secs_f64().max(0.001),
-            );
-        }
+        && let Some(authority) = fetch::url_authority(&route.url)
+    {
+        super::native_reputation::record_transport_success(
+            &authority,
+            route.proxy,
+            super::native_reputation::NativeTransport::H2MultiRange,
+            result.size as f64 / started.elapsed().as_secs_f64().max(0.001),
+        );
+    }
     outcome
 }
 
@@ -507,13 +507,12 @@ async fn run_download(
         let invalid = fetch::is_integrity_error(&error)
             || matches!(error.raw.as_ref(), crate::ErrorKind::JSONError(_))
             || matches!(error.raw.as_ref(), crate::ErrorKind::OtherError(message) if message.starts_with("Invalid JAR") || message.starts_with("Incorrect size"));
-        if invalid
-            && discard(part).await.is_err() {
-                return H2DownloadOutcome::Fallback {
-                    failure: H2DownloadFailure::Io,
-                    preserve_partial: true,
-                };
-            }
+        if invalid && discard(part).await.is_err() {
+            return H2DownloadOutcome::Fallback {
+                failure: H2DownloadFailure::Io,
+                preserve_partial: true,
+            };
+        }
         return H2DownloadOutcome::Fallback {
             failure: if invalid {
                 H2DownloadFailure::Integrity

@@ -14,7 +14,6 @@ pub enum ContentOwnershipKind {
     LocalDiscovered,
 }
 
-
 impl ContentOwnershipKind {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -128,7 +127,6 @@ pub enum ManualDownloadOperationKind {
     ContentInstall,
     ContentUpdate,
 }
-
 
 impl ManualDownloadOperationKind {
     pub fn as_str(self) -> &'static str {

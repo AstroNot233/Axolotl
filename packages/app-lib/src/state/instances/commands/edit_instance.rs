@@ -277,11 +277,8 @@ pub(crate) async fn restore_instance_metadata(
         &mut tx,
     )
     .await?;
-    instance_rows::upsert_instance_launch_overrides(
-        &launch_overrides,
-        &mut tx,
-    )
-    .await?;
+    instance_rows::upsert_instance_launch_overrides(&launch_overrides, &mut tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }

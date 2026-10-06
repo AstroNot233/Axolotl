@@ -3253,19 +3253,17 @@ pub async fn preview_install_file(
         left.project_id == right.project_id
             && left.version_id == right.version_id
     });
-    plan.issues.extend(
-        skipped
-            .iter()
-            .map(|skipped| DependencyResolutionIssue {
-                provider: ContentProvider::CurseForge,
-                project_id: skipped.project_id.to_string(),
-                parent: None,
-                relation: Some(
-                    crate::state::instances::ContentDependencyKind::Required,
-                ),
-                reason: skipped.reason.clone(),
-            }),
-    );
+    plan.issues.extend(skipped.iter().map(|skipped| {
+        DependencyResolutionIssue {
+            provider: ContentProvider::CurseForge,
+            project_id: skipped.project_id.to_string(),
+            parent: None,
+            relation: Some(
+                crate::state::instances::ContentDependencyKind::Required,
+            ),
+            reason: skipped.reason.clone(),
+        }
+    }));
     store_dependency_resolution_plan(plan.clone());
 
     Ok(CurseForgeInstallPreview {
@@ -3610,8 +3608,9 @@ pub async fn install_modpack_with_reporter(
         .then(|| target.loader.as_str().to_string());
     if (instance_game_version != manifest.minecraft.version
         || target.loader.as_str() != instance_loader)
-        && !request.allow_target_change {
-            return Err(ErrorKind::InputError(format!(
+        && !request.allow_target_change
+    {
+        return Err(ErrorKind::InputError(format!(
 				"This modpack targets Minecraft {} with {}, while the selected instance uses {} with {}",
 				manifest.minecraft.version,
 				loader.as_deref().unwrap_or("vanilla"),
@@ -3619,7 +3618,7 @@ pub async fn install_modpack_with_reporter(
 				instance_loader
 			))
 			.into());
-        }
+    }
 
     let content_set = crate::state::instances::adapters::sqlite::content_rows::get_applied_content_set(
 			&request.instance_id,
@@ -6678,9 +6677,11 @@ fn pending_manual_download(
                 project_id: item.provider_project_id.parse().ok()?,
                 file_id: item.provider_release_id.parse().ok()?,
                 file_name: item.file_name,
-                ownership_kind: if item
-                    .pack_member_id
-                    .is_some() { crate::state::instances::ContentOwnershipKind::PackManaged } else { Default::default() },
+                ownership_kind: if item.pack_member_id.is_some() {
+                    crate::state::instances::ContentOwnershipKind::PackManaged
+                } else {
+                    Default::default()
+                },
                 operation_kind: item.operation_kind,
                 website_url: item.website_url,
                 project_type: item.project_type.get_name().to_string(),
@@ -7501,7 +7502,11 @@ async fn manually_imported_curseforge_world_downloads(
             .join("level.dat")
             .is_file()
     });
-    Ok(if imported { HashSet::from([(project_id, file_id)]) } else { Default::default() })
+    Ok(if imported {
+        HashSet::from([(project_id, file_id)])
+    } else {
+        Default::default()
+    })
 }
 
 async fn install_manual_download(
@@ -9578,13 +9583,20 @@ async fn verify_installed_curseforge_file(
     {
         if let Some(download) = download
             && download.path == path
-                && download.verified_sha1.as_deref().is_some_and(|hash| {
-                    hash.eq_ignore_ascii_case(expected_sha1)
-                })
-                && let Some(proof) = &download.verified_file
-                    && proof.matches(path, download.size).await {
-                        return Ok(VerifiedInstalledCurseForgeFile { size: download.size, sha1: expected_sha1.to_string(), pending_completion: CurseForgePendingCompletionProof::AuthoritativeSha1 });
-                    }
+            && download
+                .verified_sha1
+                .as_deref()
+                .is_some_and(|hash| hash.eq_ignore_ascii_case(expected_sha1))
+            && let Some(proof) = &download.verified_file
+            && proof.matches(path, download.size).await
+        {
+            return Ok(VerifiedInstalledCurseForgeFile {
+                size: download.size,
+                sha1: expected_sha1.to_string(),
+                pending_completion:
+                    CurseForgePendingCompletionProof::AuthoritativeSha1,
+            });
+        }
         let (size, sha1) = match cancellation {
             Some(cancellation) => {
                 sha1_file_cancellable(path, cancellation).await?
