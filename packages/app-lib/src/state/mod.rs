@@ -673,7 +673,7 @@ impl State {
             settings.ignore_ssl_errors,
             settings.doh_enabled,
         )?;
-        Settings::set_proxy_config(&self.pool, config).await?;
+        Settings::set_proxy_config(config).await?;
         *self.configured_http_client.write() = client;
         Ok(())
     }

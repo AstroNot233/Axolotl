@@ -798,20 +798,17 @@ impl Settings {
     }
 
     /// The proxy the row holds, which startup reads once to hand it over to the
-    /// document: every other reader goes through `proxy_config`.
+    /// document: every other reader goes through `proxy_config`. The password is
+    /// not part of that, as the credential store owns it and
+    /// `migrate_proxy_password` moves an older row's one there.
     pub(crate) async fn read_row_proxy_config<'a, E>(
         exec: E,
     ) -> crate::Result<ProxyConfig>
     where
         E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
-        let (mode, url, username, stored_password): (
-            String,
-            String,
-            String,
-            String,
-        ) = sqlx::query_as(
-            "SELECT proxy_mode, proxy_url, proxy_username, proxy_password
+        let (mode, url, username): (String, String, String) = sqlx::query_as(
+            "SELECT proxy_mode, proxy_url, proxy_username
              FROM settings WHERE id = 0",
         )
         .fetch_one(exec)
@@ -820,12 +817,13 @@ impl Settings {
             mode: ProxyMode::from_string(&mode),
             url,
             username,
-            password: read_proxy_password().unwrap_or(stored_password),
+            ..ProxyConfig::default()
         })
     }
 
     /// Moves a password an older build left in the row into the system
-    /// credential store, so the row stops carrying it.
+    /// credential store, so the row stops carrying it. The row is cleared even
+    /// when that store refuses the password, as nothing else reads the column.
     pub(crate) async fn migrate_proxy_password<'a, E>(
         exec: E,
     ) -> crate::Result<()>
@@ -842,10 +840,15 @@ impl Settings {
         }
 
         if read_proxy_password().is_none() {
-            write_proxy_password(&stored)?;
-            tracing::info!(
-                "Moved the proxy password into the system credential store"
-            );
+            match write_proxy_password(&stored) {
+                Ok(()) => tracing::info!(
+                    "Moved the proxy password into the system credential store"
+                ),
+                Err(error) => tracing::warn!(
+                    %error,
+                    "Dropping the proxy password the row held"
+                ),
+            }
         }
         sqlx::query("UPDATE settings SET proxy_password = '' WHERE id = 0")
             .execute(exec)
@@ -853,51 +856,41 @@ impl Settings {
         Ok(())
     }
 
-    pub(crate) async fn set_proxy_config<'a, E>(
-        exec: E,
+    pub(crate) async fn set_proxy_config(
         config: &ProxyConfig,
-    ) -> crate::Result<()>
-    where
-        E: sqlx::Executor<'a, Database = sqlx::Sqlite>,
-    {
+    ) -> crate::Result<()> {
         config.validate()?;
-        // The password belongs in the system credential store; the row keeps it
-        // only where that store is unavailable.
-        let fallback_password = match write_proxy_password(&config.password) {
-            Ok(()) => None,
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    "Storing the proxy password in the settings row instead"
-                );
-                Some(config.password.clone())
-            }
-        };
-        Self::store_proxy_config(&config).await;
-        // The row carries the password only while the credential store cannot,
-        // so writing the column on every change is what keeps a password the
-        // user has since cleared from coming back.
-        sqlx::query("UPDATE settings SET proxy_password = ? WHERE id = 0")
-            .bind(fallback_password.unwrap_or_default())
-            .execute(exec)
-            .await?;
+        // The password lives in the system credential store alone: the row is
+        // no longer written, so it must never hold a plaintext fallback.
+        if let Err(error) = write_proxy_password(&config.password) {
+            tracing::warn!(
+                %error,
+                "Could not store the proxy password in the system credential store"
+            );
+        }
+        Self::store_proxy_config(config).await;
         Ok(())
     }
 
     /// Writes the proxy the settings carry into its document.
     pub(crate) async fn store_proxy_config(config: &ProxyConfig) {
-        super::settings_store::store_in(
-            "proxy",
-            &[
-                ("proxy_mode", serde_json::Value::from(config.mode.as_str())),
-                ("proxy_url", serde_json::Value::from(config.url.trim())),
-                (
-                    "proxy_username",
-                    serde_json::Value::from(config.username.trim()),
-                ),
-            ],
-        )
-        .await;
+        super::settings_store::store_in("proxy", &Self::proxy_entries(config))
+            .await;
+    }
+
+    /// The entries the proxy document carries, which the handover writes as
+    /// well.
+    pub(crate) fn proxy_entries(
+        config: &ProxyConfig,
+    ) -> [(&'static str, serde_json::Value); 3] {
+        [
+            ("proxy_mode", serde_json::Value::from(config.mode.as_str())),
+            ("proxy_url", serde_json::Value::from(config.url.trim())),
+            (
+                "proxy_username",
+                serde_json::Value::from(config.username.trim()),
+            ),
+        ]
     }
 
     pub fn effective_max_concurrent_downloads(&self) -> usize {
@@ -1329,7 +1322,8 @@ mod tests {
             "UPDATE settings
              SET proxy_mode = 'custom',
                  proxy_url = 'http://127.0.0.1:7897',
-                 proxy_username = 'someone'
+                 proxy_username = 'someone',
+                 proxy_password = 'secret'
              WHERE id = 0",
         )
         .execute(&pool)
@@ -1340,6 +1334,9 @@ mod tests {
         assert_eq!(proxy.mode.as_str(), "custom");
         assert_eq!(proxy.url, "http://127.0.0.1:7897");
         assert_eq!(proxy.username, "someone");
+        // The password belongs to the credential store, which the handover
+        // leaves out of the document it writes.
+        assert!(proxy.password.is_empty());
     }
 
     #[test]
