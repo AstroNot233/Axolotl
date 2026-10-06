@@ -1,6 +1,5 @@
 //! Theseus settings management interface
 
-pub use crate::util::download::DownloadEngine;
 pub use crate::{
     State,
     state::{
@@ -27,18 +26,10 @@ pub async fn set(mut settings: Settings) -> crate::Result<()> {
     super::terracotta::validate_public_nodes(
         &settings.terracotta_public_nodes,
     )?;
+    crate::util::download_dns::DownloadDnsResolver::with_doh(
+        settings.doh_enabled,
+    )?;
     settings.apply_legacy_download_source_settings();
-    settings.update().await;
-    state.apply_runtime_settings(&settings).await?;
-
-    Ok(())
-}
-
-#[tracing::instrument]
-pub async fn set_download_engine(engine: DownloadEngine) -> crate::Result<()> {
-    let state = State::get().await?;
-    let mut settings = Settings::get().await;
-    settings.download_engine = engine;
     settings.update().await;
     state.apply_runtime_settings(&settings).await?;
     Ok(())

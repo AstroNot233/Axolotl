@@ -85,7 +85,7 @@ const DOMAINS: &[(&str, &[&str])] = &[
             "auto_concurrent_downloads",
             "bypass_curseforge_download_restrictions",
             "curseforge_source",
-            "download_engine",
+            "doh_enabled",
             "max_concurrent_downloads",
             "max_concurrent_writes",
             "minecraft_file_source",

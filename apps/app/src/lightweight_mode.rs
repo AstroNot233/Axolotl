@@ -234,12 +234,11 @@ impl LightweightMode {
                         show_main_window(&app)
                     };
                     if let Err(error) = result {
-                        if was_lightweight {
-                            if let Ok(mut state) =
+                        if was_lightweight
+                            && let Ok(mut state) =
                                 app.state::<LightweightMode>().0.lock()
-                            {
-                                state.restoring = false;
-                            }
+                        {
+                            state.restoring = false;
                         }
                         tracing::error!(
                             "Failed to restore launcher after Minecraft exited: {error}"
@@ -302,10 +301,10 @@ impl LightweightMode {
     }
 
     fn set_route(&self, route: String) {
-        if route.starts_with('/') {
-            if let Ok(mut state) = self.0.lock() {
-                state.route = route;
-            }
+        if route.starts_with('/')
+            && let Ok(mut state) = self.0.lock()
+        {
+            state.route = route;
         }
     }
 
@@ -409,7 +408,7 @@ unsafe extern "system" fn maximize_if_owned_by_process(
     }
 
     let mut window_pid = 0;
-    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut window_pid)) };
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&raw mut window_pid)) };
     if window_pid == MAXIMIZE_PROCESS_ID.load(Ordering::Relaxed)
         && unsafe { IsWindowVisible(hwnd).as_bool() }
     {

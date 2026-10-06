@@ -216,7 +216,7 @@ pub async fn set_world_datapack_enabled(
 
         let key = if enabled { "Enabled" } else { "Disabled" };
         if let Ok(list) = data_packs.get_mut::<_, &mut NbtList>(key) {
-            list.push(NbtTag::String(file_id.clone()));
+            list.push(NbtTag::String(file_id));
         } else {
             let mut list = NbtList::new();
             list.push(NbtTag::String(file_id));
@@ -454,15 +454,16 @@ fn read_zip_pack_meta(
 
     {
         let cache = ZIP_DATAPACK_META_CACHE.lock().unwrap();
-        if let Some(cached) = cache.get(&cache_key) {
-            if cached.len == signature.0 && cached.modified == signature.1 {
-                return Ok((
-                    cached.pack_format.clone(),
-                    cached.supported_formats.clone(),
-                    cached.description.clone(),
-                    cached.icon.clone(),
-                ));
-            }
+        if let Some(cached) = cache.get(&cache_key)
+            && cached.len == signature.0
+            && cached.modified == signature.1
+        {
+            return Ok((
+                cached.pack_format,
+                cached.supported_formats.clone(),
+                cached.description.clone(),
+                cached.icon.clone(),
+            ));
         }
     }
 
@@ -477,7 +478,7 @@ fn read_zip_pack_meta(
         CachedZipDatapackMeta {
             len: signature.0,
             modified: signature.1,
-            pack_format: parsed.0.clone(),
+            pack_format: parsed.0,
             supported_formats: parsed.1.clone(),
             description: parsed.2.clone(),
             icon: parsed.3.clone(),

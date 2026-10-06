@@ -403,7 +403,7 @@ pub(crate) async fn local_instance_icon_path(
                             .with_guessed_format()
                             .map_err(|error| thumbnail_error(error.into()))?
                             .into_dimensions()
-                            .map_err(|error| thumbnail_error(error.into()))?;
+                            .map_err(thumbnail_error)?;
 
                     if width <= max_dimension
                         && height <= max_dimension
@@ -417,7 +417,7 @@ pub(crate) async fn local_instance_icon_path(
                             .with_guessed_format()
                             .map_err(|error| thumbnail_error(error.into()))?
                             .decode()
-                            .map_err(|error| thumbnail_error(error.into()))?;
+                            .map_err(thumbnail_error)?;
                     let thumbnail =
                         decoded.thumbnail(max_dimension, max_dimension);
                     let mut output = Vec::new();
@@ -430,7 +430,7 @@ pub(crate) async fn local_instance_icon_path(
                                 rgba.height(),
                                 image::ExtendedColorType::Rgba8,
                             )
-                            .map_err(|error| thumbnail_error(error.into()))?;
+                            .map_err(thumbnail_error)?;
                         Ok((output, "icon.png"))
                     } else {
                         let rgb = thumbnail.to_rgb8();
@@ -444,7 +444,7 @@ pub(crate) async fn local_instance_icon_path(
                             rgb.height(),
                             image::ExtendedColorType::Rgb8,
                         )
-                        .map_err(|error| thumbnail_error(error.into()))?;
+                        .map_err(thumbnail_error)?;
                         Ok((output, "icon.jpg"))
                     }
                 },
