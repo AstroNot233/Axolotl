@@ -733,17 +733,19 @@ impl Settings {
         )
         .fetch_one(exec)
         .await?;
-        if stored.trim().is_empty() || read_proxy_password().is_some() {
+        if stored.trim().is_empty() {
             return Ok(());
         }
 
-        write_proxy_password(&stored)?;
+        if read_proxy_password().is_none() {
+            write_proxy_password(&stored)?;
+            tracing::info!(
+                "Moved the proxy password into the system credential store"
+            );
+        }
         sqlx::query("UPDATE settings SET proxy_password = '' WHERE id = 0")
             .execute(exec)
             .await?;
-        tracing::info!(
-            "Moved the proxy password into the system credential store"
-        );
         Ok(())
     }
 
@@ -768,12 +770,13 @@ impl Settings {
             }
         };
         Self::store_proxy_config(&config).await;
-        if let Some(password) = fallback_password {
-            sqlx::query("UPDATE settings SET proxy_password = ? WHERE id = 0")
-                .bind(password)
-                .execute(exec)
-                .await?;
-        }
+        // The row carries the password only while the credential store cannot,
+        // so writing the column on every change is what keeps a password the
+        // user has since cleared from coming back.
+        sqlx::query("UPDATE settings SET proxy_password = ? WHERE id = 0")
+            .bind(fallback_password.unwrap_or_default())
+            .execute(exec)
+            .await?;
         Ok(())
     }
 
