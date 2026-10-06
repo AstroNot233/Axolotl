@@ -558,11 +558,12 @@ impl Settings {
             .unwrap_or(false),
             version: res.version as usize,
         };
-        Ok(super::settings_store::overlay(settings).await)
+        Ok(super::settings_store::overlay(settings).await.normalized())
     }
 
-    /// The values `update` persists: clamped, trimmed and with the core nav
-    /// items kept visible, matching what `get` applies when it reads back.
+    /// The values every read returns and `update` persists: clamped, trimmed
+    /// and with the core nav items kept visible. A stored document is text a
+    /// person can edit, so the ranges are applied on the way out as well.
     pub(crate) fn normalized(&self) -> Self {
         let mut settings = self.clone();
         settings.max_concurrent_downloads =
