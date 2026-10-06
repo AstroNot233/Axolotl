@@ -1,3 +1,4 @@
+use futures::stream::{FuturesUnordered, StreamExt};
 use hickory_resolver::proto::{
     op::{Message, MessageType, Query, ResponseCode},
     rr::{Name as DnsName, RData, RecordType},
@@ -9,12 +10,17 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub const DEFAULT_DOH_SERVER: &str = "https://doh.pub/dns-query";
+pub const BUILTIN_DOH_SERVERS: [&str; 3] = [
+    "https://doh.pub/dns-query",
+    "https://doh.pysio.online/dns-query",
+    "https://cloudflare-dns.com/dns-query",
+];
 
 /// `lookup_host` does not expose the authoritative record TTL. Keep entries
 /// long enough to retain the connection-reuse benefit, but short enough that
 /// a changed CDN, VPN, or network is not pinned until the application exits.
 const CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+const SUCCESSFUL_ADDRESS_CACHE_TTL: Duration = Duration::from_secs(10 * 60);
 const CONNECTION_FAILURES_BEFORE_REFRESH: u8 = 2;
 const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(6);
 const DOH_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -44,6 +50,7 @@ impl CachedAddresses {
 #[derive(Clone)]
 pub struct DownloadDnsResolver {
     reliability: Arc<Mutex<HashMap<IpAddr, f64>>>,
+    successful_addresses: Arc<Mutex<HashMap<String, HashMap<IpAddr, Instant>>>>,
     last_resolved: Arc<Mutex<HashMap<String, CachedAddresses>>>,
     last_failed: Arc<Mutex<HashMap<String, CachedFailure>>>,
     /// Locks only a single hostname's lookup. The map is held just long
@@ -51,8 +58,9 @@ pub struct DownloadDnsResolver {
     resolving_hosts: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     host_overrides: Arc<Mutex<HashMap<String, String>>>,
     doh_enabled: bool,
-    doh_server: Arc<str>,
-    doh_client: reqwest::Client,
+    doh_endpoints: Arc<Vec<Arc<str>>>,
+    doh_clients: Arc<Vec<reqwest::Client>>,
+    doh_provider_weights: Arc<Mutex<HashMap<String, u8>>>,
     #[cfg(test)]
     test_addresses: Arc<Mutex<HashMap<String, Vec<SocketAddr>>>>,
     #[cfg(test)]
@@ -67,18 +75,24 @@ impl Default for DownloadDnsResolver {
     fn default() -> Self {
         Self {
             reliability: Arc::default(),
+            successful_addresses: Arc::default(),
             last_resolved: Arc::default(),
             last_failed: Arc::default(),
             resolving_hosts: Arc::default(),
             host_overrides: Arc::default(),
             doh_enabled: false,
-            doh_server: Arc::from(DEFAULT_DOH_SERVER),
-            doh_client: reqwest::Client::builder()
-                .no_proxy()
-                .timeout(DOH_REQUEST_TIMEOUT)
-                .connect_timeout(Duration::from_secs(3))
-                .build()
-                .expect("DNS bootstrap client configuration should be valid"),
+            doh_endpoints: Arc::new(vec![Arc::from(BUILTIN_DOH_SERVERS[0])]),
+            doh_clients: Arc::new(vec![
+                reqwest::Client::builder()
+                    .no_proxy()
+                    .timeout(DOH_REQUEST_TIMEOUT)
+                    .connect_timeout(Duration::from_secs(3))
+                    .build()
+                    .expect(
+                        "DNS bootstrap client configuration should be valid",
+                    ),
+            ]),
+            doh_provider_weights: Arc::default(),
             #[cfg(test)]
             test_addresses: Arc::default(),
             #[cfg(test)]
@@ -92,47 +106,43 @@ impl Default for DownloadDnsResolver {
 }
 
 impl DownloadDnsResolver {
-    pub fn with_doh(
-        enabled: bool,
-        server: impl Into<String>,
-    ) -> crate::Result<Self> {
-        Self::with_doh_and_proxy(enabled, server, None)
+    pub fn with_doh(enabled: bool) -> crate::Result<Self> {
+        Self::with_doh_and_proxy(enabled, None)
     }
 
     pub fn with_doh_and_proxy(
         enabled: bool,
-        server: impl Into<String>,
         proxy: Option<&crate::util::proxy::ProxyConfig>,
     ) -> crate::Result<Self> {
-        let server = server.into().trim().to_string();
-        if enabled {
-            let parsed = reqwest::Url::parse(&server).map_err(|error| {
-                crate::ErrorKind::InputError(format!(
-                    "DoH server URL is invalid: {error}"
-                ))
-            })?;
-            if parsed.scheme() != "https" || parsed.host_str().is_none() {
-                return Err(crate::ErrorKind::InputError(
-                    "DoH server must be an HTTPS URL".to_string(),
-                )
-                .into());
-            }
-        }
-        let builder = match proxy {
-            Some(proxy) => proxy.apply(reqwest::Client::builder())?,
-            None => reqwest::Client::builder().no_proxy(),
+        let endpoints = if enabled {
+            BUILTIN_DOH_SERVERS
+                .iter()
+                .map(|endpoint| Arc::from(*endpoint))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
         };
-        let doh_client = builder
-            .timeout(DOH_REQUEST_TIMEOUT)
-            .connect_timeout(Duration::from_secs(3))
-            .read_timeout(DOH_REQUEST_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(crate::Error::from)?;
+        let mut doh_clients = Vec::with_capacity(endpoints.len());
+        for _ in &endpoints {
+            let builder = match proxy {
+                Some(proxy) => proxy.apply(reqwest::Client::builder())?,
+                None => reqwest::Client::builder().no_proxy(),
+            };
+            doh_clients.push(
+                builder
+                    .timeout(DOH_REQUEST_TIMEOUT)
+                    .connect_timeout(Duration::from_secs(3))
+                    .read_timeout(DOH_REQUEST_TIMEOUT)
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .map_err(crate::Error::from)?,
+            );
+        }
         Ok(Self {
             doh_enabled: enabled,
-            doh_server: Arc::from(server),
-            doh_client,
+            doh_endpoints: Arc::new(endpoints),
+            doh_clients: Arc::new(doh_clients),
+            doh_provider_weights: Arc::default(),
             ..Self::default()
         })
     }
@@ -141,9 +151,6 @@ impl DownloadDnsResolver {
         self.doh_enabled
     }
 
-    pub fn doh_server(&self) -> &str {
-        &self.doh_server
-    }
     /// Resolves `host` through `resolver_host` while preserving the original
     /// URL host for HTTP Host headers and TLS SNI.
     #[allow(dead_code)]
@@ -200,6 +207,12 @@ impl DownloadDnsResolver {
             entry.consecutive_connection_failures = 0;
             drop(cached);
             self.record_result(address, 0.5);
+            let mut successful = self.successful_addresses.lock();
+            let addresses = successful.entry(host.to_string()).or_default();
+            addresses.retain(|_, timestamp| {
+                timestamp.elapsed() < SUCCESSFUL_ADDRESS_CACHE_TTL
+            });
+            addresses.insert(address, Instant::now());
         }
     }
 
@@ -301,16 +314,78 @@ impl DownloadDnsResolver {
         .await
     }
 
+    fn doh_provider_candidates(&self) -> Vec<(Arc<str>, reqwest::Client)> {
+        let mut indices = (0..self.doh_endpoints.len()).collect::<Vec<_>>();
+        let weights = self.doh_provider_weights.lock();
+        indices.sort_by(|left, right| {
+            weights
+                .get(self.doh_endpoints[*right].as_ref())
+                .copied()
+                .unwrap_or_default()
+                .cmp(
+                    &weights
+                        .get(self.doh_endpoints[*left].as_ref())
+                        .copied()
+                        .unwrap_or_default(),
+                )
+                .then_with(|| left.cmp(right))
+        });
+        indices
+            .into_iter()
+            .take(2)
+            .map(|index| {
+                (
+                    Arc::clone(&self.doh_endpoints[index]),
+                    self.doh_clients[index].clone(),
+                )
+            })
+            .collect()
+    }
+
+    fn record_doh_provider_success(&self, endpoint: &str) {
+        let mut weights = self.doh_provider_weights.lock();
+        let weight = weights.entry(endpoint.to_string()).or_default();
+        *weight = weight.saturating_add(1);
+    }
+
     async fn lookup_doh_family(
         &self,
         host: &str,
         record_type: RecordType,
     ) -> std::io::Result<Vec<SocketAddr>> {
-        let query = doh_query(host, record_type)?;
+        let providers = self.doh_provider_candidates();
+        let mut requests = FuturesUnordered::new();
+        for (endpoint, client) in providers {
+            let query = doh_query(host, record_type)?;
+            requests.push(async move {
+                let result =
+                    Self::lookup_doh_provider(&client, &endpoint, &query).await;
+                (endpoint, result)
+            });
+        }
+        let mut last_error = None;
+        while let Some((endpoint, result)) = requests.next().await {
+            match result {
+                Ok(addresses) => {
+                    self.record_doh_provider_success(&endpoint);
+                    return Ok(addresses);
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            std::io::Error::other("No DoH providers available")
+        }))
+    }
+
+    async fn lookup_doh_provider(
+        client: &reqwest::Client,
+        endpoint: &str,
+        query: &Message,
+    ) -> std::io::Result<Vec<SocketAddr>> {
         let body = query.to_vec().map_err(std::io::Error::other)?;
-        let mut response = self
-            .doh_client
-            .post(self.doh_server.as_ref())
+        let mut response = client
+            .post(endpoint)
             .header(reqwest::header::CONTENT_TYPE, "application/dns-message")
             .header(reqwest::header::ACCEPT, "application/dns-message")
             .body(body)
@@ -328,7 +403,7 @@ impl DownloadDnsResolver {
             }
             bytes.extend_from_slice(&chunk);
         }
-        parse_doh_response(&bytes, &query)
+        parse_doh_response(&bytes, query)
     }
 
     fn cached_failure(&self, host: &str) -> Option<std::io::Error> {
@@ -459,32 +534,59 @@ impl DownloadDnsResolver {
         host: &str,
         mut addresses: Vec<SocketAddr>,
     ) -> Vec<SocketAddr> {
-        addresses.sort_unstable_by_key(|address| address.ip());
-        addresses.dedup_by_key(|address| address.ip());
+        let mut seen = std::collections::HashSet::new();
+        addresses.retain(|address| seen.insert(address.ip()));
 
-        let best_v4 = addresses
+        let successful = self
+            .successful_addresses
+            .lock()
+            .get(host)
+            .cloned()
+            .unwrap_or_default();
+        let mut cached = addresses
             .iter()
-            .filter(|address| address.is_ipv4())
-            .map(|address| self.score(address.ip()))
-            .max_by(f64::total_cmp);
-        let mut best_v6 = addresses
-            .iter()
-            .filter(|address| address.is_ipv6())
-            .map(|address| self.score(address.ip()))
-            .max_by(f64::total_cmp);
-        if host == "api.modrinth.com" {
-            best_v6 = best_v6.map(|score| score - 0.1);
-        }
-        addresses.sort_unstable_by(|left, right| {
-            let preferred_v4 =
-                best_v4.unwrap_or_default() >= best_v6.unwrap_or_default();
-            let left_family = left.is_ipv4() == preferred_v4;
-            let right_family = right.is_ipv4() == preferred_v4;
-            right_family.cmp(&left_family).then_with(|| {
-                self.score(right.ip()).total_cmp(&self.score(left.ip()))
+            .filter(|address| {
+                successful.get(&address.ip()).is_some_and(|timestamp| {
+                    timestamp.elapsed() < SUCCESSFUL_ADDRESS_CACHE_TTL
+                })
             })
+            .copied()
+            .collect::<Vec<_>>();
+        cached.sort_by_key(|address| {
+            std::cmp::Reverse(successful.get(&address.ip()).copied())
         });
-        addresses
+        let uncached = addresses
+            .into_iter()
+            .filter(|address| {
+                successful.get(&address.ip()).is_none_or(|timestamp| {
+                    timestamp.elapsed() >= SUCCESSFUL_ADDRESS_CACHE_TTL
+                })
+            })
+            .collect::<Vec<_>>();
+        let v6 = uncached
+            .iter()
+            .copied()
+            .filter(|address| address.is_ipv6())
+            .collect::<Vec<_>>();
+        let v4 = uncached
+            .iter()
+            .copied()
+            .filter(|address| address.is_ipv4())
+            .collect::<Vec<_>>();
+        let mut ordered = cached;
+        let mut v6_index = 0;
+        let mut v4_index = 0;
+        while v6_index < v6.len() || v4_index < v4.len() {
+            if v6_index < v6.len() {
+                ordered.push(v6[v6_index]);
+                v6_index += 1;
+            }
+            if v4_index < v4.len() {
+                ordered.push(v4[v4_index]);
+                v4_index += 1;
+            }
+        }
+        return ordered;
     }
 }
 
@@ -607,6 +709,7 @@ impl Resolve for DownloadDnsResolver {
                 .await?
                 .into_iter()
                 .map(|address| SocketAddr::new(address, 0))
+                .take(2)
                 .collect::<Vec<_>>();
             Ok(Box::new(addresses.into_iter()) as Addrs)
         })
@@ -621,23 +724,17 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
-    fn doh_configuration_requires_https_and_keeps_the_default() {
-        assert_eq!(DEFAULT_DOH_SERVER, "https://doh.pub/dns-query");
-        assert!(
-            DownloadDnsResolver::with_doh(true, "http://dns.example/query")
-                .is_err()
-        );
-        let resolver =
-            DownloadDnsResolver::with_doh(true, DEFAULT_DOH_SERVER).unwrap();
+    fn doh_configuration_uses_the_builtin_provider_pool() {
+        let resolver = DownloadDnsResolver::with_doh(true).unwrap();
         assert!(resolver.doh_enabled());
-        assert_eq!(resolver.doh_server(), DEFAULT_DOH_SERVER);
+        assert_eq!(resolver.doh_endpoints.len(), BUILTIN_DOH_SERVERS.len());
+        assert_eq!(resolver.doh_endpoints[0].as_ref(), BUILTIN_DOH_SERVERS[0]);
     }
 
     #[test]
     fn disabled_doh_accepts_an_invalid_draft_endpoint() {
-        let resolver = DownloadDnsResolver::with_doh(false, "").unwrap();
+        let resolver = DownloadDnsResolver::with_doh(false).unwrap();
         assert!(!resolver.doh_enabled());
-        assert!(DownloadDnsResolver::with_doh(true, "").is_err());
     }
 
     #[test]
@@ -817,11 +914,9 @@ mod tests {
         let resolver = DownloadDnsResolver::default();
         let ipv4 = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 0));
         let ipv6 = SocketAddr::from((Ipv6Addr::LOCALHOST, 0));
-        resolver.record_result(ipv6.ip(), -0.7);
-
         assert_eq!(
             resolver.order_addresses("api.modrinth.com", vec![ipv6, ipv4]),
-            vec![ipv4, ipv6]
+            vec![ipv6, ipv4]
         );
     }
 
@@ -830,7 +925,11 @@ mod tests {
         let resolver = DownloadDnsResolver::default();
         let slower = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 0));
         let faster = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 11), 0));
-        resolver.record_result(faster.ip(), 0.5);
+        resolver.cache_addresses(
+            "cdn.example.com".to_string(),
+            vec![slower, faster],
+        );
+        resolver.record_host_success("cdn.example.com", faster.ip());
 
         assert_eq!(
             resolver.order_addresses("cdn.example.com", vec![slower, faster]),

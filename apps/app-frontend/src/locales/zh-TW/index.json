@@ -6851,26 +6851,14 @@
   "app.settings.resources.database-backups-description": {
     "message": "重要應用程式的資料備份保存在這裡，以便日後需要時復原。"
   },
-	"app.settings.resources.doh-custom": {
-		"message": "自訂"
-	},
-	"app.settings.resources.doh-invalid-server": {
-		"message": "請輸入有效的 HTTPS 網址。"
-	},
   "app.settings.resources.doh-enabled": {
     "message": "使用 DNS over HTTPS"
-  },
-  "app.settings.resources.doh-server": {
-    "message": "DNS over HTTPS 伺服器"
-  },
-  "app.settings.resources.doh-server-placeholder": {
-    "message": "https://doh.pub/dns-query"
   },
   "app.settings.resources.doh-settings": {
     "message": "DNS over HTTPS"
   },
   "app.settings.resources.doh-settings-description": {
-    "message": "透過所選的加密 DNS 服務解析下載網域。"
+    "message": "透過內建的加密 DNS 服務池解析下載網域。"
   },
   "app.settings.resources.download-mirrors": {
     "message": "下載來源"

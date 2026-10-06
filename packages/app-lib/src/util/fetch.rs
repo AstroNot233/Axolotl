@@ -3,7 +3,7 @@ use super::download::modrinth_redirect::is_official_redirect as is_official_modr
 #[cfg(test)]
 use super::download::modrinth_redirect::repair_official_redirect as repair_official_cdn_redirect;
 use super::download::route_policy;
-use super::download_dns::{DEFAULT_DOH_SERVER, DownloadDnsResolver};
+use super::download_dns::DownloadDnsResolver;
 use super::download_manager::{DownloadSpeedTracker, SpeedSnapshot};
 use super::io::{self, IOError};
 use crate::event::LoadingBarId;
@@ -1102,7 +1102,6 @@ pub(crate) struct DownloadClients {
     pub(crate) system_dns: Arc<DownloadDnsResolver>,
     pub(crate) direct_dns: Arc<DownloadDnsResolver>,
     pub(crate) doh_enabled: bool,
-    pub(crate) doh_server: String,
 }
 
 impl DownloadClients {
@@ -1110,17 +1109,13 @@ impl DownloadClients {
         proxy: &crate::util::proxy::ProxyConfig,
         ignore_ssl_errors: bool,
         doh_enabled: bool,
-        doh_server: &str,
     ) -> crate::Result<Self> {
-        let doh_server = doh_server.trim();
         let system_dns = Arc::new(DownloadDnsResolver::with_doh_and_proxy(
             doh_enabled,
-            doh_server,
             Some(proxy),
         )?);
         let direct_dns = Arc::new(DownloadDnsResolver::with_doh_and_proxy(
             doh_enabled,
-            doh_server,
             None,
         )?);
         let build = |direct: bool, http1: bool| {
@@ -1167,12 +1162,10 @@ impl DownloadClients {
                 proxy,
                 ignore_ssl_errors,
                 doh_enabled,
-                doh_server,
             ),
             system_dns,
             direct_dns,
             doh_enabled,
-            doh_server: doh_server.to_string(),
         })
     }
 
@@ -1199,7 +1192,6 @@ impl DownloadClients {
             system_dns: Arc::clone(&DOWNLOAD_DNS_RESOLVER),
             direct_dns: Arc::clone(&DOWNLOAD_DNS_RESOLVER),
             doh_enabled: false,
-            doh_server: DEFAULT_DOH_SERVER.to_string(),
         }
     }
 }

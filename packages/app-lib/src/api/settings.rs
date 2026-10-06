@@ -29,7 +29,6 @@ pub async fn set(mut settings: Settings) -> crate::Result<()> {
     )?;
     crate::util::download_dns::DownloadDnsResolver::with_doh(
         settings.doh_enabled,
-        settings.doh_server.trim(),
     )?;
     settings.apply_legacy_download_source_settings();
     settings.update(&state.pool).await?;

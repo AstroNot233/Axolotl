@@ -658,7 +658,6 @@ impl State {
             config,
             settings.ignore_ssl_errors,
             settings.doh_enabled,
-            &settings.doh_server,
         )?;
         crate::state::proxy_settings::set(&self.pool, config).await?;
         *self.configured_http_client.write() = client;
@@ -676,7 +675,6 @@ impl State {
             current.proxy == proxy
                 && current.ignore_ssl_errors == settings.ignore_ssl_errors
                 && current.doh_enabled == settings.doh_enabled
-                && current.doh_server == settings.doh_server.trim()
         } {
             return Ok(());
         }
@@ -684,7 +682,6 @@ impl State {
             &proxy,
             settings.ignore_ssl_errors,
             settings.doh_enabled,
-            &settings.doh_server,
         )?;
         *self.configured_http_client.write() = client;
         Ok(())
@@ -927,7 +924,6 @@ impl State {
                 &proxy_config,
                 settings.ignore_ssl_errors,
                 settings.doh_enabled,
-                &settings.doh_server,
             )?;
 
         tracing::info!("Initializing directories");
@@ -1081,7 +1077,6 @@ pub(crate) async fn test_state(
         &proxy_config,
         settings.ignore_ssl_errors,
         settings.doh_enabled,
-        &settings.doh_server,
     )?;
 
     Ok(Arc::new(State {

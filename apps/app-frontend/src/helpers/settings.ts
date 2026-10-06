@@ -64,7 +64,6 @@ export type ProxyTestResult = {
 }
 export type DohSettings = {
 	doh_enabled: boolean
-	doh_server: string
 }
 
 export async function getUpdateChannel(): Promise<UpdateChannel> {

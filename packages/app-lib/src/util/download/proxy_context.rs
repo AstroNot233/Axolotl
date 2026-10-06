@@ -36,19 +36,13 @@ pub(crate) fn fingerprint(
     config: &ProxyConfig,
     ignore_ssl_errors: bool,
 ) -> String {
-    fingerprint_with_doh(
-        config,
-        ignore_ssl_errors,
-        false,
-        crate::util::download_dns::DEFAULT_DOH_SERVER,
-    )
+    fingerprint_with_doh(config, ignore_ssl_errors, false)
 }
 
 pub(crate) fn fingerprint_with_doh(
     config: &ProxyConfig,
     ignore_ssl_errors: bool,
     doh_enabled: bool,
-    doh_server: &str,
 ) -> String {
     let mut digest = Sha256::new();
     for value in [
@@ -62,8 +56,6 @@ pub(crate) fn fingerprint_with_doh(
     }
     digest.update([u8::from(ignore_ssl_errors)]);
     digest.update([u8::from(doh_enabled)]);
-    digest.update((doh_server.len() as u64).to_le_bytes());
-    digest.update(doh_server.as_bytes());
     format!("{:x}", digest.finalize())
 }
 
@@ -78,7 +70,6 @@ pub(crate) fn scope(proxy: ProxyPolicy) -> String {
                 },
                 clients.ignore_ssl_errors,
                 clients.doh_enabled,
-                &clients.doh_server,
             ),
         })
         .unwrap_or_else(|| format!("unconfigured-{proxy:?}"))
@@ -141,11 +132,7 @@ mod tests {
     #[tokio::test]
     async fn direct_scope_changes_with_doh_configuration() {
         let mut keys = Vec::new();
-        for (enabled, endpoint) in [
-            (true, "https://doh.pub/dns-query"),
-            (false, "https://doh.pub/dns-query"),
-            (true, "https://dns.google/dns-query"),
-        ] {
+        for enabled in [true, false] {
             let clients = crate::util::fetch::DownloadClients::build(
                 &ProxyConfig {
                     mode: ProxyMode::None,
@@ -153,7 +140,6 @@ mod tests {
                 },
                 false,
                 enabled,
-                endpoint,
             )
             .unwrap();
             keys.push(
@@ -164,7 +150,6 @@ mod tests {
             );
         }
         assert_ne!(keys[0], keys[1]);
-        assert_ne!(keys[0], keys[2]);
     }
 
     #[test]
@@ -173,13 +158,9 @@ mod tests {
             mode: ProxyMode::None,
             ..Default::default()
         };
-        let first = crate::util::fetch::DownloadClients::build(
-            &config,
-            false,
-            true,
-            crate::util::download_dns::DEFAULT_DOH_SERVER,
-        )
-        .unwrap();
+        let first =
+            crate::util::fetch::DownloadClients::build(&config, false, true)
+                .unwrap();
         let second = crate::util::fetch::DownloadClients::build(
             &ProxyConfig {
                 mode: ProxyMode::Custom,
@@ -188,7 +169,6 @@ mod tests {
             },
             false,
             true,
-            crate::util::download_dns::DEFAULT_DOH_SERVER,
         )
         .unwrap();
         assert_ne!(first.scope, second.scope);
@@ -218,7 +198,6 @@ mod tests {
                 },
                 false,
                 true,
-                crate::util::download_dns::DEFAULT_DOH_SERVER,
             )
             .unwrap();
             keys.push(with_snapshot(clients, async {
