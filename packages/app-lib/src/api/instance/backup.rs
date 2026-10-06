@@ -1429,14 +1429,14 @@ pub async fn create_snapshot(
     cancellation: CancellationToken,
     cancellable: Arc<AtomicBool>,
 ) -> crate::Result<BackupSnapshot> {
-    let result = create_snapshot_inner(
+    
+    create_snapshot_inner(
         instance_id,
         operation_id,
         &cancellation,
         &cancellable,
     )
-    .await;
-    result
+    .await
 }
 
 async fn create_snapshot_inner(
@@ -2307,8 +2307,8 @@ async fn cleanup_pending_repository_paths(state: &State) -> crate::Result<()> {
             );
             continue;
         }
-        if path.try_exists()? {
-            if let Err(error) = io::remove_dir_all(&path).await {
+        if path.try_exists()?
+            && let Err(error) = io::remove_dir_all(&path).await {
                 tracing::warn!(
                     path = %path.display(),
                     %error,
@@ -2316,7 +2316,6 @@ async fn cleanup_pending_repository_paths(state: &State) -> crate::Result<()> {
                 );
                 continue;
             }
-        }
         sqlx::query(
             "DELETE FROM pending_backup_repository_cleanups WHERE path = ?",
         )

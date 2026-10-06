@@ -1958,7 +1958,7 @@ async fn enqueue_curseforge_dependencies(
                                 plan,
                             });
                         }
-                        Ok(Some(_)) | Ok(None) => {
+                        Ok(Some(_) | None) => {
                             result.skipped_dependencies.push(
                                 CurseForgeSkippedDependency {
                                     project_id: dependency_project_id,
@@ -3099,7 +3099,7 @@ pub async fn preview_install_file(
                                         );
                                         continue;
                                     }
-                                    Ok(Some(_)) | Ok(None) => {}
+                                    Ok(Some(_) | None) => {}
                                     Err(error) => {
                                         tracing::warn!(
                                             project_id = dependency_project_id,
@@ -3264,8 +3264,7 @@ pub async fn preview_install_file(
                     crate::state::instances::ContentDependencyKind::Required,
                 ),
                 reason: skipped.reason.clone(),
-            })
-            .collect::<Vec<_>>(),
+            }),
     );
     store_dependency_resolution_plan(plan.clone());
 
@@ -3609,10 +3608,9 @@ pub async fn install_modpack_with_reporter(
     let target = modpack_target(&manifest)?;
     let loader = (target.loader != ModLoader::Vanilla)
         .then(|| target.loader.as_str().to_string());
-    if instance_game_version != manifest.minecraft.version
-        || target.loader.as_str() != instance_loader
-    {
-        if !request.allow_target_change {
+    if (instance_game_version != manifest.minecraft.version
+        || target.loader.as_str() != instance_loader)
+        && !request.allow_target_change {
             return Err(ErrorKind::InputError(format!(
 				"This modpack targets Minecraft {} with {}, while the selected instance uses {} with {}",
 				manifest.minecraft.version,
@@ -3622,7 +3620,6 @@ pub async fn install_modpack_with_reporter(
 			))
 			.into());
         }
-    }
 
     let content_set = crate::state::instances::adapters::sqlite::content_rows::get_applied_content_set(
 			&request.instance_id,
@@ -4038,11 +4035,11 @@ pub async fn install_modpack_with_reporter(
         crate::api::instance::get_full_path(&request.instance_id).await?;
     if let Some(reporter) = reporter.as_ref() {
         reporter
-			.update(
-				InstallPhaseId::ExtractingOverrides,
-				None,
-				pack_details.clone(),
-			)
+            .update(
+                InstallPhaseId::ExtractingOverrides,
+                None,
+                pack_details.clone(),
+            )
             .await?;
     }
     let update_ready = content.manual_downloads.is_empty()
@@ -5474,19 +5471,19 @@ async fn cache_instance_icon_from_url(
 }
 
 struct ModpackOverrideTask {
-	index: usize,
-	target: PathBuf,
-	size: u64,
+    index: usize,
+    target: PathBuf,
+    size: u64,
 }
 
 fn collect_modpack_override_tasks<R: Read + Seek>(
-	archive: &mut zip::ZipArchive<R>,
-	manifest: &CurseForgeModpackManifest,
-	instance_path: &Path,
-	cancellation: Option<&CancellationToken>,
+    archive: &mut zip::ZipArchive<R>,
+    manifest: &CurseForgeModpackManifest,
+    instance_path: &Path,
+    cancellation: Option<&CancellationToken>,
 ) -> crate::Result<Vec<ModpackOverrideTask>> {
-	let prefix = format!("{}/", manifest.overrides.trim_matches('/'));
-	let mut tasks_by_target = HashMap::<PathBuf, ModpackOverrideTask>::new();
+    let prefix = format!("{}/", manifest.overrides.trim_matches('/'));
+    let mut tasks_by_target = HashMap::<PathBuf, ModpackOverrideTask>::new();
     for index in 0..archive.len() {
         crate::api::pack::archive_util::check_cancellation(cancellation)?;
         let entry = archive.by_index(index).map_err(modpack_zip_error)?;
@@ -5500,45 +5497,45 @@ fn collect_modpack_override_tasks<R: Read + Seek>(
         let target = instance_path.join(safe_path);
         // Preserve archive order semantics for duplicate targets: the last
         // entry wins, while unique targets can be extracted independently.
-		tasks_by_target.insert(
-			target.clone(),
-			ModpackOverrideTask {
-				index,
-				target,
-				size: entry.size(),
-			},
-		);
+        tasks_by_target.insert(
+            target.clone(),
+            ModpackOverrideTask {
+                index,
+                target,
+                size: entry.size(),
+            },
+        );
     }
-	let total_size = tasks_by_target
-		.values()
-		.fold(0_u64, |total, task| total.saturating_add(task.size));
-	let limit = crate::api::pack::archive_util::EXTRACTION_SIZE_LIMIT;
-	if total_size > limit {
-		return Err(ErrorKind::InputError(format!(
+    let total_size = tasks_by_target
+        .values()
+        .fold(0_u64, |total, task| total.saturating_add(task.size));
+    let limit = crate::api::pack::archive_util::EXTRACTION_SIZE_LIMIT;
+    if total_size > limit {
+        return Err(ErrorKind::InputError(format!(
 			"CurseForge modpack overrides exceed the extraction limit: {total_size} unpacked bytes required, limit is {limit} bytes"
 		))
 		.into());
-	}
-	Ok(tasks_by_target.into_values().collect())
+    }
+    Ok(tasks_by_target.into_values().collect())
 }
 
 fn materialize_modpack_overrides(
-	archive_path: &Path,
-	instance_path: &Path,
-	cancellation: Option<&tokio_util::sync::CancellationToken>,
+    archive_path: &Path,
+    instance_path: &Path,
+    cancellation: Option<&tokio_util::sync::CancellationToken>,
 ) -> crate::Result<(
-	u32,
-	crate::api::pack::archive_util::StagedArchiveReplacements,
+    u32,
+    crate::api::pack::archive_util::StagedArchiveReplacements,
 )> {
-	let file = std::fs::File::open(archive_path)?;
-	let mut archive = zip::ZipArchive::new(file).map_err(modpack_zip_error)?;
-	let manifest = read_modpack_manifest(&mut archive)?;
-	let tasks = collect_modpack_override_tasks(
-		&mut archive,
-		&manifest,
-		instance_path,
-		cancellation,
-	)?;
+    let file = std::fs::File::open(archive_path)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(modpack_zip_error)?;
+    let manifest = read_modpack_manifest(&mut archive)?;
+    let tasks = collect_modpack_override_tasks(
+        &mut archive,
+        &manifest,
+        instance_path,
+        cancellation,
+    )?;
     drop(archive);
     if tasks.is_empty() {
         return Ok((
@@ -6681,13 +6678,9 @@ fn pending_manual_download(
                 project_id: item.provider_project_id.parse().ok()?,
                 file_id: item.provider_release_id.parse().ok()?,
                 file_name: item.file_name,
-                ownership_kind: item
+                ownership_kind: if item
                     .pack_member_id
-                    .is_some()
-                    .then_some(
-                        crate::state::instances::ContentOwnershipKind::PackManaged,
-                    )
-                    .unwrap_or_default(),
+                    .is_some() { crate::state::instances::ContentOwnershipKind::PackManaged } else { Default::default() },
                 operation_kind: item.operation_kind,
                 website_url: item.website_url,
                 project_type: item.project_type.get_name().to_string(),
@@ -7232,7 +7225,7 @@ where
     .into_iter()
     .collect::<HashSet<_>>();
 
-    let jobs = crate::install::store::list(false, &state).await?;
+    let jobs = crate::install::store::list(false, state).await?;
     let waiting_job_count = jobs
         .iter()
         .filter(|job| {
@@ -7508,9 +7501,7 @@ async fn manually_imported_curseforge_world_downloads(
             .join("level.dat")
             .is_file()
     });
-    Ok(imported
-        .then(|| HashSet::from([(project_id, file_id)]))
-        .unwrap_or_default())
+    Ok(if imported { HashSet::from([(project_id, file_id)]) } else { Default::default() })
 }
 
 async fn install_manual_download(
@@ -9378,8 +9369,7 @@ async fn download_installed_file(
             != Some(std::ffi::OsStr::new(expected_file_name))
     {
         return Err(ErrorKind::OtherError(format!(
-            "CurseForge install context mismatch before download: expected_file={} installed_path={}",
-            expected_file_name, relative_path,
+            "CurseForge install context mismatch before download: expected_file={expected_file_name} installed_path={relative_path}",
         ))
         .into());
     }
@@ -9586,19 +9576,15 @@ async fn verify_installed_curseforge_file(
         .find(|hash| hash.algo == 1 && !hash.value.trim().is_empty())
         .map(|hash| hash.value.as_str())
     {
-        if let Some(download) = download {
-            if download.path == path
+        if let Some(download) = download
+            && download.path == path
                 && download.verified_sha1.as_deref().is_some_and(|hash| {
                     hash.eq_ignore_ascii_case(expected_sha1)
                 })
-            {
-                if let Some(proof) = &download.verified_file {
-                    if proof.matches(path, download.size).await {
+                && let Some(proof) = &download.verified_file
+                    && proof.matches(path, download.size).await {
                         return Ok(VerifiedInstalledCurseForgeFile { size: download.size, sha1: expected_sha1.to_string(), pending_completion: CurseForgePendingCompletionProof::AuthoritativeSha1 });
                     }
-                }
-            }
-        }
         let (size, sha1) = match cancellation {
             Some(cancellation) => {
                 sha1_file_cancellable(path, cancellation).await?
@@ -10458,112 +10444,112 @@ mod tests {
         );
     }
 
-	fn write_override_size_test_archive(path: &Path, entries: &[(&str, u32)]) {
-		let contents = entries
-			.iter()
-			.map(|(name, _)| (*name, b"x".as_slice()))
-			.collect::<Vec<_>>();
-		write_override_test_archive(path, &contents);
-		let mut bytes = std::fs::read(path).unwrap();
-		let headers = bytes
-			.windows(4)
-			.enumerate()
-			.filter_map(|(offset, signature)| {
-				(signature == b"PK\x01\x02").then_some(offset)
-			})
-			.collect::<Vec<_>>();
-		assert_eq!(headers.len(), entries.len() + 1);
-		for (offset, (_, size)) in headers.into_iter().skip(1).zip(entries) {
-			bytes[offset + 24..offset + 28].copy_from_slice(&size.to_le_bytes());
-		}
-		std::fs::write(path, bytes).unwrap();
-	}
+    fn write_override_size_test_archive(path: &Path, entries: &[(&str, u32)]) {
+        let contents = entries
+            .iter()
+            .map(|(name, _)| (*name, b"x".as_slice()))
+            .collect::<Vec<_>>();
+        write_override_test_archive(path, &contents);
+        let mut bytes = std::fs::read(path).unwrap();
+        let headers = bytes
+            .windows(4)
+            .enumerate()
+            .filter_map(|(offset, signature)| {
+                (signature == b"PK\x01\x02").then_some(offset)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(headers.len(), entries.len() + 1);
+        for (offset, (_, size)) in headers.into_iter().skip(1).zip(entries) {
+            bytes[offset + 24..offset + 28]
+                .copy_from_slice(&size.to_le_bytes());
+        }
+        std::fs::write(path, bytes).unwrap();
+    }
 
-	#[test]
-	fn curseforge_overrides_accept_sizes_above_two_gib_up_to_shared_limit() {
-		let root = tempfile::tempdir().unwrap();
-		let archive_path = root.path().join("pack.zip");
-		for sizes in [
-			[3 * 1024 * 1024 * 1024, 0, 0],
-			[u32::MAX - 1, u32::MAX - 1, 4],
-		] {
-			write_override_size_test_archive(
-				&archive_path,
-				&[("a", sizes[0]), ("b", sizes[1]), ("c", sizes[2])],
-			);
-			let mut archive = zip::ZipArchive::new(
-				std::fs::File::open(&archive_path).unwrap(),
-			)
-			.unwrap();
-			let manifest = read_modpack_manifest(&mut archive).unwrap();
-			let tasks = collect_modpack_override_tasks(
-				&mut archive,
-				&manifest,
-				root.path(),
-				None,
-			)
-			.unwrap();
-			assert_eq!(tasks.len(), 3);
-			assert_eq!(
-				tasks.iter().map(|task| task.size).sum::<u64>(),
-				sizes.into_iter().map(u64::from).sum::<u64>(),
-			);
-		}
-	}
+    #[test]
+    fn curseforge_overrides_accept_sizes_above_two_gib_up_to_shared_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let archive_path = root.path().join("pack.zip");
+        for sizes in [
+            [3 * 1024 * 1024 * 1024, 0, 0],
+            [u32::MAX - 1, u32::MAX - 1, 4],
+        ] {
+            write_override_size_test_archive(
+                &archive_path,
+                &[("a", sizes[0]), ("b", sizes[1]), ("c", sizes[2])],
+            );
+            let mut archive = zip::ZipArchive::new(
+                std::fs::File::open(&archive_path).unwrap(),
+            )
+            .unwrap();
+            let manifest = read_modpack_manifest(&mut archive).unwrap();
+            let tasks = collect_modpack_override_tasks(
+                &mut archive,
+                &manifest,
+                root.path(),
+                None,
+            )
+            .unwrap();
+            assert_eq!(tasks.len(), 3);
+            assert_eq!(
+                tasks.iter().map(|task| task.size).sum::<u64>(),
+                sizes.into_iter().map(u64::from).sum::<u64>(),
+            );
+        }
+    }
 
-	#[test]
-	fn curseforge_overrides_reject_above_shared_limit_before_writing() {
-		let root = tempfile::tempdir().unwrap();
-		let archive_path = root.path().join("pack.zip");
-		let instance_path = root.path().join("instance");
-		write_override_size_test_archive(
-			&archive_path,
-			&[("a", u32::MAX - 1), ("b", u32::MAX - 1), ("c", 5)],
-		);
-		let error =
-			materialize_modpack_overrides(&archive_path, &instance_path, None)
-				.err()
-				.unwrap()
-				.to_string();
-		assert!(error.contains("overrides exceed the extraction limit"));
-		assert!(error.contains("8589934593 unpacked bytes"));
-		assert!(error.contains("limit is 8589934592 bytes"));
-		assert!(!instance_path.exists());
-	}
+    #[test]
+    fn curseforge_overrides_reject_above_shared_limit_before_writing() {
+        let root = tempfile::tempdir().unwrap();
+        let archive_path = root.path().join("pack.zip");
+        let instance_path = root.path().join("instance");
+        write_override_size_test_archive(
+            &archive_path,
+            &[("a", u32::MAX - 1), ("b", u32::MAX - 1), ("c", 5)],
+        );
+        let error =
+            materialize_modpack_overrides(&archive_path, &instance_path, None)
+                .err()
+                .unwrap()
+                .to_string();
+        assert!(error.contains("overrides exceed the extraction limit"));
+        assert!(error.contains("8589934593 unpacked bytes"));
+        assert!(error.contains("limit is 8589934592 bytes"));
+        assert!(!instance_path.exists());
+    }
 
-	#[test]
-	fn curseforge_overrides_size_counts_only_final_duplicate_targets() {
-		let root = tempfile::tempdir().unwrap();
-		let archive_path = root.path().join("pack.zip");
-		write_override_size_test_archive(
-			&archive_path,
-			&[
-				("config/a", u32::MAX - 1),
-				("config\\a", 1),
-				("config/b", u32::MAX - 1),
-				("config/c", 5),
-			],
-		);
-		let mut archive = zip::ZipArchive::new(
-			std::fs::File::open(&archive_path).unwrap(),
-		)
-		.unwrap();
-		let manifest = read_modpack_manifest(&mut archive).unwrap();
-		let tasks = collect_modpack_override_tasks(
-			&mut archive,
-			&manifest,
-			root.path(),
-			None,
-		)
-		.unwrap();
-		assert_eq!(tasks.len(), 3);
-		let winner = tasks
-			.iter()
-			.find(|task| task.target == root.path().join("config/a"))
-			.unwrap();
-		assert_eq!(winner.index, 2);
-		assert_eq!(winner.size, 1);
-	}
+    #[test]
+    fn curseforge_overrides_size_counts_only_final_duplicate_targets() {
+        let root = tempfile::tempdir().unwrap();
+        let archive_path = root.path().join("pack.zip");
+        write_override_size_test_archive(
+            &archive_path,
+            &[
+                ("config/a", u32::MAX - 1),
+                ("config\\a", 1),
+                ("config/b", u32::MAX - 1),
+                ("config/c", 5),
+            ],
+        );
+        let mut archive =
+            zip::ZipArchive::new(std::fs::File::open(&archive_path).unwrap())
+                .unwrap();
+        let manifest = read_modpack_manifest(&mut archive).unwrap();
+        let tasks = collect_modpack_override_tasks(
+            &mut archive,
+            &manifest,
+            root.path(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(tasks.len(), 3);
+        let winner = tasks
+            .iter()
+            .find(|task| task.target == root.path().join("config/a"))
+            .unwrap();
+        assert_eq!(winner.index, 2);
+        assert_eq!(winner.size, 1);
+    }
 
     #[test]
     fn curseforge_overrides_commit_successful_parallel_staging() {

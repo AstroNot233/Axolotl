@@ -898,14 +898,13 @@ pub(crate) async fn finalize_updated_project_path(
     } else {
         installed_path.to_string()
     };
-    if !old_archived && final_path != old_path {
-        if archive_project_file(instance_id, old_path, &final_path, state)
+    if !old_archived && final_path != old_path
+        && archive_project_file(instance_id, old_path, &final_path, state)
             .await?
             .is_none()
         {
             remove_project(instance_id, old_path, state).await?;
         }
-    }
     Ok(final_path)
 }
 
@@ -1355,7 +1354,7 @@ async fn download_project_version_with_reporting(
     if let Some(reporter) = tracking_reporter {
         request = request.with_install_tracking(
             reporter,
-            &prepared.path.display().to_string(),
+            prepared.path.display().to_string(),
             &prepared.file_name,
         );
     }

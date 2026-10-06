@@ -64,8 +64,8 @@ impl Drop for TaskProbeGuard {
             return;
         }
         let mut families = self.state.families.lock();
-        if let Some(entry) = families.get_mut(&self.family) {
-            if entry
+        if let Some(entry) = families.get_mut(&self.family)
+            && entry
                 .in_flight
                 .as_ref()
                 .is_some_and(|v| Arc::ptr_eq(v, &self.notify))
@@ -73,7 +73,6 @@ impl Drop for TaskProbeGuard {
                 entry.in_flight = None;
                 entry.last_probed = None;
             }
-        }
     }
 }
 pub(crate) static ROUTE_EFFECTIVE_AUTHORITIES: LazyLock<

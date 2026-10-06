@@ -873,18 +873,16 @@ where
         hasher.update(&buffer[..bytes_read]);
         size += bytes_read as u64;
         pending_progress += bytes_read as u64;
-        if let Some(progress) = progress.as_mut() {
-            if pending_progress >= PROGRESS_GRANULARITY {
+        if let Some(progress) = progress.as_mut()
+            && pending_progress >= PROGRESS_GRANULARITY {
                 progress(pending_progress).await?;
                 pending_progress = 0;
             }
-        }
     }
-    if let Some(progress) = progress.as_mut() {
-        if pending_progress > 0 {
+    if let Some(progress) = progress.as_mut()
+        && pending_progress > 0 {
             progress(pending_progress).await?;
         }
-    }
     drop(file);
 
     if reader.compute_hash() != expected_crc32 {
@@ -1499,9 +1497,7 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                     }
                     Ok(())
                 }.await;
-                if let Err(error) = result {
-                    return Err(error);
-                }
+                result?;
                 Ok(())
                     }
                 },
@@ -1871,11 +1867,8 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
     let mut seen_override_targets = HashSet::new();
     let override_targets = override_specs
         .iter()
-        .filter_map(|spec| {
-            seen_override_targets
-                .insert(spec.target_path.clone())
-                .then(|| spec.target_path.clone())
-        })
+        .filter(|&spec| seen_override_targets
+                .insert(spec.target_path.clone())).map(|spec| spec.target_path.clone())
         .collect::<Vec<_>>();
     let override_groups = Arc::new(Mutex::new(VecDeque::from(
         override_extraction_groups(override_specs),
@@ -2009,7 +2002,7 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
             return Err(error);
         }
     };
-	let materialization_result =
+    let materialization_result =
 		crate::api::pack::archive_util::run_cancellable_blocking_instance_write(
         instance_id.clone(),
         reporter.cancellation_token(),
@@ -2024,22 +2017,22 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
         },
     )
 	.await;
-	let override_replacements = match materialization_result {
-		Ok(replacements) => replacements,
-		Err(error) => {
-			let cleanup_targets = override_targets.clone();
-			let cleanup_result = tokio::task::spawn_blocking(move || {
-				crate::api::pack::archive_util::discard_staged_archive_entries(
-					&cleanup_targets,
-				)
-			})
-			.await?;
-			if let Err(cleanup_error) = cleanup_result {
-				return Err(crate::ErrorKind::OtherError(format!("{error}; failed to clean staged MRPack overrides: {cleanup_error}")).into());
-			}
-			return Err(error);
-		}
-	};
+    let override_replacements = match materialization_result {
+        Ok(replacements) => replacements,
+        Err(error) => {
+            let cleanup_targets = override_targets.clone();
+            let cleanup_result = tokio::task::spawn_blocking(move || {
+                crate::api::pack::archive_util::discard_staged_archive_entries(
+                    &cleanup_targets,
+                )
+            })
+            .await?;
+            if let Err(cleanup_error) = cleanup_result {
+                return Err(crate::ErrorKind::OtherError(format!("{error}; failed to clean staged MRPack overrides: {cleanup_error}")).into());
+            }
+            return Err(error);
+        }
+    };
     extracted_overrides.sort_unstable_by_key(|extracted| extracted.spec.index);
 
     let mut override_records = Vec::new();

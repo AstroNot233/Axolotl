@@ -85,7 +85,7 @@ fn file_identity(
     unsafe {
         GetFileInformationByHandle(
             HANDLE(file.as_raw_handle()),
-            &mut information,
+            &raw mut information,
         )
         .ok()?;
     }

@@ -26,11 +26,10 @@ pub fn fallen_proxy_url(original: &str) -> Option<String> {
 }
 
 pub fn mojang_service_url(original: &str, use_mirror: bool) -> Cow<'_, str> {
-    if use_mirror {
-        if let Some(mirror) = fallen_proxy_url(original) {
+    if use_mirror
+        && let Some(mirror) = fallen_proxy_url(original) {
             return Cow::Owned(mirror);
         }
-    }
     Cow::Borrowed(original)
 }
 

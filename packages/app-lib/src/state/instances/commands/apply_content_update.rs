@@ -121,8 +121,7 @@ async fn apply_content_update(
             .await?
             .ok_or_else(|| {
                 crate::ErrorKind::InputError(format!(
-                    "Unable to install version id {}. Not found.",
-                    update_version_id
+                    "Unable to install version id {update_version_id}. Not found."
                 ))
             })?;
             let content_type =
@@ -276,8 +275,8 @@ pub(crate) async fn update_all_projects(
                     .await?;
                 }
 
-                if new_path != update.relative_path {
-                    if archive_project_file(
+                if new_path != update.relative_path
+                    && archive_project_file(
                         instance_id,
                         &update.relative_path,
                         &new_path,
@@ -293,7 +292,6 @@ pub(crate) async fn update_all_projects(
                         )
                         .await?;
                     }
-                }
 
                 applied.push(AppliedBulkItem {
                     project_id: update.project_id,

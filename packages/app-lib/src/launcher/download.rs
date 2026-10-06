@@ -962,8 +962,8 @@ fn missing_library_bytes(
         }
 
         // Native library size for this platform, if any.
-        if is_native_library(library) {
-            if let Some(classifier) =
+        if is_native_library(library)
+            && let Some(classifier) =
                 library_native_classifier(library, java_arch)
                 && let Some(native) = library
                     .downloads
@@ -973,15 +973,14 @@ fn missing_library_bytes(
             {
                 total += native.size as u64;
             }
-        }
 
         // Java artifact size. Mixed libraries carry both.
         if needs_java_artifact(library) {
             let artifact_path = d::get_path_from_artifact(&library.name)?;
             let path = st.directories.libraries_dir().join(&artifact_path);
 
-            if !path.exists() || force {
-                if let Some(artifact) = library
+            if (!path.exists() || force)
+                && let Some(artifact) = library
                     .downloads
                     .as_ref()
                     .and_then(|downloads| downloads.artifact.as_ref())
@@ -989,7 +988,6 @@ fn missing_library_bytes(
                 {
                     total += artifact.size as u64;
                 }
-            }
         }
     }
 
@@ -1800,7 +1798,7 @@ pub async fn download_assets(
     let mut legacy_copies = Vec::new();
     let mut fallback_assets = Vec::new();
     let mut skipped_count = 0_u64;
-    for (name, asset) in index.objects.iter() {
+    for (name, asset) in &index.objects {
         let hash = &asset.hash;
         let resource_path = st.directories.object_dir(hash);
         let legacy_resource_path = st
@@ -1916,14 +1914,13 @@ pub async fn download_assets(
                     let loading_bar = loading_bar.clone();
                     Box::pin(async move {
                         for _ in 0..item.logical_items {
-                            if let Some(progress) = &progress {
-                                if let Err(error) = progress.add_bytes(item.size).await {
+                            if let Some(progress) = &progress
+                                && let Err(error) = progress.add_bytes(item.size).await {
                                     tracing::warn!(
                                         error = %error,
                                         "Failed to record batch asset bytes"
                                     );
                                 }
-                            }
                             if let Some(loading_bar) = &loading_bar {
                                 let _ = emit_loading(loading_bar, per_file_fraction, None);
                             }
@@ -2172,7 +2169,7 @@ pub async fn download_libraries(
     let num_files = tasks.len();
     loading_try_for_each_concurrent(
 		stream::iter(tasks).map(Ok::<LibraryDownloadTask<'_>, crate::Error>),
-		crate::util::download::task_concurrency_limit(&st),
+		crate::util::download::task_concurrency_limit(st),
         loading_bar,
         loading_amount,
         num_files,

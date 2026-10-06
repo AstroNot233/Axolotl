@@ -1444,7 +1444,7 @@ fn extract_zip_to_dir_with_cancellation(
             failed_entries.join(", ")
         ));
     }
-    if archive.len() > 0 && extracted_entries == 0 {
+    if !archive.is_empty() && extracted_entries == 0 {
         return Err(format!(
             "No ZIP entries could be extracted ({skipped} skipped)"
         ));

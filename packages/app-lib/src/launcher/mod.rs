@@ -1302,7 +1302,7 @@ async fn install_minecraft_with_local_source(
         let resolved = direct.resolve()?;
         direct_ensure::ensure_direct_launch_dependencies_with_progress(
             &state,
-            &direct,
+            direct,
             &resolved.merged.libraries,
             &version_info,
             java_version

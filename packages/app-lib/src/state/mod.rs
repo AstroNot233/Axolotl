@@ -306,20 +306,20 @@ impl InstanceLockManager {
             inner: Some(inner),
             owner: None,
             instance_id: instance_id.to_string(),
-		}
-	}
+        }
+    }
 
-	pub(crate) async fn lock_exclusive_cancellable(
-		self: &Arc<Self>,
-		instance_id: &str,
-		cancellation: &tokio_util::sync::CancellationToken,
-	) -> crate::Result<InstanceLockGuard> {
-		tokio::select! {
-			biased;
-			_ = cancellation.cancelled() => Err(crate::ErrorKind::OtherError(
-				format!("Install was canceled while waiting for the content lock for {instance_id}"),
-			).into()),
-			guard = self.lock_exclusive(instance_id) => Ok(guard),
+    pub(crate) async fn lock_exclusive_cancellable(
+        self: &Arc<Self>,
+        instance_id: &str,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> crate::Result<InstanceLockGuard> {
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err(crate::ErrorKind::OtherError(
+                format!("Install was canceled while waiting for the content lock for {instance_id}"),
+            ).into()),
+            guard = self.lock_exclusive(instance_id) => Ok(guard),
         }
     }
 }
@@ -684,12 +684,12 @@ impl State {
     ) -> crate::Result<()> {
         let _update = self.configured_http_client_update.lock().await;
         let proxy = crate::state::proxy_settings::get(&self.pool).await?;
-        if {
+        let res = {
             let current = self.configured_http_client.read();
             current.proxy == proxy
                 && current.ignore_ssl_errors == settings.ignore_ssl_errors
                 && current.doh_enabled == settings.doh_enabled
-        } {
+        }; if res {
             return Ok(());
         }
         let client = crate::util::fetch::DownloadClients::build(
@@ -1235,46 +1235,46 @@ mod instance_lock_tests {
     use std::time::Duration;
 
     #[tokio::test]
-	async fn canceled_archive_writer_does_not_wait_for_busy_instance() {
-		let manager = Arc::new(InstanceLockManager::default());
-		let holder = manager.lock_exclusive("instance-1").await;
-		let cancellation = tokio_util::sync::CancellationToken::new();
-		let mut waiter = Box::pin(
-			manager.lock_exclusive_cancellable("instance-1", &cancellation),
-		);
-		assert!(
-			tokio::time::timeout(Duration::from_millis(20), &mut waiter)
-				.await
-				.is_err()
-		);
-		cancellation.cancel();
-		let result = tokio::time::timeout(Duration::from_millis(500), waiter)
-			.await
-			.unwrap();
-		assert!(result.err().unwrap().to_string().contains("canceled"));
-		drop(holder);
-		tokio::time::timeout(
-			Duration::from_millis(500),
-			manager.lock_exclusive("instance-1"),
-		)
-		.await
-		.unwrap();
-	}
+    async fn canceled_archive_writer_does_not_wait_for_busy_instance() {
+        let manager = Arc::new(InstanceLockManager::default());
+        let holder = manager.lock_exclusive("instance-1").await;
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let mut waiter = Box::pin(
+            manager.lock_exclusive_cancellable("instance-1", &cancellation),
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut waiter)
+                .await
+                .is_err()
+        );
+        cancellation.cancel();
+        let result = tokio::time::timeout(Duration::from_millis(500), waiter)
+            .await
+            .unwrap();
+        assert!(result.err().unwrap().to_string().contains("canceled"));
+        drop(holder);
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            manager.lock_exclusive("instance-1"),
+        )
+        .await
+        .unwrap();
+    }
 
-	#[tokio::test]
-	async fn canceled_archive_writer_does_not_acquire_available_instance() {
-		let manager = Arc::new(InstanceLockManager::default());
-		let cancellation = tokio_util::sync::CancellationToken::new();
-		cancellation.cancel();
-		assert!(
-			manager
-				.lock_exclusive_cancellable("instance-1", &cancellation)
-				.await
-				.is_err()
-		);
-	}
+    #[tokio::test]
+    async fn canceled_archive_writer_does_not_acquire_available_instance() {
+        let manager = Arc::new(InstanceLockManager::default());
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        cancellation.cancel();
+        assert!(
+            manager
+                .lock_exclusive_cancellable("instance-1", &cancellation)
+                .await
+                .is_err()
+        );
+    }
 
-	#[tokio::test]
+    #[tokio::test]
     async fn serializes_concurrent_tasks_for_the_same_instance() {
         let manager = Arc::new(InstanceLockManager::default());
         let first = manager.lock("instance-1").await;

@@ -580,7 +580,7 @@ fn official_route(url: &str, resource: ResourceClass) -> DownloadRoute {
             | DownloadRouteSource::Aliyun
     );
     let route = route(
-        url.clone(),
+        url,
         source,
         is_mirror,
         !matches!(resource, ResourceClass::Metadata),
@@ -786,13 +786,11 @@ fn order_auto_routes(
                     .cmp(&right_health.consecutive_failures)
             })
             .then_with(|| {
-                force_mirror_first
-                    .then(|| {
+                if force_mirror_first { {
                         let left_mirror_rank = !left.is_mirror;
                         let right_mirror_rank = !right.is_mirror;
                         left_mirror_rank.cmp(&right_mirror_rank)
-                    })
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                    } } else { std::cmp::Ordering::Equal }
             })
             .then_with(|| {
                 // Automatic content downloads start from the supplied
@@ -1174,7 +1172,7 @@ impl DownloadClients {
         direct: &reqwest::Client,
     ) -> Self {
         if let Some(mut clients) = super::download::proxy_context::clients() {
-            if std::ptr::eq(system, &*HTTP1_NO_REDIRECT_REQWEST_CLIENT) {
+            if std::ptr::eq(system, &raw const *HTTP1_NO_REDIRECT_REQWEST_CLIENT) {
                 clients.system = clients.http1_system.clone();
                 clients.direct = clients.http1_direct.clone();
             }
@@ -4190,7 +4188,7 @@ async fn download_segment(
     let _range_guard = DownloadRangeGuard(Arc::clone(&range.state));
     let request_started = Instant::now();
     let mut pending_progress = 0_u64;
-	let mut last_progress_at = time::Instant::now();
+    let mut last_progress_at = time::Instant::now();
     let mut final_url = route.url.clone();
     let mut remote_addr = None;
     let mut http_version = None;
@@ -4478,12 +4476,12 @@ async fn download_segment(
                 .map_err(|error| SegmentDownloadError::Fatal(error.into()))?;
             pending_progress += accepted as u64;
             speed.record_bytes(accepted as u64);
-			if pending_progress >= 256 * 1024
-				|| last_progress_at.elapsed() >= time::Duration::from_secs(1)
-			{
-				let _ = progress.send(std::mem::take(&mut pending_progress));
-				last_progress_at = time::Instant::now();
-			}
+            if pending_progress >= 256 * 1024
+                || last_progress_at.elapsed() >= time::Duration::from_secs(1)
+            {
+                let _ = progress.send(std::mem::take(&mut pending_progress));
+                last_progress_at = time::Instant::now();
+            }
             if completed {
                 break;
             }
@@ -5647,11 +5645,11 @@ async fn try_segmented_native_attempt(
         let size = request.integrity.size.unwrap();
         match try_segmented_download(
             SegmentedDownloadContext::new(
-                &request,
+                request,
                 route,
                 &routes[route_index + 1..],
                 size,
-                &part_path,
+                part_path,
                 semaphore,
                 credentials,
                 &HTTP1_NO_REDIRECT_REQWEST_CLIENT,
@@ -5665,7 +5663,7 @@ async fn try_segmented_native_attempt(
         .await
         {
             SegmentedDownloadOutcome::Success(result) => {
-                finalize_download(&part_path, destination).await?;
+                finalize_download(part_path, destination).await?;
                 if let Some(authority) = original_route_authority(route) {
                     crate::util::download::native_reputation::record_transport_success(
                         &authority,
@@ -5803,9 +5801,9 @@ async fn try_segmented_native_attempt(
                 session.last_error = Some(error);
                 session.terminal_routes.insert(route.url.clone());
                 if !is_official_route(route)
-                    && let Some(official) = official_fallback_route(&routes)
+                    && let Some(official) = official_fallback_route(routes)
                 {
-                    remove_if_exists(&part_path).await?;
+                    remove_if_exists(part_path).await?;
                     session.official_integrity_retry = true;
                     session.preferred_route = Some(official);
                     return Ok(Some(NativeSegmentedAttempt::RetryRoute));
@@ -7993,7 +7991,7 @@ mod tests {
         let _guard = RANGE_SPLITTING_TEST_LOCK.lock().await;
         RANGE_SPLITTING_PROTOCOL_FAILURES.lock().clear();
         RANGE_SPLITTING_SUPPORTED.lock().clear();
-		let size = (SEGMENTED_DOWNLOAD_THRESHOLD * 2 + 1024 * 1024) as usize;
+        let size = (SEGMENTED_DOWNLOAD_THRESHOLD * 2 + 1024 * 1024) as usize;
         let data = Arc::new(
             (0..size)
                 .map(|index| (index % 251) as u8)
@@ -8026,12 +8024,13 @@ mod tests {
             .build()
             .unwrap();
         let semaphore = FetchSemaphore(Semaphore::new(8));
-		let progress_samples = Arc::new(Mutex::new(Vec::new()));
-		let samples = Arc::clone(&progress_samples);
-		let mut progress: Box<FetchProgressFn<'_>> = Box::new(move |bytes, _| {
-			samples.lock().push(bytes);
-			Box::pin(async { Ok(()) })
-		});
+        let progress_samples = Arc::new(Mutex::new(Vec::new()));
+        let samples = Arc::clone(&progress_samples);
+        let mut progress: Box<FetchProgressFn<'_>> =
+            Box::new(move |bytes, _| {
+                samples.lock().push(bytes);
+                Box::pin(async { Ok(()) })
+            });
         let outcome = try_segmented_download(
             SegmentedDownloadContext::new(
                 &request,
@@ -8056,11 +8055,11 @@ mod tests {
             }
             _ => panic!("segmented fixture download did not succeed"),
         }
-		let samples = progress_samples.lock();
-		assert!(samples.first().is_some_and(|bytes| *bytes <= 512 * 1024));
-		assert!(samples.windows(2).all(|pair| pair[0] <= pair[1]));
-		assert!(samples.iter().all(|bytes| *bytes <= size as u64));
-		drop(samples);
+        let samples = progress_samples.lock();
+        assert!(samples.first().is_some_and(|bytes| *bytes <= 512 * 1024));
+        assert!(samples.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!(samples.iter().all(|bytes| *bytes <= size as u64));
+        drop(samples);
         assert!(
             requests.load(Ordering::Relaxed) >= INITIAL_SEGMENT_CONCURRENCY
         );
@@ -8890,14 +8889,14 @@ async fn run_native_route_attempts(
             "Starting file download attempt"
         );
         if let Some(decision) = try_segmented_native_attempt(
-            &request,
+            request,
             destination,
             semaphore,
             progress,
-            &routes,
+            routes,
             route_index,
             route,
-            &part_path,
+            part_path,
             credentials,
             session,
             retry_with_single_thread,
@@ -8934,14 +8933,14 @@ async fn run_native_route_attempts(
         let mut activity = crate::State::get_if_initialized()
             .map(|state| state.begin_download_connection());
         record_install_download_started(
-            &request,
+            request,
             route,
             session.attempts,
             session.file_attempt_budget,
         )
         .await;
         record_install_download_stage(
-            &request,
+            request,
             DownloadItemStatus::WaitingForResource,
         )
         .await;
@@ -8971,7 +8970,7 @@ async fn run_native_route_attempts(
             "Acquired native download resources"
         );
         record_install_download_stage(
-            &request,
+            request,
             DownloadItemStatus::Downloading,
         )
         .await;
@@ -9108,7 +9107,7 @@ async fn run_native_route_attempts(
             drop(permit);
             drop(activity.take());
             if status == StatusCode::RANGE_NOT_SATISFIABLE {
-                remove_if_exists(&part_path).await?;
+                remove_if_exists(part_path).await?;
                 disable_range_splitting(route);
                 session.single_thread_routes.insert(route.url.clone());
                 session.preferred_route = Some(route.clone());
@@ -9176,9 +9175,9 @@ async fn run_native_route_attempts(
                     record_route_failure(route, request.resource, None);
                     disable_range_splitting(route);
                     preserve_or_remove_partial(
-                        &part_path,
+                        part_path,
                         &request.integrity,
-                        any_route_can_resume(&routes),
+                        any_route_can_resume(routes),
                     )
                     .await?;
                     let error: crate::Error =
@@ -9204,7 +9203,7 @@ async fn run_native_route_attempts(
                 // before sending data never pay a full re-read of a
                 // potentially huge partial file.
                 match hash_existing_part_prefix(
-                    &part_path,
+                    part_path,
                     &request.integrity,
                     resume_offset,
                 )
@@ -9222,7 +9221,7 @@ async fn run_native_route_attempts(
                     None => {
                         drop(permit);
                         drop(activity.take());
-                        remove_if_exists(&part_path).await?;
+                        remove_if_exists(part_path).await?;
                         let error: crate::Error =
                             ErrorKind::OtherError(format!(
                                 "Partial download changed on disk while resuming {log_url}"
@@ -9252,12 +9251,12 @@ async fn run_native_route_attempts(
 
         let starting_size = resume_offset;
         let mut file = if starting_size > 0 {
-            match open_download_file_for_append(&part_path).await {
+            match open_download_file_for_append(part_path).await {
                 Ok(file) => file,
                 Err(error) => {
                     drop(permit);
                     drop(activity.take());
-                    remove_if_exists(&part_path).await?;
+                    remove_if_exists(part_path).await?;
                     let error: crate::Error = error.into();
                     record_download_attempt_failure(
                         &mut session.attempt_history,
@@ -9274,7 +9273,7 @@ async fn run_native_route_attempts(
                 }
             }
         } else {
-            create_download_file(&part_path).await?
+            create_download_file(part_path).await?
         };
         let response_length = response.content_length().unwrap_or(0);
         let total_size = request
@@ -9316,8 +9315,8 @@ async fn run_native_route_attempts(
                             break;
                         }
                     };
-                    super::download::local_resources::write(&part_path, chunk.len() as u64, async { file.write_all(&chunk).await?; file.flush().await }).await.map_err(|error| {
-                        IOError::with_path(error, &part_path)
+                    super::download::local_resources::write(part_path, chunk.len() as u64, async { file.write_all(&chunk).await?; file.flush().await }).await.map_err(|error| {
+                        IOError::with_path(error, part_path)
                     })?;
                     hashers.update(&chunk);
                     downloaded += chunk.len() as u64;
@@ -9330,7 +9329,7 @@ async fn run_native_route_attempts(
                         >= tracking_threshold
                     {
                         record_install_download_progress(
-                            &request, downloaded, total_size,
+                            request, downloaded, total_size,
                         )
                         .await;
                         last_tracking_bytes = downloaded;
@@ -9345,7 +9344,7 @@ async fn run_native_route_attempts(
                     let slow_decision = slow_policy.observe_with_pressure(
                         downloaded,
                         total_size.saturating_sub(downloaded),
-                        super::download::local_resources::pressure(&part_path),
+                        super::download::local_resources::pressure(part_path),
                     );
                     if allow_low_throughput_abort
                         && total_size >= SEGMENTED_DOWNLOAD_THRESHOLD
@@ -9429,17 +9428,17 @@ async fn run_native_route_attempts(
             }
         }
         drop(alternate_probe);
-        record_install_download_progress(&request, downloaded, total_size)
+        record_install_download_progress(request, downloaded, total_size)
             .await;
-        super::download::local_resources::write(&part_path, 0, file.flush())
+        super::download::local_resources::write(part_path, 0, file.flush())
             .await
-            .map_err(|error| IOError::with_path(error, &part_path))?;
+            .map_err(|error| IOError::with_path(error, part_path))?;
         if transfer_error.is_some() {
             // Best-effort durability for data a later resume builds
             // on; a power loss could otherwise leave a zero-filled
             // tail that wastes the resumed transfer.
             let _ = super::download::local_resources::write(
-                &part_path,
+                part_path,
                 0,
                 file.sync_data(),
             )
@@ -9458,9 +9457,9 @@ async fn run_native_route_attempts(
             record_route_failure(route, request.resource, None);
             record_native_transfer_failure(route, None);
             preserve_or_remove_partial(
-                &part_path,
+                part_path,
                 &request.integrity,
-                any_route_can_resume(&routes),
+                any_route_can_resume(routes),
             )
             .await?;
             record_download_attempt_failure(
@@ -9507,9 +9506,9 @@ async fn run_native_route_attempts(
             }
             record_route_failure(route, request.resource, None);
             preserve_or_remove_partial(
-                &part_path,
+                part_path,
                 &request.integrity,
-                any_route_can_resume(&routes),
+                any_route_can_resume(routes),
             )
             .await?;
             let error: crate::Error = ErrorKind::OtherError(format!(
@@ -9535,7 +9534,7 @@ async fn run_native_route_attempts(
             session.last_error = Some(error);
             break;
         }
-        record_install_download_stage(&request, DownloadItemStatus::Verifying)
+        record_install_download_stage(request, DownloadItemStatus::Verifying)
             .await;
         let computed = hashers.finish(downloaded);
         if let Err(error) =
@@ -9555,16 +9554,16 @@ async fn run_native_route_attempts(
             // arrived in full is discarded so the retry restarts.
             if downloaded < expected_size.unwrap_or(0) {
                 preserve_or_remove_partial(
-                    &part_path,
+                    part_path,
                     &request.integrity,
-                    any_route_can_resume(&routes),
+                    any_route_can_resume(routes),
                 )
                 .await?;
             } else {
-                remove_if_exists(&part_path).await?;
+                remove_if_exists(part_path).await?;
             }
             let official = (!is_official_route(route))
-                .then(|| official_fallback_route(&routes))
+                .then(|| official_fallback_route(routes))
                 .flatten();
             let decision = if official.is_some() {
                 "fallback_official"
@@ -9615,7 +9614,7 @@ async fn run_native_route_attempts(
             break;
         }
         if let Err(error) =
-            validate_file_content(&part_path, request.integrity.content).await
+            validate_file_content(part_path, request.integrity.content).await
         {
             record_route_failure(route, request.resource, None);
             if http_version == reqwest::Version::HTTP_2
@@ -9629,13 +9628,13 @@ async fn run_native_route_attempts(
             }
             if downloaded < expected_size.unwrap_or(0) {
                 preserve_or_remove_partial(
-                    &part_path,
+                    part_path,
                     &request.integrity,
-                    any_route_can_resume(&routes),
+                    any_route_can_resume(routes),
                 )
                 .await?;
             } else {
-                remove_if_exists(&part_path).await?;
+                remove_if_exists(part_path).await?;
             }
             let decision = if routes.len() > 1 {
                 "clear_partial_and_switch"
@@ -9667,7 +9666,7 @@ async fn run_native_route_attempts(
             break;
         }
 
-        finalize_download(&part_path, destination).await?;
+        finalize_download(part_path, destination).await?;
         record_route_success(
             route,
             request.resource,

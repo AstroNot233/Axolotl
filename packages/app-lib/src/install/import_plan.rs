@@ -720,8 +720,8 @@ fn library_artifacts(
         }
 
         // Native library artifact for this platform, if any.
-        if is_native_library(library) {
-            if let Some(classifier) =
+        if is_native_library(library)
+            && let Some(classifier) =
                 library_native_classifier(library, java_arch)
             {
                 let native = library
@@ -771,7 +771,6 @@ fn library_artifacts(
                     }
                 }
             }
-        }
 
         // Java artifact (regular JAR). Mixed libraries carry both.
         if needs_java_artifact(library) {

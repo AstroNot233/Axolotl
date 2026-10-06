@@ -262,7 +262,7 @@ pub(crate) async fn restore_instance_metadata(
     let mut launch_overrides = metadata.launch_overrides.clone();
 
     instance_rows::update_instance(&instance, &mut tx).await?;
-    content_rows::update_content_set(&mut content_set, &mut tx).await?;
+    content_rows::update_content_set(&content_set, &mut tx).await?;
     loader_component_rows::replace_loader_components(
         &instance.id,
         &metadata.loader_components,
@@ -278,7 +278,7 @@ pub(crate) async fn restore_instance_metadata(
     )
     .await?;
     instance_rows::upsert_instance_launch_overrides(
-        &mut launch_overrides,
+        &launch_overrides,
         &mut tx,
     )
     .await?;

@@ -375,7 +375,6 @@ async fn connect_addresses(
         .iter()
         .copied()
         .take(2)
-        .into_iter()
         .enumerate()
         .map(|(index, address)| async move {
             if index > 0 {
@@ -955,10 +954,10 @@ pub(crate) async fn has_live_connection(route: &DownloadRoute) -> bool {
         return false;
     };
     drop(connections);
-    let live = slot
+    
+    slot
         .lock()
         .await
         .as_ref()
-        .is_some_and(|connection| !connection.is_dead());
-    live
+        .is_some_and(|connection| !connection.is_dead())
 }

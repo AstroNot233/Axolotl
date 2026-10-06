@@ -586,7 +586,7 @@ impl DownloadDnsResolver {
                 v4_index += 1;
             }
         }
-        return ordered;
+        ordered
     }
 }
 

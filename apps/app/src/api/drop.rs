@@ -56,10 +56,10 @@ fn remove_dir_all(path: &std::path::Path) -> Result<(), String> {
         return Ok(());
     }
 
-    let mut entries = std::fs::read_dir(path).map_err(|error| {
+    let entries = std::fs::read_dir(path).map_err(|error| {
         format!("Failed to read '{}': {error}", path.display())
     })?;
-    while let Some(entry) = entries.next() {
+    for entry in entries {
         let entry = entry.map_err(|error| {
             format!("Failed to enumerate '{}': {error}", path.display())
         })?;
@@ -87,10 +87,10 @@ fn remove_dir_all_cancellable(
         return Ok(());
     }
 
-    let mut entries = std::fs::read_dir(path).map_err(|error| {
+    let entries = std::fs::read_dir(path).map_err(|error| {
         format!("Failed to read '{}': {error}", path.display())
     })?;
-    while let Some(entry) = entries.next() {
+    for entry in entries {
         if cancellation.is_cancelled() {
             return Err("Operation cancelled".to_string());
         }

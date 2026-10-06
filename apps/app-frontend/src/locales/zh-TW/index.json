@@ -6827,9 +6827,6 @@
   "app.settings.resources.remove-minecraft-directory": {
     "message": "移除 .minecraft 目錄"
   },
-  "app.settings.resources.minecraft-directory-must-end-with": {
-    "message": "所選資料夾名稱必須是 .minecraft。"
-  },
   "app.settings.resources.concurrency.manual": {
     "message": "手動"
   },

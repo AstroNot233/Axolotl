@@ -410,23 +410,18 @@ pub(crate) fn request_headers(
         && (route.allow_sensitive_headers || !fetch::is_sensitive_header(name))
         && (!name.eq_ignore_ascii_case("x-api-key")
             || route_host.as_deref() == Some("api.curseforge.com"))
-    {
-        if let Ok(name) = http::header::HeaderName::from_str(name) {
-            if let Ok(value) = HeaderValue::from_str(value) {
+        && let Ok(name) = http::header::HeaderName::from_str(name)
+            && let Ok(value) = HeaderValue::from_str(value) {
                 headers.insert(name, value);
             }
-        }
-    }
     if route.source == DownloadRouteSource::Official
         && fetch::is_official_modrinth_download_url(&request.url)
         && let Some(download_meta) = &request.download_meta
-    {
-        if let Ok(value) =
+        && let Ok(value) =
             HeaderValue::from_str(&download_meta.to_header_value())
         {
             headers.insert("modrinth-download-meta", value);
         }
-    }
     headers
 }
 
@@ -638,14 +633,8 @@ async fn verify_and_finalize(
 ) -> crate::Result<()> {
     // The size check lives inside `verify_computed_integrity`: the hash is
     // authoritative whenever one is available, mirroring the legacy path.
-    if let Err(error) = fetch::verify_computed_integrity(integrity, &hashers) {
-        return Err(error);
-    }
-    if let Err(error) =
-        fetch::validate_file_content(part_path, integrity.content).await
-    {
-        return Err(error);
-    }
+    fetch::verify_computed_integrity(integrity, &hashers)?;
+    fetch::validate_file_content(part_path, integrity.content).await?;
     if downloaded == 0 {
         return Err(crate::ErrorKind::OtherError(
             "downloaded file is empty".to_string(),

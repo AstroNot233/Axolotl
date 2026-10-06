@@ -317,10 +317,10 @@ async fn resolve_instance_data_dir(
     if let Some(metadata) =
         crate::state::get_instance(instance_id, &state.pool).await?
     {
-        return Ok(crate::state::instances::instance_content_root(
+        return crate::state::instances::instance_content_root(
             &state.directories,
             &metadata.instance,
-        )?);
+        );
     }
     Ok(state
         .directories
@@ -973,7 +973,7 @@ pub async fn remove_server_from_instance(
     let (_, instance_path, game_dir_override) =
         resolve_instance_identity(instance_id, &state).await?;
     let instance_dir = resolve_instance_data_dir(
-        &instance_id,
+        instance_id,
         &instance_path,
         game_dir_override.as_deref(),
         &state,

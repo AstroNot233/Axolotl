@@ -657,14 +657,14 @@ async fn deepl_translate(
     let client = crate::util::fetch::configured_client().await?;
 
     let primary_auth = if is_official_deepl {
-        format!("DeepL-Auth-Key {}", api_key)
+        format!("DeepL-Auth-Key {api_key}")
     } else {
-        format!("Bearer {}", api_key)
+        format!("Bearer {api_key}")
     };
     let fallback_auth = if is_official_deepl {
         None
     } else {
-        Some(format!("DeepL-Auth-Key {}", api_key))
+        Some(format!("DeepL-Auth-Key {api_key}"))
     };
 
     tracing::debug!(
@@ -690,13 +690,13 @@ async fn deepl_translate(
         if status.is_success() {
             break 'translate response.json().await.map_err(|e| {
                 tracing::error!(error = %e, "Failed to parse DeepL response JSON");
-                ErrorKind::OtherError(format!("Failed to parse DeepL response: {}", e))
+                ErrorKind::OtherError(format!("Failed to parse DeepL response: {e}"))
             })?;
         }
 
         // 403 on a custom endpoint → try fallback auth format
-        if status == StatusCode::FORBIDDEN {
-            if let Some(ref fallback) = fallback_auth {
+        if status == StatusCode::FORBIDDEN
+            && let Some(ref fallback) = fallback_auth {
                 let error_text = response.text().await.unwrap_or_default();
                 tracing::warn!(
                     error_body = %error_text,
@@ -718,7 +718,7 @@ async fn deepl_translate(
                 if retry_status.is_success() {
                     break 'translate retry.json().await.map_err(|e| {
                         tracing::error!(error = %e, "Failed to parse DeepL fallback response JSON");
-                        ErrorKind::OtherError(format!("Failed to parse DeepL response: {}", e))
+                        ErrorKind::OtherError(format!("Failed to parse DeepL response: {e}"))
                     })?;
                 }
 
@@ -735,7 +735,6 @@ async fn deepl_translate(
                 ))
                 .into());
             }
-        }
 
         // Non-403 error or 403 without fallback
         let error_text = response.text().await.unwrap_or_default();

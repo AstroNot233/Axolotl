@@ -1909,9 +1909,7 @@ fn openai_content(value: &Value) -> Option<String> {
         .into_iter()
         .flatten()
         .filter_map(|item| item.get("content").and_then(Value::as_array))
-        .flatten()
-        .filter_map(|item| item.get("text").and_then(Value::as_str))
-        .next()
+        .flatten().find_map(|item| item.get("text").and_then(Value::as_str))
         .map(str::to_string)
 }
 

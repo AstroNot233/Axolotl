@@ -273,8 +273,8 @@ pub(crate) async fn download(
         None,
     )
     .await;
-    if let H2DownloadOutcome::Completed(result) = &outcome {
-        if !transport.used_http1.load(Ordering::Relaxed)
+    if let H2DownloadOutcome::Completed(result) = &outcome
+        && !transport.used_http1.load(Ordering::Relaxed)
             && let Some(authority) = fetch::url_authority(&route.url)
         {
             super::native_reputation::record_transport_success(
@@ -284,7 +284,6 @@ pub(crate) async fn download(
                 result.size as f64 / started.elapsed().as_secs_f64().max(0.001),
             );
         }
-    }
     outcome
 }
 
@@ -447,7 +446,7 @@ async fn run_download(
     let ranges = journal.ranges().await;
     let downloaded =
         AtomicU64::new(ranges.iter().map(|range| range.written).sum());
-	let reported = Mutex::new(super::h2_receive::H2ProgressGate::new(size));
+    let reported = Mutex::new(super::h2_receive::H2ProgressGate::new(size));
     let workers = concurrency.clamp(1, 8);
     let mut tasks = futures::stream::iter(ranges.into_iter().enumerate())
         .map(|(index, range)| {
@@ -508,14 +507,13 @@ async fn run_download(
         let invalid = fetch::is_integrity_error(&error)
             || matches!(error.raw.as_ref(), crate::ErrorKind::JSONError(_))
             || matches!(error.raw.as_ref(), crate::ErrorKind::OtherError(message) if message.starts_with("Invalid JAR") || message.starts_with("Incorrect size"));
-        if invalid {
-            if discard(part).await.is_err() {
+        if invalid
+            && discard(part).await.is_err() {
                 return H2DownloadOutcome::Fallback {
                     failure: H2DownloadFailure::Io,
                     preserve_partial: true,
                 };
             }
-        }
         return H2DownloadOutcome::Fallback {
             failure: if invalid {
                 H2DownloadFailure::Integrity
@@ -556,7 +554,7 @@ async fn recover_range(
     index: usize,
     range: Checkpoint,
     downloaded: &AtomicU64,
-	reported: &Mutex<super::h2_receive::H2ProgressGate>,
+    reported: &Mutex<super::h2_receive::H2ProgressGate>,
     total_size: u64,
 ) -> Result<(), H2DownloadFailure> {
     if range.start + range.written == range.end {
@@ -613,8 +611,9 @@ async fn recover_range(
             let current = downloaded
                 .fetch_add(chunk.len() as u64, Ordering::Relaxed)
                 + chunk.len() as u64;
-			let should_report = reported.lock().should_report(current, total_size);
-			if should_report {
+            let should_report =
+                reported.lock().should_report(current, total_size);
+            if should_report {
                 super::h2_download::record_install_progress(
                     request,
                     current.min(total_size),
