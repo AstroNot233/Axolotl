@@ -104,24 +104,70 @@ fn texture_url(input: &str) -> Option<Url> {
     Some(url)
 }
 
+#[derive(Clone, Copy)]
+enum RequestKind {
+    Name,
+    Profile,
+    Texture,
+}
+
+impl RequestKind {
+    fn stage(self) -> &'static str {
+        match self {
+            Self::Name => "name_lookup",
+            Self::Profile => "profile_lookup",
+            Self::Texture => "texture_download",
+        }
+    }
+}
+
+fn unavailable(stage: &'static str, reason: &'static str) -> PlayerSkinLookup {
+    tracing::warn!(stage, reason, "Player skin lookup failed");
+    PlayerSkinLookup::Unavailable
+}
+
+fn check_status(
+    status: StatusCode,
+    kind: RequestKind,
+) -> Result<(), PlayerSkinLookup> {
+    match status {
+        StatusCode::OK => Ok(()),
+        StatusCode::NO_CONTENT | StatusCode::NOT_FOUND
+            if !matches!(kind, RequestKind::Texture) =>
+        {
+            Err(PlayerSkinLookup::NotFound)
+        }
+        StatusCode::TOO_MANY_REQUESTS => Err(PlayerSkinLookup::RateLimited),
+        _ => {
+            tracing::warn!(
+                stage = kind.stage(),
+                status = status.as_u16(),
+                "Player skin request returned an unexpected status"
+            );
+            Err(PlayerSkinLookup::Unavailable)
+        }
+    }
+}
+
 async fn read_limited(
     mut response: Response,
     limit: usize,
+    stage: &'static str,
 ) -> Result<Vec<u8>, PlayerSkinLookup> {
     if response
         .content_length()
         .is_some_and(|len| len > limit as u64)
     {
-        return Err(PlayerSkinLookup::Unavailable);
+        return Err(unavailable(stage, "response exceeds size limit"));
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| PlayerSkinLookup::Unavailable)?
+        .map_err(|_| unavailable(stage, "could not read response body"))?
     {
         if bytes.len() + chunk.len() > limit {
-            return Err(PlayerSkinLookup::Unavailable);
+            return Err(unavailable(stage, "response exceeds size limit"));
         }
         bytes.extend_from_slice(&chunk);
     }
@@ -131,29 +177,27 @@ async fn read_limited(
 async fn request(
     client: &Client,
     url: &str,
+    kind: RequestKind,
 ) -> Result<Response, PlayerSkinLookup> {
     let response = client
         .get(url)
         .timeout(Duration::from_secs(15))
         .send()
         .await
-        .map_err(|_| PlayerSkinLookup::Unavailable)?;
-    match response.status() {
-        StatusCode::OK => Ok(response),
-        StatusCode::NO_CONTENT | StatusCode::NOT_FOUND => {
-            Err(PlayerSkinLookup::NotFound)
-        }
-        StatusCode::TOO_MANY_REQUESTS => Err(PlayerSkinLookup::RateLimited),
-        _ => Err(PlayerSkinLookup::Unavailable),
-    }
+        .map_err(|error| {
+            tracing::warn!(stage = kind.stage(), error = %error.without_url(), "Player skin request failed");
+            PlayerSkinLookup::Unavailable
+        })?;
+    check_status(response.status(), kind)?;
+    Ok(response)
 }
 
 async fn lookup(input: &str) -> Result<PlayerSkinLookup, PlayerSkinLookup> {
     let input = input.trim();
     let id = player_id(input)?;
-    let state = State::get()
-        .await
-        .map_err(|_| PlayerSkinLookup::Unavailable)?;
+    let state = State::get().await.map_err(|_| {
+        unavailable("initialization", "could not access application state")
+    })?;
     let client = state.configured_http_client();
     let mirror = should_use_mojang_mirror();
     let id = match id {
@@ -162,12 +206,17 @@ async fn lookup(input: &str) -> Result<PlayerSkinLookup, PlayerSkinLookup> {
             let url = format!(
                 "https://api.mojang.com/users/profiles/minecraft/{input}"
             );
-            let response =
-                request(&client, &mojang_service_url(&url, mirror)).await?;
-            let profile: Profile = serde_json::from_slice(
-                &read_limited(response, 64 * 1024).await?,
+            let response = request(
+                &client,
+                &mojang_service_url(&url, mirror),
+                RequestKind::Name,
             )
-            .map_err(|_| PlayerSkinLookup::Unavailable)?;
+            .await?;
+            let profile: Profile = serde_json::from_slice(
+                &read_limited(response, 64 * 1024, RequestKind::Name.stage())
+                    .await?,
+            )
+            .map_err(|_| unavailable("name_lookup", "invalid profile JSON"))?;
             profile.id
         }
     };
@@ -175,12 +224,22 @@ async fn lookup(input: &str) -> Result<PlayerSkinLookup, PlayerSkinLookup> {
         "https://sessionserver.mojang.com/session/minecraft/profile/{}",
         id.simple()
     );
-    let response = request(&client, &mojang_service_url(&url, mirror)).await?;
-    let profile: Profile =
-        serde_json::from_slice(&read_limited(response, 64 * 1024).await?)
-            .map_err(|_| PlayerSkinLookup::Unavailable)?;
+    let response = request(
+        &client,
+        &mojang_service_url(&url, mirror),
+        RequestKind::Profile,
+    )
+    .await?;
+    let profile: Profile = serde_json::from_slice(
+        &read_limited(response, 64 * 1024, RequestKind::Profile.stage())
+            .await?,
+    )
+    .map_err(|_| unavailable("profile_lookup", "invalid profile JSON"))?;
     if profile.id != id || !valid_name(&profile.name) {
-        return Err(PlayerSkinLookup::Unavailable);
+        return Err(unavailable(
+            "profile_lookup",
+            "profile identity mismatch or invalid name",
+        ));
     }
     let property = profile
         .properties
@@ -189,40 +248,60 @@ async fn lookup(input: &str) -> Result<PlayerSkinLookup, PlayerSkinLookup> {
         .ok_or(PlayerSkinLookup::NoCustomSkin)?;
     let payload = base64::engine::general_purpose::STANDARD
         .decode(&property.value)
-        .map_err(|_| PlayerSkinLookup::Unavailable)?;
+        .map_err(|_| {
+            unavailable("texture_metadata", "invalid base64 texture property")
+        })?;
     let payload: TexturePayload = serde_json::from_slice(&payload)
-        .map_err(|_| PlayerSkinLookup::Unavailable)?;
+        .map_err(|_| unavailable("texture_metadata", "invalid texture JSON"))?;
     let texture = payload
         .textures
         .skin
         .ok_or(PlayerSkinLookup::NoCustomSkin)?;
-    let url = texture_url(&texture.url).ok_or(PlayerSkinLookup::Unavailable)?;
+    let url = texture_url(&texture.url).ok_or_else(|| {
+        unavailable("texture_metadata", "invalid texture URL")
+    })?;
     let variant = match texture.metadata.and_then(|m| m.model).as_deref() {
         Some("slim") => MinecraftSkinVariant::Slim,
         None | Some("classic") => MinecraftSkinVariant::Classic,
-        _ => return Err(PlayerSkinLookup::Unavailable),
+        _ => {
+            return Err(unavailable(
+                "texture_metadata",
+                "unsupported skin model",
+            ));
+        }
     };
-    let response = request(&client, url.as_str()).await?;
-    let bytes = read_limited(response, 1024 * 1024).await?;
+    let response = request(&client, url.as_str(), RequestKind::Texture).await?;
+    let bytes =
+        read_limited(response, 1024 * 1024, RequestKind::Texture.stage())
+            .await?;
     let (width, height) = png_util::dimensions(&bytes)
-        .map_err(|_| PlayerSkinLookup::Unavailable)?;
+        .map_err(|_| unavailable("texture_validation", "invalid PNG"))?;
     if width != 64 || !matches!(height, 32 | 64) {
-        return Err(PlayerSkinLookup::Unavailable);
+        return Err(unavailable(
+            "texture_validation",
+            "unsupported PNG dimensions",
+        ));
     }
     let preview = super::normalize_skin_texture_for_preview(&UrlOrBlob::Blob(
         bytes.clone().into(),
     ))
     .await
-    .map_err(|_| PlayerSkinLookup::Unavailable)?;
+    .map_err(|_| {
+        unavailable("preview_normalization", "could not normalize skin PNG")
+    })?;
     Ok(PlayerSkinLookup::Found {
         name: profile.name,
         uuid: id,
         variant,
         texture: png_util::blob_to_data_url(bytes)
-            .ok_or(PlayerSkinLookup::Unavailable)?
+            .ok_or_else(|| {
+                unavailable("texture_encoding", "could not encode skin PNG")
+            })?
             .to_string(),
         preview_texture: png_util::blob_to_data_url(preview)
-            .ok_or(PlayerSkinLookup::Unavailable)?
+            .ok_or_else(|| {
+                unavailable("preview_encoding", "could not encode preview PNG")
+            })?
             .to_string(),
     })
 }
@@ -234,6 +313,37 @@ pub async fn lookup_player_skin(input: &str) -> PlayerSkinLookup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_profiles_and_missing_textures_have_distinct_errors() {
+        for status in [StatusCode::NOT_FOUND, StatusCode::NO_CONTENT] {
+            for kind in [RequestKind::Name, RequestKind::Profile] {
+                assert!(matches!(
+                    check_status(status, kind),
+                    Err(PlayerSkinLookup::NotFound)
+                ));
+            }
+            assert!(matches!(
+                check_status(status, RequestKind::Texture),
+                Err(PlayerSkinLookup::Unavailable)
+            ));
+        }
+        for kind in [
+            RequestKind::Name,
+            RequestKind::Profile,
+            RequestKind::Texture,
+        ] {
+            assert!(check_status(StatusCode::OK, kind).is_ok());
+            assert!(matches!(
+                check_status(StatusCode::TOO_MANY_REQUESTS, kind),
+                Err(PlayerSkinLookup::RateLimited)
+            ));
+            assert!(matches!(
+                check_status(StatusCode::INTERNAL_SERVER_ERROR, kind),
+                Err(PlayerSkinLookup::Unavailable)
+            ));
+        }
+    }
 
     #[test]
     fn accepts_names_and_both_uuid_formats_but_rejects_urls_and_paths() {
