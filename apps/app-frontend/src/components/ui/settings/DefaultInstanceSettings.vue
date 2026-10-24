@@ -148,6 +148,18 @@ const saveDraft = createSettingsPatchSaver(fetchSettings, update)
 const supportsMaximizeWindow = (await platform()) === 'windows'
 const settings = ref(fetchSettings)
 
+// `game_resolution` is a `WindowSize(u16, u16)` on the Rust side. A cleared or
+// half-typed `<input type="number">` reports `undefined`/`NaN`, which becomes JSON
+// `null` and makes `settings_set` reject the whole patch with
+// `invalid type: null, expected u16`. Ignore such an update so the stored size stays
+// usable and the field re-renders with it.
+function setResolutionDimension(index: 0 | 1, value: number) {
+    if (!Number.isFinite(value)) return
+    const next: [number, number] = [...settings.value.game_resolution]
+    next[index] = value
+    settings.value.game_resolution = next
+}
+
 watch(
     settings,
     async () => {
@@ -215,11 +227,12 @@ watch(
                 <template #control>
                     <StyledInput
                         id="width"
-                        v-model="settings.game_resolution[0]"
+                        :model-value="settings.game_resolution[0]"
                         :disabled="settings.force_fullscreen"
                         autocomplete="off"
                         type="number"
                         :placeholder="formatMessage(messages.widthPlaceholder)"
+                        @update:model-value="(value: number) => setResolutionDimension(0, value)"
                     />
                 </template>
             </SettingsRow>
@@ -229,11 +242,12 @@ watch(
                 <template #control>
                     <StyledInput
                         id="height"
-                        v-model="settings.game_resolution[1]"
+                        :model-value="settings.game_resolution[1]"
                         :disabled="settings.force_fullscreen"
                         autocomplete="off"
                         type="number"
                         :placeholder="formatMessage(messages.heightPlaceholder)"
+                        @update:model-value="(value: number) => setResolutionDimension(1, value)"
                     />
                 </template>
             </SettingsRow>

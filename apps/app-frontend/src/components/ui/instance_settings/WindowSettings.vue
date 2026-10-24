@@ -40,6 +40,20 @@ const maximizeWindowSetting = ref(initialInstance.maximize_window ?? globalSetti
 const windowTitle = ref(initialInstance.window_title ?? '')
 let saveQueue = Promise.resolve()
 
+// `game_resolution` is a `WindowSize(u16, u16)` on the Rust side. A cleared or
+// half-typed `<input type="number">` reports `undefined`/`NaN`, which serializes to
+// JSON `null` and makes `instance_edit` fail with
+// `invalid type: null, expected u16`. Ignore such an update instead, so the model
+// keeps the last usable size and the field falls back to it.
+function setDimension(index: 0 | 1, value: number) {
+    if (!Number.isFinite(value)) {
+        // Re-assign so the field re-renders with the value that is still stored.
+        resolution.value = [...resolution.value]
+        return
+    }
+    resolution.value = index === 0 ? [value, resolution.value[1]] : [resolution.value[0], value]
+}
+
 watch(
     [
         overrideWindowSettings,
@@ -201,11 +215,12 @@ const messages = defineMessages({
             </div>
             <StyledInput
                 id="width"
-                v-model="resolution[0]"
+                :model-value="resolution[0]"
                 autocomplete="off"
                 :disabled="!overrideWindowSettings || fullscreenSetting"
                 type="number"
                 :placeholder="formatMessage(messages.enterWidth)"
+                @update:model-value="(value: number) => setDimension(0, value)"
             />
         </div>
 
@@ -220,11 +235,12 @@ const messages = defineMessages({
             </div>
             <StyledInput
                 id="height"
-                v-model="resolution[1]"
+                :model-value="resolution[1]"
                 autocomplete="off"
                 :disabled="!overrideWindowSettings || fullscreenSetting"
                 type="number"
                 :placeholder="formatMessage(messages.enterHeight)"
+                @update:model-value="(value: number) => setDimension(1, value)"
             />
         </div>
         <div

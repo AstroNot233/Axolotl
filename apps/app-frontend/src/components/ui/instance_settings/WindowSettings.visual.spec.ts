@@ -188,3 +188,25 @@ it('serializes rapid edits so the last title remains persisted', async () => {
     await flushPromises()
     expect(backend.persisted).toMatchObject({ window_title: 'Last', force_fullscreen: false })
 })
+
+it('never persists a cleared window size', async () => {
+    const wrapper = await settings({ force_fullscreen: false, game_resolution: [1920, 1080] })
+    // A cleared `<input type="number">` reports `undefined`, which serializes to JSON
+    // `null`; `game_resolution` is a `WindowSize(u16, u16)`, so the command would fail
+    // with `invalid type: null, expected u16` and drop the edit.
+    await wrapper.get('#width').setValue(NaN)
+    await flushPromises()
+    expect(backend.edit).not.toHaveBeenCalled()
+    expect(backend.persisted.game_resolution).toEqual([1920, 1080])
+    await wrapper.get('#height').setValue(NaN)
+    await flushPromises()
+    expect(backend.edit).not.toHaveBeenCalled()
+    expect(backend.persisted.game_resolution).toEqual([1920, 1080])
+})
+
+it('persists a single dimension edit as a number', async () => {
+    const wrapper = await settings({ force_fullscreen: false, game_resolution: [1920, 1080] })
+    await wrapper.get('#width').setValue(1280)
+    await flushPromises()
+    expect(backend.persisted.game_resolution).toEqual([1280, 1080])
+})
