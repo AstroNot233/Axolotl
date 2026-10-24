@@ -147,16 +147,31 @@ const fetchSettings = await get()
 const saveDraft = createSettingsPatchSaver(fetchSettings, update)
 const supportsMaximizeWindow = (await platform()) === 'windows'
 const settings = ref(fetchSettings)
+// Bumped when an unusable size edit is discarded so both fields re-mount and show the
+// stored pair again instead of the text the user cleared.
+const dimensionResetToken = ref(0)
 
-// `game_resolution` is a `WindowSize(u16, u16)` on the Rust side. A cleared or
-// half-typed `<input type="number">` reports `undefined`/`NaN`, which becomes JSON
-// `null` and makes `settings_set` reject the whole patch with
-// `invalid type: null, expected u16`. Ignore such an update so the stored size stays
-// usable and the field re-renders with it.
+// `game_resolution` is a `WindowSize(u16, u16)` on the Rust side, so only integers in
+// `0..=65535` survive `settings_set`. A cleared or half-typed `<input type="number">`
+// reports `undefined`/`NaN` (JSON `null`), and decimals or out-of-range numbers fail
+// the `u16` deserialization as well; each of those drops the whole patch. Re-assign
+// the stored pair so the field re-renders with it instead of staying blank.
+const MAX_WINDOW_DIMENSION = 65535
+
+function usableDimension(value: unknown): number | null {
+    if (typeof value !== 'number' || !Number.isInteger(value)) return null
+    return value >= 0 && value <= MAX_WINDOW_DIMENSION ? value : null
+}
+
 function setResolutionDimension(index: 0 | 1, value: number) {
-    if (!Number.isFinite(value)) return
-    const next: [number, number] = [...settings.value.game_resolution]
-    next[index] = value
+    const current = settings.value.game_resolution
+    const usable = usableDimension(value)
+    if (usable === null) {
+        dimensionResetToken.value += 1
+        return
+    }
+    const next: [number, number] = [...current]
+    next[index] = usable
     settings.value.game_resolution = next
 }
 
@@ -227,6 +242,7 @@ watch(
                 <template #control>
                     <StyledInput
                         id="width"
+                        :key="`width-${dimensionResetToken}`"
                         :model-value="settings.game_resolution[0]"
                         :disabled="settings.force_fullscreen"
                         autocomplete="off"
@@ -242,6 +258,7 @@ watch(
                 <template #control>
                     <StyledInput
                         id="height"
+                        :key="`height-${dimensionResetToken}`"
                         :model-value="settings.game_resolution[1]"
                         :disabled="settings.force_fullscreen"
                         autocomplete="off"

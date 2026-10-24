@@ -38,20 +38,34 @@ const fullscreenSetting: Ref<boolean> = ref(
 )
 const maximizeWindowSetting = ref(initialInstance.maximize_window ?? globalSettings.maximize_window)
 const windowTitle = ref(initialInstance.window_title ?? '')
+// Incremented when an unusable size edit is discarded, so both number fields re-mount
+// and show the stored value again instead of the text the user cleared.
+const dimensionResetToken = ref(0)
 let saveQueue = Promise.resolve()
 
-// `game_resolution` is a `WindowSize(u16, u16)` on the Rust side. A cleared or
-// half-typed `<input type="number">` reports `undefined`/`NaN`, which serializes to
-// JSON `null` and makes `instance_edit` fail with
-// `invalid type: null, expected u16`. Ignore such an update instead, so the model
-// keeps the last usable size and the field falls back to it.
+// `game_resolution` is a `WindowSize(u16, u16)` on the Rust side, so the only values
+// that survive `instance_edit` are integers in `0..=65535`. A cleared or half-typed
+// `<input type="number">` reports `undefined`/`NaN` (which serialize to JSON `null`),
+// and decimals or out-of-range numbers fail the `u16` deserialization too; all of
+// those lose the edit. Ignore such an update instead, so the model keeps the last
+// usable size and the field falls back to it.
+const MAX_WINDOW_DIMENSION = 65535
+
+function usableDimension(value: unknown): number | null {
+    if (typeof value !== 'number' || !Number.isInteger(value)) return null
+    return value >= 0 && value <= MAX_WINDOW_DIMENSION ? value : null
+}
+
 function setDimension(index: 0 | 1, value: number) {
-    if (!Number.isFinite(value)) {
-        // Re-assign so the field re-renders with the value that is still stored.
-        resolution.value = [...resolution.value]
+    const usable = usableDimension(value)
+    if (usable === null) {
+        // Re-mount the field so it shows the value that is still stored: re-assigning an
+        // equal number does not change the bound prop, so Vue would leave the cleared
+        // text in place.
+        dimensionResetToken.value += 1
         return
     }
-    resolution.value = index === 0 ? [value, resolution.value[1]] : [resolution.value[0], value]
+    resolution.value = index === 0 ? [usable, resolution.value[1]] : [resolution.value[0], usable]
 }
 
 watch(
@@ -215,6 +229,7 @@ const messages = defineMessages({
             </div>
             <StyledInput
                 id="width"
+                :key="`width-${dimensionResetToken}`"
                 :model-value="resolution[0]"
                 autocomplete="off"
                 :disabled="!overrideWindowSettings || fullscreenSetting"
@@ -235,6 +250,7 @@ const messages = defineMessages({
             </div>
             <StyledInput
                 id="height"
+                :key="`height-${dimensionResetToken}`"
                 :model-value="resolution[1]"
                 autocomplete="off"
                 :disabled="!overrideWindowSettings || fullscreenSetting"

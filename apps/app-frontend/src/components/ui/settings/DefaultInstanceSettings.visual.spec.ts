@@ -106,9 +106,21 @@ it('never sends a cleared window dimension to the settings command', async () =>
     await flushPromises()
     expect(backend.patches).toEqual([])
     expect(backend.settings.game_resolution).toEqual([1920, 1080])
+    expect(wrapper.get<HTMLInputElement>('#width').element.value).toBe('1920')
 
     await wrapper.get('#height').setValue('')
     await flushPromises()
+    expect(backend.patches).toEqual([])
+    expect(backend.settings.game_resolution).toEqual([1920, 1080])
+    expect(wrapper.get<HTMLInputElement>('#height').element.value).toBe('1080')
+})
+
+it('never sends a dimension the u16 field cannot hold', async () => {
+    const wrapper = await openSettings([1920, 1080])
+    for (const invalid of ['1920.5', '-1', '65536']) {
+        await wrapper.get('#width').setValue(invalid)
+        await flushPromises()
+    }
     expect(backend.patches).toEqual([])
     expect(backend.settings.game_resolution).toEqual([1920, 1080])
 })
