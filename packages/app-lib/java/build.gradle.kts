@@ -31,6 +31,7 @@ java {
 
 tasks.withType<JavaCompile>().configureEach {
     options.release = 8
+    options.encoding = "UTF-8"
     options.compilerArgs.addAll(listOf("-Xlint:all", "-Werror"))
 }
 

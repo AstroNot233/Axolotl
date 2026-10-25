@@ -332,7 +332,11 @@ const messages = defineMessages({
 }
 
 // 亮色模式项目卡背景（与页面其它卡片一致）
-:global(html.light-mode) .project {
-    background: rgba(255, 255, 255, 0.8) !important;
+//
+// .projects-showcase 是必需的：基础规则是 .projects-showcase .row .project[data-v-…]
+// （0,4,0），带上它这条才够特异性压过基础规则，从而不必依赖 !important。
+// :not(:hover) 让这条在悬停时不匹配，hover 渐变才不会被一并压平。
+.light-mode .projects-showcase .project:not(:hover) {
+    background: rgba(255, 255, 255, 0.8);
 }
 </style>

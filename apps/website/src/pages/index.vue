@@ -2008,15 +2008,15 @@ useHead(() => ({
     }
 }
 
-:global(html.light-mode) .axolotl-highlights {
+.light-mode .axolotl-highlights {
     background: #f8f7f8;
 }
 
-:global(html.light-mode) .promise-card::after {
+.light-mode .promise-card::after {
     color: rgb(0 0 0 / 5%);
 }
 
-:global(html.light-mode) .mods .row:not(.header):hover {
+.light-mode .mods .row:not(.header):hover {
     background: rgb(0 0 0 / 4%);
 }
 
