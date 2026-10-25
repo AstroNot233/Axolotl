@@ -278,6 +278,50 @@ pub(crate) fn is_scannable_project_path(
     }
 }
 
+/// Whether a tracked row can be refreshed by the content scan.
+///
+/// The scan starts at each content folder and only recurses into subfolders for
+/// schematics, so scannability has to be decided by the *root* content folder
+/// and that recursion rule. Taking the nearest ancestor content folder instead
+/// would misjudge nested paths: `schematics/mods/house.schem` is scanned under
+/// `schematics`, while `mods/subdir/example.jar` is not scanned at all.
+///
+/// The scan only reports files whose extension matches their folder's content
+/// type, so a row outside that scope can never be reported again. Iris writes
+/// shader configuration sidecars such as `shaderpacks/<pack>.zip.txt` next to
+/// the packs; a tracked row for one of them would stay marked missing forever
+/// and surface as phantom content.
+///
+/// Rows under a folder this scanner never walks are kept: worlds live in
+/// `saves/` and are tracked through `worlds.rs`, so dropping their rows here
+/// would remove worlds that still exist on disk from the content list.
+pub(crate) fn is_scannable_instance_file_path(relative_path: &str) -> bool {
+    let Some((project_type, nested)) = root_content_folder_of(relative_path)
+    else {
+        return false;
+    };
+    // `worlds.rs` owns world tracking, so a world row is never stale here.
+    if project_type == ProjectType::WorldSave {
+        return true;
+    }
+    // Only schematics are scanned below their content folder; a nested file in
+    // any other content folder can never be reported again.
+    if nested && project_type != ProjectType::Schematic {
+        return false;
+    }
+    is_scannable_project_path(project_type, relative_path)
+}
+
+/// Returns the root content folder a path belongs to, together with whether the
+/// path is nested below that folder.
+fn root_content_folder_of(relative_path: &str) -> Option<(ProjectType, bool)> {
+    let mut components = Path::new(relative_path).components();
+    let folder_name = components.next()?.as_os_str().to_str()?;
+    let project_type = ProjectType::from_folder_name(folder_name)?;
+    let nested = components.next().is_some();
+    Some((project_type, nested))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,6 +422,45 @@ mod tests {
             ProjectType::ShaderPack,
             "shaderpacks/ComplementaryReimagined_r5.3.txt"
         ));
+    }
+
+    #[test]
+    fn tracked_rows_outside_the_scan_scope_are_recognised() {
+        assert!(is_scannable_instance_file_path("mods/example.jar"));
+        assert!(is_scannable_instance_file_path("mods/example.jar.disabled"));
+        assert!(is_scannable_instance_file_path(
+            "shaderpacks/BSL_v10.1.3.zip"
+        ));
+        assert!(is_scannable_instance_file_path(
+            "schematics/redstone/house.litematic"
+        ));
+        assert!(!is_scannable_instance_file_path(
+            "shaderpacks/BSL_v10.1.3.zip.txt"
+        ));
+        assert!(!is_scannable_instance_file_path(
+            "mods/Mod-2.jar_Mod-1.jar.old"
+        ));
+        assert!(!is_scannable_instance_file_path("config/example.json"));
+    }
+
+    #[test]
+    fn tracked_row_scope_follows_the_scanner_recursion_rules() {
+        // A schematic nested under a subfolder is scanned, even when an
+        // ancestor directory happens to share a content folder name.
+        assert!(is_scannable_instance_file_path(
+            "schematics/mods/house.schem"
+        ));
+        // Non-schematic folders are only scanned at the top level, so a nested
+        // file there can never be reported again.
+        assert!(!is_scannable_instance_file_path("mods/subdir/example.jar"));
+        // Worlds are tracked through `worlds.rs`, not by this scanner, so their
+        // rows must survive reconciliation.
+        assert!(is_scannable_instance_file_path("saves/My World/level.dat"));
+        assert!(is_scannable_instance_file_path(
+            "saves/My World/region/r.0.0.mca"
+        ));
+        // A path with no content folder is out of scope as well.
+        assert!(!is_scannable_instance_file_path("options.txt"));
     }
 
     #[test]
