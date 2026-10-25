@@ -1,9 +1,9 @@
 <template>
     <!--
-		Fullscreen must teleport to body: .app-contents uses isolation:isolate
-		and z-index:1, so an in-tree fixed overlay cannot paint above its
-		border/vignette pseudo-elements.
-	-->
+        Fullscreen must teleport to body: .app-contents uses isolation:isolate
+        and z-index:1, so an in-tree fixed overlay cannot paint above its
+        border/vignette pseudo-elements.
+    -->
     <Teleport to="body" :disabled="!isFullscreen">
         <div
             class="flex min-h-0 flex-1 flex-col gap-4"
@@ -26,14 +26,15 @@
                         ctx.localCrashAnalysis?.value?.mod_changes.length) &&
                     !isFullscreen
                 "
-                class="flex flex-col gap-2"
+                class="flex max-h-[50%] shrink-0 flex-col gap-2 overflow-y-auto"
             >
                 <CollapsibleAdmonition
+                    class="shrink-0"
                     type="critical"
                     :header="localCrashHeader"
                     :items="localCrashItems"
                 />
-                <div class="flex justify-end">
+                <div class="flex shrink-0 justify-end">
                     <Button
                         type="outlined"
                         :disabled="exportingCrashContext"
@@ -130,15 +131,8 @@
                 </Transition>
             </div>
 
-            <slot
-                v-if="showCommandInput && customCommandInput"
-                name="command-input"
-                :disabled="commandDisabled"
-                :placeholder="commandPlaceholder"
-                :submit-command="submitProvidedCommand"
-            />
             <StyledInput
-                v-else-if="showCommandInput"
+                v-if="showCommandInput"
                 v-model="commandInput"
                 v-tooltip="commandDisabled ? commandDisabledTooltip : undefined"
                 :icon="TerminalSquareIcon"
@@ -205,6 +199,7 @@ import LoadingIndicator from '#ui/components/base/LoadingIndicator.vue'
 import StyledInput from '#ui/components/base/StyledInput.vue'
 import NewModal from '#ui/components/modal/NewModal.vue'
 import ShareModal from '#ui/components/modal/ShareModal.vue'
+import { useBodyScrollLock } from '#ui/composables/body-scroll-lock'
 import { useVIntl } from '#ui/composables/i18n'
 import { injectModrinthClient } from '#ui/providers'
 import { injectModalBehavior } from '#ui/providers/modal-behavior'
@@ -222,9 +217,6 @@ import { injectConsoleManager } from './providers'
 import type { LogLevel, LogLine } from './types'
 
 const ctx = injectConsoleManager()
-defineProps<{
-    customCommandInput?: boolean
-}>()
 const client = injectModrinthClient()
 const modalBehavior = injectModalBehavior()
 const pageContext = injectPageContext(null)
@@ -667,6 +659,7 @@ const fontSizeOptions = computed<ComboboxOption<number>[]>(() =>
 )
 
 const isFullscreen = ref(false)
+const { lock: lockBodyScroll, unlock: unlockBodyScroll } = useBodyScrollLock()
 const fullscreenBodyClass = 'modrinth-console-fullscreen-active'
 const fullscreenIntercomPadding = 20
 const fullscreenIntercomPaddingRequestId = Symbol('console-fullscreen')
@@ -721,7 +714,7 @@ const filteredLines = computed(() => {
 
 onBeforeUnmount(() => {
     if (isFullscreen.value) {
-        document.body.style.overflow = ''
+        unlockBodyScroll()
         document.body.classList.remove(fullscreenBodyClass)
         window.dispatchEvent(new CustomEvent('modrinth-console-fullscreen', { detail: false }))
         pageContext?.intercomBubble?.requestHorizontalPadding?.(
@@ -775,12 +768,6 @@ function submitCommand() {
     viewportRef.value?.scrollToBottom()
 }
 
-function submitProvidedCommand(command: string) {
-    if (!command.trim() || commandDisabled.value || !ctx.sendCommand) return
-    ctx.sendCommand(command.trim())
-    viewportRef.value?.scrollToBottom()
-}
-
 // Re-pins the viewport to the bottom (and re-enables bottom-following).
 // Exposed so hosts can react to external events such as a server starting.
 function scrollToBottom() {
@@ -826,7 +813,7 @@ async function toggleFullscreen() {
     const viewportState = viewportRef.value?.captureViewState()
     isFullscreen.value = !isFullscreen.value
     if (isFullscreen.value) {
-        document.body.style.overflow = 'hidden'
+        lockBodyScroll()
         document.body.classList.add(fullscreenBodyClass)
         // Let the shell collapse the account sidebar so the collapse control
         // stays reachable and the expanded pane uses the full width (#584).
@@ -837,7 +824,7 @@ async function toggleFullscreen() {
         )
         modalBehavior?.onShow?.()
     } else {
-        document.body.style.overflow = ''
+        unlockBodyScroll()
         document.body.classList.remove(fullscreenBodyClass)
         window.dispatchEvent(new CustomEvent('modrinth-console-fullscreen', { detail: false }))
         pageContext?.intercomBubble?.requestHorizontalPadding?.(

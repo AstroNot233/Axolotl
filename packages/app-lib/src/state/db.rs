@@ -612,7 +612,7 @@ fn sidecar_path(path: &Path, suffix: &str) -> PathBuf {
 }
 
 async fn connect_app_db(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
-    super::db_backup::restore_corrupt_app_db_if_needed(db_path).await?;
+    super::db_backup::prepare_app_db(db_path).await?;
     super::db_backup::maybe_backup_existing_app_db(db_path).await?;
     open_migrated_app_db(db_path).await
 }
@@ -1709,12 +1709,12 @@ async fn open_app_db_pool(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
 async fn record_current_app_version(pool: &Pool<Sqlite>) -> crate::Result<()> {
     sqlx::query!(
         "
-		INSERT INTO app_metadata (key, value, updated_at)
-		VALUES ('app_version', ?, unixepoch())
-		ON CONFLICT(key) DO UPDATE SET
-			value = excluded.value,
-			updated_at = excluded.updated_at
-		",
+        INSERT INTO app_metadata (key, value, updated_at)
+        VALUES ('app_version', ?, unixepoch())
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = excluded.updated_at
+        ",
         env!("CARGO_PKG_VERSION"),
     )
     .execute(pool)
@@ -1730,18 +1730,18 @@ async fn stale_data_cleanup(pool: &Pool<Sqlite>) -> crate::Result<()> {
     let mut tx = pool.begin().await?;
 
     let has_skin_tables = sqlx::query!(
-		"SELECT COUNT(*) AS \"count!: i64\" FROM sqlite_master WHERE type = 'table' AND name IN ('custom_minecraft_skins', 'minecraft_users')",
-	)
-	.fetch_one(&mut *tx)
-	.await?
-	.count == 2;
+        "SELECT COUNT(*) AS \"count!: i64\" FROM sqlite_master WHERE type = 'table' AND name IN ('custom_minecraft_skins', 'minecraft_users')",
+    )
+    .fetch_one(&mut *tx)
+    .await?
+    .count == 2;
 
     if has_skin_tables {
         sqlx::query!(
-			"DELETE FROM custom_minecraft_skins WHERE minecraft_user_uuid NOT IN (SELECT uuid FROM minecraft_users)"
-		)
-		.execute(&mut *tx)
-		.await?;
+            "DELETE FROM custom_minecraft_skins WHERE minecraft_user_uuid NOT IN (SELECT uuid FROM minecraft_users)"
+        )
+        .execute(&mut *tx)
+        .await?;
     }
 
     tx.commit().await?;
@@ -1776,6 +1776,53 @@ pub(crate) async fn migrated_test_pool() -> Pool<Sqlite> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[tokio::test]
+    async fn version_backup_precedes_migration_validation_and_survives_an_upgrade_failure()
+     {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("release").join("app.db");
+        tokio::fs::create_dir_all(database.parent().unwrap())
+            .await
+            .unwrap();
+        let pool = connect_app_db(&database).await.unwrap();
+        sqlx::query("UPDATE app_metadata SET value = 'previous-software-version' WHERE key = 'app_version'")
+            .execute(&pool).await.unwrap();
+        // An unknown applied migration must still fail; it must not suppress the version backup.
+        sqlx::query("INSERT INTO _sqlx_migrations(version, description, success, checksum, execution_time) VALUES (99999999999999, 'unavailable-build', TRUE, X'00', 1)")
+            .execute(&pool).await.unwrap();
+        pool.close().await;
+        assert!(connect_app_db(&database).await.is_err());
+        let backup_dir = directory
+            .path()
+            .join("Backups")
+            .join("app-db")
+            .join("release");
+        let mut entries = tokio::fs::read_dir(backup_dir).await.unwrap();
+        let snapshot = entries.next_entry().await.unwrap().unwrap().path();
+        assert_eq!(
+            snapshot.extension().and_then(|value| value.to_str()),
+            Some("db")
+        );
+        let backup = open_app_db_pool(&snapshot).await.unwrap();
+        let version: String = sqlx::query_scalar(
+            "SELECT value FROM app_metadata WHERE key = 'app_version'",
+        )
+        .fetch_one(&backup)
+        .await
+        .unwrap();
+        assert_eq!(version, "previous-software-version");
+        backup.close().await;
+        let source = open_app_db_pool(&database).await.unwrap();
+        let version: String = sqlx::query_scalar(
+            "SELECT value FROM app_metadata WHERE key = 'app_version'",
+        )
+        .fetch_one(&source)
+        .await
+        .unwrap();
+        assert_eq!(version, "previous-software-version");
+        source.close().await;
+    }
 
     const TERRACOTTA_PUBLIC_NODES_MIGRATION_VERSION: i64 = 20260812120000;
     const INSTANCE_LOADER_COMPONENTS_MIGRATION_VERSION: i64 = 20260819120000;
@@ -1841,9 +1888,9 @@ mod tests {
         MIGRATOR.run(&fresh).await.unwrap();
         let table_exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(
-				SELECT 1 FROM sqlite_master
-				WHERE type = 'table' AND name = 'instance_loader_components'
-			)",
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'instance_loader_components'
+            )",
         )
         .fetch_one(&fresh)
         .await
@@ -1887,12 +1934,12 @@ mod tests {
             let content_set_id = format!("{id}-set");
             sqlx::query(
                 "INSERT INTO instances (
-					id, path, applied_content_set_id, install_stage,
-					launcher_feature_version, update_channel, name,
-					created, modified, submitted_time_played,
-					recent_time_played
-				 ) VALUES (?, ?, ?, 'installed', 'migrated_launch_hooks',
-					'release', ?, 1, 1, 0, 0)",
+                    id, path, applied_content_set_id, install_stage,
+                    launcher_feature_version, update_channel, name,
+                    created, modified, submitted_time_played,
+                    recent_time_played
+                    ) VALUES (?, ?, ?, 'installed', 'migrated_launch_hooks',
+                    'release', ?, 1, 1, 0, 0)",
             )
             .bind(id)
             .bind(id)
@@ -1903,10 +1950,10 @@ mod tests {
             .unwrap();
             sqlx::query(
                 "INSERT INTO instance_content_sets (
-					id, instance_id, name, source_kind, status,
-					game_version, loader, loader_version, created, modified
-				 ) VALUES (?, ?, 'Default', 'local', 'available',
-					'1.12.2', ?, ?, 1, 1)",
+                    id, instance_id, name, source_kind, status,
+                    game_version, loader, loader_version, created, modified
+                    ) VALUES (?, ?, 'Default', 'local', 'available',
+                    '1.12.2', ?, ?, 1, 1)",
             )
             .bind(&content_set_id)
             .bind(id)
@@ -1922,8 +1969,8 @@ mod tests {
         let rows: Vec<(String, String, Option<String>, String)> =
             sqlx::query_as(
                 "SELECT instance_id, kind, version, role
-				 FROM instance_loader_components
-				 ORDER BY instance_id, role DESC, kind",
+                    FROM instance_loader_components
+                    ORDER BY instance_id, role DESC, kind",
             )
             .fetch_all(&upgraded)
             .await
@@ -1959,8 +2006,8 @@ mod tests {
         );
         let malformed_metadata = sqlx::query(
             "UPDATE instance_loader_components
-			 SET provider_metadata = '{'
-			 WHERE instance_id = 'forge'",
+                SET provider_metadata = '{'
+                WHERE instance_id = 'forge'",
         )
         .execute(&upgraded)
         .await;
@@ -4674,7 +4721,7 @@ mod tests {
         assert_eq!(
             translation,
             (
-                "microsoft".to_string(),
+                "google".to_string(),
                 String::new(),
                 String::new(),
                 String::new(),
@@ -4783,7 +4830,7 @@ mod tests {
         assert_eq!(
             translation,
             (
-                "microsoft".to_string(),
+                "google".to_string(),
                 String::new(),
                 String::new(),
                 "https://api.openai.com/v1".to_string(),

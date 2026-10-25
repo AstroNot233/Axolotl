@@ -28,26 +28,32 @@ pub(crate) fn start(state: Arc<State>) {
 
     let (wake_tx, mut wake_rx) = tokio::sync::mpsc::channel(1);
     let _ = WAKE_TX.set(wake_tx);
-    tokio::spawn(async move {
-        loop {
-            let client = match crate::util::fetch::configured_client().await {
-                Ok(client) => client,
-                Err(error) => {
-                    tracing::debug!(target: "theseus::telemetry", %error, "Telemetry client configuration failed");
-                    tokio::time::sleep(Duration::from_secs(60)).await;
-                    continue;
+    let task = tokio::spawn({
+        let state = Arc::clone(&state);
+        async move {
+            loop {
+                state.maintenance_gate.wait_until_resumed().await;
+                let client = match crate::util::fetch::configured_client().await
+                {
+                    Ok(client) => client,
+                    Err(error) => {
+                        tracing::debug!(target: "theseus::telemetry", %error, "Telemetry client configuration failed");
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                        continue;
+                    }
+                };
+                if let Err(error) = run_cycle(&state, &client).await {
+                    tracing::debug!(target: "theseus::telemetry", %error, "Telemetry cycle failed");
                 }
-            };
-            if let Err(error) = run_cycle(&state, &client).await {
-                tracing::debug!(target: "theseus::telemetry", %error, "Telemetry cycle failed");
-            }
 
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(60)) => {},
-                _ = wake_rx.recv() => {},
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(60)) => {},
+                    _ = wake_rx.recv() => {},
+                }
             }
         }
     });
+    state.background_tasks.lock().push(task);
 }
 
 pub async fn set_enabled(state: &State, enabled: bool) -> crate::Result<()> {
@@ -114,11 +120,11 @@ async fn ensure_identity(pool: &sqlx::SqlitePool) -> crate::Result<String> {
 
     let installation_id = Uuid::new_v4().to_string();
     sqlx::query(
-		"INSERT OR IGNORE INTO telemetry_identity (id, installation_id) VALUES (0, ?)",
-	)
-	.bind(&installation_id)
-	.execute(pool)
-	.await?;
+        "INSERT OR IGNORE INTO telemetry_identity (id, installation_id) VALUES (0, ?)",
+    )
+    .bind(&installation_id)
+    .execute(pool)
+    .await?;
     let row = sqlx::query(
         "SELECT installation_id FROM telemetry_identity WHERE id = 0",
     )
@@ -180,12 +186,12 @@ async fn insert_outbox_event(
     let now = Utc::now().timestamp();
     sqlx::query(
         r#"
-		INSERT INTO telemetry_outbox (
-			event_id, event_type, payload, created_at, next_attempt_at,
-			size_bytes, dedupe_key
-		) VALUES (?, 'heartbeat', jsonb(?), ?, ?, ?, ?)
-		ON CONFLICT(dedupe_key) DO NOTHING
-		"#,
+        INSERT INTO telemetry_outbox (
+            event_id, event_type, payload, created_at, next_attempt_at,
+            size_bytes, dedupe_key
+        ) VALUES (?, 'heartbeat', jsonb(?), ?, ?, ?, ?)
+        ON CONFLICT(dedupe_key) DO NOTHING
+        "#,
     )
     .bind(event_id)
     .bind(&payload)
@@ -205,27 +211,27 @@ async fn cleanup_outbox(state: &State) -> crate::Result<()> {
         .execute(&state.pool)
         .await?;
     sqlx::query(
-		"DELETE FROM telemetry_outbox WHERE event_id IN (SELECT event_id FROM telemetry_outbox ORDER BY created_at DESC LIMIT -1 OFFSET ?)",
-	)
-	.bind(MAX_OUTBOX_EVENTS)
-	.execute(&state.pool)
-	.await?;
+        "DELETE FROM telemetry_outbox WHERE event_id IN (SELECT event_id FROM telemetry_outbox ORDER BY created_at DESC LIMIT -1 OFFSET ?)",
+    )
+    .bind(MAX_OUTBOX_EVENTS)
+    .execute(&state.pool)
+    .await?;
     sqlx::query(
-		r#"
-		DELETE FROM telemetry_outbox
-		WHERE event_id IN (
-			SELECT event_id FROM (
-				SELECT event_id,
-					SUM(size_bytes) OVER (ORDER BY created_at DESC, event_id DESC) AS running_bytes
-				FROM telemetry_outbox
-			)
-			WHERE running_bytes > ?
-		)
-		"#,
-	)
-	.bind(MAX_OUTBOX_BYTES)
-	.execute(&state.pool)
-	.await?;
+        r#"
+        DELETE FROM telemetry_outbox
+        WHERE event_id IN (
+            SELECT event_id FROM (
+                SELECT event_id,
+                    SUM(size_bytes) OVER (ORDER BY created_at DESC, event_id DESC) AS running_bytes
+                FROM telemetry_outbox
+            )
+            WHERE running_bytes > ?
+        )
+        "#,
+    )
+    .bind(MAX_OUTBOX_BYTES)
+    .execute(&state.pool)
+    .await?;
     Ok(())
 }
 
@@ -235,12 +241,12 @@ async fn upload_next_batch(
 ) -> crate::Result<()> {
     let now = Utc::now().timestamp();
     let rows = sqlx::query(
-		"SELECT event_id, json(payload) AS payload FROM telemetry_outbox WHERE event_type = 'heartbeat' AND next_attempt_at <= ? ORDER BY created_at LIMIT ?",
-	)
-	.bind(now)
-	.bind(MAX_BATCH_EVENTS)
-	.fetch_all(&state.pool)
-	.await?;
+        "SELECT event_id, json(payload) AS payload FROM telemetry_outbox WHERE event_type = 'heartbeat' AND next_attempt_at <= ? ORDER BY created_at LIMIT ?",
+    )
+    .bind(now)
+    .bind(MAX_BATCH_EVENTS)
+    .fetch_all(&state.pool)
+    .await?;
     if rows.is_empty() {
         return Ok(());
     }
@@ -331,13 +337,13 @@ async fn schedule_retry(
             _ => 6 * 60 * 60,
         };
         sqlx::query(
-			"UPDATE telemetry_outbox SET attempts = ?, next_attempt_at = ? WHERE event_id = ?",
-		)
-		.bind(attempts)
-		.bind(Utc::now().timestamp() + delay)
-		.bind(event_id)
-		.execute(&state.pool)
-		.await?;
+            "UPDATE telemetry_outbox SET attempts = ?, next_attempt_at = ? WHERE event_id = ?",
+        )
+        .bind(attempts)
+        .bind(Utc::now().timestamp() + delay)
+        .bind(event_id)
+        .execute(&state.pool)
+        .await?;
     }
     Ok(())
 }

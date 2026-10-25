@@ -11,6 +11,7 @@ use crate::state::{
 use chrono::{DateTime, TimeZone, Utc};
 use serde::de::DeserializeOwned;
 use sqlx::{Executor, Sqlite, SqlitePool, Transaction};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, sqlx::FromRow)]
@@ -106,16 +107,16 @@ where
         Option<String>,
     )> = sqlx::query_as(
         "
-		SELECT
-			linked_launcher,
-			linked_launcher_root,
-			linked_dot_minecraft,
-			linked_version_id,
-			linked_version_json_path
-			, linked_game_dir_mode
-		FROM instances
-		WHERE id = ?
-		",
+        SELECT
+            linked_launcher,
+            linked_launcher_root,
+            linked_dot_minecraft,
+            linked_version_id,
+            linked_version_json_path
+            , linked_game_dir_mode
+        FROM instances
+        WHERE id = ?
+        ",
     )
     .bind(id)
     .fetch_optional(exec)
@@ -157,16 +158,16 @@ pub(crate) async fn set_direct_link_fields(
 
     sqlx::query(
         "
-		UPDATE instances
-		SET
-			linked_launcher = ?,
-			linked_launcher_root = ?,
-			linked_dot_minecraft = ?,
-			linked_version_id = ?,
-			linked_version_json_path = ?
-			, linked_game_dir_mode = ?
-		WHERE id = ?
-		",
+        UPDATE instances
+        SET
+            linked_launcher = ?,
+            linked_launcher_root = ?,
+            linked_dot_minecraft = ?,
+            linked_version_id = ?,
+            linked_version_json_path = ?
+            , linked_game_dir_mode = ?
+        WHERE id = ?
+        ",
     )
     .bind(launcher)
     .bind(launcher_root)
@@ -531,26 +532,26 @@ where
 {
     let row = sqlx::query_as::<_, InstanceRow>(
         "
-		SELECT
-			id,
-			path,
-			applied_content_set_id,
-			install_stage,
-			launcher_feature_version,
-			update_channel,
-			name,
-			icon_path,
-			symlink_target,
-			game_dir_override,
-			created,
-			modified,
-			last_played,
-			pinned_at,
-			submitted_time_played,
-			recent_time_played
-		FROM instances
-		WHERE id = ?
-		",
+        SELECT
+            id,
+            path,
+            applied_content_set_id,
+            install_stage,
+            launcher_feature_version,
+            update_channel,
+            name,
+            icon_path,
+            symlink_target,
+            game_dir_override,
+            created,
+            modified,
+            last_played,
+            pinned_at,
+            submitted_time_played,
+            recent_time_played
+        FROM instances
+        WHERE id = ?
+        ",
     )
     .bind(id)
     .fetch_optional(exec)
@@ -575,26 +576,26 @@ where
 {
     let row = sqlx::query_as::<_, InstanceRow>(
         "
-		SELECT
-			id,
-			path,
-			applied_content_set_id,
-			install_stage,
-			launcher_feature_version,
-			update_channel,
-			name,
-			icon_path,
-			symlink_target,
-			game_dir_override,
-			created,
-			modified,
-			last_played,
-			pinned_at,
-			submitted_time_played,
-			recent_time_played
-		FROM instances
-		WHERE path = ?
-		",
+        SELECT
+            id,
+            path,
+            applied_content_set_id,
+            install_stage,
+            launcher_feature_version,
+            update_channel,
+            name,
+            icon_path,
+            symlink_target,
+            game_dir_override,
+            created,
+            modified,
+            last_played,
+            pinned_at,
+            submitted_time_played,
+            recent_time_played
+        FROM instances
+        WHERE path = ?
+        ",
     )
     .bind(path)
     .fetch_optional(exec)
@@ -724,7 +725,7 @@ pub(crate) async fn get_instance_metadata_by_id(
             i.created,
             i.modified,
             i.last_played,
-			i.pinned_at,
+            i.pinned_at,
             i.submitted_time_played,
             i.recent_time_played,
             cs.id AS content_set_id,
@@ -815,7 +816,7 @@ pub(crate) async fn get_instance_metadata_many(
             i.created,
             i.modified,
             i.last_played,
-			i.pinned_at,
+            i.pinned_at,
             i.submitted_time_played,
             i.recent_time_played,
             cs.id AS content_set_id,
@@ -900,7 +901,7 @@ pub(crate) async fn list_instance_metadata(
             i.created,
             i.modified,
             i.last_played,
-			i.pinned_at,
+            i.pinned_at,
             i.submitted_time_played,
             i.recent_time_played,
             cs.id AS content_set_id,
@@ -982,7 +983,7 @@ pub(crate) async fn get_instance_launch_context(
             i.created,
             i.modified,
             i.last_played,
-			i.pinned_at,
+            i.pinned_at,
             i.submitted_time_played,
             i.recent_time_played,
             cs.id AS content_set_id,
@@ -1036,25 +1037,25 @@ pub(crate) async fn list_instances(
 ) -> crate::Result<Vec<Instance>> {
     let rows = sqlx::query_as::<_, InstanceRow>(
         "
-		SELECT
-			id,
-			path,
-			applied_content_set_id,
-			install_stage,
-			launcher_feature_version,
-			update_channel,
-			name,
-			icon_path,
-			symlink_target,
-			game_dir_override,
-			created,
-			modified,
-			last_played,
-			pinned_at,
-			submitted_time_played,
-			recent_time_played
-		FROM instances
-		",
+        SELECT
+            id,
+            path,
+            applied_content_set_id,
+            install_stage,
+            launcher_feature_version,
+            update_channel,
+            name,
+            icon_path,
+            symlink_target,
+            game_dir_override,
+            created,
+            modified,
+            last_played,
+            pinned_at,
+            submitted_time_played,
+            recent_time_played
+        FROM instances
+        ",
     )
     .fetch_all(pool)
     .await?;
@@ -1118,11 +1119,11 @@ where
 {
     let rows = sqlx::query_scalar!(
         "
-		SELECT group_name
-		FROM instance_groups
-		WHERE instance_id = ?
-		ORDER BY group_name
-		",
+        SELECT group_name
+        FROM instance_groups
+        WHERE instance_id = ?
+        ORDER BY group_name
+        ",
         instance_id,
     )
     .fetch_all(exec)
@@ -1141,12 +1142,12 @@ where
     let row = sqlx::query_as!(
         InstanceLaunchOverridesRow,
         r#"
-		SELECT
-			instance_id,
-			json(overrides) AS "overrides!: String"
-		FROM instance_launch_overrides
-		WHERE instance_id = ?
-		"#,
+        SELECT
+            instance_id,
+            json(overrides) AS "overrides!: String"
+        FROM instance_launch_overrides
+        WHERE instance_id = ?
+        "#,
         instance_id,
     )
     .fetch_optional(exec)
@@ -1182,26 +1183,26 @@ pub(crate) async fn insert_instance(
 
     sqlx::query!(
         "
-		INSERT INTO instances (
-			id,
-			path,
-			applied_content_set_id,
-			install_stage,
-			launcher_feature_version,
-			update_channel,
-			name,
-			icon_path,
-			symlink_target,
-			game_dir_override,
-			created,
-			modified,
-			last_played,
-			pinned_at,
-			submitted_time_played,
-			recent_time_played
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		",
+        INSERT INTO instances (
+            id,
+            path,
+            applied_content_set_id,
+            install_stage,
+            launcher_feature_version,
+            update_channel,
+            name,
+            icon_path,
+            symlink_target,
+            game_dir_override,
+            created,
+            modified,
+            last_played,
+            pinned_at,
+            submitted_time_played,
+            recent_time_played
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ",
         id,
         path,
         applied_content_set_id,
@@ -1251,24 +1252,24 @@ pub(crate) async fn update_instance(
 
     sqlx::query!(
         "
-		UPDATE instances
-		SET
-			path = ?,
-			applied_content_set_id = ?,
-			install_stage = ?,
-			launcher_feature_version = ?,
-			update_channel = ?,
-			name = ?,
-			icon_path = ?,
-			symlink_target = ?,
-			game_dir_override = ?,
-			modified = ?,
-			last_played = ?,
-			pinned_at = ?,
-			submitted_time_played = ?,
-			recent_time_played = ?
-		WHERE id = ?
-		",
+        UPDATE instances
+        SET
+            path = ?,
+            applied_content_set_id = ?,
+            install_stage = ?,
+            launcher_feature_version = ?,
+            update_channel = ?,
+            name = ?,
+            icon_path = ?,
+            symlink_target = ?,
+            game_dir_override = ?,
+            modified = ?,
+            last_played = ?,
+            pinned_at = ?,
+            submitted_time_played = ?,
+            recent_time_played = ?
+        WHERE id = ?
+        ",
         path,
         applied_content_set_id,
         install_stage,
@@ -1297,6 +1298,12 @@ pub(crate) async fn upsert_instance_link(
     tx: &mut Transaction<'_, Sqlite>,
 ) -> crate::Result<()> {
     let columns = instance_link_columns(link)?;
+    if !matches!(link, InstanceLink::Unmanaged) {
+        sqlx::query("DELETE FROM resource_pack_unlinks WHERE instance_id = ?")
+            .bind(instance_id)
+            .execute(&mut **tx)
+            .await?;
+    }
     let modrinth_project_id = columns.modrinth_project_id.as_deref();
     let modrinth_version_id = columns.modrinth_version_id.as_deref();
     let server_project_id = columns.server_project_id.as_deref();
@@ -1313,38 +1320,38 @@ pub(crate) async fn upsert_instance_link(
 
     sqlx::query!(
         "
-		INSERT INTO instance_links (
-			instance_id,
-			link_kind,
-			modrinth_project_id,
-			modrinth_version_id,
-			server_project_id,
-			content_project_id,
-			content_version_id,
-			hosting_server_id,
-			hosting_instance_ids,
-			hosting_active_instance_id,
-			shared_instance_id,
-			imported_name,
-			imported_version_number,
-			imported_filename
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, jsonb(?), ?, ?, ?, ?, ?)
-		ON CONFLICT (instance_id) DO UPDATE SET
-			link_kind = excluded.link_kind,
-			modrinth_project_id = excluded.modrinth_project_id,
-			modrinth_version_id = excluded.modrinth_version_id,
-			server_project_id = excluded.server_project_id,
-			content_project_id = excluded.content_project_id,
-			content_version_id = excluded.content_version_id,
-			hosting_server_id = excluded.hosting_server_id,
-			hosting_instance_ids = excluded.hosting_instance_ids,
-			hosting_active_instance_id = excluded.hosting_active_instance_id,
-			shared_instance_id = excluded.shared_instance_id,
-			imported_name = excluded.imported_name,
-			imported_version_number = excluded.imported_version_number,
-			imported_filename = excluded.imported_filename
-		",
+        INSERT INTO instance_links (
+            instance_id,
+            link_kind,
+            modrinth_project_id,
+            modrinth_version_id,
+            server_project_id,
+            content_project_id,
+            content_version_id,
+            hosting_server_id,
+            hosting_instance_ids,
+            hosting_active_instance_id,
+            shared_instance_id,
+            imported_name,
+            imported_version_number,
+            imported_filename
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, jsonb(?), ?, ?, ?, ?, ?)
+        ON CONFLICT (instance_id) DO UPDATE SET
+            link_kind = excluded.link_kind,
+            modrinth_project_id = excluded.modrinth_project_id,
+            modrinth_version_id = excluded.modrinth_version_id,
+            server_project_id = excluded.server_project_id,
+            content_project_id = excluded.content_project_id,
+            content_version_id = excluded.content_version_id,
+            hosting_server_id = excluded.hosting_server_id,
+            hosting_instance_ids = excluded.hosting_instance_ids,
+            hosting_active_instance_id = excluded.hosting_active_instance_id,
+            shared_instance_id = excluded.shared_instance_id,
+            imported_name = excluded.imported_name,
+            imported_version_number = excluded.imported_version_number,
+            imported_filename = excluded.imported_filename
+        ",
         instance_id,
         columns.link_kind,
         modrinth_project_id,
@@ -1373,9 +1380,9 @@ pub(crate) async fn replace_instance_groups(
 ) -> crate::Result<()> {
     sqlx::query!(
         "
-		DELETE FROM instance_groups
-		WHERE instance_id = ?
-		",
+        DELETE FROM instance_groups
+        WHERE instance_id = ?
+        ",
         instance_id,
     )
     .execute(&mut **tx)
@@ -1384,9 +1391,9 @@ pub(crate) async fn replace_instance_groups(
     for group in groups {
         sqlx::query!(
             "
-			INSERT OR IGNORE INTO instance_groups (instance_id, group_name)
-			VALUES (?, ?)
-			",
+            INSERT OR IGNORE INTO instance_groups (instance_id, group_name)
+            VALUES (?, ?)
+            ",
             instance_id,
             group,
         )
@@ -1407,14 +1414,14 @@ pub(crate) async fn upsert_instance_launch_overrides(
 
     sqlx::query!(
         "
-		INSERT INTO instance_launch_overrides (
-			instance_id,
-			overrides
-		)
-		VALUES (?, jsonb(?))
-		ON CONFLICT (instance_id) DO UPDATE SET
-			overrides = excluded.overrides
-		",
+        INSERT INTO instance_launch_overrides (
+            instance_id,
+            overrides
+        )
+        VALUES (?, jsonb(?))
+        ON CONFLICT (instance_id) DO UPDATE SET
+            overrides = excluded.overrides
+        ",
         instance_id,
         overrides_data,
     )
@@ -1430,9 +1437,9 @@ pub(crate) async fn delete_instance_by_id(
 ) -> crate::Result<()> {
     sqlx::query!(
         "
-		DELETE FROM instances
-		WHERE id = ?
-		",
+        DELETE FROM instances
+        WHERE id = ?
+        ",
         instance_id,
     )
     .execute(pool)
@@ -1470,18 +1477,52 @@ pub(crate) async fn get_instance_synced_options(
     for row in rows {
         let feature: String = sqlx::Row::get(&row, "feature");
         let enabled: bool = sqlx::Row::get(&row, "enabled");
-        match feature.as_str() {
-            "game_options" => options.game_options = enabled,
-            "command_history" => options.command_history = enabled,
-            "multiplayer_servers" => options.multiplayer_servers = enabled,
-            "creative_hotbars" => options.creative_hotbars = enabled,
-            "screenshots" => options.screenshots = enabled,
-            "resource_packs" => options.resource_packs = enabled,
-            "data_packs" => options.data_packs = enabled,
-            _ => {}
-        }
+        apply_sync_preference(&mut options, &feature, enabled);
     }
     Ok(options)
+}
+
+pub(crate) async fn get_instance_synced_options_many(
+    instance_ids: &[&str],
+    pool: &SqlitePool,
+) -> crate::Result<HashMap<String, crate::state::InstanceSyncedOptions>> {
+    use sqlx::Row;
+    let rows = sqlx::query(
+        "SELECT instance_id, feature, enabled FROM instance_sync_preferences
+         WHERE instance_id IN (SELECT value FROM json_each(?))",
+    )
+    .bind(serde_json::to_string(instance_ids)?)
+    .fetch_all(pool)
+    .await?;
+    let mut grouped = HashMap::new();
+    for row in rows {
+        let id: String = row.try_get("instance_id")?;
+        let feature: String = row.try_get("feature")?;
+        let enabled: bool = row.try_get("enabled")?;
+        apply_sync_preference(
+            grouped.entry(id).or_default(),
+            &feature,
+            enabled,
+        );
+    }
+    Ok(grouped)
+}
+
+fn apply_sync_preference(
+    options: &mut crate::state::InstanceSyncedOptions,
+    feature: &str,
+    enabled: bool,
+) {
+    match feature {
+        "game_options" => options.game_options = enabled,
+        "command_history" => options.command_history = enabled,
+        "multiplayer_servers" => options.multiplayer_servers = enabled,
+        "creative_hotbars" => options.creative_hotbars = enabled,
+        "screenshots" => options.screenshots = enabled,
+        "resource_packs" => options.resource_packs = enabled,
+        "data_packs" => options.data_packs = enabled,
+        _ => {}
+    }
 }
 
 struct InstanceLinkColumns {

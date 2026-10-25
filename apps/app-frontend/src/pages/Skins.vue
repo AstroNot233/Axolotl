@@ -23,7 +23,6 @@ import {
     useVIntl,
 } from '@modrinth/ui'
 import { arrayBufferToBase64 } from '@modrinth/utils'
-import { useQuery } from '@tanstack/vue-query'
 import { invoke } from '@tauri-apps/api/core'
 import type { DragDropEvent } from '@tauri-apps/api/webview'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
@@ -37,10 +36,13 @@ import ArmorTrimTab from '@/components/ui/skin/ArmorTrimTab.vue'
 import EditSkinModal from '@/components/ui/skin/EditSkinModal.vue'
 import SkinListSkeleton from '@/components/ui/skin/SkinListSkeleton.vue'
 import VirtualSkinSectionList from '@/components/ui/skin/VirtualSkinSectionList.vue'
+import { useMojangAuthStatus } from '@/composables/useMojangAuth'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
-import { check_reachable, get_default_user, users } from '@/helpers/auth'
+import { accountSelectionRevision } from '@/helpers/account-state'
+import { get_default_user, users } from '@/helpers/auth'
 import type { RenderResult } from '@/helpers/rendering/batch-skin-renderer.ts'
-import { skinBlobUrlMap } from '@/helpers/rendering/batch-skin-renderer.ts'
+import { setActiveSkinPreviews, skinBlobUrlMap } from '@/helpers/rendering/batch-skin-renderer.ts'
+import { createSkinAccountSession } from '@/helpers/skin-account-session'
 import { loadSkinArmorPreview, saveSkinArmorPreview } from '@/helpers/skin-armor-preview'
 import type { Cape, Skin, SkinTextureUrl } from '@/helpers/skins.ts'
 import {
@@ -59,9 +61,12 @@ import {
 } from '@/helpers/skins.ts'
 import { useTheming } from '@/store/state'
 
+let cancelSkinPreviews: (() => void) | undefined
 async function generateSkinPreviews(skins: Skin[], capes: Cape[]) {
-    const { generateSkinPreviews: generate } =
+    const { generateSkinPreviews: generate, cancelSkinPreviews: cancel } =
         await import('@/helpers/rendering/skin-preview-renderer')
+    if (isUnmounted) return
+    cancelSkinPreviews = cancel
     await generate(skins, capes)
 }
 
@@ -278,10 +283,10 @@ function closeArmorTab() {
 }
 
 /**
- * The tab bar keeps the last list tab highlighted while the armour tab shows, so
- * picking one of them leaves the armour tab. That transition has to drop the
- * draft exactly like the toggle and Escape paths do, or it lingers on the model
- * while the panel is gone.
+ * While the armour tab shows, no list tab is selected, so picking one of them
+ * leaves the armour surface. That transition has to drop the draft exactly like
+ * the toggle and Escape paths do, or it lingers on the model while the panel is
+ * gone.
  */
 function selectSkinListTab(index: number) {
     if (skinListTab.value === 'armor') resetArmorPreviewToSaved()
@@ -298,13 +303,15 @@ const { addNotification, handleError } = notifications
 const themeStore = useTheming()
 const skins = ref<Skin[]>([])
 const capes = ref<Cape[]>([])
-const { browserOffline, offline, setNetworkReachable } = useNetworkStatus()
+const { offline } = useNetworkStatus()
+const mojangAuth = useMojangAuthStatus()
 
 const accountsCard = inject('accountsCard') as Ref<typeof AccountsCard>
-const accountChangeRevision = computed(() => accountsCard.value?.accountChangeRevision)
 const currentUser = ref(undefined)
 const currentUserId = ref<string | undefined>(undefined)
 const currentAccountType = ref<'microsoft' | 'offline' | 'yggdrasil' | undefined>(undefined)
+const isAccountLoading = ref(true)
+const isSkinLibraryLoading = ref(true)
 
 const username = computed(() => currentUser.value?.profile?.name ?? undefined)
 const selectedSkin = ref<Skin | null>(null)
@@ -319,23 +326,6 @@ const savedSkins = computed(() => {
         handleError(error as Error)
         return []
     }
-})
-const authServerQuery = useQuery({
-    queryKey: ['authServerReachability'],
-    enabled: computed(() => !browserOffline.value),
-    queryFn: async () => {
-        try {
-            await check_reachable()
-            setNetworkReachable(true)
-            return true
-        } catch (error) {
-            setNetworkReachable(false)
-            throw error
-        }
-    },
-    refetchInterval: 5 * 60 * 1000,
-    retry: false,
-    refetchOnWindowFocus: false,
 })
 const defaultSkins = computed(() => filterDefaultSkins(skins.value))
 const defaultSkinSections = computed(() => {
@@ -396,15 +386,16 @@ const isSkinManagementReadOnly = computed(
     () =>
         currentAccountType.value === 'yggdrasil' ||
         (currentAccountType.value !== 'offline' &&
-            (offline.value || (authServerQuery.isError.value && !authServerQuery.isLoading.value))),
+            (offline.value || mojangAuth.reachable.value === false)),
 )
 const hasPendingSkinChange = computed(
     () => !skinsMatch(selectedSkin.value, originalSelectedSkin.value),
 )
 
-let userCheckInterval: number | null = null
 let pendingSkinRefreshTimeout: number | null = null
 let isUnmounted = false
+const skinAccountSessions = createSkinAccountSession()
+let skinAccountGeneration = 0
 let unlistenNativeDrop: (() => void) | null = null
 let skinNavigationRevision = 0
 const skinNavigationRevisions = new WeakMap<object, number>()
@@ -470,19 +461,29 @@ async function deleteSkin() {
     }
 }
 
-async function loadCapes() {
+async function loadCapes(generation = skinAccountGeneration, cachedOnly = false) {
     try {
-        capes.value = (await get_available_capes()) ?? []
+        const loadedCapes = (await get_available_capes(cachedOnly)) ?? []
+        if (generation === skinAccountGeneration) capes.value = loadedCapes
     } catch (error) {
-        if (currentUser.value && error instanceof Error) {
+        if (generation === skinAccountGeneration && currentUser.value && error instanceof Error) {
             handleError(error)
         }
     }
 }
 
-async function loadSkins() {
+async function loadSkins(
+    generation = skinAccountGeneration,
+    cachedOnly = false,
+    preserveSelection = false,
+) {
+    const previousSkins = skins.value
+    const previousSelection = selectedSkin.value
     try {
-        const loadedSkins = (await get_available_skins()) ?? []
+        const loadedSkins = (await get_available_skins(cachedOnly)) ?? []
+        if (generation !== skinAccountGeneration) return
+        // A background response must not overwrite a save, reorder or apply.
+        if (preserveSelection && skins.value !== previousSkins) return
         const loadedEquippedSkin = loadedSkins.find((s) => s.is_equipped)
         const locallyKnownEquippedSkin =
             originalSelectedSkin.value &&
@@ -495,15 +496,23 @@ async function loadSkins() {
             locallyKnownEquippedSkin &&
             !skinsMatch(loadedEquippedSkin, locallyKnownEquippedSkin)
 
-        skins.value =
+        const nextSkins =
             shouldPreserveKnownEquippedSkin && locallyKnownEquippedSkin
                 ? mergeEquippedSkin(loadedSkins, locallyKnownEquippedSkin)
                 : loadedSkins
-        generateSkinPreviews(skins.value, capes.value)
-        selectedSkin.value = skins.value.find((s) => s.is_equipped) ?? null
-        originalSelectedSkin.value = selectedSkin.value
+        if (generation !== skinAccountGeneration) return
+        skins.value = nextSkins
+        void generateSkinPreviews(nextSkins, capes.value)
+        const equippedSkin = nextSkins.find((s) => s.is_equipped) ?? null
+        const preview = selectedSkin.value
+        const keepPreview =
+            preserveSelection && (preview !== previousSelection || hasPendingSkinChange.value)
+        selectedSkin.value = keepPreview
+            ? (nextSkins.find((skin) => skinsMatch(skin, preview)) ?? preview)
+            : equippedSkin
+        originalSelectedSkin.value = equippedSkin
     } catch (error) {
-        if (currentUser.value && error instanceof Error) {
+        if (generation === skinAccountGeneration && currentUser.value && error instanceof Error) {
             handleError(error)
         }
     }
@@ -835,9 +844,11 @@ async function applySelectedSkin() {
     )
         return
 
+    const generation = skinAccountGeneration
     isApplyingSkin.value = true
     try {
         await equip_skin(skinToApply)
+        if (generation !== skinAccountGeneration) return
         setLocallyEquippedSkin(skinToApply)
         schedulePendingSkinRefresh()
     } catch (error) {
@@ -870,31 +881,64 @@ async function onSkinSaved(options: { applied: boolean; skin?: Skin; previousSki
     }
 }
 
-async function loadCurrentUser() {
+async function loadCurrentUser(generation = skinAccountGeneration) {
     try {
-        const defaultId = await get_default_user(offline.value)
-        currentUserId.value = defaultId
-
-        const allAccounts = await users(offline.value)
+        const [defaultId, allAccounts] = await Promise.all([
+            get_default_user(offline.value),
+            users(offline.value, true),
+        ])
+        if (generation !== skinAccountGeneration) return false
         const selectedAccount = allAccounts.find((acc) => acc.account_id === defaultId)
         currentAccountType.value = selectedAccount?.account_type
+        currentUserId.value = defaultId
         currentUser.value = selectedAccount
+        return true
     } catch (e) {
+        if (generation !== skinAccountGeneration) return false
         handleError(e as Error)
         currentUser.value = undefined
         currentUserId.value = undefined
         currentAccountType.value = undefined
+        return false
     }
 }
 
 async function refreshSelectedAccount() {
-    await loadCurrentUser()
-    await loadCapes()
-    await loadSkins()
+    const session = skinAccountSessions.begin()
+    const generation = ++skinAccountGeneration
+    isAccountLoading.value = true
+    isSkinLibraryLoading.value = true
+    currentUser.value = undefined
+    currentUserId.value = undefined
+    currentAccountType.value = undefined
+    skins.value = []
+    capes.value = []
+    selectedSkin.value = null
+    originalSelectedSkin.value = null
+    isApplyingSkin.value = false
+    const loaded = await loadCurrentUser(generation)
+    if (!skinAccountSessions.isCurrent(session)) return
+    isAccountLoading.value = false
+    if (!loaded || !currentUser.value) {
+        isSkinLibraryLoading.value = false
+        return
+    }
+    await Promise.all([loadCapes(generation, true), loadSkins(generation, true)])
+    if (!skinAccountSessions.isCurrent(session)) return
+    isSkinLibraryLoading.value = false
+    if (!offline.value && currentAccountType.value !== 'offline') {
+        void refreshOnlineSkinLibrary(generation)
+    }
 }
 
-watch(accountChangeRevision, (revision, previousRevision) => {
-    if (revision === undefined || previousRevision === undefined) return
+async function refreshOnlineSkinLibrary(generation: number) {
+    // The skin read reuses the profile fetched for capes instead of racing it.
+    await loadCapes(generation)
+    if (generation !== skinAccountGeneration) return
+    await loadSkins(generation, false, true)
+}
+
+watch(accountSelectionRevision, () => {
     void refreshSelectedAccount()
 })
 
@@ -1065,16 +1109,17 @@ onBeforeRouteLeave(async (to) => {
 })
 
 onMounted(() => {
-    userCheckInterval = window.setInterval(checkUserChanges, 250)
     void setupNativeDropHandler()
+    void refreshSelectedAccount()
 })
 
 onUnmounted(() => {
     isUnmounted = true
+    skinAccountSessions.begin()
+    skinAccountGeneration += 1
+    cancelSkinPreviews?.()
+    setActiveSkinPreviews([])
     removeNavigationFailureHandler()
-    if (userCheckInterval !== null) {
-        window.clearInterval(userCheckInterval)
-    }
 
     if (unlistenNativeDrop) {
         unlistenNativeDrop()
@@ -1087,21 +1132,9 @@ onUnmounted(() => {
     }
 })
 
-async function checkUserChanges() {
-    try {
-        const defaultId = await get_default_user(offline.value)
-        if (defaultId !== currentUserId.value) {
-            await refreshSelectedAccount()
-        }
-    } catch (error) {
-        if (currentUser.value && error instanceof Error) {
-            handleError(error)
-        }
-    }
-}
-
-await Promise.all([loadCapes(), loadCurrentUser()])
-await loadSkins()
+watch(offline, () => {
+    void refreshSelectedAccount()
+})
 </script>
 
 <template>
@@ -1153,7 +1186,7 @@ await loadSkins()
     </Teleport>
 
     <div
-        v-if="currentUser"
+        v-if="currentUser || isAccountLoading"
         data-onboarding-id="skins-page"
         class="skin-layout box-border min-h-full p-4"
     >
@@ -1162,17 +1195,18 @@ await loadSkins()
                 {{ formatMessage(messages.skinSelectorTitle) }}
             </h1>
             <!--
-				The preview's height, strictly: the area the app gives the page
-				(100vh less the top bar) minus the title, the action row below it and
-				the page's own padding. It keeps that height whether or not actions are
-				showing -- when one appears the column grows downwards instead, so the
-				model never moves and the actions never sit on the canvas.
-			-->
+                The preview's height, strictly: the area the app gives the page
+                (100vh less the top bar) minus the title, the action row below it and
+                the page's own padding. It keeps that height whether or not actions are
+                showing -- when one appears the column grows downwards instead, so the
+                model never moves and the actions never sit on the canvas.
+            -->
             <div
                 ref="skinPreviewArea"
                 class="ml-5 mt-4 flex h-[calc(100vh_-_var(--top-bar-height)_-_11rem)] min-h-[14rem] items-center justify-center"
             >
                 <SkinPreviewRenderer
+                    v-if="selectedSkin"
                     v-model:armor-config="armorPreviewConfig"
                     armor-preview
                     :armor-controls="false"
@@ -1194,10 +1228,10 @@ await loadSkins()
             </div>
 
             <!--
-				The preview's actions belong to the column, not to the canvas: in the
-				flow they always get their own height, they never sit on the model, and
-				the preview above them does not move when one of them appears.
-			-->
+                The preview's actions belong to the column, not to the canvas: in the
+                flow they always get their own height, they never sit on the model, and
+                the preview above them does not move when one of them appears.
+            -->
             <div class="ml-5 mt-3 flex flex-wrap items-center justify-center gap-2">
                 <template v-if="hasPendingSkinChange">
                     <button
@@ -1242,7 +1276,9 @@ await loadSkins()
         <div class="pt-2">
             <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <NavTabs
-                    :active-index="lastSkinListTab === 'saved' ? 0 : 1"
+                    :active-index="
+                        skinListTab === 'armor' ? -1 : lastSkinListTab === 'saved' ? 0 : 1
+                    "
                     :links="skinListTabLinks"
                     mode="local"
                     @tab-click="selectSkinListTab"
@@ -1253,10 +1289,15 @@ await loadSkins()
                 </Button>
             </div>
             <Transition name="armor-tab" mode="out-in">
-                <div v-if="skinListTab !== 'armor'" key="list">
-                    <SkinListSkeleton v-if="isSkinListBuffering" />
+                <div
+                    v-if="skinListTab !== 'armor'"
+                    key="list"
+                    role="tabpanel"
+                    :aria-labelledby="'nav-tab-' + lastSkinListTab"
+                >
+                    <SkinListSkeleton v-if="isSkinListBuffering || isSkinLibraryLoading" />
                     <VirtualSkinSectionList
-                        v-show="!isSkinListBuffering"
+                        v-show="!isSkinListBuffering && !isSkinLibraryLoading"
                         ref="skinSectionList"
                         :active-tab="lastSkinListTab"
                         :saved-skins="savedSkins"

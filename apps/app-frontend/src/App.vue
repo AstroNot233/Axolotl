@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import '@/assets/stylesheets/window-frame.css'
+
 import { AuthFeature, TauriModrinthClient, VerboseLoggingFeature } from '@modrinth/api-client'
 import {
     ChangeSkinIcon,
@@ -8,7 +10,6 @@ import {
     FolderOpenIcon,
     HomeIcon,
     ImagesIcon,
-    LeftArrowIcon,
     LibraryIcon,
     LogInIcon,
     LogOutIcon,
@@ -56,12 +57,11 @@ import {
     providePopupNotificationManager,
     ScrollToTopButton,
     SymlinkMethodCards,
-    useDebugLogger,
     useFormatBytes,
     useModalStack,
     useVIntl,
 } from '@modrinth/ui'
-import { useQuery } from '@tanstack/vue-query'
+import { useQueryClient } from '@tanstack/vue-query'
 import { getVersion } from '@tauri-apps/api/app'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -78,8 +78,7 @@ import InstanceExportModal from '@/components/lab/recipe-generator/InstanceExpor
 import AccountsCard from '@/components/ui/AccountsCard.vue'
 import UpdateAnnouncementModal from '@/components/ui/announcement/UpdateAnnouncementModal.vue'
 import AppActionBar from '@/components/ui/AppActionBar.vue'
-import AxolotlLogo from '@/components/ui/AxolotlLogo.vue'
-import Breadcrumbs from '@/components/ui/Breadcrumbs.vue'
+import AppTitlebar from '@/components/ui/AppTitlebar.vue'
 import ContentInstallPreviewModal from '@/components/ui/ContentInstallPreviewModal.vue'
 import ErrorModal from '@/components/ui/ErrorModal.vue'
 import AddServerToInstanceModal from '@/components/ui/install_flow/AddServerToInstanceModal.vue'
@@ -99,21 +98,25 @@ import OfflineAccountRestrictionModal from '@/components/ui/OfflineAccountRestri
 import OnboardingOverlay from '@/components/ui/onboarding/OnboardingOverlay.vue'
 import QuickInstanceSwitcher from '@/components/ui/QuickInstanceSwitcher.vue'
 import RemoteAnnouncements from '@/components/ui/RemoteAnnouncements.vue'
+import ResourceOperationPreviewModal from '@/components/ui/ResourceOperationPreviewModal.vue'
 import SplashScreen from '@/components/ui/SplashScreen.vue'
 import WindowControls from '@/components/ui/WindowControls.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { isOfflineAccountRestrictedError } from '@/composables/useAntiPiracyStatus'
 import { useDropImport } from '@/composables/useDropImport'
 import { minecraftLaunchErrorKey } from '@/composables/useMinecraftLaunchError'
+import { setupMojangAuthMonitor, useMojangAuthStatus } from '@/composables/useMojangAuth'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { AxolotlBrandConfig, config, getOfficialLabrinthBaseUrl } from '@/config'
 import { trackEvent } from '@/helpers/analytics'
-import { check_reachable } from '@/helpers/auth.js'
 import { get_user, get_version } from '@/helpers/cache.js'
 import { configureCurseForgeManualDownloadWatcher } from '@/helpers/curseforge'
 import { applySettingChanges } from '@/helpers/deep-link-settings.ts'
 import { resolveOpenRoute, resolveSettingsRoute } from '@/helpers/deep-links.ts'
-import { DIRECT_LINKS_SYNCED_EVENT, syncConfiguredDirectLinks } from '@/helpers/direct-link-sync'
+import {
+    DIRECT_LINKS_SYNCED_EVENT,
+    startConfiguredDirectLinkSync,
+} from '@/helpers/direct-link-sync'
 import { getMissingContentScannerSettings } from '@/helpers/downloads-scanner'
 import { classifyDroppedItem } from '@/helpers/drop'
 import {
@@ -122,20 +125,23 @@ import {
     java_download_confirmation_listener,
     warning_listener,
 } from '@/helpers/events.js'
+import { fileOperationError } from '@/helpers/file-operation-errors'
 import { install_create_modpack_instance, install_get_modpack_preview } from '@/helpers/install'
 import { type DirectLinkSyncReport, get as getInstance, run } from '@/helpers/instance'
 import { type BackupOperation, cancelBackup, listBackupOperations } from '@/helpers/instance-backup'
-import {
-    reconcileMojangAuthSourceAtStartup,
-    reconcileMojangAuthSourceIfMirrored,
-} from '@/helpers/mojang-auth'
 import { cancelLogin, get as getCreds, login, logout } from '@/helpers/mr_auth.ts'
+import { installNativeEditMenuBoundary } from '@/helpers/native-edit-menu'
 import { getNavShortcutEnabled } from '@/helpers/nav-shortcut-state'
 import { runWhenIdle } from '@/helpers/page-transition'
 import { get_by_instance_id, kill as killProcess } from '@/helpers/process.js'
 import { getExternalLinkUrl, mergeUrlQuery, parseModrinthLink } from '@/helpers/project-links.ts'
+import {
+    isResourceOperationError,
+    resourceOperationError,
+} from '@/helpers/resource-operation-logic'
 import { getQuickScrollEnabled, getShowScrollTop } from '@/helpers/scroll-top-state'
 import {
+    appSettingsKeys,
     get as getSettings,
     getLastBrowseContentProjectType,
     getPrivacySettings,
@@ -143,8 +149,9 @@ import {
     getUpdatePreferences,
     type PrivacySettings,
     savePrivacySettings,
-    set as setSettings,
+    update as updateSettings,
 } from '@/helpers/settings.ts'
+import { diffSettings } from '@/helpers/settings-patch'
 import {
     discoverContentTarget,
     SHORTCUT_ACTIONS,
@@ -166,6 +173,10 @@ import {
     isNetworkMetered,
     setRestartAfterPendingUpdate,
 } from '@/helpers/utils.js'
+import {
+    createWindowAppearanceController,
+    type WindowFrameResult,
+} from '@/helpers/window-appearance'
 import { start_join_server, start_join_singleplayer_world } from '@/helpers/worlds.ts'
 import { applyLocalePreference, setFollowSystemLocale } from '@/i18n.config'
 import {
@@ -192,7 +203,6 @@ import { setupLoadingStateProvider } from '@/providers/setup/loading-state'
 import { useError } from '@/store/error.js'
 import { useTheming } from '@/store/state'
 
-import { get_available_capes, get_available_skins } from './helpers/skins'
 import { AppNotificationManager } from './providers/app-notifications'
 import { AppPopupNotificationManager } from './providers/app-popup-notifications'
 
@@ -358,7 +368,7 @@ const {
     fileDrop,
 } = setupProviders(notificationManager, popupNotificationManager, stateInitialization)
 
-const { browserOffline, offline, setNetworkReachable } = useNetworkStatus()
+const { offline } = useNetworkStatus()
 
 const showOnboarding = ref(false)
 const onboardingMode = ref('main')
@@ -369,60 +379,123 @@ const nativeDecorations = ref(false)
 const os = ref('')
 const isDevEnvironment = ref(false)
 
-/**
- * Acrylic is rendered by the Windows compositor behind the webview, so CSS
- * cannot clip it. Keep the native rounded frame and hide its border while the
- * CSS-drawn transparent-window border is active.
- */
-async function applyWindowFrame() {
-    if (os.value !== 'Windows') return
-
-    try {
-        await invoke('set_transparent_window_frame', {
-            enabled: themeStore.transparentBackground,
-        })
-    } catch (error) {
-        // Frame helpers can reject with invalid parameter on some window states;
-        // do not spam the console for a cosmetic desktop chrome tweak.
-        console.debug('Failed to update transparent window frame', error)
-    }
-}
-
-watch(() => themeStore.transparentBackground, applyWindowFrame)
-
-/**
- * The frosted glass has to come from the compositor: a webview cannot reach the
- * pixels behind its own window, so `backdrop-filter` can never blur the desktop.
- * Acrylic blurs whatever sits behind the window, matching what the transparency
- * already reveals; Mica would only sample the wallpaper and ignore other
- * windows. Linux exposes no window effects at all.
- */
-async function applyWindowEffects() {
-    if (os.value === 'Linux') return
-
-    try {
+const isMaximized = ref(false)
+const appearanceReady = ref(false)
+const cssWindowBorder = ref(false)
+const windowAppearance = createWindowAppearanceController(
+    async (state) => {
+        if (state.os === 'Linux') return
         const window = getCurrentWindow()
-        if (!themeStore.transparentBackground || !themeStore.transparentBackgroundBlur) {
-            await window.clearEffects()
-            return
-        }
+        if (state.transparent && state.blur) {
+            await window.setEffects({
+                effects: [state.os === 'MacOS' ? Effect.UnderWindowBackground : Effect.Acrylic],
+            })
+        } else await window.clearEffects()
+    },
+    (state) =>
+        invoke<WindowFrameResult>('set_transparent_window_frame', {
+            enabled: state.transparent,
+        }),
+    (enabled) => {
+        cssWindowBorder.value = enabled
+    },
+    (error) => console.debug('Window appearance compatibility result', error),
+)
 
-        await window.setEffects({
-            effects: [os.value === 'MacOS' ? Effect.UnderWindowBackground : Effect.Acrylic],
-        })
-    } catch (error) {
-        console.warn('Failed to update window effects', error)
-    }
+function applyWindowAppearance() {
+    return windowAppearance.update({
+        os: os.value,
+        transparent: themeStore.transparentBackground,
+        blur: themeStore.transparentBackgroundBlur,
+        decorated: nativeDecorations.value,
+        maximized: isMaximized.value,
+    })
 }
 
 watch(
-    () => [themeStore.transparentBackground, themeStore.transparentBackgroundBlur],
-    applyWindowEffects,
+    () => [
+        themeStore.transparentBackground,
+        themeStore.transparentBackgroundBlur,
+        nativeDecorations.value,
+    ],
+    () => {
+        if (appearanceReady.value) void applyWindowAppearance()
+    },
 )
 
 const stateInitialized = ref(false)
 const privacyConsentModal = ref<InstanceType<typeof PrivacyConsentModal>>()
 const privacyConsentPending = ref(false)
+const titlebar = ref<InstanceType<typeof AppTitlebar>>()
+const titlebarAnchor = computed<HTMLElement | undefined>(() => titlebar.value?.$el)
+let titlebarAnchorObserver: ResizeObserver | undefined
+let titlebarAnchorFrame: number | undefined
+let titlebarAnchorUpdatePending = false
+let titlebarAnchorUpdateRunning = false
+
+async function updateNativeTrafficLightAnchor() {
+    if (titlebarAnchorUpdateRunning) {
+        titlebarAnchorUpdatePending = true
+        return
+    }
+
+    titlebarAnchorUpdateRunning = true
+    do {
+        titlebarAnchorUpdatePending = false
+        const anchorElement = titlebarAnchor.value
+        if (!anchorElement || os.value !== 'MacOS') break
+
+        const rect = anchorElement.getBoundingClientRect()
+        try {
+            await invoke('update_traffic_lights_anchor', {
+                anchor: {
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                    viewportWidth: document.documentElement.clientWidth,
+                    viewportHeight: document.documentElement.clientHeight,
+                },
+            })
+        } catch (error) {
+            console.warn('Failed to update the native traffic-light anchor', error)
+        }
+    } while (titlebarAnchorUpdatePending)
+    titlebarAnchorUpdateRunning = false
+}
+
+function scheduleNativeTrafficLightAnchorUpdate() {
+    if (os.value !== 'MacOS' || titlebarAnchorFrame !== undefined) return
+    titlebarAnchorFrame = requestAnimationFrame(() => {
+        titlebarAnchorFrame = undefined
+        void updateNativeTrafficLightAnchor()
+    })
+}
+
+function stopNativeTrafficLightAnchorTracking() {
+    titlebarAnchorObserver?.disconnect()
+    titlebarAnchorObserver = undefined
+    window.removeEventListener('resize', scheduleNativeTrafficLightAnchorUpdate)
+    window.visualViewport?.removeEventListener('resize', scheduleNativeTrafficLightAnchorUpdate)
+    window.visualViewport?.removeEventListener('scroll', scheduleNativeTrafficLightAnchorUpdate)
+    if (titlebarAnchorFrame !== undefined) {
+        cancelAnimationFrame(titlebarAnchorFrame)
+        titlebarAnchorFrame = undefined
+    }
+}
+
+watch([() => os.value, titlebarAnchor], ([platform, anchorElement]) => {
+    stopNativeTrafficLightAnchorTracking()
+    if (platform !== 'MacOS' || !anchorElement) return
+
+    titlebarAnchorObserver = new ResizeObserver(scheduleNativeTrafficLightAnchorUpdate)
+    titlebarAnchorObserver.observe(anchorElement)
+    titlebarAnchorObserver.observe(document.documentElement)
+    window.addEventListener('resize', scheduleNativeTrafficLightAnchorUpdate)
+    window.visualViewport?.addEventListener('resize', scheduleNativeTrafficLightAnchorUpdate)
+    window.visualViewport?.addEventListener('scroll', scheduleNativeTrafficLightAnchorUpdate)
+    scheduleNativeTrafficLightAnchorUpdate()
+})
 const updateAnnouncementModal = ref()
 const closeChoiceModal = ref<InstanceType<typeof NewModal>>()
 const backupExitModal = ref<InstanceType<typeof NewModal>>()
@@ -436,58 +509,15 @@ let unlistenLightweightModeError: (() => void) | undefined
 let unlistenSystemAccentColor: (() => void) | undefined
 let maximizedStateTimer: ReturnType<typeof setTimeout> | undefined
 let unlistenWindowResize: (() => void) | undefined
+let stopNativeEditMenu: (() => void) | undefined
 const minecraftCrashModal = ref()
 const javaDownloadConfirmationModal = ref()
 const pendingUpdateAnnouncementVersion = ref(null)
 const updateAnnouncementShowing = ref(false)
 
-const isMaximized = ref(false)
-const mojangAuthSourceReady = ref(false)
-
-const authUnreachableDebug = useDebugLogger('AuthReachableChecker')
-const authServerRefetchInterval = ref(5 * 60 * 1000)
-const authServerQuery = useQuery({
-    queryKey: ['authServerReachability'],
-    enabled: computed(() => mojangAuthSourceReady.value && !browserOffline.value),
-    queryFn: async () => {
-        try {
-            await check_reachable()
-            setNetworkReachable(true)
-            authServerRefetchInterval.value = 5 * 60 * 1000
-            authUnreachableDebug('Auth servers are reachable')
-        } catch (error) {
-            setNetworkReachable(false)
-            // Keep probing while the temporary outage is active so the launcher
-            // can return online without requiring a restart or manual refresh.
-            authServerRefetchInterval.value = 15 * 1000
-            throw error
-        }
-        try {
-            await reconcileMojangAuthSourceIfMirrored()
-        } catch (error) {
-            console.warn('Failed to reconcile the Mojang auth source', error)
-        }
-        return true
-    },
-    refetchInterval: () => authServerRefetchInterval.value,
-    // A single slow probe is not enough to declare the auth servers down.
-    retry: 1,
-    retryDelay: 1000,
-    refetchOnWindowFocus: false,
-})
-
-const authUnreachable = computed(
-    () => !offline.value && authServerQuery.isError.value && !authServerQuery.isLoading.value,
-)
-
-watch(
-    () => authServerQuery.error.value,
-    (error) => {
-        if (!error) return
-        setNetworkReachable(false)
-        console.warn('Failed to reach auth servers', error)
-    },
-)
+setupMojangAuthMonitor(stateInitialized)
+const mojangAuth = useMojangAuthStatus()
+const authUnreachable = computed(() => !offline.value && mojangAuth.reachable.value === false)
 
 const appUpdateDownload = {
     progress: appUpdateState.progress,
@@ -770,13 +800,14 @@ onMounted(async () => {
 
     // Background maintenance must not compete with first paint / route enter.
     runWhenIdle(() => {
+        if (appUnmounted) return
         void checkUpdates()
         void warnIfRunningElevated()
         startDirectLinkSync()
     })
 })
 
-let directLinkSync: (() => Promise<void>) | undefined
+let appUnmounted = false
 let stopDirectLinkSync: (() => void) | undefined
 let directLinkSyncErrorSignature = ''
 
@@ -838,24 +869,17 @@ function startDirectLinkSync() {
             return []
         }
     }
-    const sync = () => syncConfiguredDirectLinks(readRoots()).catch(handleError)
-    const handleWindowFocus = () => {
-        void sync()
-    }
-
-    directLinkSync = sync
-    window.addEventListener('focus', handleWindowFocus)
-    void sync()
-    stopDirectLinkSync = () => {
-        window.removeEventListener('focus', handleWindowFocus)
-        if (directLinkSync === sync) directLinkSync = undefined
-        if (stopDirectLinkSync) stopDirectLinkSync = undefined
-    }
+    stopDirectLinkSync?.()
+    stopDirectLinkSync = startConfiguredDirectLinkSync(readRoots, handleError)
 }
 
 onUnmounted(async () => {
+    appUnmounted = true
+    windowAppearance.dispose()
+    stopNativeEditMenu?.()
     if (maximizedStateTimer) clearTimeout(maximizedStateTimer)
     unlistenWindowResize?.()
+    stopNativeTrafficLightAnchorTracking()
     window.removeEventListener('keydown', handleGlobalKeydown, true)
     window.removeEventListener('mousedown', handleShortcutMouse, true)
     window.removeEventListener('wheel', handleShortcutWheel, { capture: true, passive: false })
@@ -963,6 +987,11 @@ async function onImportFileReceived({
 }
 
 const messages = defineMessages({
+    modrinthAccount: { id: 'app.account.modrinth-account', defaultMessage: 'Modrinth account' },
+    signInModrinth: {
+        id: 'app.account.sign-in-modrinth',
+        defaultMessage: 'Sign in to a Modrinth account',
+    },
     updateInstalledToastTitle: {
         id: 'app.update.complete-toast.title',
         defaultMessage: 'Version {version} was successfully installed!',
@@ -1037,10 +1066,6 @@ const messages = defineMessages({
     backupExitTimeout: {
         id: 'app.backup-exit.timeout',
         defaultMessage: 'Timed out while waiting for backup operations to stop.',
-    },
-    betaBuild: {
-        id: 'app.build.beta',
-        defaultMessage: 'Beta',
     },
     home: {
         id: 'app.navigation.home',
@@ -1365,6 +1390,9 @@ const messages = defineMessages({
 })
 
 notificationManager.errorTitleProvider = () => formatMessage(messages.errorOccurred)
+notificationManager.errorTextFormatter = (error) =>
+    fileOperationError(error, getOsType(), formatMessage) ??
+    (isResourceOperationError(error) ? resourceOperationError(error, formatMessage) : null)
 
 function getErrorNotificationDetails(notification) {
     const details = [notification.title, notification.text, notification.errorCode].filter(Boolean)
@@ -1407,17 +1435,12 @@ async function applyThemeFromSettings(s: Awaited<ReturnType<typeof getSettings>>
     themeStore.setCustomBackgroundClass()
 }
 
-async function setupApp() {
-    try {
-        await reconcileMojangAuthSourceAtStartup()
-    } catch (error) {
-        handleError(error)
-    } finally {
-        mojangAuthSourceReady.value = true
-    }
+const queryClient = useQueryClient()
 
+async function setupApp() {
     const initialSettings = await getSettings()
-    await downloadManager.start()
+    queryClient.setQueryData(appSettingsKeys.all, initialSettings)
+    void downloadManager.start().catch(handleError)
     const {
         native_decorations,
         theme,
@@ -1457,11 +1480,14 @@ async function setupApp() {
     // flag) keeps tracking the OS language and stores a concrete locale for backend
     // checks that compare against codes like `zh-CN`.
     if (!locale) setFollowSystemLocale(true)
-    const resolvedLocale = applyLocalePreference(locale)
-    if (!locale || locale !== resolvedLocale) {
-        initialSettings.locale = resolvedLocale
-        await setSettings(initialSettings)
-    }
+    const localePreparation = applyLocalePreference(locale).then(async (resolvedLocale) => {
+        if (!locale || locale !== resolvedLocale) {
+            initialSettings.locale = resolvedLocale
+            await updateSettings({ locale: resolvedLocale })
+        }
+    })
+    // Attach a handler immediately while window/theme setup proceeds in parallel.
+    void localePreparation.catch(console.error)
 
     const defaultPageRoutes = {
         Home: '/',
@@ -1504,8 +1530,9 @@ async function setupApp() {
     themeStore.transparentBackgroundBlur = transparent_background_blur
     themeStore.setTransparentBackgroundClass()
     themeStore.setCustomBackgroundClass()
-    await applyWindowFrame()
-    await applyWindowEffects()
+    isMaximized.value = await getCurrentWindow().isMaximized()
+    appearanceReady.value = true
+    await applyWindowAppearance()
     themeStore.homeWidgetBackgroundOpacity = home_widget_background_opacity ?? 100
     themeStore.setHomeWidgetBackgroundOpacity()
     themeStore.hiddenNavItems = hidden_nav_items ?? []
@@ -1523,6 +1550,7 @@ async function setupApp() {
             themeStore[shortcut.enabledField] = getNavShortcutEnabled(shortcut.id)
     }
     themeStore.shortcutBindings = resolveAllBindings()
+    await localePreparation
     stateInitialized.value = true
     if (privacyConsentPending.value) {
         await nextTick()
@@ -1534,7 +1562,6 @@ async function setupApp() {
     } else {
         showOnboarding.value = !onboarded
     }
-    isMaximized.value = await getCurrentWindow().isMaximized()
 
     unlistenWindowResize = await getCurrentWindow().onResized(() => {
         // Display mode/DPI changes can emit a burst of resize events. Coalesce
@@ -1544,23 +1571,15 @@ async function setupApp() {
             maximizedStateTimer = undefined
             try {
                 isMaximized.value = await getCurrentWindow().isMaximized()
+                await applyWindowAppearance()
             } catch (error) {
                 console.warn('Failed to refresh maximized state after resize', error)
             }
         }, 100)
     })
 
-    if (!dev) {
-        // Keep the native edit menu on inputs while suppressing the WebView menu
-        // elsewhere in the launcher.
-        document.addEventListener(
-            'contextmenu',
-            (event) => {
-                if (!isEditableTarget(event.target)) event.preventDefault()
-            },
-            { capture: true },
-        )
-    }
+    stopNativeEditMenu?.()
+    stopNativeEditMenu = installNativeEditMenuBoundary(!dev)
 
     const osType = await getOsType()
     if (osType === 'macos') {
@@ -1597,15 +1616,6 @@ async function setupApp() {
 
     get_opening_command().then(handleCommand)
     fetchCredentials()
-
-    try {
-        const skins = (await get_available_skins()) ?? []
-        const capes = (await get_available_capes()) ?? []
-        const { generateSkinPreviews } = await import('./helpers/rendering/skin-preview-renderer')
-        generateSkinPreviews(skins, capes)
-    } catch (error) {
-        console.warn('Failed to generate skin previews in app setup.', error)
-    }
 }
 
 type SystemAccentColorPayload = {
@@ -1646,6 +1656,7 @@ async function replayOnboarding(mode) {
     onboardingReplay.value = true
     onboardingMode.value = mode
     if (mode === 'main') await router.replace('/')
+    if (mode === 'logagent') await router.replace('/settings#launch-defaults')
     showOnboarding.value = true
 }
 
@@ -1659,7 +1670,11 @@ async function finishOnboarding() {
             settings.onboarded = true
             settings.onboarding_version = 1
         }
-        await setSettings(settings)
+        await updateSettings(
+            onboardingMode.value === 'instance'
+                ? { onboarding_instance_tour_completed: true }
+                : { onboarded: true, onboarding_version: 1 },
+        )
         onboardingSettings.value = settings
     }
     showOnboarding.value = false
@@ -1681,7 +1696,7 @@ async function handleUpdateAnnouncementClosed(version) {
     const settings = await getSettings()
     if (settings.pending_update_toast_for_version === version) {
         settings.pending_update_toast_for_version = null
-        await setSettings(settings)
+        await updateSettings({ pending_update_toast_for_version: null })
     }
     pendingUpdateAnnouncementVersion.value = null
     updateAnnouncementShowing.value = false
@@ -1850,9 +1865,7 @@ async function applyCloseChoice(choice: 'close' | 'lightweight', remember: boole
     let closeBehaviorPersisted = false
     try {
         if (remember) {
-            const settings = await getSettings()
-            settings.close_behavior = choice
-            await setSettings(settings)
+            await updateSettings({ close_behavior: choice })
             themeStore.closeBehavior = choice
             closeBehaviorPersisted = true
         }
@@ -2001,7 +2014,6 @@ router.afterEach((to, from, failure) => {
         failed: failure,
     })
     if (!failure) {
-        void directLinkSync?.()
         if (stateInitialized.value) syncDiscordActivity(to)
     }
     setTimeout(() => {
@@ -2106,7 +2118,6 @@ const {
     handleNavigate: handleContentInstallNavigate,
     handleCancel: handleContentInstallCancel,
     setContentInstallModal,
-    setContentInstallPreviewModal,
     setModpackInstallModal: setContentInstallModpackInstallModal,
     handleModpackInstall: handleContentInstallModpackInstall,
     handleModpackInstallCancel: handleContentInstallModpackInstallCancel,
@@ -2132,6 +2143,7 @@ const {
 } = serverInstall
 
 const modInstallModal = ref()
+const resourceInstallPreview = ref<InstanceType<typeof ResourceOperationPreviewModal> | null>(null)
 const contentInstallPreviewModal = ref<InstanceType<typeof ContentInstallPreviewModal> | null>(null)
 const modpackAlreadyInstalledModal = ref()
 const contentInstallModpackInstallModal = ref<InstanceType<typeof ModpackInstallModal> | null>(null)
@@ -2301,8 +2313,9 @@ onMounted(() => {
     setContentIncompatibilityWarningModal(incompatibilityWarningModal.value)
     dropIncompatibilityWarningModal.value = incompatibilityWarningModal.value
     setContentInstallModal(modInstallModal.value)
-    setContentInstallPreviewModal(contentInstallPreviewModal.value)
     contentSelection.setPreviewModal(contentInstallPreviewModal.value)
+    contentSelection.setResourceInstallPreview(resourceInstallPreview.value)
+    contentInstall.setResourceInstallPreview(resourceInstallPreview.value)
     setContentInstallModpackInstallModal(contentInstallModpackInstallModal.value!)
     setContentInstallCurseForgeManualDownloadsModal(
         contentInstallCurseForgeManualDownloadsModal.value,
@@ -2466,11 +2479,13 @@ const privilegedMessages = defineMessages({
 async function handlePrivilegedCommand(e) {
     if (e.event === 'UpdateSettings') {
         const latest = await getSettings().catch(handleError)
-        if (!latest || !applySettingChanges(latest, e.changes ?? [])) return
-        await setSettings(latest).catch(handleError)
+        if (!latest) return
+        const before = JSON.parse(JSON.stringify(latest))
+        if (!applySettingChanges(latest, e.changes ?? [])) return
+        await updateSettings(diffSettings(before, latest)).catch(handleError)
         await applyThemeFromSettings(latest)
         setFollowSystemLocale(!latest.locale || latest.locale === 'system')
-        applyLocalePreference(latest.locale)
+        await applyLocalePreference(latest.locale)
         addNotification({
             title: formatMessage(privilegedMessages.applied),
             type: 'success',
@@ -2858,11 +2873,11 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 <template>
     <SplashScreen v-if="!stateFailed" ref="splashScreen" data-tauri-drag-region />
     <!--
-		A failed initialization never renders the app shell, so this framed window
-		ends up with no title bar and no controls at all. This strip keeps the
-		window draggable and offers a way to quit that does not depend on the
-		parts which failed to load.
-	-->
+        A failed initialization never renders the app shell, so this framed window
+        ends up with no title bar and no controls at all. This strip keeps the
+        window draggable and offers a way to quit that does not depend on the
+        parts which failed to load.
+    -->
     <div
         v-if="stateFailed && !stateInitialized"
         data-tauri-drag-region
@@ -2897,6 +2912,8 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
                 themeStore.customBackgroundPath && !themeStore.transparentBackground,
             'has-transparent-background': themeStore.transparentBackground,
             'is-maximized': isMaximized,
+            'has-native-decorations': nativeDecorations,
+            'has-css-window-border': cssWindowBorder,
         }"
     >
         <Transition name="fade">
@@ -2994,7 +3011,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
                     v-tooltip.right="formatMessage(messages.library)"
                     data-onboarding-id="nav-library"
                     to="/library"
-                    :is-primary="(r) => r.path === '/library' || r.path === '/library'"
+                    :is-primary="(r) => r.matched.some((record) => record.name === 'Library')"
                     :is-subpage="
                         () =>
                             route.path.startsWith('/instance') ||
@@ -3038,7 +3055,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
             </NavButton>
             <OverflowMenu
                 v-if="AxolotlBrandConfig.capabilities.privateModrinthServices && credentials?.user"
-                v-tooltip.right="`Modrinth account`"
+                v-tooltip.right="formatMessage(messages.modrinthAccount)"
                 data-onboarding-id="account-entry"
                 class="w-12 h-12 text-[var(--color-text-default)] rounded-full flex items-center justify-center text-2xl transition-all bg-transparent hover:bg-surface-4 hover:text-[var(--color-text-primary)] border-0 cursor-pointer"
                 :options="[
@@ -3074,56 +3091,31 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
                     </span>
                     <ExternalIcon />
                 </template>
-                <template #sign-out> <LogOutIcon /> Sign out </template>
+                <template #sign-out>
+                    <LogOutIcon /> {{ formatMessage(commonMessages.signOutButton) }}
+                </template>
             </OverflowMenu>
             <NavButton
                 v-else-if="AxolotlBrandConfig.capabilities.privateModrinthServices"
-                v-tooltip.right="'Sign in to a Modrinth account'"
+                v-tooltip.right="formatMessage(messages.signInModrinth)"
                 data-onboarding-id="account-entry"
                 :to="() => signIn()"
             >
                 <LogInIcon class="text-brand" />
             </NavButton>
         </div>
-        <div
-            data-tauri-drag-region
-            class="app-grid-statusbar bg-surface-bar h-[--top-bar-height] flex"
+        <AppTitlebar
+            ref="titlebar"
+            class="app-grid-statusbar bg-surface-bar h-[--top-bar-height]"
+            :is-beta-build="isBetaBuild"
         >
-            <div data-tauri-drag-region class="flex min-w-0 flex-1 overflow-hidden p-3">
-                <div data-tauri-drag-region class="flex shrink-0 items-center gap-2">
-                    <AxolotlLogo class="h-full w-auto shrink-0 pointer-events-none" />
-                    <span
-                        v-if="isBetaBuild"
-                        class="inline-flex shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold leading-none text-blue-700"
-                    >
-                        {{ formatMessage(messages.betaBuild) }}
-                    </span>
-                </div>
-                <div data-tauri-drag-region class="flex shrink-0 items-center gap-1 ml-3">
-                    <button
-                        class="cursor-pointer p-0 m-0 text-[var(--color-text-primary)] border-none outline-none bg-surface-4 rounded-full flex items-center justify-center w-6 h-6 hover:brightness-75 transition-all"
-                        @click="router.back()"
-                    >
-                        <LeftArrowIcon />
-                    </button>
-                    <button
-                        class="cursor-pointer p-0 m-0 text-[var(--color-text-primary)] border-none outline-none bg-surface-4 rounded-full flex items-center justify-center w-6 h-6 hover:brightness-75 transition-all"
-                        @click="router.forward()"
-                    >
-                        <RightArrowIcon />
-                    </button>
-                </div>
-                <Breadcrumbs class="pt-[2px]" />
+            <div class="flex min-w-0 mr-3">
+                <Suspense>
+                    <AppActionBar />
+                </Suspense>
             </div>
-            <section data-tauri-drag-region class="flex shrink-0 ml-auto items-center">
-                <div class="flex mr-3">
-                    <Suspense>
-                        <AppActionBar />
-                    </Suspense>
-                </div>
-                <WindowControls />
-            </section>
-        </div>
+            <WindowControls />
+        </AppTitlebar>
     </div>
     <div
         v-if="stateInitialized"
@@ -3178,10 +3170,10 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
             <div class="page-transition-grid grid min-h-full">
                 <RouterView v-slot="{ Component, route: pageRoute }">
                     <!--
-						Enter animation is keyed only on the route (see getPageTransitionKey).
-						The layer mounts as soon as the URL changes — not when the async page
-						Suspense resolves — so nav switches stay smooth while data loads.
-					-->
+                        Enter animation is keyed only on the route (see getPageTransitionKey).
+                        The layer mounts as soon as the URL changes — not when the async page
+                        Suspense resolves — so nav switches stay smooth while data loads.
+                    -->
                     <Transition
                         name="page-slide"
                         :css="themeStore.getFeatureFlag('page_transitions') && !onSettingsPage"
@@ -3384,6 +3376,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
         @cancel="handleContentInstallCancel"
     />
     <ContentInstallPreviewModal ref="contentInstallPreviewModal" />
+    <ResourceOperationPreviewModal ref="resourceInstallPreview" />
     <ModpackAlreadyInstalledModal
         ref="modpackAlreadyInstalledModal"
         @create-anyway="handleModpackDuplicateCreateAnyway"
@@ -3637,13 +3630,16 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 
 .app-grid-layout.has-custom-background,
 .app-grid-layout.has-transparent-background {
+    background-color: transparent;
+}
+
+.app-grid-layout.has-custom-background,
+.app-grid-layout.has-transparent-background:not(.has-native-decorations) {
     &:not(.is-maximized) {
         border-radius: 8px;
         clip-path: inset(0 round 8px);
         overflow: hidden;
     }
-
-    background-color: transparent;
 }
 
 .app-grid-layout.has-custom-background {
@@ -3739,21 +3735,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
-    }
-
-    // Without native decorations or rounded corners the window edge dissolves
-    // into the desktop, so it needs drawing. Dark outside, light inside, to stay
-    // legible over any wallpaper.
-    &::after {
-        content: '';
-        position: fixed;
-        inset: 0;
-        border-radius: inherit;
-        z-index: 100;
-        pointer-events: none;
-        box-shadow:
-            inset 0 0 0 1px rgba(0, 0, 0, 0.5),
-            inset 0 0 0 2px rgba(255, 255, 255, 0.14);
     }
 }
 

@@ -7,7 +7,7 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("settings")
         .invoke_handler(tauri::generate_handler![
             settings_get,
-            settings_set,
+            settings_patch,
             privacy_get,
             privacy_set,
             telemetry_set,
@@ -15,7 +15,9 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             cancel_directory_change,
             proxy_get,
             proxy_set,
-            proxy_test
+            proxy_test,
+            network_test,
+            network_test_cancel
         ])
         .build()
 }
@@ -28,6 +30,42 @@ pub(crate) fn log_level_for_channel(channel: &str, log_level: &str) -> String {
     }
 }
 
+static NETWORK_TEST_SLOTS: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(2);
+
+#[tauri::command]
+pub async fn network_test(
+    request_id: uuid::Uuid,
+    target: theseus::NetworkTestTarget,
+    mode: theseus::NetworkTestMode,
+) -> Result<Option<theseus::NetworkTestResult>> {
+    let cancellation = super::search_cancellation::SearchCancellation::register(
+        format!("network-test:{request_id}"),
+    );
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => Ok(None),
+        result = async {
+            let _permit = NETWORK_TEST_SLOTS.acquire().await.map_err(|_| {
+                std::io::Error::other("Network diagnostics are unavailable")
+            })?;
+            Ok(Some(theseus::test_network_connection(target, mode).await?))
+        } => result,
+    }
+}
+
+#[tauri::command]
+pub fn network_test_cancel(request_id: uuid::Uuid) {
+    if let Some(pending) = super::search_cancellation::cancel(&format!(
+        "network-test:{request_id}"
+    )) {
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            pending.expire();
+        });
+    }
+}
+
 // Get full settings
 // invoke('plugin:settings|settings_get')
 #[tauri::command]
@@ -36,24 +74,28 @@ pub async fn settings_get() -> Result<Settings> {
     Ok(res)
 }
 
-// Set full settings
-// invoke('plugin:settings|settings_set', settings)
+/// Merges only the edited fields into current settings.
 #[tauri::command]
-pub async fn settings_set(
+pub async fn settings_patch(
     app: tauri::AppHandle<impl Runtime>,
-    mut settings: Settings,
-) -> Result<()> {
+    mut patch: serde_json::Value,
+) -> Result<Settings> {
     let channel = crate::resolve_update_channel(&app).await?;
-    settings.log_level = log_level_for_channel(&channel, &settings.log_level);
+    if let Some(log_level) =
+        patch.get("log_level").and_then(|value| value.as_str())
+    {
+        let log_level = log_level_for_channel(&channel, log_level);
+        patch["log_level"] = serde_json::Value::String(log_level);
+    }
+    let settings = settings::patch(patch).await?;
     let log_level = settings.log_level.clone();
-    settings::set(settings).await?;
     // Apply the log level right away so the new verbosity takes effect without
     // a restart. A value this build does not know is stored as the default.
     if let Err(error) = theseus::set_log_level(&log_level) {
         tracing::warn!("Keeping the previous log level: {error}");
     }
     let _ = app.emit("settings", ());
-    Ok(())
+    Ok(settings)
 }
 
 #[cfg(test)]
@@ -111,49 +153,18 @@ pub async fn proxy_get() -> Result<ProxyConfig> {
 }
 
 #[tauri::command]
-pub async fn proxy_set(config: ProxyConfig) -> Result<()> {
+pub async fn proxy_set(
+    app: tauri::AppHandle<impl Runtime>,
+    config: ProxyConfig,
+) -> Result<()> {
     let state = State::get().await?;
     config.validate()?;
     state.update_proxy_config(&config).await?;
+    let _ = app.emit("settings", ());
     Ok(())
 }
 
 #[tauri::command]
 pub async fn proxy_test(config: ProxyConfig) -> Result<ProxyTestResult> {
-    if let Err(e) = config.validate() {
-        return Ok(ProxyTestResult {
-            success: false,
-            latency_ms: None,
-            message: e.to_string(),
-        });
-    }
-    let client = theseus::build_proxied_client(&config);
-    let started = std::time::Instant::now();
-    match client
-        .get("http://connect.rom.miui.com/generate_204")
-        .send()
-        .await
-    {
-        Ok(response) if response.status().is_success() => {
-            let latency_ms = started.elapsed().as_millis() as u64;
-            Ok(ProxyTestResult {
-                success: true,
-                latency_ms: Some(latency_ms),
-                message: format!("Connection successful ({latency_ms} ms)"),
-            })
-        }
-        Ok(response) => {
-            let latency_ms = started.elapsed().as_millis() as u64;
-            Ok(ProxyTestResult {
-                success: false,
-                latency_ms: Some(latency_ms),
-                message: format!("HTTP {}", response.status()),
-            })
-        }
-        Err(e) => Ok(ProxyTestResult {
-            success: false,
-            latency_ms: None,
-            message: format!("{e}"),
-        }),
-    }
+    Ok(theseus::test_proxy_connection(&config).await?)
 }

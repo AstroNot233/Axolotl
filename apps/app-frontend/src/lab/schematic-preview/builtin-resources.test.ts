@@ -18,6 +18,8 @@ before(async () => {
     server = await createServer({
         root: appRoot,
         configFile: `${appRoot}/vite.config.ts`,
+        // This SSR fixture must not replace an active dev server's optimized dependencies.
+        cacheDir: `${appRoot}/node_modules/.vite-schematic-resources`,
         server: { middlewareMode: true, hmr: false },
         appType: 'custom',
     })
@@ -36,7 +38,7 @@ test('built-in assets render stained glass and sugar cane across supported versi
         { name: 'minecraft:white_stained_glass', properties: {} },
         { name: 'minecraft:sugar_cane', properties: {} },
     ]
-    for (const version of ['1.21', '26.2']) {
+    for (const version of ['1.21', '26.2', '26.3']) {
         const resources = builtin.loadBuiltinBlockResources(version, palette)
         assert.equal(resources.defaultBlockProperties['minecraft:sugar_cane']?.age, '0')
         const models = Object.fromEntries(
@@ -77,8 +79,8 @@ test('built-in assets expose the complete renderer resource set', () => {
     assert.ok(textureUvs['minecraft:block/white_stained_glass'])
     assert.ok(textureUvs['minecraft:block/sugar_cane'])
     assert.deepEqual(builtin.builtinTextureRegion('minecraft:block/white_stained_glass'), {
-        x: 80,
-        y: 1952,
+        x: 1568,
+        y: 1968,
         width: 16,
         height: 16,
     })
@@ -86,7 +88,7 @@ test('built-in assets expose the complete renderer resource set', () => {
 
 test('all built-in block resources remain compatible with Deepslate', () => {
     const palette = builtin.listBuiltinBlockStates()
-    const resources = builtin.loadBuiltinBlockResources('26.3-snapshot-6', palette)
+    const resources = builtin.loadBuiltinBlockResources('26.3', palette)
     const definitions = Object.fromEntries(
         Object.entries(resources.blockDefinitions).map(([id, definition]) => [
             id,
@@ -144,7 +146,7 @@ test('partial redstone models do not hide every face of adjacent blocks', () => 
                 : state
         }),
     ]
-    const resources = builtin.loadBuiltinBlockResources('26.3-snapshot-6', palette)
+    const resources = builtin.loadBuiltinBlockResources('26.3', palette)
     const definitions = Object.fromEntries(
         Object.entries(resources.blockDefinitions).map(([id, definition]) => [
             id,
@@ -214,4 +216,35 @@ test('unqualified model parents use the vanilla namespace', () => {
     }
     builtin.completeBuiltinModelDependencies('26.2', blockDefinitions, blockModels)
     assert.ok(blockModels['minecraft:block/cube_all'])
+})
+
+test('canceling an atlas decode releases the bitmap and rejects the old resource task', async () => {
+    const controller = new AbortController()
+    const originalFetch = globalThis.fetch
+    const bitmapDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'createImageBitmap')
+    let closed = false
+    globalThis.fetch = async (_, options) => {
+        assert.equal(options?.signal, controller.signal)
+        return new Response(new Blob())
+    }
+    Object.defineProperty(globalThis, 'createImageBitmap', {
+        configurable: true,
+        value: async () => {
+            controller.abort()
+            return {
+                close: () => {
+                    closed = true
+                },
+            }
+        },
+    })
+    try {
+        await assert.rejects(builtin.loadBuiltinAtlas(controller.signal), { name: 'AbortError' })
+        assert.equal(closed, true)
+    } finally {
+        globalThis.fetch = originalFetch
+        if (bitmapDescriptor)
+            Object.defineProperty(globalThis, 'createImageBitmap', bitmapDescriptor)
+        else Reflect.deleteProperty(globalThis, 'createImageBitmap')
+    }
 })

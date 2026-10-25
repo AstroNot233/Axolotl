@@ -29,10 +29,16 @@ fn runtime_commands(source: &str) -> BTreeSet<&str> {
         .collect()
 }
 
-fn manifest_commands(source: &str) -> BTreeSet<&str> {
+fn manifest_commands<'a>(source: &'a str, plugin: &str) -> BTreeSet<&'a str> {
     let instance_plugin = source
-        .find(".plugin(\n                \"instance\",")
-        .expect("missing instance InlinedPlugin");
+        .match_indices(".plugin(")
+        .find(|(index, _)| {
+            source[index + ".plugin(".len()..]
+                .trim_start()
+                .starts_with(&format!("\"{plugin}\","))
+        })
+        .map(|(index, _)| index)
+        .expect("missing InlinedPlugin");
     bracket_contents_after(&source[instance_plugin..], ".commands(&[")
         .split(',')
         .map(str::trim)
@@ -41,9 +47,43 @@ fn manifest_commands(source: &str) -> BTreeSet<&str> {
 }
 
 #[test]
+fn resource_analysis_commands_are_registered_and_allowed_for_the_main_window() {
+    let runtime = runtime_commands(include_str!("../src/api/resources.rs"));
+    let manifest =
+        manifest_commands(include_str!("../build.rs"), "axolotl-resources");
+    for command in [
+        "resource_analysis_open",
+        "resource_analysis_update",
+        "resource_analysis_close",
+        "resource_prepare_operation",
+    ] {
+        assert!(runtime.contains(command));
+        assert!(manifest.contains(command));
+    }
+    assert!(runtime.difference(&manifest).next().is_none());
+    let capabilities: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/plugins.json"))
+            .unwrap();
+    assert!(
+        capabilities["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|window| window == "main")
+    );
+    assert!(
+        capabilities["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|permission| permission == "axolotl-resources:default")
+    );
+}
+
+#[test]
 fn instance_runtime_handlers_are_registered_in_build_manifest() {
     let runtime = runtime_commands(include_str!("../src/api/instance.rs"));
-    let manifest = manifest_commands(include_str!("../build.rs"));
+    let manifest = manifest_commands(include_str!("../build.rs"), "instance");
     let missing = runtime.difference(&manifest).copied().collect::<Vec<_>>();
 
     assert!(
@@ -52,6 +92,7 @@ fn instance_runtime_handlers_are_registered_in_build_manifest() {
         missing.join(", ")
     );
     for command in [
+        "instance_discard_upgrade_plan",
         "instance_get_post_upgrade_notice",
         "instance_dismiss_post_upgrade_notice",
     ] {
@@ -64,4 +105,93 @@ fn instance_runtime_handlers_are_registered_in_build_manifest() {
             "build.rs manifest missing {command}"
         );
     }
+}
+
+#[test]
+fn server_log_delta_is_registered_and_allowed_for_the_main_window() {
+    let runtime = runtime_commands(include_str!("../src/api/servers.rs"));
+    let manifest = manifest_commands(include_str!("../build.rs"), "servers");
+    assert!(runtime.contains("servers_get_log_delta"));
+    assert!(manifest.contains("servers_get_log_delta"));
+    for command in [
+        "servers_get_console_delta",
+        "servers_send_console_input",
+        "servers_resize_console",
+        "servers_kill",
+        "servers_update_settings",
+        "servers_install_neoforge",
+        "servers_install_modpack",
+    ] {
+        assert!(runtime.contains(command));
+        assert!(manifest.contains(command));
+    }
+    assert!(runtime.difference(&manifest).next().is_none());
+    let capabilities: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/plugins.json"))
+            .unwrap();
+    assert!(
+        capabilities["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|window| window == "main")
+    );
+    assert!(
+        capabilities["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|permission| permission == "servers:default")
+    );
+}
+
+#[test]
+fn mojang_monitor_commands_are_registered_and_allowed_for_the_main_window() {
+    let runtime = runtime_commands(include_str!("../src/api/auth.rs"));
+    let manifest = manifest_commands(include_str!("../build.rs"), "auth");
+    for command in [
+        "check_reachable",
+        "check_mojang_services",
+        "network_scope",
+        "set_mojang_auth_use_mirror",
+    ] {
+        assert!(runtime.contains(command));
+        assert!(manifest.contains(command));
+    }
+    let settings = runtime_commands(include_str!("../src/api/settings.rs"));
+    assert!(settings.contains("proxy_set"));
+    assert!(
+        manifest_commands(include_str!("../build.rs"), "settings")
+            .contains("proxy_set")
+    );
+    let capabilities: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/plugins.json"))
+            .unwrap();
+    assert!(
+        capabilities["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|window| window == "main")
+    );
+    for permission in ["auth:default", "settings:default"] {
+        assert!(
+            capabilities["permissions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == permission)
+        );
+    }
+}
+
+#[test]
+fn curseforge_runtime_handlers_match_the_build_manifest() {
+    let runtime = runtime_commands(include_str!("../src/api/curseforge.rs"));
+    let manifest = manifest_commands(include_str!("../build.rs"), "curseforge");
+    assert_eq!(
+        runtime, manifest,
+        "curseforge commands must be identical in the runtime handler and the \
+         build-time manifest"
+    );
 }

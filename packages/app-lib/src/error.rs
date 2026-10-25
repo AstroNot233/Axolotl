@@ -79,6 +79,21 @@ pub enum ErrorKind {
     #[error("Network download error: {0}")]
     NetworkError(String),
 
+    #[error("download endpoint changed; resume the validated partial file")]
+    DownloadEndpointChanged,
+
+    #[error("download transfer remained below its expected throughput")]
+    DownloadTransferSlow,
+
+    #[error("download {context} stream receive timed out")]
+    DownloadStreamStalled { context: String },
+
+    #[error("{0}")]
+    DownloadResourceWaitTimeout(String),
+
+    #[error("HTTP/2 transport error: {0}")]
+    DownloadH2Error(#[from] h2::Error),
+
     #[error("HTTP {status} for {method} {url}")]
     HttpError {
         status: u16,
@@ -109,6 +124,9 @@ pub enum ErrorKind {
 
     #[error("Invalid input: {0}")]
     InputError(String),
+
+    #[error("{0}")]
+    ResourceError(#[from] crate::resources::ResourceError),
 
     #[error(
         "The instance upgrade plan is stale (planned revision {planned_revision}, current revision {current_revision})"
@@ -184,8 +202,10 @@ pub enum ErrorKind {
     #[error("Move directory error: {0}")]
     DirectoryMoveError(String),
 
+    /// Carries the resolver's message rather than the upstream error type so a
+    /// hickory-resolver minor bump cannot change this crate's public API.
     #[error("Error resolving DNS: {0}")]
-    DNSError(#[from] hickory_resolver::ResolveError),
+    DNSError(String),
 
     #[error("An online profile for {user_name} is not available")]
     OnlineMinecraftProfileUnavailable { user_name: String },
@@ -232,6 +252,16 @@ pub struct Error {
     pub raw: Arc<ErrorKind>,
     pub source: tracing_error::TracedError<Arc<ErrorKind>>,
     context: Option<String>,
+}
+
+impl Error {
+    pub(crate) fn from_shared_kind(raw: Arc<ErrorKind>) -> Self {
+        Self {
+            source: Arc::clone(&raw).in_current_span(),
+            raw,
+            context: None,
+        }
+    }
 }
 
 impl std::error::Error for Error {
@@ -286,6 +316,12 @@ impl Error {
             );
         }
         self.to_string()
+    }
+}
+
+impl From<hickory_resolver::net::NetError> for ErrorKind {
+    fn from(source: hickory_resolver::net::NetError) -> Self {
+        Self::DNSError(source.to_string())
     }
 }
 

@@ -94,6 +94,7 @@ const props = defineProps<{
     sectionKey: string
     groupName?: string
     instances: GameInstance[]
+    runningInstanceIds: Set<string>
     grouping: string
     isCollapsed: boolean
     displayMode: string
@@ -241,7 +242,7 @@ function onStartLongPress(instanceId: string) {
     >
         <div
             v-if="!hideHeader && isDropTarget && isGroupDragActive"
-            class="pointer-events-none absolute -inset-2 inset-y-0 z-20 rounded-xl border-2 border-dashed border-contrast opacity-40 bg-transparent transition-opacity duration-150"
+            class="pointer-events-none absolute -inset-2 inset-y-0 z-20 rounded-xl border-2 border-dashed border-brand opacity-40 bg-transparent transition-opacity duration-150"
         />
         <div
             v-if="!hideHeader && (grouping === 'Group' || sectionKey !== UNGROUPED_GROUP_KEY)"
@@ -386,6 +387,7 @@ function onStartLongPress(instanceId: string) {
                             >
                                 <Instance
                                     :instance="instance"
+                                    :playing="runningInstanceIds.has(instance.id)"
                                     :disabled="selectMode || isDragging"
                                     :variant="displayMode === 'cards' ? 'library' : 'standard'"
                                     :class="{
@@ -448,6 +450,7 @@ function onStartLongPress(instanceId: string) {
                             <div :class="{ 'pointer-events-none': selectMode }">
                                 <Instance
                                     :instance="instance"
+                                    :playing="runningInstanceIds.has(instance.id)"
                                     :disabled="selectMode"
                                     :variant="displayMode === 'cards' ? 'library' : 'standard'"
                                     :class="{

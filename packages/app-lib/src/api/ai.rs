@@ -1,5 +1,8 @@
 //! AI provider catalog, credentials, and text-generation adapters.
 
+pub mod chat;
+mod credentials;
+
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -19,7 +22,7 @@ use uuid::Uuid;
 
 use crate::{ErrorKind, State};
 
-const CATALOG_SOURCE: &str = "LobeHub 787e3d20aa8194a4d4aafe40f0e48bd21d654045";
+const CATALOG_SOURCE: &str = "LobeHub 49204982cab98bfa2f2fb6831a34d5018a2af6be";
 const KEYRING_PREFIX: &str = "ai-provider";
 const OAUTH_CREDENTIAL: &str = "oauth";
 const API_KEY_CREDENTIAL: &str = "api-key";
@@ -52,6 +55,9 @@ static OAUTH_FLOWS: LazyLock<Mutex<HashMap<Uuid, PendingOAuthFlow>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static OAUTH_REFRESH_LOCK: LazyLock<tokio::sync::Mutex<()>> =
     LazyLock::new(|| tokio::sync::Mutex::new(()));
+static OAUTH_POLL_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
+static OAUTH_CREDENTIAL_LOCK: Mutex<()> = Mutex::new(());
 static VERTEX_ACCESS_TOKEN: LazyLock<Mutex<Option<CachedVertexAccessToken>>> =
     LazyLock::new(|| Mutex::new(None));
 
@@ -128,45 +134,45 @@ pub struct AiProviderDefinition {
 }
 
 macro_rules! provider {
-	($id:literal, $name:literal, $protocol:ident, $endpoint:literal, $model:literal, $fetch:literal) => {
-		AiProviderDefinition {
-			id: $id,
-			name: $name,
-			protocol: AiProtocol::$protocol,
-			auth_type: AiAuthType::ApiKey,
-			default_endpoint: $endpoint,
-			check_model: $model,
-			show_model_fetcher: $fetch,
-			required_settings: &[],
-			sponsored: false,
-		}
-	};
-	($id:literal, $name:literal, $protocol:ident, $endpoint:literal, $model:literal, $fetch:literal, $auth:ident) => {
-		AiProviderDefinition {
-			id: $id,
-			name: $name,
-			protocol: AiProtocol::$protocol,
-			auth_type: AiAuthType::$auth,
-			default_endpoint: $endpoint,
-			check_model: $model,
-			show_model_fetcher: $fetch,
-			required_settings: &[],
-			sponsored: false,
-		}
-	};
-	($id:literal, $name:literal, $protocol:ident, $endpoint:literal, $model:literal, $fetch:literal, [$($setting:literal),*]) => {
-		AiProviderDefinition {
-			id: $id,
-			name: $name,
-			protocol: AiProtocol::$protocol,
-			auth_type: AiAuthType::ApiKey,
-			default_endpoint: $endpoint,
-			check_model: $model,
-			show_model_fetcher: $fetch,
-			required_settings: &[$($setting),*],
-			sponsored: false,
-		}
-	};
+    ($id:literal, $name:literal, $protocol:ident, $endpoint:literal, $model:literal, $fetch:literal) => {
+        AiProviderDefinition {
+            id: $id,
+            name: $name,
+            protocol: AiProtocol::$protocol,
+            auth_type: AiAuthType::ApiKey,
+            default_endpoint: $endpoint,
+            check_model: $model,
+            show_model_fetcher: $fetch,
+            required_settings: &[],
+            sponsored: false,
+        }
+    };
+    ($id:literal, $name:literal, $protocol:ident, $endpoint:literal, $model:literal, $fetch:literal, $auth:ident) => {
+        AiProviderDefinition {
+            id: $id,
+            name: $name,
+            protocol: AiProtocol::$protocol,
+            auth_type: AiAuthType::$auth,
+            default_endpoint: $endpoint,
+            check_model: $model,
+            show_model_fetcher: $fetch,
+            required_settings: &[],
+            sponsored: false,
+        }
+    };
+    ($id:literal, $name:literal, $protocol:ident, $endpoint:literal, $model:literal, $fetch:literal, [$($setting:literal),*]) => {
+        AiProviderDefinition {
+            id: $id,
+            name: $name,
+            protocol: AiProtocol::$protocol,
+            auth_type: AiAuthType::ApiKey,
+            default_endpoint: $endpoint,
+            check_model: $model,
+            show_model_fetcher: $fetch,
+            required_settings: &[$($setting),*],
+            sponsored: false,
+        }
+    };
 }
 
 // Text-capable providers from LobeHub's model bank. Image-only providers and
@@ -295,8 +301,8 @@ const PROVIDERS: &[AiProviderDefinition] = &[
         "codeflow",
         "CodeFlow",
         Openai,
-        "https://codeflow.asia/v1",
-        "gpt-4o-mini",
+        "https://codeflow.sh/v1",
+        "gpt-6.1-sol",
         true
     ),
     provider!(
@@ -920,6 +926,19 @@ fn text_client(request: &AiTextRequest) -> &'static reqwest::Client {
     }
 }
 
+// OpenCode routes and caches requests by conversation, not by API key.
+fn opencode_headers(
+    builder: reqwest::RequestBuilder,
+    provider_id: &str,
+    session_id: Uuid,
+) -> reqwest::RequestBuilder {
+    if matches!(provider_id, "opencodecodingplan" | "opencodezen") {
+        builder.header("x-opencode-session", session_id.to_string())
+    } else {
+        builder
+    }
+}
+
 fn lowest_openai_reasoning_effort(model_id: &str) -> Option<&'static str> {
     let model = model_id
         .rsplit('/')
@@ -1087,6 +1106,7 @@ struct PendingOAuthFlow {
     provider_id: String,
     device_code: String,
     expires_at: u64,
+    credentials: Option<OAuthCredentials>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1363,8 +1383,16 @@ fn read_credential(
     provider_id: &str,
     credential: &str,
 ) -> crate::Result<Option<String>> {
+    Ok(read_stored_credential(provider_id, credential)?
+        .filter(|value| !value.trim().is_empty()))
+}
+
+fn read_stored_credential(
+    provider_id: &str,
+    credential: &str,
+) -> crate::Result<Option<String>> {
     match credential_entry(provider_id, credential)?.get_password() {
-        Ok(value) => Ok((!value.trim().is_empty()).then_some(value)),
+        Ok(value) => Ok(Some(value)),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(error) => Err(ErrorKind::OtherError(format!(
             "Could not read the system credential store: {error}"
@@ -1378,8 +1406,20 @@ fn write_credential(
     credential: &str,
     value: Option<&str>,
 ) -> crate::Result<()> {
+    write_stored_credential(
+        provider_id,
+        credential,
+        value.map(str::trim).filter(|value| !value.is_empty()),
+    )
+}
+
+fn write_stored_credential(
+    provider_id: &str,
+    credential: &str,
+    value: Option<&str>,
+) -> crate::Result<()> {
     let entry = credential_entry(provider_id, credential)?;
-    match value.map(str::trim).filter(|value| !value.is_empty()) {
+    match value {
         Some(value) => entry.set_password(value).map_err(|error| {
             ErrorKind::OtherError(format!(
                 "Could not write the system credential store: {error}"
@@ -1399,14 +1439,19 @@ fn write_credential(
 fn read_oauth_credentials(
     provider_id: &str,
 ) -> crate::Result<Option<OAuthCredentials>> {
-    read_credential(provider_id, OAUTH_CREDENTIAL)?
+    let _guard = OAUTH_CREDENTIAL_LOCK.lock().map_err(|_| {
+        ErrorKind::OtherError(
+            "OAuth credential storage is unavailable".to_string(),
+        )
+    })?;
+    credentials::read(&OAuthCredentialStore(provider_id))?
         .map(|value| {
             serde_json::from_str(&value).map_err(|_| {
                 ErrorKind::OtherError(
-					"Stored AI OAuth credentials are invalid; reconnect the provider"
-						.to_string(),
-				)
-				.as_error()
+                    "Stored AI OAuth credentials are invalid; reconnect the provider"
+                        .to_string(),
+                )
+                .as_error()
             })
         })
         .transpose()
@@ -1416,11 +1461,31 @@ fn write_oauth_credentials(
     provider_id: &str,
     credentials: Option<&OAuthCredentials>,
 ) -> crate::Result<()> {
+    let _guard = OAUTH_CREDENTIAL_LOCK.lock().map_err(|_| {
+        ErrorKind::OtherError(
+            "OAuth credential storage is unavailable".to_string(),
+        )
+    })?;
     let serialized = credentials
         .map(serde_json::to_string)
         .transpose()
         .map_err(|error| ErrorKind::OtherError(error.to_string()))?;
-    write_credential(provider_id, OAUTH_CREDENTIAL, serialized.as_deref())
+    credentials::write(
+        &OAuthCredentialStore(provider_id),
+        serialized.as_deref(),
+    )
+}
+
+struct OAuthCredentialStore<'a>(&'a str);
+
+impl credentials::Store for OAuthCredentialStore<'_> {
+    fn read(&self, name: &str) -> crate::Result<Option<String>> {
+        read_stored_credential(self.0, name)
+    }
+
+    fn write(&self, name: &str, value: Option<&str>) -> crate::Result<()> {
+        write_stored_credential(self.0, name, value)
+    }
 }
 
 pub fn catalog() -> Vec<AiProviderDefinition> {
@@ -1461,11 +1526,11 @@ async fn load_provider_models(
 ) -> crate::Result<Vec<AiProviderModel>> {
     let state = State::get().await?;
     let rows = sqlx::query(
-		"SELECT model_id, display_name, enabled, source FROM ai_provider_models WHERE provider_id = ? ORDER BY display_name, model_id",
-	)
-	.bind(provider_id)
-	.fetch_all(&state.pool)
-	.await?;
+        "SELECT model_id, display_name, enabled, source FROM ai_provider_models WHERE provider_id = ? ORDER BY display_name, model_id",
+    )
+    .bind(provider_id)
+    .fetch_all(&state.pool)
+    .await?;
     let mut stored = rows
         .into_iter()
         .map(|row| {
@@ -1519,11 +1584,11 @@ async fn load_provider_config(
 ) -> crate::Result<AiProviderConfig> {
     let state = State::get().await?;
     let row = sqlx::query(
-		"SELECT custom_name, protocol, enabled, endpoint, settings FROM ai_provider_configs WHERE provider_id = ?",
-	)
-	.bind(definition.id)
-	.fetch_optional(&state.pool)
-	.await?;
+        "SELECT custom_name, protocol, enabled, endpoint, settings FROM ai_provider_configs WHERE provider_id = ?",
+    )
+    .bind(definition.id)
+    .fetch_optional(&state.pool)
+    .await?;
     let (custom_name, protocol, enabled, endpoint, settings) = match row {
         Some(row) => {
             let settings = serde_json::from_str::<HashMap<String, String>>(
@@ -1630,16 +1695,16 @@ pub async fn update_provider(
         .map_err(|error| ErrorKind::OtherError(error.to_string()))?;
     let state = State::get().await?;
     sqlx::query(
-		"INSERT INTO ai_provider_configs (provider_id, custom_name, protocol, enabled, endpoint, settings) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(provider_id) DO UPDATE SET custom_name = excluded.custom_name, protocol = excluded.protocol, enabled = excluded.enabled, endpoint = excluded.endpoint, settings = excluded.settings",
-	)
-	.bind(definition.id)
-	.bind(update.custom_name.map(|value| value.trim().to_string()))
-	.bind(definition.protocol.as_str())
-	.bind(update.enabled)
-	.bind(endpoint)
-	.bind(settings)
-	.execute(&state.pool)
-	.await?;
+        "INSERT INTO ai_provider_configs (provider_id, custom_name, protocol, enabled, endpoint, settings) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(provider_id) DO UPDATE SET custom_name = excluded.custom_name, protocol = excluded.protocol, enabled = excluded.enabled, endpoint = excluded.endpoint, settings = excluded.settings",
+    )
+    .bind(definition.id)
+    .bind(update.custom_name.map(|value| value.trim().to_string()))
+    .bind(definition.protocol.as_str())
+    .bind(update.enabled)
+    .bind(endpoint)
+    .bind(settings)
+    .execute(&state.pool)
+    .await?;
     Ok(())
 }
 
@@ -1691,15 +1756,15 @@ pub async fn update_model(update: AiModelUpdate) -> crate::Result<()> {
     };
     let state = State::get().await?;
     sqlx::query(
-		"INSERT INTO ai_provider_models (provider_id, model_id, display_name, enabled, source) VALUES (?, ?, ?, ?, ?) ON CONFLICT(provider_id, model_id) DO UPDATE SET display_name = excluded.display_name, enabled = excluded.enabled, source = CASE WHEN excluded.source = 'builtin' THEN 'builtin' ELSE ai_provider_models.source END",
-	)
-	.bind(&update.provider_id)
-	.bind(model_id)
-	.bind(display_name)
-	.bind(update.enabled)
-	.bind(source)
-	.execute(&state.pool)
-	.await?;
+        "INSERT INTO ai_provider_models (provider_id, model_id, display_name, enabled, source) VALUES (?, ?, ?, ?, ?) ON CONFLICT(provider_id, model_id) DO UPDATE SET display_name = excluded.display_name, enabled = excluded.enabled, source = CASE WHEN excluded.source = 'builtin' THEN 'builtin' ELSE ai_provider_models.source END",
+    )
+    .bind(&update.provider_id)
+    .bind(model_id)
+    .bind(display_name)
+    .bind(update.enabled)
+    .bind(source)
+    .execute(&state.pool)
+    .await?;
     Ok(())
 }
 
@@ -2328,7 +2393,11 @@ async fn complete_openai(
     });
     apply_openai_translation_options(&mut body, request);
     apply_openai_response_format(&mut body, request);
-    let mut builder = text_client(request).post(endpoint).json(&body);
+    let mut builder = opencode_headers(
+        text_client(request).post(endpoint).json(&body),
+        definition.id,
+        Uuid::new_v4(),
+    );
     if !token.is_empty() {
         builder = if config.protocol == AiProtocol::Azure {
             builder.header("api-key", token)
@@ -2387,14 +2456,18 @@ async fn complete_anthropic(
         );
     }
     let value = checked_json(
-        text_client(request)
-            .post(endpoint_with_path(&config.endpoint, "/v1/messages"))
-            .header("x-api-key", api_key)
-            .header("anthropic-version", "2023-06-01")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|error| ai_network_error(definition.name, error))?,
+        opencode_headers(
+            text_client(request)
+                .post(endpoint_with_path(&config.endpoint, "/v1/messages")),
+            definition.id,
+            Uuid::new_v4(),
+        )
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|error| ai_network_error(definition.name, error))?,
         definition.name,
     )
     .await?;
@@ -3190,13 +3263,13 @@ pub async fn fetch_models(
     let state = State::get().await?;
     for (id, name) in &models {
         sqlx::query(
-			"INSERT INTO ai_provider_models (provider_id, model_id, display_name, enabled, source) VALUES (?, ?, ?, TRUE, 'remote') ON CONFLICT(provider_id, model_id) DO UPDATE SET display_name = CASE WHEN ai_provider_models.source = 'custom' THEN ai_provider_models.display_name ELSE excluded.display_name END",
-		)
-		.bind(&provider_id)
-		.bind(id)
-		.bind(name)
-		.execute(&state.pool)
-		.await?;
+            "INSERT INTO ai_provider_models (provider_id, model_id, display_name, enabled, source) VALUES (?, ?, ?, TRUE, 'remote') ON CONFLICT(provider_id, model_id) DO UPDATE SET display_name = CASE WHEN ai_provider_models.source = 'custom' THEN ai_provider_models.display_name ELSE excluded.display_name END",
+        )
+        .bind(&provider_id)
+        .bind(id)
+        .bind(name)
+        .execute(&state.pool)
+        .await?;
     }
     load_provider_models(&provider_id).await
 }
@@ -3324,6 +3397,7 @@ pub async fn begin_oauth(
                 provider_id,
                 device_code,
                 expires_at: now_seconds() + expires_in,
+                credentials: None,
             },
         );
     Ok(OAuthDeviceCode {
@@ -3348,6 +3422,15 @@ fn oauth_error_status(value: &Value) -> Option<OAuthPollStatus> {
 
 #[tracing::instrument]
 pub async fn poll_oauth(flow_id: Uuid) -> crate::Result<OAuthPollStatus> {
+    poll_oauth_with_storage(flow_id, write_oauth_credentials).await
+}
+
+async fn poll_oauth_with_storage(
+    flow_id: Uuid,
+    persist: impl Fn(&str, Option<&OAuthCredentials>) -> crate::Result<()>,
+) -> crate::Result<OAuthPollStatus> {
+    // A device authorization code can only be exchanged once.
+    let _guard = OAUTH_POLL_LOCK.lock().await;
     let flow = OAUTH_FLOWS
         .lock()
         .map_err(|_| {
@@ -3366,6 +3449,14 @@ pub async fn poll_oauth(flow_id: Uuid) -> crate::Result<OAuthPollStatus> {
             .ok()
             .and_then(|mut flows| flows.remove(&flow_id));
         return Ok(OAuthPollStatus::Expired);
+    }
+    if let Some(credentials) = &flow.credentials {
+        return complete_oauth(
+            flow_id,
+            &flow.provider_id,
+            credentials,
+            persist,
+        );
     }
     let definition =
         oauth_definition(&flow.provider_id).expect("stored OAuth provider");
@@ -3525,7 +3616,26 @@ pub async fn poll_oauth(flow_id: Uuid) -> crate::Result<OAuthPollStatus> {
         credentials.bearer_token = Some(bearer_token.to_string());
         credentials.bearer_token_expires_at = Some(bearer_token_expires_at);
     }
-    write_oauth_credentials(&flow.provider_id, Some(&credentials))?;
+    // Retain exchanged tokens if persistence fails, so retrying the same flow
+    // does not attempt to redeem the already consumed authorization code.
+    OAUTH_FLOWS
+        .lock()
+        .map_err(|_| {
+            ErrorKind::OtherError("OAuth flow state is unavailable".to_string())
+        })?
+        .get_mut(&flow_id)
+        .expect("active OAuth flow")
+        .credentials = Some(credentials.clone());
+    complete_oauth(flow_id, &flow.provider_id, &credentials, persist)
+}
+
+fn complete_oauth(
+    flow_id: Uuid,
+    provider_id: &str,
+    credentials: &OAuthCredentials,
+    persist: impl FnOnce(&str, Option<&OAuthCredentials>) -> crate::Result<()>,
+) -> crate::Result<OAuthPollStatus> {
+    persist(provider_id, Some(credentials))?;
     OAUTH_FLOWS
         .lock()
         .ok()
@@ -3546,6 +3656,96 @@ pub fn disconnect_oauth(provider_id: String) -> crate::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opencode_session_headers_are_stable_and_provider_scoped() {
+        let client = reqwest::Client::builder()
+            .user_agent(crate::launcher_user_agent())
+            .build()
+            .unwrap();
+        let session = Uuid::new_v4();
+        for provider in ["opencodecodingplan", "opencodezen"] {
+            for _ in 0..2 {
+                let request = opencode_headers(
+                    client
+                        .post("https://opencode.ai/zen/go/v1/chat/completions"),
+                    provider,
+                    session,
+                )
+                .build()
+                .unwrap();
+                assert_eq!(
+                    request.headers()["x-opencode-session"],
+                    session.to_string()
+                );
+            }
+        }
+        let other_session = Uuid::new_v4();
+        let other_request = opencode_headers(
+            client.post("https://opencode.ai/zen/go/v1/chat/completions"),
+            "opencodecodingplan",
+            other_session,
+        )
+        .build()
+        .unwrap();
+        assert_eq!(
+            other_request.headers()["x-opencode-session"],
+            other_session.to_string()
+        );
+        assert_ne!(
+            other_request.headers()["x-opencode-session"],
+            session.to_string()
+        );
+        let request = opencode_headers(
+            client.post("https://example.com/v1/chat/completions"),
+            "openai",
+            session,
+        )
+        .build()
+        .unwrap();
+        assert!(!request.headers().contains_key("x-opencode-session"));
+    }
+
+    #[tokio::test]
+    async fn retries_persistence_without_redeeming_the_authorization_code() {
+        let flow_id = Uuid::new_v4();
+        OAUTH_FLOWS.lock().unwrap().insert(
+            flow_id,
+            PendingOAuthFlow {
+                provider_id: "chatgpt".to_string(),
+                // Invalid device state makes accidental re-exchange fail before
+                // making any network request.
+                device_code: "already-consumed".to_string(),
+                expires_at: now_seconds() + 900,
+                credentials: Some(OAuthCredentials {
+                    access_token: "exchanged-access-token".to_string(),
+                    refresh_token: Some("exchanged-refresh-token".to_string()),
+                    ..Default::default()
+                }),
+            },
+        );
+        let result = poll_oauth_with_storage(flow_id, |provider_id, value| {
+            assert_eq!(provider_id, "chatgpt");
+            assert_eq!(value.unwrap().access_token, "exchanged-access-token");
+            Err(input_error("Simulated persistence failure".to_string()))
+        })
+        .await;
+        assert!(result.is_err());
+        assert!(OAUTH_FLOWS.lock().unwrap().contains_key(&flow_id));
+        let result = poll_oauth_with_storage(flow_id, |_, value| {
+            let value = value.unwrap();
+            assert_eq!(value.access_token, "exchanged-access-token");
+            assert_eq!(
+                value.refresh_token.as_deref(),
+                Some("exchanged-refresh-token")
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(matches!(result, OAuthPollStatus::Success));
+        assert!(!OAUTH_FLOWS.lock().unwrap().contains_key(&flow_id));
+    }
 
     #[test]
     fn auth_type_uses_lobehub_wire_values() {

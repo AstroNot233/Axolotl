@@ -462,20 +462,20 @@ fn resolve_modloader_file<'a>(
     &'a crate::mcarchive::McArchiveFile,
 )> {
     let version = modloader
-		.mod_versions
-		.iter()
-		.find(|version| {
-			version.name == game_version
-				|| version
-					.game_versions
-					.iter()
-					.any(|candidate| candidate.name == game_version)
-		})
-		.ok_or_else(|| {
-			crate::ErrorKind::InputError(format!(
-				"MCArchive has no ModLoader release for Minecraft {game_version}"
-			))
-		})?;
+        .mod_versions
+        .iter()
+        .find(|version| {
+            version.name == game_version
+                || version
+                    .game_versions
+                    .iter()
+                    .any(|candidate| candidate.name == game_version)
+        })
+        .ok_or_else(|| {
+            crate::ErrorKind::InputError(format!(
+                "MCArchive has no ModLoader release for Minecraft {game_version}"
+            ))
+        })?;
     let file = version
         .files
         .iter()
@@ -549,10 +549,10 @@ async fn add_component(
         })?;
     if instance.applied_content_set.game_version != target_game_version {
         return Err(crate::ErrorKind::InputError(format!(
-			"Core component targets Minecraft {target_game_version}, but this instance uses {}",
-			instance.applied_content_set.game_version
-		))
-		.into());
+            "Core component targets Minecraft {target_game_version}, but this instance uses {}",
+            instance.applied_content_set.game_version
+        ))
+        .into());
     }
     let metadata = tokio::fs::metadata(&source_path).await?;
     if !metadata.is_file() {
@@ -820,43 +820,11 @@ fn assemble_archive(
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
 fn atomically_replace_file(
     temporary: &Path,
     destination: &Path,
 ) -> std::io::Result<()> {
-    std::fs::rename(temporary, destination)
-}
-
-#[cfg(target_os = "windows")]
-fn atomically_replace_file(
-    temporary: &Path,
-    destination: &Path,
-) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-    use windows::core::PCWSTR;
-
-    let temporary = temporary
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    unsafe {
-        MoveFileExW(
-            PCWSTR(temporary.as_ptr()),
-            PCWSTR(destination.as_ptr()),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-        .map_err(|error| std::io::Error::other(error.to_string()))
-    }
+    io::atomically_replace_file(temporary, destination)
 }
 
 async fn update_component_assembly_state(

@@ -66,6 +66,8 @@ impl ContentFavoriteType {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ContentFavorite {
+    #[serde(default)]
+    pub resource_id: Option<String>,
     pub provider: ContentFavoriteProvider,
     pub project_id: String,
     pub content_type: ContentFavoriteType,
@@ -95,6 +97,7 @@ fn from_row(row: sqlx::sqlite::SqliteRow) -> crate::Result<ContentFavorite> {
     let provider: String = row.try_get("provider")?;
     let content_type: String = row.try_get("content_type")?;
     Ok(ContentFavorite {
+        resource_id: row.try_get("resource_id")?,
         provider: ContentFavoriteProvider::parse(&provider)?,
         project_id: row.try_get("project_id")?,
         content_type: ContentFavoriteType::parse(&content_type)?,
@@ -107,10 +110,12 @@ pub async fn list(
 ) -> crate::Result<Vec<ContentFavorite>> {
     let rows = sqlx::query(
         "
-		SELECT provider, project_id, content_type, saved_at
-		FROM content_favorites
-		ORDER BY saved_at DESC, provider ASC, project_id ASC
-		",
+        SELECT provider, project_id, content_type, saved_at,
+            (SELECT resource_id FROM resource_source_projects
+                WHERE source = content_favorites.provider AND project_id = content_favorites.project_id) AS resource_id
+        FROM content_favorites
+        ORDER BY saved_at DESC, provider ASC, project_id ASC
+        ",
     )
     .fetch_all(exec)
     .await?;
@@ -129,11 +134,11 @@ pub async fn add(
 
     sqlx::query(
         "
-		INSERT INTO content_favorites (provider, project_id, content_type, saved_at)
-		VALUES (?, ?, ?, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
-		ON CONFLICT (provider, project_id) DO UPDATE SET
-			content_type = excluded.content_type
-		",
+        INSERT INTO content_favorites (provider, project_id, content_type, saved_at)
+        VALUES (?, ?, ?, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
+        ON CONFLICT (provider, project_id) DO UPDATE SET
+            content_type = excluded.content_type
+        ",
     )
     .bind(provider)
     .bind(project_id)
@@ -143,10 +148,12 @@ pub async fn add(
 
     let row = sqlx::query(
         "
-		SELECT provider, project_id, content_type, saved_at
-		FROM content_favorites
-		WHERE provider = ? AND project_id = ?
-		",
+        SELECT provider, project_id, content_type, saved_at,
+            (SELECT resource_id FROM resource_source_projects
+                WHERE source = content_favorites.provider AND project_id = content_favorites.project_id) AS resource_id
+        FROM content_favorites
+        WHERE provider = ? AND project_id = ?
+        ",
     )
     .bind(provider)
     .bind(project_id)
@@ -206,11 +213,11 @@ mod tests {
             .await
             .expect("in-memory database");
         sqlx::raw_sql(
-			"CREATE TABLE existing_content (id INTEGER PRIMARY KEY, marker TEXT NOT NULL); INSERT INTO existing_content (marker) VALUES ('keep');",
-		)
-		.execute(&pool)
-		.await
-		.expect("legacy database data");
+            "CREATE TABLE existing_content (id INTEGER PRIMARY KEY, marker TEXT NOT NULL); INSERT INTO existing_content (marker) VALUES ('keep');",
+        )
+        .execute(&pool)
+        .await
+        .expect("legacy database data");
 
         sqlx::raw_sql(include_str!(
             "../../migrations/20260820200000_content-favorites.sql"
@@ -226,11 +233,11 @@ mod tests {
         .await
         .expect("legacy row after migration");
         let table_exists: i64 = sqlx::query_scalar(
-			"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'content_favorites'",
-		)
-		.fetch_one(&pool)
-		.await
-		.expect("content favorites table query");
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'content_favorites'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("content favorites table query");
 
         assert_eq!(marker, "keep");
         assert_eq!(table_exists, 1);
@@ -297,30 +304,30 @@ mod tests {
      {
         let pool = pool().await;
         sqlx::query(
-			"INSERT INTO content_favorites (provider, project_id, content_type, saved_at) VALUES ('modrinth', 'older', 'mod', 1)",
-		)
-		.execute(&pool)
-		.await
-		.expect("insert valid favorite");
+            "INSERT INTO content_favorites (provider, project_id, content_type, saved_at) VALUES ('modrinth', 'older', 'mod', 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert valid favorite");
         sqlx::query(
-			"INSERT INTO content_favorites (provider, project_id, content_type, saved_at) VALUES ('curseforge', 'newer', 'shader', 2)",
-		)
-		.execute(&pool)
-		.await
-		.expect("insert valid favorite");
+            "INSERT INTO content_favorites (provider, project_id, content_type, saved_at) VALUES ('curseforge', 'newer', 'shader', 2)",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert valid favorite");
 
         assert!(sqlx::query(
-			"INSERT INTO content_favorites (provider, project_id, content_type, saved_at) VALUES ('unknown', 'bad-provider', 'mod', 3)",
-		)
-		.execute(&pool)
-		.await
-		.is_err());
+            "INSERT INTO content_favorites (provider, project_id, content_type, saved_at) VALUES ('unknown', 'bad-provider', 'mod', 3)",
+        )
+        .execute(&pool)
+        .await
+        .is_err());
         assert!(sqlx::query(
-			"INSERT INTO content_favorites (provider, project_id, content_type, saved_at) VALUES ('modrinth', 'bad-type', 'modpack', 3)",
-		)
-		.execute(&pool)
-		.await
-		.is_err());
+            "INSERT INTO content_favorites (provider, project_id, content_type, saved_at) VALUES ('modrinth', 'bad-type', 'modpack', 3)",
+        )
+        .execute(&pool)
+        .await
+        .is_err());
 
         let favorites = list(&pool).await.expect("list favorites");
         assert_eq!(

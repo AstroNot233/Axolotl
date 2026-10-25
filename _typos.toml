@@ -16,6 +16,10 @@ extend-exclude = [
   "apps/app-frontend/public/monaco/",
 ]
 
+[default]
+# Historical MultiMC JSON key retained for compatibility with upstream.
+extend-ignore-re = ['"MMC-absulute_url"']
+
 [default.extend-words]
 # Terms Of Use in `tou-link`
 tou = "tou"
@@ -37,6 +41,10 @@ Fo = "Fo"
 nd = "nd"
 # Vietnamese place name used in the native language label.
 Nam = "Nam"
+# Actually it is PNGs
+PN = "PN"
+# ID for stronghold-straight
+SHS = "SHS"
 
 [default.extend-identifiers]
 # Minecraft locale identifiers containing the ISO 3166-1 code for Bosnia and

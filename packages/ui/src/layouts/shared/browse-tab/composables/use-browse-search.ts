@@ -3,6 +3,7 @@ import { computed, nextTick, onScopeDispose, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useDebugLogger } from '#ui/composables/debug-logger'
+import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import type {
     EnvironmentSearchOverride,
     FilterType,
@@ -17,18 +18,33 @@ import { useServerSearch } from '#ui/utils/server-search'
 import type { BrowseDisplayMode, BrowseSearchResponse } from '../types'
 
 export interface UseBrowseSearchOptions {
+    enabled?: Ref<boolean>
+    deferInitialization?: boolean
+    formatError?: (error: unknown) => string
     projectType: Ref<string>
     tags: Ref<Tags>
     providedFilters?: ComputedRef<FilterValue[]>
     environmentOverride?: ComputedRef<EnvironmentSearchOverride | undefined>
     installContextLoader?: ComputedRef<string | undefined>
     search: (params: string, signal: AbortSignal) => Promise<BrowseSearchResponse>
+    invalidateSearch?: () => void
     syncQueryParams?: boolean
     persistentQueryParams: string[]
     getExtraQueryParams?: () => Record<string, string | undefined>
     maxResultsOptions?: ComputedRef<number[]>
     displayMode?: Ref<BrowseDisplayMode> | ComputedRef<BrowseDisplayMode>
     initialSearchResponse?: BrowseSearchResponse
+    sortOptions?: readonly SortType[]
+}
+
+export interface BrowseCommittedSearch {
+    response: BrowseSearchResponse
+    projectType: string
+    sortType: SortType
+    page: number
+    maxResults: number
+    deprioritizedTags: string[]
+    excludeLoaders: boolean
 }
 
 export interface BrowseSearchState {
@@ -47,6 +63,8 @@ export interface BrowseSearchState {
     effectiveCurrentSortType: Ref<SortType>
 
     loading: Ref<boolean>
+    committed: ShallowRef<BrowseCommittedSearch | null>
+    searchError: Ref<string | null>
     projectHits: ShallowRef<BrowseSearchResponse['projectHits']>
     serverHits: ShallowRef<BrowseSearchResponse['serverHits']>
     totalHits: Ref<number>
@@ -60,6 +78,7 @@ export interface BrowseSearchState {
     deprioritizedTags: ComputedRef<string[]>
     excludeLoaders: ComputedRef<boolean>
 
+    initializeFilters: () => void
     refreshSearch: () => Promise<void>
     setPage: (page: number) => Promise<void>
     clearSearch: () => void
@@ -67,6 +86,14 @@ export interface BrowseSearchState {
 }
 
 export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchState {
+    const { formatMessage } = useVIntl()
+    const messages = defineMessages({
+        failed: {
+            id: 'browse.search.failed',
+            defaultMessage:
+                'The search could not be completed. Check your connection or filters and try again.',
+        },
+    })
     const debug = useDebugLogger('BrowseSearch')
     const route = useRoute()
     const router = useRouter()
@@ -88,11 +115,14 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
         sortTypes,
         requestParams,
         createPageParams,
+        initializeQueryParams,
     } = useSearch(
         projectTypes,
         options.tags,
         options.providedFilters ?? computed(() => []),
         options.environmentOverride ?? computed(() => undefined),
+        options.sortOptions,
+        options.deferInitialization,
     )
 
     const {
@@ -103,8 +133,10 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
         serverFilterTypes,
         serverRequestParams,
         createServerPageParams,
+        initializeQueryParams: initializeServerQueryParams,
     } = useServerSearch({
         tags: options.tags,
+        deferInitialization: options.deferInitialization,
         query,
         maxResults,
         currentPage,
@@ -180,17 +212,47 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
 
     const initialSearchResponse = options.initialSearchResponse
     const loading = ref(!initialSearchResponse)
-    const projectHits = shallowRef<BrowseSearchResponse['projectHits']>(
-        initialSearchResponse?.projectHits ?? [],
+    const committed = shallowRef<BrowseCommittedSearch | null>(
+        initialSearchResponse
+            ? {
+                  response: initialSearchResponse,
+                  projectType: options.projectType.value,
+                  sortType: effectiveCurrentSortType.value,
+                  page: currentPage.value,
+                  maxResults: maxResults.value,
+                  deprioritizedTags: deprioritizedTags.value,
+                  excludeLoaders: excludeLoaders.value,
+              }
+            : null,
     )
-    const serverHits = shallowRef<BrowseSearchResponse['serverHits']>(
-        initialSearchResponse?.serverHits ?? [],
-    )
-    const totalHits = ref(initialSearchResponse?.total_hits ?? 0)
-
+    const projectHits = computed({
+        get: () => committed.value?.response.projectHits ?? [],
+        set: (hits: BrowseSearchResponse['projectHits']) => {
+            if (committed.value)
+                committed.value = {
+                    ...committed.value,
+                    response: { ...committed.value.response, projectHits: hits },
+                }
+        },
+    })
+    const serverHits = computed({
+        get: () => committed.value?.response.serverHits ?? [],
+        set: (hits: BrowseSearchResponse['serverHits']) => {
+            if (committed.value)
+                committed.value = {
+                    ...committed.value,
+                    response: { ...committed.value.response, serverHits: hits },
+                }
+        },
+    })
+    const totalHits = computed(() => committed.value?.response.total_hits ?? 0)
+    const searchError = ref<string | null>(null)
     const pageCount = computed(() => {
-        if (totalHits.value === 0) return 1
-        return Math.ceil(totalHits.value / maxResults.value)
+        const snapshot = committed.value
+        if (!snapshot) return 1
+        if (snapshot.response.has_more !== undefined)
+            return snapshot.page + (snapshot.response.has_more ? 1 : 0)
+        return Math.max(1, Math.ceil(snapshot.response.total_hits / snapshot.maxResults))
     })
 
     let searchVersion = 0
@@ -217,35 +279,66 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
         { deep: true },
     )
 
-    watch(effectiveRequestParams, (newVal, oldVal) => {
-        debug('effectiveRequestParams changed', {
-            from: oldVal?.substring(0, 80),
-            to: newVal?.substring(0, 80),
-        })
+    function invalidatePendingSearch() {
         searchVersion++
         searchAbortController?.abort()
         searchAbortController = null
         if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
-        searchDebounceTimer = setTimeout(() => {
-            searchDebounceTimer = null
-            refreshSearch()
-        }, 200)
-    })
+        searchDebounceTimer = null
+    }
 
-    async function refreshSearch() {
-        searchAbortController?.abort()
+    watch(
+        effectiveRequestParams,
+        () => {
+            invalidatePendingSearch()
+            if (options.enabled?.value === false) return
+            loading.value = true
+            searchDebounceTimer = setTimeout(() => {
+                searchDebounceTimer = null
+                void refreshSearch(true)
+            }, 200)
+        },
+        { flush: 'sync' },
+    )
+
+    if (options.enabled)
+        watch(
+            options.enabled,
+            (enabled) => {
+                if (!enabled) invalidatePendingSearch()
+            },
+            { flush: 'sync' },
+        )
+
+    function initializeFilters() {
+        initializeQueryParams()
+        initializeServerQueryParams()
+    }
+
+    async function refreshSearch(reuseCache = false) {
+        if (options.enabled?.value === false) return
+        invalidatePendingSearch()
+        if (!reuseCache) options.invalidateSearch?.()
         const abortController = new AbortController()
         searchAbortController = abortController
         const version = ++searchVersion
+        const context = {
+            projectType: options.projectType.value,
+            sortType: effectiveCurrentSortType.value,
+            page: currentPage.value,
+            maxResults: maxResults.value,
+            deprioritizedTags: deprioritizedTags.value,
+            excludeLoaders: excludeLoaders.value,
+        }
         debug('refreshSearch start', {
             version,
             projectType: options.projectType.value,
             params: effectiveRequestParams.value.substring(0, 100),
         })
 
-        // Always surface the loading state so pagination/filter changes can mask
-        // or skeleton the results area instead of silently swapping content.
+        // Keep the previous committed response visible while its replacement loads.
         loading.value = true
+        searchError.value = null
 
         try {
             const response = await options.search(
@@ -258,15 +351,13 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
                 return
             }
 
-            if (isServerType.value) {
-                serverHits.value = response.serverHits
-            } else {
-                projectHits.value = response.projectHits
-            }
-            totalHits.value = response.total_hits
-            if (currentPage.value > pageCount.value) {
-                currentPage.value = pageCount.value
-            }
+            const count =
+                response.has_more !== undefined
+                    ? context.page + (response.has_more ? 1 : 0)
+                    : Math.max(1, Math.ceil(response.total_hits / context.maxResults))
+            const page = Math.min(response.page ?? context.page, count)
+            committed.value = { ...context, response, page }
+            currentPage.value = page
             debug('refreshSearch complete', {
                 version,
                 hits: response.total_hits,
@@ -284,6 +375,7 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
             debug('refreshSearch error', err)
             console.error('Browse search error:', err)
             if (version === searchVersion) {
+                searchError.value = options.formatError?.(err) ?? formatMessage(messages.failed)
                 loading.value = false
             }
         } finally {
@@ -360,9 +452,11 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
         effectiveSortTypes,
         effectiveCurrentSortType,
         loading,
+        committed,
         projectHits,
         serverHits,
         totalHits,
+        searchError,
         pageCount,
         maxResults,
         currentPage,
@@ -370,6 +464,7 @@ export function useBrowseSearch(options: UseBrowseSearchOptions): BrowseSearchSt
         effectiveLayout,
         deprioritizedTags,
         excludeLoaders,
+        initializeFilters,
         refreshSearch,
         setPage,
         clearSearch,

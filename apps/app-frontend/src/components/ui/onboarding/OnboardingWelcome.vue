@@ -4,10 +4,11 @@ import { Button, defineMessages, LOCALES, useVIntl } from '@modrinth/ui'
 import { computed, onMounted, ref } from 'vue'
 
 import AxolotlLogo from '@/components/ui/AxolotlLogo.vue'
-import { get, set } from '@/helpers/settings.ts'
+import { get, update } from '@/helpers/settings.ts'
 import i18n, {
     getSystemResolvedLocale,
     isFollowingSystemLocale,
+    setAppLocale,
     setFollowSystemLocale,
 } from '@/i18n.config'
 
@@ -91,17 +92,19 @@ const localeOptions = computed(() =>
 async function persistLocale(follow: boolean, concreteLocale: string) {
     if (applyingLocale.value) return
     applyingLocale.value = true
+    const previousLocale = i18n.global.locale.value
+    const previousFollow = followSystem.value
     try {
         setFollowSystemLocale(follow)
         followSystem.value = follow
-        i18n.global.locale.value = concreteLocale
-        const loaded = await get()
-        loaded.locale = concreteLocale
-        await set(loaded)
+        await setAppLocale(concreteLocale)
+        await update({ locale: concreteLocale })
         settingsLocale.value = concreteLocale
     } catch (error) {
         console.warn('Failed to apply onboarding language', error)
-        followSystem.value = isFollowingSystemLocale(settingsLocale.value)
+        setFollowSystemLocale(previousFollow)
+        followSystem.value = previousFollow
+        await setAppLocale(previousLocale)
     } finally {
         applyingLocale.value = false
     }

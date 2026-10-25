@@ -1,15 +1,10 @@
 <script setup lang="ts">
-import {
-    Checkbox,
-    defineMessages,
-    injectNotificationManager,
-    Slider,
-    StyledInput,
-    useVIntl,
-} from '@modrinth/ui'
+import { Checkbox, defineMessages, injectNotificationManager, Slider, useVIntl } from '@modrinth/ui'
+import { useQuery } from '@tanstack/vue-query'
 import { platform } from '@tauri-apps/plugin-os'
-import { computed, readonly, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
+import EnvironmentVariablesInput from '@/components/ui/EnvironmentVariablesInput.vue'
 import JavaArgumentsInput from '@/components/ui/JavaArgumentsInput.vue'
 import JavaSelector from '@/components/ui/JavaSelector.vue'
 import MemoryAllocationDisplay from '@/components/ui/MemoryAllocationDisplay.vue'
@@ -20,7 +15,7 @@ import { edit, get_content_snapshot, get_optimal_jre_key } from '@/helpers/insta
 import { get } from '@/helpers/settings'
 import { injectInstanceSettings } from '@/providers/instance-settings'
 
-import type { AppSettings } from '../../../helpers/types'
+import type { AppSettings, GameInstance } from '../../../helpers/types'
 
 const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
@@ -84,20 +79,32 @@ const messages = defineMessages({
 })
 
 const { instance } = injectInstanceSettings()
-const supportsMemoryOptimization = (await platform()) === 'windows'
+const instanceId = instance.value.id
+const supportsMemoryOptimization = platform() === 'windows'
 
 const globalSettings = (await get().catch(handleError)) as unknown as AppSettings
-const optimalJava = readonly(await get_optimal_jre_key(instance.value.id).catch(handleError))
-const requiredJavaVersion = optimalJava?.parsed_version ?? null
+const optimalJavaQuery = useQuery({
+    queryKey: ['instance', instanceId, 'optimal-java'],
+    queryFn: () => get_optimal_jre_key(instanceId),
+    retry: false,
+    refetchOnWindowFocus: false,
+})
+const optimalJava = computed(() => optimalJavaQuery.data.value ?? null)
+const requiredJavaVersion = computed(() => optimalJava.value?.parsed_version ?? null)
+watch(optimalJavaQuery.error, (error) => {
+    if (error) handleError(error)
+})
 
 const overrideJavaInstall = ref(!!instance.value.java_path)
-const overrideJava = ref({
-    ...(optimalJava ?? {}),
-    path: instance.value.java_path ?? optimalJava?.path ?? '',
+const overrideJava = ref<{ path: string; parsed_version?: string | number }>({
+    path: instance.value.java_path ?? '',
 })
 const displayedJava = computed({
-    get: () =>
-        overrideJavaInstall.value ? overrideJava.value : (optimalJava ?? overrideJava.value),
+    get: () => ({
+        ...(optimalJava.value ?? {}),
+        ...(overrideJavaInstall.value ? overrideJava.value : {}),
+        path: overrideJavaInstall.value ? overrideJava.value.path : (optimalJava.value?.path ?? ''),
+    }),
     set: (value) => {
         overrideJava.value = value
     },
@@ -105,7 +112,7 @@ const displayedJava = computed({
 
 watch(overrideJavaInstall, (enabled) => {
     if (enabled && !overrideJava.value.path) {
-        overrideJava.value = { ...(optimalJava ?? {}), path: optimalJava?.path ?? '' }
+        overrideJava.value = { path: optimalJava.value?.path ?? '' }
     }
 })
 
@@ -114,12 +121,8 @@ const javaArgs = ref(
     (instance.value.extra_launch_args ?? globalSettings?.extra_launch_args ?? []).join(' '),
 )
 
-const overrideEnvVars = ref((instance.value.custom_env_vars?.length ?? 0) > 0)
-const envVars = ref(
-    (instance.value.custom_env_vars ?? globalSettings?.custom_env_vars ?? [])
-        .map((x: string[]) => x.join('='))
-        .join(' '),
-)
+const overrideEnvVars = ref(instance.value.custom_env_vars != null)
+const envVars = ref(instance.value.custom_env_vars ?? globalSettings?.custom_env_vars ?? [])
 
 const defaultMemory = { maximum: 2048, automatic: true, optimize_before_launch: false }
 const overrideMemorySettings = ref(!!instance.value.memory)
@@ -135,29 +138,38 @@ const maxMemory = memData.maxMemory
 const snapPoints = memData.snapPoints
 
 const gcContext = ref<GcContext | null>(null)
-
-async function updateGcContext() {
-    const javaMajorVersion = extractJavaMajorVersion(displayedJava.value?.parsed_version)
-    let modCount = 0
-    try {
-        const snapshot = await get_content_snapshot(instance.value.id)
-        modCount = snapshot.items.filter(
+const contentQuery = useQuery({
+    queryKey: ['instance', instanceId, 'local-content-snapshot'],
+    queryFn: () => get_content_snapshot(instanceId, true),
+    retry: false,
+    refetchOnWindowFocus: false,
+})
+const modCount = computed(
+    () =>
+        contentQuery.data.value?.items.filter(
             (item) => item.projectType === 'mod' && item.materializationState === 'present',
-        ).length
-    } catch {
-        modCount = 0
-    }
-    gcContext.value = await collectGcContext(
-        memory.value.maximum,
-        instance.value.loader,
-        javaMajorVersion,
+        ).length ?? 0,
+)
+watch(
+    [
+        () => effectiveMemory.value.maximum,
+        () => displayedJava.value.parsed_version,
+        () => instance.value.loader,
         modCount,
-    )
-}
-
-await updateGcContext()
-
-watch([memory, displayedJava, () => instance.value.loader], updateGcContext)
+    ],
+    async ([allocatedMemory, javaVersion, loader, count], _, onCleanup) => {
+        let active = true
+        onCleanup(() => (active = false))
+        const context = await collectGcContext(
+            allocatedMemory,
+            loader,
+            extractJavaMajorVersion(javaVersion),
+            count,
+        )
+        if (active) gcContext.value = context
+    },
+    { immediate: true },
+)
 
 const editInstanceObject = computed(() => ({
     java_path:
@@ -167,29 +179,27 @@ const editInstanceObject = computed(() => ({
     extra_launch_args: overrideJavaArgs.value
         ? javaArgs.value.trim().split(/\s+/).filter(Boolean)
         : null,
-    custom_env_vars: overrideEnvVars.value
-        ? envVars.value
-              .trim()
-              .split(/\s+/)
-              .filter(Boolean)
-              .map((x: string) => x.split('=').filter(Boolean))
-        : null,
     memory: overrideMemorySettings.value ? memory.value : null,
 }))
 
+let saveQueue = Promise.resolve()
+function saveInstancePatch(patch: Partial<GameInstance>) {
+    const snapshot = JSON.parse(JSON.stringify(patch)) as Partial<GameInstance>
+    saveQueue = saveQueue.then(() => edit(instanceId, snapshot)).catch(handleError)
+}
+
 watch(
-    [
-        overrideJavaInstall,
-        overrideJava,
-        overrideJavaArgs,
-        javaArgs,
-        overrideEnvVars,
-        envVars,
-        overrideMemorySettings,
-        memory,
-    ],
-    async () => {
-        await edit(instance.value.id, editInstanceObject.value).catch(handleError)
+    [overrideEnvVars, envVars],
+    () => {
+        saveInstancePatch({ custom_env_vars: overrideEnvVars.value ? envVars.value : null })
+    },
+    { deep: true },
+)
+
+watch(
+    [overrideJavaInstall, overrideJava, overrideJavaArgs, javaArgs, overrideMemorySettings, memory],
+    () => {
+        saveInstancePatch(editInstanceObject.value)
     },
     { deep: true },
 )
@@ -277,13 +287,12 @@ watch(
             :label="formatMessage(messages.customEnvironmentVariables)"
             class="mb-2"
         />
-        <StyledInput
+        <EnvironmentVariablesInput
             id="env-vars"
             v-model="envVars"
             autocomplete="off"
             :disabled="!overrideEnvVars"
             :placeholder="formatMessage(messages.enterEnvironmentVariables)"
-            wrapper-class="w-full"
         />
     </div>
 </template>

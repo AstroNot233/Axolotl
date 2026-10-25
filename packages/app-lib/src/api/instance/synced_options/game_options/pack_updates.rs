@@ -132,9 +132,9 @@ pub(in crate::api::instance) async fn detach_instance(
     let feature = SyncedOption::GameOptions.as_str();
     sqlx::query!(
         "
-		DELETE FROM instance_sync_checkpoints
-		WHERE instance_id = ? AND feature = ?
-		",
+        DELETE FROM instance_sync_checkpoints
+        WHERE instance_id = ? AND feature = ?
+        ",
         metadata.instance.id,
         feature,
     )
@@ -180,13 +180,13 @@ pub(in crate::api::instance) async fn prepare_instance_update_with_state(
     };
     sqlx::query!(
         "
-		INSERT INTO instance_game_option_update_state
-			(instance_id, had_file, sha1, document)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(instance_id) DO UPDATE SET
-			had_file = excluded.had_file, sha1 = excluded.sha1,
-			document = excluded.document
-		",
+        INSERT INTO instance_game_option_update_state
+            (instance_id, had_file, sha1, document)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(instance_id) DO UPDATE SET
+            had_file = excluded.had_file, sha1 = excluded.sha1,
+            document = excluded.document
+        ",
         metadata.instance.id,
         had_file,
         sha1,
@@ -212,9 +212,9 @@ pub async fn capture_pack_base(
     let feature = SyncedOption::GameOptions.as_str();
     sqlx::query!(
         "
-		DELETE FROM instance_sync_checkpoints
-		WHERE instance_id = ? AND feature = ?
-		",
+        DELETE FROM instance_sync_checkpoints
+        WHERE instance_id = ? AND feature = ?
+        ",
         instance_id,
         feature,
     )
@@ -224,10 +224,10 @@ pub async fn capture_pack_base(
     if source.is_none() {
         let pending = sqlx::query!(
             r#"
-			SELECT had_file AS "had_file!: bool", document
-			FROM instance_game_option_update_state
-			WHERE instance_id = ?
-			"#,
+            SELECT had_file AS "had_file!: bool", document
+            FROM instance_game_option_update_state
+            WHERE instance_id = ?
+            "#,
             instance_id,
         )
         .fetch_optional(&state.pool)
@@ -272,14 +272,14 @@ pub async fn capture_pack_base(
     let version_id = pack_version_id(&metadata);
     sqlx::query!(
         "
-		INSERT INTO instance_game_option_pack_bases
-			(instance_id, pack_version_id, source, sha1, encoding, document)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(instance_id) DO UPDATE SET
-			pack_version_id = excluded.pack_version_id,
-			source = excluded.source, sha1 = excluded.sha1,
-			encoding = excluded.encoding, document = excluded.document
-		",
+        INSERT INTO instance_game_option_pack_bases
+            (instance_id, pack_version_id, source, sha1, encoding, document)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(instance_id) DO UPDATE SET
+            pack_version_id = excluded.pack_version_id,
+            source = excluded.source, sha1 = excluded.sha1,
+            encoding = excluded.encoding, document = excluded.document
+        ",
         instance_id,
         version_id,
         source_name,

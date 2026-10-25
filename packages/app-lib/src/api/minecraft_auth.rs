@@ -1,5 +1,7 @@
 //! Authentication flow interface
 
+pub(super) mod profile_cache;
+
 use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use serde::Serialize;
@@ -13,7 +15,7 @@ use crate::state::{
     YggdrasilAccount,
 };
 pub use crate::state::{MinecraftDeviceLoginFlow, MinecraftDeviceLoginPoll};
-use crate::util::fetch::INSECURE_REQWEST_CLIENT;
+use crate::util::fetch::authentication_client;
 use crate::util::mojang::{mojang_service_url, should_use_mojang_mirror};
 
 /// Budget for the Mojang reachability probes.
@@ -27,47 +29,42 @@ use crate::util::mojang::{mojang_service_url, should_use_mojang_mirror};
 /// idle check runs.
 const REACHABILITY_TIMEOUT: Duration = Duration::from_secs(12);
 
-/// The client used for reachability probes: the app's configured client, so a
-/// proxy the user configured is honoured exactly as it is for every other
-/// request. Before the app state exists (very early startup) the plain client
-/// is the only option.
-fn reachability_client() -> reqwest::Client {
-    match State::get_if_initialized() {
-        Some(state) => state.configured_http_client(),
-        None => INSECURE_REQWEST_CLIENT.clone(),
-    }
-}
-
 #[tracing::instrument]
 pub async fn check_reachable() -> crate::Result<()> {
-    let url = mojang_service_url(
-        "https://sessionserver.mojang.com/session/minecraft/hasJoined",
-        should_use_mojang_mirror(),
-    );
-    let resp = reachability_client()
-        .get(url.as_ref())
-        .timeout(REACHABILITY_TIMEOUT)
-        .send()
-        .await?;
-    if resp.status() == StatusCode::NO_CONTENT {
-        return Ok(());
+    let statuses =
+        probe_mojang_services(should_use_mojang_mirror(), true).await;
+    if let Some(failed) = statuses.iter().find(|status| !status.reachable) {
+        return Err(crate::ErrorKind::NetworkError(format!(
+            "Mojang {} service is unreachable",
+            failed.service,
+        ))
+        .into());
     }
-    resp.error_for_status()?;
     Ok(())
 }
 
 pub async fn set_mojang_auth_use_mirror(
     use_mirror: bool,
-    automatic: bool,
-) -> crate::Result<()> {
-    let state = State::get().await?;
-    state.set_mojang_auth_use_mirror(use_mirror);
-    if use_mirror && automatic {
+    expected_source: crate::state::DownloadSourceMode,
+) -> crate::Result<bool> {
+    let applied = crate::api::settings::apply_mojang_auth_source(
+        expected_source,
+        use_mirror,
+    )
+    .await?;
+    if applied
+        && use_mirror
+        && matches!(
+            expected_source,
+            crate::state::DownloadSourceMode::Auto
+                | crate::state::DownloadSourceMode::OfficialPreferred
+        )
+    {
         tracing::info!(
             "Mojang services are unreachable; routing Mojang service requests through the Fallen proxy"
         );
     }
-    Ok(())
+    Ok(applied)
 }
 
 /// Whether Mojang service requests currently go out through the Fallen proxy.
@@ -82,39 +79,72 @@ pub struct MojangServiceStatus {
     pub reachable: bool,
 }
 
-const MOJANG_SERVICES: [(&str, &str); 5] = [
-    ("auth", "https://authserver.mojang.com/"),
+const MOJANG_SERVICES: [(&str, &str); 4] = [
     ("account", "https://api.mojang.com/"),
     (
         "session",
         "https://sessionserver.mojang.com/session/minecraft/hasJoined",
     ),
-    ("services", "https://api.minecraftservices.com/"),
+    ("services", "https://api.minecraftservices.com/publickeys"),
     (
         "profiles",
-        "https://api.mojang.com/users/profiles/minecraft/",
+        "https://api.mojang.com/users/profiles/minecraft/Notch",
     ),
 ];
 
-#[tracing::instrument]
+fn service_response_reachable(service: &str, status: StatusCode) -> bool {
+    if service == "session" {
+        status == StatusCode::NO_CONTENT
+    } else {
+        status.is_success()
+            || service == "account" && status == StatusCode::NOT_FOUND
+    }
+}
+
 pub async fn check_mojang_services() -> Vec<MojangServiceStatus> {
-    let client = reachability_client();
-    futures::future::join_all(MOJANG_SERVICES.map(|(service, url)| {
-        let client = client.clone();
-        async move {
-            let reachable = client
-                .get(url)
-                .timeout(REACHABILITY_TIMEOUT)
-                .send()
-                .await
-                .is_ok();
-            MojangServiceStatus {
-                service,
-                url,
-                reachable,
-            }
-        }
-    }))
+    check_mojang_services_for(false).await
+}
+
+#[tracing::instrument]
+pub async fn check_mojang_services_for(
+    use_mirror: bool,
+) -> Vec<MojangServiceStatus> {
+    probe_mojang_services(use_mirror, false).await
+}
+
+async fn probe_mojang_services(
+    use_mirror: bool,
+    core_only: bool,
+) -> Vec<MojangServiceStatus> {
+    let client = authentication_client();
+    futures::future::join_all(
+        MOJANG_SERVICES
+            .into_iter()
+            .filter(|(service, _)| {
+                !core_only || matches!(*service, "session" | "services")
+            })
+            .map(|(service, url)| {
+                let client = client.clone();
+                async move {
+                    let reachable = client
+                        .get(mojang_service_url(url, use_mirror).as_ref())
+                        .timeout(REACHABILITY_TIMEOUT)
+                        .send()
+                        .await
+                        .is_ok_and(|response| {
+                            service_response_reachable(
+                                service,
+                                response.status(),
+                            )
+                        });
+                    MojangServiceStatus {
+                        service,
+                        url,
+                        reachable,
+                    }
+                }
+            }),
+    )
     .await
 }
 
@@ -217,7 +247,7 @@ pub async fn get_default_user(
     let user = if offline_mode {
         Credentials::get_offline_credential(&state.pool).await?
     } else {
-        Credentials::get_active(&state.pool).await?
+        Credentials::get_active_without_refresh(&state.pool).await?
     };
     Ok(user.map(|user| user.account_id()))
 }
@@ -261,6 +291,11 @@ pub async fn remove_user(account_id: &str) -> crate::Result<()> {
     {
         let user = users.remove(index);
         Credentials::remove(account_id, &state.pool).await?;
+        profile_cache::remove(
+            &state.directories.caches_dir().join("minecraft-profiles"),
+            &user,
+        )
+        .await;
 
         if user.active
             && let Some(mut user) = users.into_iter().next()
@@ -286,8 +321,23 @@ pub struct MinecraftUser {
 }
 
 impl MinecraftUser {
-    async fn from_credentials(credentials: Credentials) -> Self {
-        let profile = (*credentials.maybe_online_profile().await).clone();
+    async fn from_credentials(
+        credentials: Credentials,
+        cached_only: bool,
+        cache_dir: &std::path::Path,
+    ) -> Self {
+        let cached = profile_cache::read(cache_dir, &credentials).await;
+        let profile = if cached_only {
+            cached.unwrap_or_else(|| credentials.offline_profile.clone())
+        } else {
+            let profile = (*credentials.maybe_online_profile().await).clone();
+            if !profile.skins.is_empty() {
+                profile_cache::write(cache_dir, &credentials, &profile).await;
+                profile
+            } else {
+                cached.unwrap_or(profile)
+            }
+        };
         Self {
             account_id: credentials.account_id(),
             profile,
@@ -305,8 +355,17 @@ impl MinecraftUser {
 /// serialization.
 #[tracing::instrument]
 pub async fn users(offline_mode: bool) -> crate::Result<Vec<MinecraftUser>> {
+    users_with_cache(offline_mode, false).await
+}
+
+/// Reads saved account and skin metadata without refreshing tokens or making
+/// profile requests when `cached_only` is set.
+pub async fn users_with_cache(
+    offline_mode: bool,
+    cached_only: bool,
+) -> crate::Result<Vec<MinecraftUser>> {
     let state = State::get().await?;
-    let users = if offline_mode {
+    let users = if offline_mode || cached_only {
         Credentials::get_all_without_refresh(&state.pool).await?
     } else {
         Credentials::get_all(&state.pool).await?
@@ -315,8 +374,16 @@ pub async fn users(offline_mode: bool) -> crate::Result<Vec<MinecraftUser>> {
         .into_iter()
         .filter(|credentials| !offline_mode || credentials.is_offline());
     let mut hydrated_users = Vec::new();
+    let cache_dir = state.directories.caches_dir().join("minecraft-profiles");
     for credentials in credentials {
-        hydrated_users.push(MinecraftUser::from_credentials(credentials).await);
+        hydrated_users.push(
+            MinecraftUser::from_credentials(
+                credentials,
+                cached_only,
+                &cache_dir,
+            )
+            .await,
+        );
     }
     Ok(hydrated_users)
 }
@@ -324,6 +391,32 @@ pub async fn users(offline_mode: bool) -> crate::Result<Vec<MinecraftUser>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reachability_rejects_gateway_errors_and_captive_portal_pages() {
+        for status in [
+            StatusCode::FORBIDDEN,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::BAD_GATEWAY,
+        ] {
+            for service in ["account", "session", "services", "profiles"] {
+                assert!(!service_response_reachable(service, status));
+            }
+        }
+        assert!(!service_response_reachable("session", StatusCode::OK));
+        assert!(service_response_reachable(
+            "session",
+            StatusCode::NO_CONTENT
+        ));
+        assert!(service_response_reachable("services", StatusCode::OK));
+        assert!(service_response_reachable("account", StatusCode::NOT_FOUND));
+    }
+
+    #[test]
+    fn mojang_monitor_probes_only_current_required_services() {
+        let services = MOJANG_SERVICES.map(|(service, _)| service);
+        assert_eq!(services, ["account", "session", "services", "profiles"]);
+    }
 
     /// The probes run against hosts that answer in one to six seconds on a
     /// proxied connection, so a budget inside that range declares a healthy

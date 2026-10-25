@@ -2,6 +2,7 @@
 import { ChevronDownIcon, ChevronRightIcon, SearchIcon, XIcon } from '@modrinth/assets'
 import {
     defineMessages,
+    injectNotificationManager,
     type MessageDescriptor,
     ProgressBar,
     useLoadingBarToken,
@@ -27,7 +28,7 @@ import {
     type SettingsSearchEntry,
 } from '@/components/ui/settings/settings-search-index'
 import { AxolotlBrandConfig } from '@/config'
-import { get, set } from '@/helpers/settings'
+import { update } from '@/helpers/settings'
 import { injectAppUpdateDownloadProgress } from '@/providers/download-progress'
 import { useTheming } from '@/store/state'
 
@@ -42,17 +43,20 @@ const themeStore = useTheming()
 const route = useRoute()
 const router = useRouter()
 const { formatMessage } = useVIntl()
+const { handleError } = injectNotificationManager()
 const { progress, version: downloadingVersion } = injectAppUpdateDownloadProgress()
 
-const [version, loadedSettings] = await Promise.all([getVersion(), get()])
+const version = await getVersion()
 const osPlatform = getOsPlatform()
 const osVersion = getOsVersion()
-const settings = ref(loadedSettings)
 const devModeCounter = ref(0)
 const searchQuery = ref('')
 const selectedCategoryId = ref(route.hash.slice(1) || 'interface')
 const settingsContentPending = ref(false)
 const contentContainer = ref<HTMLElement | null>(null)
+const pendingSearchTarget = ref<{ categoryId: string; targetId: string; query: string } | null>(
+    null,
+)
 const searchHighlightTarget = ref<HTMLElement | null>(null)
 const expandedGroups = ref<Record<string, boolean>>({
     launcher: true,
@@ -77,6 +81,9 @@ const CATEGORY_SKELETON_MAX_MS = 4000
 const isContentLoading = computed(() => showContentSkeleton.value || settingsContentPending.value)
 
 watch(searchQuery, (value) => {
+    if (pendingSearchTarget.value && value !== pendingSearchTarget.value.query) {
+        pendingSearchTarget.value = null
+    }
     searchResultsPending.value = true
     if (searchDebounceTimer) window.clearTimeout(searchDebounceTimer)
     searchDebounceTimer = window.setTimeout(() => {
@@ -87,7 +94,8 @@ watch(searchQuery, (value) => {
     }, SEARCH_DEBOUNCE_MS)
 })
 
-watch(selectedCategoryId, () => {
+watch(selectedCategoryId, (categoryId) => {
+    if (pendingSearchTarget.value?.categoryId !== categoryId) pendingSearchTarget.value = null
     const token = ++categoryTransitionToken
     showContentSkeleton.value = true
     const startedAt = Date.now()
@@ -210,14 +218,6 @@ const searchResults = computed<SettingsSearchResult[]>(() => {
     )
 })
 
-watch(
-    settings,
-    async () => {
-        await set(settings.value)
-    },
-    { deep: true },
-)
-
 watch(visibleCategories, (categories) => {
     if (!categories.some((category) => category.id === selectedCategoryId.value)) {
         selectedCategoryId.value = categories[0]?.id ?? 'interface'
@@ -239,8 +239,9 @@ function selectCategory(categoryId: string) {
     contentContainer.value?.scrollTo({ top: 0 })
     // Keep the URL hash in sync so a remount (error recovery, HMR) restores
     // this tab instead of falling back to the default category.
-    if (route.hash !== `#${categoryId}`) {
-        void router.replace({ hash: `#${categoryId}` })
+    if (route.hash !== `#${categoryId}` || route.query.page) {
+        const { page: _page, ...query } = route.query
+        void router.replace({ query, hash: `#${categoryId}` })
     }
 }
 
@@ -248,33 +249,54 @@ function toggleGroup(groupId: string) {
     expandedGroups.value[groupId] = !expandedGroups.value[groupId]
 }
 
-async function selectSearchResult(result: SettingsSearchResult) {
-    selectedCategoryId.value = result.category.id
-    expandedGroups.value[result.category.group] = true
-    searchQuery.value = ''
-    contentContainer.value?.scrollTo({ top: 0 })
-
-    if (!result.entry) return
-
-    const targetId = getSettingsSearchTargetId(result.entry)
-    for (let attempt = 0; attempt < 12; attempt++) {
-        await nextTick()
-        const target = contentContainer.value?.querySelector<HTMLElement>(`#${targetId}`)
-        if (target) {
-            target.scrollIntoView({ behavior: 'smooth', block: 'center' })
-            flashSearchTarget(target)
-            return
-        }
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-    }
+async function revealSearchTarget() {
+    await nextTick()
+    const pending = pendingSearchTarget.value
+    if (!pending || isContentLoading.value || activeCategory.value?.id !== pending.categoryId)
+        return
+    const target = contentContainer.value?.querySelector<HTMLElement>(`#${pending.targetId}`)
+    if (!target) return
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    flashSearchTarget(target)
+    pendingSearchTarget.value = null
+    if (searchQuery.value === pending.query) searchQuery.value = ''
 }
 
-function toggleDeveloperMode() {
+watch(isContentLoading, () => void revealSearchTarget(), { flush: 'post' })
+
+function onSettingsContentResolved() {
+    settingsContentPending.value = false
+    void revealSearchTarget()
+}
+
+async function selectSearchResult(result: SettingsSearchResult) {
+    pendingSearchTarget.value = result.entry
+        ? {
+              categoryId: result.category.id,
+              targetId: getSettingsSearchTargetId(result.entry),
+              query: searchQuery.value,
+          }
+        : null
+    selectedCategoryId.value = result.category.id
+    expandedGroups.value[result.category.group] = true
+    if (!result.entry) searchQuery.value = ''
+    const { page: _page, ...query } = route.query
+    await router.replace({ query, hash: `#${result.category.id}` })
+    if (selectedCategoryId.value !== result.category.id) return
+    contentContainer.value?.scrollTo({ top: 0 })
+    await revealSearchTarget()
+}
+
+async function toggleDeveloperMode() {
     devModeCounter.value++
     if (devModeCounter.value <= 5) return
 
-    themeStore.devMode = !themeStore.devMode
-    settings.value.developer_mode = !!themeStore.devMode
+    try {
+        const saved = await update({ developer_mode: !themeStore.devMode })
+        themeStore.devMode = saved.developer_mode
+    } catch (error) {
+        handleError(error)
+    }
     devModeCounter.value = 0
 }
 
@@ -545,10 +567,8 @@ const pageTitle: MessageDescriptor = settingsPageTitle
                                 aria-hidden="true"
                             >
                                 <div class="settings-content-skeleton-inner">
-                                    <div class="h-6 w-40 animate-pulse rounded bg-surface-3" />
-                                    <div
-                                        class="h-3 w-72 max-w-full animate-pulse rounded bg-surface-2"
-                                    />
+                                    <div class="h-6 w-40 rounded bg-surface-3" />
+                                    <div class="h-3 w-72 max-w-full rounded bg-surface-2" />
                                     <div class="mt-2 flex flex-col gap-3">
                                         <div
                                             v-for="row in 5"
@@ -562,15 +582,13 @@ const pageTitle: MessageDescriptor = settingsPageTitle
                                         >
                                             <div class="flex min-w-0 flex-1 flex-col gap-2">
                                                 <div
-                                                    class="h-4 animate-pulse rounded bg-surface-3"
+                                                    class="h-4 rounded bg-surface-3"
                                                     :class="row % 2 === 0 ? 'w-2/5' : 'w-1/3'"
                                                 />
-                                                <div
-                                                    class="h-3 w-3/5 animate-pulse rounded bg-surface-2"
-                                                />
+                                                <div class="h-3 w-3/5 rounded bg-surface-2" />
                                             </div>
                                             <div
-                                                class="h-8 w-16 shrink-0 animate-pulse rounded-lg bg-surface-3"
+                                                class="h-8 w-16 shrink-0 rounded-lg bg-surface-3"
                                             />
                                         </div>
                                     </div>
@@ -592,7 +610,7 @@ const pageTitle: MessageDescriptor = settingsPageTitle
                         >
                             <Suspense
                                 @pending="settingsContentPending = true"
-                                @resolve="settingsContentPending = false"
+                                @resolve="onSettingsContentResolved"
                             >
                                 <component :is="activeCategory.content" :key="activeCategory.id" />
                                 <template #fallback>
@@ -623,9 +641,9 @@ const pageTitle: MessageDescriptor = settingsPageTitle
 
 .settings-sidebar {
     /* The shell paints its own surface so the page is a component layer rather
-	   than a window onto `.app-contents`. Without this the region resolved to
-	   `--color-bg`, which only follows "Background visibility", and the
-	   "Component opacity" slider could not reach it at all. */
+                than a window onto `.app-contents`. Without this the region resolved to
+                `--color-bg`, which only follows "Background visibility", and the
+                "Component opacity" slider could not reach it at all. */
     background: var(--surface-2);
     border: 1px solid var(--surface-4);
     border-radius: var(--radius-lg);
@@ -704,8 +722,8 @@ const pageTitle: MessageDescriptor = settingsPageTitle
 
 .settings-category-button.is-active {
     /* A brand token on purpose, not a surface one: the active item should stay
-	   emphasised when the panels fade over a background image. Selection
-	   surfaces elsewhere follow the same pair. */
+                emphasised when the panels fade over a background image. Selection
+                surfaces elsewhere follow the same pair. */
     background: var(--color-button-bg-selected);
     color: var(--color-button-text-selected);
 }
@@ -907,10 +925,10 @@ const pageTitle: MessageDescriptor = settingsPageTitle
 
 .settings-content {
     /* Same reason as `.settings-sidebar`: this is the component layer the
-	   category content sits on, so it must follow "Component opacity" rather
-	   than exposing the page surface beneath it. The height chain that the
-	   `is-flush` category relies on resolves against this box, so padding and
-	   a radius are safe here but a margin would break it. */
+                category content sits on, so it must follow "Component opacity" rather
+                than exposing the page surface beneath it. The height chain that the
+                `is-flush` category relies on resolves against this box, so padding and
+                a radius are safe here but a margin would break it. */
     background: var(--surface-2);
     border: 1px solid var(--surface-4);
     border-radius: var(--radius-lg);
@@ -942,8 +960,8 @@ const pageTitle: MessageDescriptor = settingsPageTitle
     z-index: 2;
     padding: 0 1.5rem 1.5rem;
     /* A full-cover overlay on the content panel, so it takes that panel's own
-	   rung. `--surface-1` here would paint the page colour over the panel and
-	   flash a darker sheet on every category switch. */
+                rung. `--surface-1` here would paint the page colour over the panel and
+                flash a darker sheet on every category switch. */
     background: var(--surface-2);
 }
 
@@ -956,13 +974,11 @@ const pageTitle: MessageDescriptor = settingsPageTitle
 }
 
 .settings-content-body {
-    transition:
-        opacity 180ms ease,
-        transform 180ms ease;
+    transition: opacity 180ms ease;
 
     /* Programmatic focus target after category changes. Clicking the panel
-	   focuses it; Tab/Shift/Esc then paint the UA ring as a full-panel black
-	   frame (issue #579). */
+                focuses it; Tab/Shift/Esc then paint the UA ring as a full-panel black
+                frame (issue #579). */
     &:focus,
     &:focus-visible {
         outline: none;
@@ -971,26 +987,21 @@ const pageTitle: MessageDescriptor = settingsPageTitle
 
 .settings-content-body.is-loading {
     opacity: 0;
-    transform: translateY(4px);
     pointer-events: none;
 }
 
 .settings-content-body.is-ready {
     opacity: 1;
-    transform: none;
 }
 
 .settings-content-skeleton-enter-active,
 .settings-content-skeleton-leave-active {
-    transition:
-        opacity 160ms ease,
-        transform 160ms ease;
+    transition: opacity 160ms ease;
 }
 
 .settings-content-skeleton-enter-from,
 .settings-content-skeleton-leave-to {
     opacity: 0;
-    transform: translateY(4px);
 }
 
 .settings-content-header-enter-active,

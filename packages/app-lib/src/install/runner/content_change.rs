@@ -1,4 +1,5 @@
 use super::*;
+use crate::util::download::constants::INSTALL_FILE_REPORTED_ATTEMPTS;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -253,7 +254,7 @@ async fn download_prepared_files(
         events.push(InstallJobEventKind::ContentFileQueued {
             path: file.target_relative_path.clone(),
             bytes_total: file.integrity.size,
-            max_attempts: 5,
+            max_attempts: INSTALL_FILE_REPORTED_ATTEMPTS,
         });
         if !file.urls.is_empty() {
             events.push(InstallJobEventKind::ContentFileBrowserOptions {
@@ -293,49 +294,49 @@ async fn download_prepared_files(
                     );
                 }
                 let result = match file.provider {
-				ContentProvider::Modrinth => {
-					crate::state::instances::commands::download_project_version_with_reporter(
-						&instance_id,
-						&file.release_id,
-						if file.role == crate::install::ContentChangeFileRole::Primary {
-							DownloadReason::Update
-						} else {
-							DownloadReason::Dependency
-						},
-						None,
-						reporter,
-						&state,
-					)
-					.await
-					.map(DownloadedContent::Modrinth)
-				}
-				ContentProvider::CurseForge => {
-					match (
-						file.project_id.parse::<u32>(),
-						file.release_id.parse::<u32>(),
-					) {
-						(Ok(project_id), Ok(file_id)) => {
-							crate::api::curseforge::stage_curseforge_upgrade_file(
-								project_id,
-								file_id,
-								None,
-								Some(&reporter),
-							)
-							.await
-								.map(DownloadedContent::CurseForge)
-						}
-						_ => Err(crate::ErrorKind::InputError(
-							"Invalid CurseForge project or file ID".to_string(),
-						)
-						.into()),
-					}
-				}
-				provider => Err(crate::ErrorKind::InputError(format!(
-					"Provider {} cannot be downloaded automatically",
-					provider.as_str()
-				))
-				.into()),
-			};
+                ContentProvider::Modrinth => {
+                    crate::state::instances::commands::download_project_version_with_reporter(
+                        &instance_id,
+                        &file.release_id,
+                        if file.role == crate::install::ContentChangeFileRole::Primary {
+                            DownloadReason::Update
+                        } else {
+                            DownloadReason::Dependency
+                        },
+                        None,
+                        reporter,
+                        &state,
+                    )
+                    .await
+                    .map(DownloadedContent::Modrinth)
+                }
+                ContentProvider::CurseForge => {
+                    match (
+                        file.project_id.parse::<u32>(),
+                        file.release_id.parse::<u32>(),
+                    ) {
+                        (Ok(project_id), Ok(file_id)) => {
+                            crate::api::curseforge::stage_curseforge_upgrade_file(
+                                project_id,
+                                file_id,
+                                None,
+                                Some(&reporter),
+                            )
+                            .await
+                                .map(DownloadedContent::CurseForge)
+                        }
+                        _ => Err(crate::ErrorKind::InputError(
+                            "Invalid CurseForge project or file ID".to_string(),
+                        )
+                        .into()),
+                    }
+                }
+                provider => Err(crate::ErrorKind::InputError(format!(
+                    "Provider {} cannot be downloaded automatically",
+                    provider.as_str()
+                ))
+                .into()),
+            };
                 (file, result)
             }
         }),
@@ -658,7 +659,10 @@ async fn publish_downloaded_action(
                     staged.project_type.get_folder()
                 }
             };
-            format!("{folder}/{}", file.file_name)
+            format!(
+                "{folder}/{}",
+                crate::util::io::sanitize_download_file_name(&file.file_name)?
+            )
         };
         path_util::SafeRelativeUtf8UnixPathBuf::try_from(install_path.clone())?;
         if (!primary || install_path != old_path)
@@ -798,7 +802,7 @@ async fn persist_prepared_dependency_edges(
             dependency_kind: match downloaded.get(&parent.id) {
                 Some(DownloadedContent::CurseForge(staged)) if child.provider == ContentProvider::CurseForge => {
                     staged.file.dependencies.iter().find(|reference| reference.mod_id.to_string() == child.project_id)
-                        .map(|reference| if reference.relation_type == crate::api::curseforge::DEPENDENCY_RELATION_REQUIRED {
+                        .map(|reference| if reference.relation().is_required() {
                             crate::state::instances::ContentDependencyKind::Required
                         } else {
                             crate::state::instances::ContentDependencyKind::Include
@@ -1114,18 +1118,17 @@ mod tests {
             vec![file("primary")],
         );
         assert!(needs_preparation(&prepared));
-        prepared.modrinth_plan =
-            Some(modrinth_content_management::ResolveContentPlan {
-                primary: modrinth_content_management::ResolvedContent {
-                    project_id: "projectA".into(),
-                    version_id: "versionA".into(),
-                    dependent_on_version_id: None,
-                    required: true,
-                    metadata: None,
-                },
-                dependencies: Vec::new(),
-                skipped: Vec::new(),
-            });
+        prepared.modrinth_plan = Some(content_management::ResolveContentPlan {
+            primary: content_management::ResolvedContent {
+                project_id: "projectA".into(),
+                version_id: "versionA".into(),
+                dependent_on_version_id: None,
+                required: true,
+                metadata: None,
+            },
+            dependencies: Vec::new(),
+            skipped: Vec::new(),
+        });
         let serialized = serde_json::to_string(&prepared).unwrap();
         let restored: ContentChangeAction =
             serde_json::from_str(&serialized).unwrap();

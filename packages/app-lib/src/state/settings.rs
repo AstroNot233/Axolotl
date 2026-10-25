@@ -1,5 +1,8 @@
 //! Theseus settings file
 
+use crate::util::download::constants::{
+    AUTO_DOWNLOAD_CONCURRENCY_INITIAL, DOWNLOAD_CONCURRENCY_HARD_MAX,
+};
 use crate::util::proxy::{ProxyConfig, ProxyMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -91,6 +94,10 @@ impl<'de> Deserialize<'de> for HomeLayout {
 /// Global Theseus settings
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Settings {
+    #[serde(default = "default_true")]
+    pub resource_chinese_filenames: bool,
+    #[serde(default = "default_true")]
+    pub resource_preserve_filenames: bool,
     pub max_concurrent_downloads: usize,
     pub max_concurrent_writes: usize,
     #[serde(default)]
@@ -293,6 +300,8 @@ pub enum FeatureFlag {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            resource_chinese_filenames: true,
+            resource_preserve_filenames: true,
             max_concurrent_downloads: 10,
             max_concurrent_writes: 10,
             auto_concurrent_downloads: true,
@@ -506,6 +515,16 @@ impl Settings {
                 .fetch_one(exec)
                 .await?;
         let settings = Self {
+            resource_chinese_filenames: sqlx::query_scalar(
+                "SELECT resource_chinese_filenames FROM settings WHERE id = 0",
+            )
+            .fetch_one(exec)
+            .await?,
+            resource_preserve_filenames: sqlx::query_scalar(
+                "SELECT resource_preserve_filenames FROM settings WHERE id = 0",
+            )
+            .fetch_one(exec)
+            .await?,
             max_concurrent_downloads: res.max_concurrent_downloads as usize,
             max_concurrent_writes: res.max_concurrent_writes as usize,
             auto_concurrent_downloads: res.auto_concurrent_downloads == 1,
@@ -655,8 +674,9 @@ impl Settings {
     /// person can edit, so the ranges are applied on the way out as well.
     pub(crate) fn normalized(&self) -> Self {
         let mut settings = self.clone();
-        settings.max_concurrent_downloads =
-            self.max_concurrent_downloads.clamp(1, 256);
+        settings.max_concurrent_downloads = self
+            .max_concurrent_downloads
+            .clamp(1, DOWNLOAD_CONCURRENCY_HARD_MAX);
         settings.max_concurrent_writes =
             self.max_concurrent_writes.clamp(1, 256);
         settings.custom_background_blur = self.custom_background_blur.min(40);
@@ -891,9 +911,10 @@ impl Settings {
 
     pub fn effective_max_concurrent_downloads(&self) -> usize {
         if self.auto_concurrent_downloads {
-            64
+            AUTO_DOWNLOAD_CONCURRENCY_INITIAL
         } else {
-            self.max_concurrent_downloads.clamp(1, 256)
+            self.max_concurrent_downloads
+                .clamp(1, DOWNLOAD_CONCURRENCY_HARD_MAX)
         }
     }
 
@@ -1475,12 +1496,18 @@ mod tests {
     #[tokio::test]
     async fn curseforge_bypass_defaults_on_and_round_trips() {
         let mut settings = Settings::get().await;
+        assert!(settings.resource_chinese_filenames);
+        assert!(settings.resource_preserve_filenames);
         assert!(settings.bypass_curseforge_download_restrictions);
 
+        settings.resource_chinese_filenames = false;
+        settings.resource_preserve_filenames = false;
         settings.bypass_curseforge_download_restrictions = false;
         settings.update().await;
 
         let reloaded = Settings::get().await;
+        assert!(!reloaded.resource_chinese_filenames);
+        assert!(!reloaded.resource_preserve_filenames);
         assert!(!reloaded.bypass_curseforge_download_restrictions);
     }
 

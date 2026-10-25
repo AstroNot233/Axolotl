@@ -16,7 +16,14 @@
                 { 'project-card--compact-server': isServerProject },
             ]"
         >
-            <Avatar :src="iconUrl" size="48px" class="ease-brightness" no-shadow />
+            <Avatar
+                loading="lazy"
+                decoding="async"
+                :src="iconUrl"
+                size="48px"
+                class="ease-brightness"
+                no-shadow
+            />
             <div class="project-card--compact__identity flex min-w-0 flex-col justify-center gap-1">
                 <div class="flex min-w-0 items-center gap-2">
                     <ProjectCardTitle :title="title" dense />
@@ -29,12 +36,13 @@
                     {{ summary }}
                 </p>
             </div>
-            <span
-                v-if="provider"
-                class="project-card--compact__provider truncate text-[13px] font-medium leading-4 text-[var(--color-text-tertiary)]"
+            <AutoLink
+                v-tooltip="providerLabels.join(', ')"
+                :to="link"
+                class="project-card--compact__provider smart-clickable:allow-pointer-events min-w-0 truncate text-xs font-semibold text-[var(--color-text-tertiary)]"
             >
-                {{ providerLabel }}
-            </span>
+                {{ providerLabels.join(', ') }}
+            </AutoLink>
             <div
                 class="project-card--compact__tags flex min-w-0 items-center gap-1 overflow-hidden"
             >
@@ -98,12 +106,16 @@
             >
                 <img
                     v-if="banner"
+                    loading="lazy"
+                    decoding="async"
                     :src="banner"
                     alt=""
                     class="absolute w-full h-full inset-0 object-cover object-center"
                 />
                 <img
                     v-else
+                    loading="lazy"
+                    decoding="async"
                     src="https://cdn-raw.modrinth.com/landing-new/landing.webp"
                     alt=""
                     class="absolute w-full h-full inset-0 object-cover object-center opacity-70 scale-[200%]"
@@ -112,6 +124,8 @@
             <div class="p-4 flex flex-col gap-3 grow">
                 <div class="flex gap-3">
                     <Avatar
+                        loading="lazy"
+                        decoding="async"
                         :src="iconUrl"
                         size="96px"
                         class="project-card__icon ease-brightness"
@@ -123,10 +137,11 @@
                                 <div class="flex min-w-0 gap-2 items-center">
                                     <ProjectCardTitle :title="title" compact />
                                     <span
-                                        v-if="provider"
+                                        v-for="label in providerLabels"
+                                        :key="label"
                                         class="rounded-full bg-surface-5 px-2 py-0.5 text-xs font-semibold text-[var(--color-text-tertiary)]"
                                     >
-                                        {{ providerLabel }}
+                                        {{ label }}
                                     </span>
                                     <ProjectStatusBadge
                                         v-if="status"
@@ -219,6 +234,8 @@
             ]"
         >
             <Avatar
+                loading="lazy"
+                decoding="async"
                 :src="iconUrl"
                 size="100px"
                 class="project-card__icon grid-project-card-list__icon ease-brightness"
@@ -228,10 +245,11 @@
                 <div class="flex min-w-0 gap-2 items-center">
                     <ProjectCardTitle :title="title" />
                     <span
-                        v-if="provider"
+                        v-for="label in providerLabels"
+                        :key="label"
                         class="rounded-full bg-surface-5 px-2 py-0.5 text-xs font-semibold text-[var(--color-text-tertiary)]"
                     >
-                        {{ providerLabel }}
+                        {{ label }}
                     </span>
                     <ProjectStatusBadge v-if="status" :status="status" />
                 </div>
@@ -363,7 +381,14 @@ const props = defineProps<{
     downloads?: number
     dateUpdated?: string
     datePublished?: string
-    displayedDate?: 'updated' | 'published'
+    displayedDate?:
+        | 'updated'
+        | 'published'
+        | 'created'
+        | 'projectModified'
+        | 'releaseUpdated'
+        | 'projectPublished'
+        | 'firstRelease'
     serverRegion?: string
     serverOnlinePlayers?: number
     serverStatusOnline?: boolean
@@ -381,20 +406,22 @@ const props = defineProps<{
     environment?: ProjectCardEnvironmentProps
     status?: ProjectStatus
     maxTags?: number
+    providers?: ('modrinth' | 'curseforge' | 'mcarchive' | 'planet_minecraft')[]
     provider?: 'modrinth' | 'curseforge' | 'mcarchive' | 'planet_minecraft'
 }>()
 
-const providerLabel = computed(() => {
-    switch (props.provider) {
-        case 'curseforge':
-            return 'CurseForge'
-        case 'mcarchive':
-            return 'MCArchive'
-        case 'planet_minecraft':
-            return 'Planet Minecraft'
-        default:
-            return 'Modrinth'
+const providerLabels = computed(() => {
+    const names = {
+        modrinth: 'Modrinth',
+        curseforge: 'CurseForge',
+        mcarchive: 'MCArchive',
+        planet_minecraft: 'Planet Minecraft',
     }
+    return [
+        ...new Set(
+            props.providers?.length ? props.providers : props.provider ? [props.provider] : [],
+        ),
+    ].map((source) => names[source])
 })
 
 const baseCardStyle =
@@ -423,9 +450,13 @@ const autoDisplayDate = computed(() => {
 })
 
 const date = computed(() => {
-    if (autoDisplayDate.value === 'updated') {
+    if (['updated', 'projectModified', 'releaseUpdated'].includes(autoDisplayDate.value ?? '')) {
         return updatedDate.value
-    } else if (autoDisplayDate.value === 'published') {
+    } else if (
+        ['published', 'created', 'projectPublished', 'firstRelease'].includes(
+            autoDisplayDate.value ?? '',
+        )
+    ) {
         return publishedDate.value
     }
     return undefined

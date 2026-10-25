@@ -6,17 +6,20 @@ use crate::util::io::IOError;
 use crate::util::rpc::RpcServer;
 use chrono::{DateTime, Duration, NaiveDateTime, TimeZone, Utc};
 use dashmap::DashMap;
-use quick_xml::Reader;
 use quick_xml::events::Event;
+use quick_xml::{Reader, XmlVersion};
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::Debug;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
-use std::sync::LazyLock;
+use std::sync::{
+    Arc, LazyLock,
+    atomic::{AtomicU64, Ordering},
+};
 use std::time::Instant;
 #[cfg(feature = "tauri")]
 use tauri::Emitter;
@@ -117,15 +120,36 @@ async fn record_post_upgrade_launch_best_effort(
 }
 
 struct LogRingBuffer {
-    lines: VecDeque<String>,
+    lines: VecDeque<Arc<str>>,
+    occurrences: HashMap<Arc<str>, usize>,
     byte_len: usize,
+    epoch: u64,
+    sequence: u64,
+}
+
+static NEXT_LOG_EPOCH: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub struct LogCursor {
+    pub epoch: u64,
+    pub sequence: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LogDelta {
+    pub cursor: LogCursor,
+    pub reset: bool,
+    pub lines: Vec<String>,
 }
 
 impl LogRingBuffer {
     fn new() -> Self {
         Self {
             lines: VecDeque::new(),
+            occurrences: HashMap::new(),
             byte_len: 0,
+            epoch: NEXT_LOG_EPOCH.fetch_add(1, Ordering::Relaxed),
+            sequence: 0,
         }
     }
 
@@ -138,18 +162,57 @@ impl LogRingBuffer {
                 break;
             };
             self.byte_len = self.byte_len.saturating_sub(removed.len());
+            if let Some(count) = self.occurrences.get_mut(&removed) {
+                *count -= 1;
+                if *count == 0 {
+                    self.occurrences.remove(&removed);
+                }
+            }
         }
         self.byte_len += line_len;
+        let line: Arc<str> = line.into();
+        *self.occurrences.entry(line.clone()).or_default() += 1;
         self.lines.push_back(line);
+        self.sequence += 1;
     }
 
     fn get_all(&self) -> Vec<String> {
-        self.lines.iter().cloned().collect()
+        self.lines.iter().map(|line| line.to_string()).collect()
+    }
+
+    fn delta(&self, cursor: Option<LogCursor>) -> LogDelta {
+        let first_sequence = self.sequence - self.lines.len() as u64;
+        let reset = cursor.is_none_or(|cursor| {
+            cursor.epoch != self.epoch
+                || cursor.sequence < first_sequence
+                || cursor.sequence > self.sequence
+        });
+        let skip = if reset {
+            0
+        } else {
+            (cursor.unwrap().sequence - first_sequence) as usize
+        };
+        LogDelta {
+            cursor: LogCursor {
+                epoch: self.epoch,
+                sequence: self.sequence,
+            },
+            reset,
+            lines: self
+                .lines
+                .iter()
+                .skip(skip)
+                .map(|line| line.to_string())
+                .collect(),
+        }
     }
 
     fn clear(&mut self) {
         self.lines.clear();
+        self.occurrences.clear();
         self.byte_len = 0;
+        self.epoch = NEXT_LOG_EPOCH.fetch_add(1, Ordering::Relaxed);
+        self.sequence = 0;
     }
 }
 
@@ -234,8 +297,29 @@ pub fn clear_log_buffer(instance_id: &str) {
     }
 }
 
+pub fn log_buffer_contains(instance_id: &str, line: &str) -> bool {
+    LOG_BUFFERS
+        .get(instance_id)
+        .is_some_and(|buffer| buffer.occurrences.contains_key(line))
+}
+
+pub fn get_log_delta(instance_id: &str, cursor: Option<LogCursor>) -> LogDelta {
+    LOG_BUFFERS
+        .entry(instance_id.to_string())
+        .or_insert_with(LogRingBuffer::new)
+        .delta(cursor)
+}
+
 pub fn remove_log_buffer(instance_id: &str) {
     LOG_BUFFERS.remove(instance_id);
+}
+
+/// Drops buffered logs for every instance or dedicated server that no longer
+/// has a running process.
+pub(crate) fn remove_inactive_log_buffers(active_log_ids: &[String]) {
+    let active: std::collections::HashSet<&str> =
+        active_log_ids.iter().map(String::as_str).collect();
+    LOG_BUFFERS.retain(|log_id, _| active.contains(log_id.as_str()));
 }
 
 pub struct ProcessManager {
@@ -311,6 +395,7 @@ impl ProcessManager {
                 instance_name: instance_name.to_string(),
             },
             child: mc_proc,
+            exit_status: tokio::sync::watch::channel(None).0,
             manually_killed: false,
             output_tasks: Vec::new(),
             rpc_server,
@@ -502,29 +587,54 @@ impl ProcessManager {
         id: Uuid,
     ) -> crate::Result<Option<Option<ExitStatus>>> {
         if let Some(mut process) = self.processes.get_mut(&id) {
-            Ok(Some(process.child.try_wait()?))
+            match process.child.try_wait() {
+                Ok(status) => {
+                    if let Some(status) = status {
+                        process.exit_status.send_replace(Some(Ok(status)));
+                    }
+                    Ok(Some(status))
+                }
+                Err(error) => {
+                    process
+                        .exit_status
+                        .send_replace(Some(Err(error.to_string())));
+                    Err(error.into())
+                }
+            }
         } else {
             Ok(None)
         }
     }
 
     pub async fn wait_for(&self, id: Uuid) -> crate::Result<()> {
-        if let Some(mut process) = self.processes.get_mut(&id) {
-            process.child.wait().await?;
+        let Some(mut exit_status) = self
+            .processes
+            .get(&id)
+            .map(|process| process.exit_status.subscribe())
+        else {
+            return Ok(());
+        };
+        loop {
+            let result = exit_status.borrow_and_update().clone();
+            if let Some(result) = result {
+                return result.map(|_| ()).map_err(|error| {
+                    crate::ErrorKind::LauncherError(error).into()
+                });
+            }
+            if exit_status.changed().await.is_err() {
+                return Ok(());
+            }
         }
-        Ok(())
     }
 
     pub async fn kill(&self, id: Uuid) -> crate::Result<()> {
-        if let Some(mut process) = self.processes.get_mut(&id) {
-            process.manually_killed = true;
-            if let Err(error) = process.child.kill().await {
-                process.manually_killed = false;
-                return Err(error.into());
+        {
+            if let Some(mut process) = self.processes.get_mut(&id) {
+                process.child.start_kill()?;
+                process.manually_killed = true;
             }
         }
-
-        Ok(())
+        self.wait_for(id).await
     }
 
     fn remove(&self, id: Uuid) -> Option<Process> {
@@ -555,6 +665,7 @@ pub struct ProcessMetadata {
 struct Process {
     metadata: ProcessMetadata,
     child: Child,
+    exit_status: tokio::sync::watch::Sender<Option<Result<ExitStatus, String>>>,
     manually_killed: bool,
     output_tasks: Vec<tokio::task::JoinHandle<()>>,
     _main_class_keep_alive: TempDir,
@@ -795,9 +906,9 @@ impl Process {
                                     )
                                     .await;
                                         if let Err(e) = Self::maybe_handle_server_join_logging(
-											instance_id,
-											&timestamp,
-											message,
+                                            instance_id,
+                                            &timestamp,
+                                            message,
                                         ).await {
                                             tracing::error!("Failed to handle server join logging: {e}");
                                         }
@@ -814,7 +925,9 @@ impl Process {
                     }
                     Ok(Event::Text(mut e)) => {
                         if in_message || in_throwable {
-                            if let Ok(text) = e.xml_content() {
+                            if let Ok(text) =
+                                e.xml_content(XmlVersion::Explicit1_1)
+                            {
                                 append_bounded_log4j_content(
                                     &mut current_content,
                                     &text,
@@ -823,7 +936,8 @@ impl Process {
                         } else if !in_event
                             && !e.inplace_trim_end()
                             && !e.inplace_trim_start()
-                            && let Ok(text) = e.xml_content()
+                            && let Ok(text) =
+                                e.xml_content(XmlVersion::Explicit1_1)
                         {
                             if let Err(e) = Process::append_to_log_file(
                                 &log_path,
@@ -839,7 +953,8 @@ impl Process {
                     }
                     Ok(Event::CData(e)) => {
                         if (in_message || in_throwable)
-                            && let Ok(text) = e.xml_content()
+                            && let Ok(text) =
+                                e.xml_content(XmlVersion::Explicit1_1)
                         {
                             append_bounded_log4j_content(
                                 &mut current_content,
@@ -1133,20 +1248,20 @@ impl Process {
                 );
             }
             if let Err(e) =
-				crate::state::instances::commands::record_instance_daily_playtime(
-					instance_id,
-					started_at,
-					ended_at,
-					&state.pool,
-				)
-				.await
-			{
-				tracing::warn!(
-					"Failed to record daily playtime for instance {}: {}",
-					instance_id,
-					e
-				);
-			}
+                crate::state::instances::commands::record_instance_daily_playtime(
+                    instance_id,
+                    started_at,
+                    ended_at,
+                    &state.pool,
+                )
+                .await
+            {
+                tracing::warn!(
+                    "Failed to record daily playtime for instance {}: {}",
+                    instance_id,
+                    e
+                );
+            }
             *last_updated_playtime = Instant::now();
         }
 
@@ -1324,6 +1439,9 @@ impl Process {
                         state.directories.instances_dir().join(&instance_path)
                     });
                     let mut command = Command::new(command);
+                    crate::util::java_environment::configure_child_environment(
+                        command.as_std_mut(),
+                    );
                     command.args(cmd).current_dir(game_dir);
                     command.spawn().map_err(IOError::from)?;
                 }
@@ -1337,6 +1455,47 @@ impl Process {
 #[cfg(test)]
 mod post_upgrade_tests {
     use super::*;
+
+    #[test]
+    fn log_delta_tracks_rollover_clear_and_caught_up_cursors() {
+        let mut buffer = LogRingBuffer::new();
+        buffer.push("first".to_string());
+        let initial = buffer.delta(None);
+        assert!(initial.reset);
+        assert_eq!(initial.lines, ["first"]);
+        assert!(buffer.delta(Some(initial.cursor)).lines.is_empty());
+        for index in 0..LOG_BUFFER_CAPACITY {
+            buffer.push(format!("line-{index}"));
+        }
+        let delta = buffer.delta(Some(initial.cursor));
+        assert!(!delta.reset);
+        assert_eq!(delta.lines.len(), LOG_BUFFER_CAPACITY);
+        assert!(!buffer.occurrences.contains_key("first"));
+        buffer.push("next".to_string());
+        assert!(buffer.delta(Some(initial.cursor)).reset);
+        let before_clear = buffer.delta(None).cursor;
+        buffer.clear();
+        buffer.push("new-run".to_string());
+        let restarted = buffer.delta(Some(before_clear));
+        assert!(restarted.reset);
+        assert_eq!(restarted.lines, ["new-run"]);
+    }
+
+    #[test]
+    fn log_dedup_index_preserves_duplicate_counts_until_last_occurrence_expires()
+     {
+        let mut buffer = LogRingBuffer::new();
+        buffer.push("repeated".to_string());
+        buffer.push("repeated".to_string());
+        for index in 0..LOG_BUFFER_CAPACITY - 1 {
+            buffer.push(index.to_string());
+        }
+        assert_eq!(buffer.occurrences.get("repeated"), Some(&1));
+        buffer.push("last".to_string());
+        assert!(!buffer.occurrences.contains_key("repeated"));
+        buffer.clear();
+        assert!(buffer.occurrences.is_empty());
+    }
 
     #[test]
     fn live_log_lines_are_truncated_on_character_boundaries() {
@@ -1400,5 +1559,99 @@ mod post_upgrade_tests {
         assert!(!crash_reports_changed(&before, &unchanged));
         assert!(crash_reports_changed(&before, &added));
         assert!(crash_reports_changed(&before, &modified));
+    }
+
+    #[test]
+    fn remove_inactive_log_buffers_keeps_active_log_ids() {
+        push_log_line("remove_inactive_keep_test", "kept".to_string());
+        push_log_line("remove_inactive_drop_test", "dropped".to_string());
+
+        remove_inactive_log_buffers(&["remove_inactive_keep_test".to_string()]);
+
+        assert!(!get_log_buffer("remove_inactive_keep_test").is_empty());
+        assert!(get_log_buffer("remove_inactive_drop_test").is_empty());
+
+        remove_log_buffer("remove_inactive_keep_test");
+    }
+}
+
+#[cfg(test)]
+mod process_wait_tests {
+    use super::*;
+
+    #[test]
+    fn sleeping_child() {
+        if std::env::var_os("AXOLOTL_PROCESS_WAIT_TEST").is_some() {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+        }
+    }
+
+    #[tokio::test]
+    async fn waiters_do_not_block_queries_or_kill_and_observe_the_same_exit() {
+        let manager = Arc::new(ProcessManager::new());
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "state::process::process_wait_tests::sleeping_child",
+            ])
+            .env("AXOLOTL_PROCESS_WAIT_TEST", "1")
+            .kill_on_drop(true)
+            .stdout(std::process::Stdio::null());
+        let child = command.spawn().unwrap();
+        let id = Uuid::new_v4();
+        manager.processes.insert(
+            id,
+            Process {
+                metadata: ProcessMetadata {
+                    uuid: id,
+                    pid: child.id().unwrap(),
+                    maximize_window: false,
+                    window_title: None,
+                    instance_id: "test".into(),
+                    instance_path: "test".into(),
+                    instance_name: "test".into(),
+                    start_time: Utc::now(),
+                },
+                child,
+                exit_status: tokio::sync::watch::channel(None).0,
+                manually_killed: false,
+                output_tasks: Vec::new(),
+                _main_class_keep_alive: TempDir::new().unwrap(),
+                rpc_server: crate::util::rpc::RpcServerBuilder::new()
+                    .launch()
+                    .await
+                    .unwrap(),
+            },
+        );
+        let waiters = (0..3)
+            .map(|_| {
+                let manager = manager.clone();
+                tokio::spawn(async move { manager.wait_for(id).await.unwrap() })
+            })
+            .collect::<Vec<_>>();
+        tokio::task::yield_now().await;
+        assert_eq!(manager.get_all().len(), 1);
+        assert!(manager.try_wait(id).unwrap().unwrap().is_none());
+        let monitor = manager.clone();
+        let polling = tokio::spawn(async move {
+            while monitor.try_wait(id).unwrap().unwrap().is_none() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            manager.kill(id),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(manager.was_manually_killed(id));
+        for waiter in waiters {
+            waiter.await.unwrap();
+        }
+        polling.await.unwrap();
+        manager.remove(id);
+        manager.wait_for(id).await.unwrap();
     }
 }

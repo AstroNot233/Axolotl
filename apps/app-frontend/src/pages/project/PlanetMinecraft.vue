@@ -1,41 +1,63 @@
 <script setup lang="ts">
 import { DownloadIcon, ExternalIcon, FileArchiveIcon, SpinnerIcon } from '@modrinth/assets'
-import { Button, Card, defineMessages, injectNotificationManager, useVIntl } from '@modrinth/ui'
+import {
+    Button,
+    Card,
+    commonMessages,
+    defineMessages,
+    injectNotificationManager,
+    useVIntl,
+} from '@modrinth/ui'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import BrowseInstanceSelector from '@/components/browse/BrowseInstanceSelector.vue'
 import InstanceIcon from '@/components/ui/InstanceIcon.vue'
-import {
-    import_planet_minecraft_content,
-    install_planet_minecraft_content,
-    type PlanetMinecraftContentInstallRequest,
-} from '@/helpers/instance'
+import ResourceDescription from '@/components/ui/ResourceDescription.vue'
+import ResourceOperationPreviewModal from '@/components/ui/ResourceOperationPreviewModal.vue'
 import { getPlanetMinecraftProject, type PlanetMinecraftVersion } from '@/helpers/planet-minecraft'
+import { readProjectPreviewTitle } from '@/helpers/project-preview'
 import { injectContentSelection } from '@/providers/content-selection'
+import { injectDownloadManager } from '@/providers/download-manager'
 import { useBreadcrumbs } from '@/store/breadcrumbs'
 
+import SourceProjectSkeleton from './SourceProjectSkeleton.vue'
+
+type PlanetMinecraftContentInstallRequest = {
+    projectId: string
+    versionId: string
+    projectType: string
+}
+
 const route = useRoute()
+const previewTitle = computed(() => readProjectPreviewTitle(route.path))
 const { formatMessage } = useVIntl()
-const { addNotification, handleError } = injectNotificationManager()
+const { handleError } = injectNotificationManager()
 const contentSelection = injectContentSelection()
 const breadcrumbs = useBreadcrumbs()
+const preview = ref<InstanceType<typeof ResourceOperationPreviewModal>>()
+const downloads = injectDownloadManager()
 const instanceSelector = ref<InstanceType<typeof BrowseInstanceSelector>>()
 const project = ref<Awaited<ReturnType<typeof getPlanetMinecraftProject>> | null>(null)
 const loading = ref(false)
 const busyVersionId = ref<string | null>(null)
+let projectRequest: AbortController | null = null
+let operationGeneration = 0
 const manualDownload = ref<{
+    instanceId: string
+    verifiable: boolean
     request: PlanetMinecraftContentInstallRequest
     pageUrl: string
     fileName: string | null
 } | null>(null)
 
 const messages = defineMessages({
-    loading: {
-        id: 'app.project.planet-minecraft.loading',
-        defaultMessage: 'Loading Planet Minecraft project…',
+    unavailable: {
+        id: 'app.project.planet-minecraft.unavailable',
+        defaultMessage:
+            'This Planet Minecraft project is unavailable. Reopen the project and try again.',
     },
     chooseInstance: { id: 'app.browse.choose-instance', defaultMessage: 'Choose instance' },
     versions: { id: 'app.project.planet-minecraft.versions', defaultMessage: 'Downloads' },
@@ -47,6 +69,11 @@ const messages = defineMessages({
     manualDescription: {
         id: 'app.project.planet-minecraft.manual.description',
         defaultMessage: '{fileName} must be downloaded from Planet Minecraft, then imported here.',
+    },
+    unverifiable: {
+        id: 'app.resources.manual.unverifiable',
+        defaultMessage:
+            'This source provides no file hash. Its artifact cannot be verified; download it from the source page and use the local import workflow.',
     },
     unknownFile: {
         id: 'app.project.planet-minecraft.unknown-file',
@@ -76,9 +103,56 @@ const messages = defineMessages({
 
 const selectedInstance = computed(() => contentSelection.targetInstance.value)
 
+watch(
+    () => selectedInstance.value?.id,
+    () => {
+        operationGeneration++
+        void preview.value?.cancel()
+        manualDownload.value = null
+        busyVersionId.value = null
+    },
+)
+onScopeDispose(() => {
+    projectRequest?.abort()
+    operationGeneration++
+})
+
 function createRequest(version: PlanetMinecraftVersion): PlanetMinecraftContentInstallRequest {
-    if (!project.value) throw new Error('Planet Minecraft project is unavailable')
+    if (!project.value) throw new Error(formatMessage(messages.unavailable))
     return { projectId: project.value.id, versionId: version.id, projectType: 'mod' }
+}
+
+async function reviewInstall(
+    instanceId: string,
+    request: PlanetMinecraftContentInstallRequest,
+    filePath?: string,
+) {
+    const key = 'selected-file'
+    const source = 'planet_minecraft' as const
+    const release = {
+        project: { source, projectId: request.projectId },
+        releaseId: request.versionId,
+    }
+    const job = await preview.value?.showInstall({
+        instanceId,
+        instanceName:
+            contentSelection.instances.value.find((instance) => instance.id === instanceId)?.name ??
+            selectedInstance.value?.name ??
+            '',
+        selections: [
+            {
+                id: key,
+                resource: { kind: 'source', project: release.project },
+                release: { kind: 'release', reference: release },
+                resourceType: 'mod',
+                scope: { kind: 'instance' },
+            },
+        ],
+        installDependencies: false,
+        importFiles: filePath ? { [key]: filePath } : undefined,
+    })
+    if (job) downloads.trackJob(job)
+    return !!job
 }
 
 async function install(version: PlanetMinecraftVersion) {
@@ -89,72 +163,84 @@ async function install(version: PlanetMinecraftVersion) {
         instanceSelector.value?.show()
         return
     }
+    if (busyVersionId.value) return
+    const instanceId = selectedInstance.value.id
+    const generation = ++operationGeneration
     busyVersionId.value = version.id
     try {
         const request = createRequest(version)
-        const result = await install_planet_minecraft_content(selectedInstance.value.id, request)
-        if (result.state === 'manual_download') {
-            manualDownload.value = { request, pageUrl: result.pageUrl, fileName: result.fileName }
+        if (!version.download.sha256 || !version.download.directUrl) {
+            manualDownload.value = {
+                instanceId,
+                verifiable: !!version.download.sha256,
+                request,
+                pageUrl: version.download.pageUrl,
+                fileName: version.download.fileName ?? null,
+            }
             return
         }
-        addNotification({
-            type: 'success',
-            title: formatMessage(messages.installed, {
-                fileName: version.download.fileName ?? version.name,
-            }),
-        })
+        await reviewInstall(instanceId, request)
     } catch (error) {
-        handleError(error)
+        if (generation === operationGeneration) handleError(error)
     } finally {
-        busyVersionId.value = null
+        if (generation === operationGeneration) busyVersionId.value = null
     }
 }
 
 async function importDownloadedFile() {
-    if (!manualDownload.value || !selectedInstance.value) return
-    const path = await open({
-        multiple: false,
-        title: formatMessage(messages.pickFile),
-        filters: [{ name: formatMessage(messages.archiveFilter), extensions: ['jar', 'zip'] }],
-    })
-    if (!path || Array.isArray(path)) return
-    busyVersionId.value = manualDownload.value.request.versionId
+    const pending = manualDownload.value
+    if (!pending || pending.instanceId !== selectedInstance.value?.id || busyVersionId.value) return
+    const generation = ++operationGeneration
+    busyVersionId.value = pending.request.versionId
     try {
-        const result = await import_planet_minecraft_content(
-            selectedInstance.value.id,
-            manualDownload.value.request,
-            path,
+        const path = await open({
+            multiple: false,
+            title: formatMessage(messages.pickFile),
+            filters: [{ name: formatMessage(messages.archiveFilter), extensions: ['jar', 'zip'] }],
+        })
+        if (
+            !path ||
+            Array.isArray(path) ||
+            generation !== operationGeneration ||
+            manualDownload.value !== pending
         )
-        const fileName =
-            manualDownload.value.fileName ??
-            (result.state === 'installed' ? result.relativePath : '')
-        addNotification({ type: 'success', title: formatMessage(messages.installed, { fileName }) })
-        manualDownload.value = null
+            return
+
+        const accepted = await reviewInstall(pending.instanceId, pending.request, path)
+        if (generation === operationGeneration && accepted) manualDownload.value = null
     } catch (error) {
-        handleError(error)
+        if (generation === operationGeneration) handleError(error)
     } finally {
-        busyVersionId.value = null
+        if (generation === operationGeneration) busyVersionId.value = null
     }
 }
 
+async function loadProject(id = route.params.id) {
+    if (typeof id !== 'string' || !id) return
+    projectRequest?.abort()
+    const request = new AbortController()
+    projectRequest = request
+    operationGeneration++
+    void preview.value?.cancel()
+    busyVersionId.value = null
+    project.value = null
+    manualDownload.value = null
+    loading.value = true
+    try {
+        const result = await getPlanetMinecraftProject(id, request.signal)
+        request.signal.throwIfAborted()
+        project.value = result
+        breadcrumbs.setName('Project', project.value.title)
+        breadcrumbs.setNameIcon('Project', project.value.icon_url ?? project.value.iconUrl ?? null)
+    } catch (error) {
+        if (!request.signal.aborted) handleError(error)
+    } finally {
+        if (projectRequest === request) loading.value = false
+    }
+}
 watch(
     () => route.params.id,
-    async (id) => {
-        if (typeof id !== 'string' || !id) return
-        loading.value = true
-        try {
-            project.value = await getPlanetMinecraftProject(id)
-            breadcrumbs.setName('Project', project.value.title)
-            breadcrumbs.setNameIcon(
-                'Project',
-                project.value.icon_url ?? project.value.iconUrl ?? null,
-            )
-        } catch (error) {
-            handleError(error)
-        } finally {
-            loading.value = false
-        }
-    },
+    (id) => void loadProject(id),
     { immediate: true },
 )
 
@@ -171,12 +257,7 @@ void contentSelection
 </script>
 
 <template>
-    <div
-        v-if="loading"
-        class="flex min-h-64 items-center justify-center gap-3 p-6 text-[var(--color-text-tertiary)]"
-    >
-        <SpinnerIcon class="animate-spin" /> {{ formatMessage(messages.loading) }}
-    </div>
+    <SourceProjectSkeleton v-if="loading" :title="previewTitle" />
     <div v-else-if="project" class="mx-auto flex w-full max-w-5xl flex-col gap-5 p-6">
         <section class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0">
@@ -198,6 +279,7 @@ void contentSelection
                 {{ selectedInstance?.name ?? formatMessage(messages.chooseInstance) }}
             </Button>
         </section>
+        <Card><ResourceDescription source="planet_minecraft" :project-id="project.id" /></Card>
         <Card v-if="manualDownload" class="flex flex-wrap items-center justify-between gap-3">
             <div class="min-w-0">
                 <h2 class="m-0 text-base font-semibold text-[var(--color-text-primary)]">
@@ -216,10 +298,16 @@ void contentSelection
                 <Button type="outlined" @click="openUrl(manualDownload!.pageUrl)"
                     ><ExternalIcon /> {{ formatMessage(messages.openSource) }}
                 </Button>
-                <Button :disabled="busyVersionId !== null" @click="importDownloadedFile"
+                <Button
+                    v-if="manualDownload.verifiable"
+                    :disabled="busyVersionId !== null"
+                    @click="importDownloadedFile"
                     ><FileArchiveIcon /> {{ formatMessage(messages.importFile) }}
                 </Button>
             </div>
+            <p v-if="!manualDownload.verifiable" class="m-0">
+                {{ formatMessage(messages.unverifiable) }}
+            </p>
         </Card>
         <section class="flex flex-col gap-3">
             <h2 class="m-0 text-lg font-semibold text-[var(--color-text-primary)]">
@@ -248,6 +336,16 @@ void contentSelection
             </Card>
         </section>
     </div>
+    <div v-else class="mx-auto flex w-full max-w-5xl flex-col gap-5 p-6">
+        <h1 v-if="previewTitle" class="m-0 text-2xl font-bold text-[var(--color-text-primary)]">
+            {{ previewTitle }}
+        </h1>
+        <Card class="flex flex-wrap items-center gap-3" role="alert">
+            <span>{{ formatMessage(messages.unavailable) }}</span>
+            <Button @click="loadProject()">{{ formatMessage(commonMessages.retryButton) }}</Button>
+        </Card>
+    </div>
+    <ResourceOperationPreviewModal ref="preview" />
     <BrowseInstanceSelector
         ref="instanceSelector"
         :instances="contentSelection.instances.value"

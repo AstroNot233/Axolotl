@@ -33,15 +33,11 @@
 
 <table>
   <tr>
-    <td><img src="./.github/assets/codeflow-logo.png" width="72" alt="Codeflow Logo" /></td>
-    <td><strong>Codeflow</strong><br>更稳、更省地调用顶级 AI 模型<br>原生协议转发 · 无需海外网络 · 支付宝即充即用</td>
-    <td><a href="https://codeflow.asia/register?invite=4UHP2KYH">访问 Codeflow</a></td>
+    <td><img src="./.github/assets/codeflow-logo.png" width="72" alt="CodeFlow Logo" /></td>
+    <td><strong>CodeFlow</strong><br>更稳、更省地调用顶级 AI 模型<br>原生协议转发 · 无需海外网络 · 支付宝即充即用</td>
+    <td><a href="https://codeflow.sh/register?invite=4UHP2KYH">访问 CodeFlow</a></td>
   </tr>
 </table>
-
-<a href="https://www.netlify.com">
-  <img src="https://www.netlify.com/assets/badges/netlify-badge-color-accent.svg" alt="Deploys by Netlify" />
-</a>
 
 - [在爱发电支持 Axolotl Launcher](https://ifdian.net/a/Mystic-Stars) — 你的支持将帮助项目持续维护与改进
 
@@ -96,35 +92,39 @@ curl -fsSL https://ppa.axlmc.org/setup.sh | sudo bash
 sudo apt install axolotl-launcher
 ```
 
-**NixOS**：
+**使用 Nix(启用Flake功能) 的任意发行版**：
 
 > 小提示：
-> 由于 Axolotl Launcher 的主分支代码更新较快，可以在下面用到的网址后面加上`/?`和参数来锁定，以免过于频繁地更新。
-> + 使用`ref=`指定分支（例如`experiment/linux-cef-runtime`分支）\
+> 由于 Axolotl Launcher 的主分支代码更新较快，可以在下面用到的网址后面加上`/?`和参数来锁定，以免过于频繁地更新。多个参数用`&`连接。
+>
+> - 使用`shallow=1`避免克隆历史代码 \
+>   `git+https://github.com/Mystic-Stars/Axolotl/?shallow=1`
+> - 使用`ref=`指定分支（例如`experiment/linux-cef-runtime`分支）\
 >   `git+https://github.com/Mystic-Stars/Axolotl/?ref=experiment/linux-cef-runtime`
-> + 使用`ref=`指定版本标签（例如`v1.9.7-beta.2`）\
+> - 使用`ref=`指定版本标签（例如`v1.9.7-beta.2`）\
 >   `git+https://github.com/Mystic-Stars/Axolotl/?ref=refs/tags/v1.9.7-beta.2`
-> + 使用`rev=`指定提交（例如`10827ade74f49958cefaa6fda05961c7502741ef`）\
+> - 使用`rev=`指定提交（例如`10827ade74f49958cefaa6fda05961c7502741ef`）\
 >   `git+https://github.com/Mystic-Stars/Axolotl/?rev=10827ade74f49958cefaa6fda05961c7502741ef`
 
 ```bash
 nix profile add 'git+https://github.com/Mystic-Stars/Axolotl'
 ```
 
-**使用 Home-Manager 的 NixOS 或任意其他发行版**
+**使用 Home-Manager 的任意发行版**
 
 将此 Flake 加入你的 `flake.nix`
+
 ```nix
 # flake.nix
 {
   nixConfig = {
-    # 使用 Axolotl Launcher 的 cachix 缓存。对安全性有疑问可以审查：
-		# axololt-launcher-git.cachix.org 以及 github.com/Axolotl-Launcher/Axolotl-Cachix
+    # 使用 Axolotl Launcher 的 Cachix 缓存。对安全性有疑问可以审查：
+    # axlmc.cachix.org 以及 github.com/Axolotl-Launcher/Axolotl-Cachix
     extra-substituters = [
-      "https://axolotl-launcher-git.cachix.org"
+      "https://axlmc.cachix.org"
     ];
     extra-trusted-public-keys = [
-      "axolotl-launcher-git.cachix.org-1:6OBznZ1/jC7SRgugQ2PNGcy4VFyF0tDeWBMs2BPRt5Q="
+      "axlmc.cachix.org-1:dmsRJqFQqLMfvRveerHV3DxDCW1wq1N+TX1+dryYWZU="
     ];
   };
 
@@ -149,7 +149,9 @@ nix profile add 'git+https://github.com/Mystic-Stars/Axolotl'
   };
 }
 ```
+
 然后在 `home.nix` 中配置
+
 ```nix
 # home.nix
 {
@@ -158,10 +160,12 @@ nix profile add 'git+https://github.com/Mystic-Stars/Axolotl'
   };
 }
 ```
+
 可选属性
-| 键        | 类型    | 默认值  | 说明 |
-|-----------|---------|---------|--------------------------------------|
-| enable    | `bool`  | `false` | 设置为`true`以启用 Axolotl Launcher。 |
+
+| 键        | 类型    | 默认值  | 说明                                                                                                                                       |
+| --------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| enable    | `bool`  | `false` | 设置为`true`以启用 Axolotl Launcher。                                                                                                      |
 | launchEnv | `attrs` | `{ }`   | Axolotl Launcher 启动时额外的环境变量。例如`{ HELLO = 1; world = "two"; }`能为 Axolotl Launcher 设置额外的环境变量`HELLO=1`和`world=two`。 |
 
 </details>

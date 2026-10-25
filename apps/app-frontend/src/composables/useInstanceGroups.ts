@@ -1,16 +1,17 @@
-import { computed, type Ref, ref, watch } from 'vue'
+import { injectNotificationManager } from '@modrinth/ui'
+import { computed, onScopeDispose, type Ref, ref, watch } from 'vue'
 
 import { instance_groups_listener } from '@/helpers/events'
 import {
     create_group,
     delete_group,
     type InstanceGroupDefinition,
-    type InstanceGroupMembershipUpdate,
+    type InstanceGroupMembershipChange,
     list_groups,
     MAX_INSTANCE_GROUP_NAME_LENGTH,
     rename_group,
-    set_group_memberships,
     set_group_order,
+    update_group_memberships,
 } from '@/helpers/instance-groups'
 
 export const FAVORITES_GROUP_ID = 'group:favorites'
@@ -19,7 +20,7 @@ export const UNGROUPED_GROUP_ID = 'group:none'
 
 export { MAX_INSTANCE_GROUP_NAME_LENGTH }
 
-export { type InstanceGroupDefinition, type InstanceGroupMembershipUpdate }
+export { type InstanceGroupDefinition, type InstanceGroupMembershipChange }
 
 export interface InstanceGroupWithMembership {
     key: string
@@ -28,18 +29,34 @@ export interface InstanceGroupWithMembership {
 }
 
 export function useInstanceGroups(instances: Ref<{ id: string; groups: string[] }[]>) {
+    const { handleError } = injectNotificationManager()
     const libraryGroups = ref<InstanceGroupDefinition[]>([])
     const libraryGroupsLoaded = ref(false)
+    let disposed = false
+    let stopListening: (() => void) | undefined
 
     async function fetchGroups() {
-        libraryGroups.value = await list_groups()
+        const groups = await list_groups()
+        if (disposed) return
+        libraryGroups.value = groups
         libraryGroupsLoaded.value = true
     }
 
-    fetchGroups()
+    void fetchGroups().catch(handleError)
 
-    instance_groups_listener(() => {
-        fetchGroups()
+    void instance_groups_listener(() => {
+        if (!disposed) void fetchGroups().catch(handleError)
+    })
+        .then((unlisten) => {
+            if (disposed) unlisten()
+            else stopListening = unlisten
+        })
+        .catch(handleError)
+
+    onScopeDispose(() => {
+        disposed = true
+        stopListening?.()
+        stopListening = undefined
     })
 
     const orderedLibraryGroupIds = ref<string[]>([])
@@ -155,8 +172,8 @@ export function useInstanceGroups(instances: Ref<{ id: string; groups: string[] 
         }
     }
 
-    async function setMemberships(updates: InstanceGroupMembershipUpdate[]): Promise<boolean> {
-        await set_group_memberships(updates)
+    async function updateMemberships(updates: InstanceGroupMembershipChange[]): Promise<boolean> {
+        await update_group_memberships(updates)
         return true
     }
 
@@ -176,7 +193,7 @@ export function useInstanceGroups(instances: Ref<{ id: string; groups: string[] 
         renameGroupById,
         deleteGroupById,
         reorderGroups,
-        setMemberships,
+        updateMemberships,
         groupNameById,
     }
 }

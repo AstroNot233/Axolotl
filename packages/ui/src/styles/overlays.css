@@ -7,20 +7,52 @@
  * fallback -- without one the website would render an unstyled box.
  */
 
-.tooltip-popper {
-    /* Fixed, not absolute: `computePosition` is called with `strategy: 'fixed'`
-	   and returns viewport coordinates, so the element has to be out of flow or
-	   its transform would be applied on top of its static position. */
+.tooltip-positioner {
     position: fixed;
     top: 0;
     left: 0;
-    /* Above the app's own `z-50` / `z-[9999]` layers, so a tooltip is never
-	   painted under a panel that happens to have a stacking context. */
+    z-index: 10000;
+    pointer-events: none;
+    visibility: hidden;
+}
+
+.tooltip-positioner[data-positioned='true'] {
+    visibility: visible;
+    transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tooltip-positioner > .tooltip-popper {
+    position: relative;
+    opacity: 0;
+    transform: scale(0.96);
+    transition:
+        opacity 140ms cubic-bezier(0.4, 0, 1, 1),
+        transform 140ms cubic-bezier(0.4, 0, 1, 1);
+}
+
+.tooltip-positioner[data-state='open'] > .tooltip-popper {
+    opacity: 1;
+    transform: scale(1);
+    transition-duration: 200ms;
+    transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tooltip-positioner[data-positioned='true'],
+    .tooltip-positioner > .tooltip-popper {
+        transition: none;
+    }
+    .tooltip-positioner > .tooltip-popper {
+        transform: none;
+    }
+}
+
+.tooltip-surface {
     z-index: 10000;
 
     /* Opaque on purpose: the translucency palette pins the tooltip tokens to
-	   the opaque surface snapshot so a tooltip stays readable over a custom
-	   background image. */
+                the opaque surface snapshot so a tooltip stays readable over a custom
+                background image. */
     background: var(--color-tooltip-bg, var(--surface-3));
     color: var(--color-tooltip-text, var(--color-text-primary));
     padding: 0.625rem 0.75rem;
@@ -31,7 +63,7 @@
     font-weight: 500;
     line-height: 1;
     /* A tooltip must never intercept the pointer: it would flicker as the
-	   pointer crosses it and steal hover from the element it describes. */
+                pointer crosses it and steal hover from the element it describes. */
     pointer-events: none;
     max-width: min(28rem, calc(100vw - 2rem));
     overflow-wrap: anywhere;

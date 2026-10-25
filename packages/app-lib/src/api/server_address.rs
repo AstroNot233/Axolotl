@@ -134,6 +134,41 @@ fn parse_server_address_inner(
     Ok((host, port.unwrap_or(25565)))
 }
 
+pub async fn resolve_server_address(
+    host: &str,
+    port: u16,
+) -> Result<(String, u16)> {
+    static SIMULTANEOUS_DNS_QUERIES: Semaphore = Semaphore::const_new(24);
+
+    if port != 25565
+        || host.parse::<Ipv4Addr>().is_ok()
+        || host.parse::<Ipv6Addr>().is_ok()
+    {
+        return Ok((host.to_owned(), port));
+    }
+
+    let _permit = SIMULTANEOUS_DNS_QUERIES.acquire().await?;
+    let resolver = hickory_resolver::TokioResolver::builder_tokio()?.build()?;
+    Ok(
+        match resolver.srv_lookup(format!("_minecraft._tcp.{host}")).await {
+            Err(e) if e.is_no_records_found() => None,
+            Err(e) => return Err(e.into()),
+            Ok(lookup) => {
+                lookup
+                    .answers()
+                    .iter()
+                    .find_map(|record| match &record.data {
+                        hickory_resolver::proto::rr::RData::SRV(srv) => {
+                            Some((srv.target.to_string(), srv.port))
+                        }
+                        _ => None,
+                    })
+            }
+        }
+        .unwrap_or_else(|| (host.to_owned(), port)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_server_address_inner;
@@ -158,38 +193,4 @@ mod tests {
             assert_eq!(parse_server_address_inner(address), Ok(expected));
         }
     }
-}
-
-pub async fn resolve_server_address(
-    host: &str,
-    port: u16,
-) -> Result<(String, u16)> {
-    static SIMULTANEOUS_DNS_QUERIES: Semaphore = Semaphore::const_new(24);
-
-    if port != 25565
-        || host.parse::<Ipv4Addr>().is_ok()
-        || host.parse::<Ipv6Addr>().is_ok()
-    {
-        return Ok((host.to_owned(), port));
-    }
-
-    let _permit = SIMULTANEOUS_DNS_QUERIES.acquire().await?;
-    let resolver = hickory_resolver::TokioResolver::builder_tokio()?.build();
-    Ok(
-        match resolver.srv_lookup(format!("_minecraft._tcp.{host}")).await {
-            Err(e)
-                if e.proto()
-                    .as_ref()
-                    .is_some_and(|x| x.kind().is_no_records_found()) =>
-            {
-                None
-            }
-            Err(e) => return Err(e.into()),
-            Ok(lookup) => lookup
-                .into_iter()
-                .next()
-                .map(|r| (r.target().to_string(), r.port())),
-        }
-        .unwrap_or_else(|| (host.to_owned(), port)),
-    )
 }

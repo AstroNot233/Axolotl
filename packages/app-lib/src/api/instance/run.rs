@@ -84,10 +84,10 @@ async fn run_with_extra_launch_args_inner(
 ) -> crate::Result<(ProcessMetadata, Option<GcLaunchReport>)> {
     if crate::api::instance::has_active_instance_operation(instance_id) {
         return Err(crate::ErrorKind::InputError(
-			"Wait for the active backup operation to finish before launching this instance"
-				.to_string(),
-		)
-		.into());
+            "Wait for the active backup operation to finish before launching this instance"
+                .to_string(),
+        )
+        .into());
     }
     let _maintenance_guard =
         crate::api::instance::lock_instance_maintenance(instance_id).await;
@@ -211,6 +211,9 @@ async fn run_credentials(
                     &context.instance,
                 )?;
             let mut command = Command::new(command);
+            crate::util::java_environment::configure_child_environment(
+                command.as_std_mut(),
+            );
             command.args(cmd).current_dir(&full_path).kill_on_drop(true);
             let result = command
                 .spawn()
@@ -300,16 +303,16 @@ async fn run_credentials(
             "https://sessionserver.mojang.com/session/minecraft/join",
             state.mojang_auth_use_mirror(),
         );
-        let join_result = fetch::INSECURE_REQWEST_CLIENT
-			.post(join_url.as_ref())
-			.json(&json!({
-				"accessToken": &credentials.access_token,
-				"selectedProfile": credentials.offline_profile.id.simple().to_string(),
-				"serverId": &server_id,
-			}))
-			.timeout(Duration::from_secs(5))
-			.send()
-			.await;
+        let join_result = fetch::authentication_client()
+            .post(join_url.as_ref())
+            .json(&json!({
+                "accessToken": &credentials.access_token,
+                "selectedProfile": credentials.offline_profile.id.simple().to_string(),
+                "serverId": &server_id,
+            }))
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await;
 
         match join_result {
             Ok(resp) if resp.status().is_success() => {

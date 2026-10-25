@@ -3,15 +3,37 @@ use async_zip::base::read::seek::ZipFileReader;
 use image::ImageEncoder;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
+use std::time::SystemTime;
 use tauri::{Emitter, Runtime};
 use tauri_plugin_dialog::DialogExt;
 use theseus::instance::get_full_path;
 
 const STUDIO_FILES_CHANGED_EVENT: &str = "studio-files-changed";
+
+#[derive(PartialEq)]
+struct LocalIconCacheKey {
+    source: PathBuf,
+    size: u64,
+    modified: SystemTime,
+    max_dimension: u32,
+}
+
+static LOCAL_ICON_CACHE: LazyLock<
+    Mutex<VecDeque<(LocalIconCacheKey, String)>>,
+> = LazyLock::new(|| Mutex::new(VecDeque::new()));
+
+// Limit native decoding as well as the webview queue: old in-flight requests
+// can outlive their cards, and each decoded original may occupy hundreds of MB.
+static SCREENSHOT_DECODER: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(1);
+static SCREENSHOT_THUMBNAILS: LazyLock<
+    Mutex<VecDeque<(LocalIconCacheKey, Vec<u8>)>>,
+> = LazyLock::new(|| Mutex::new(VecDeque::new()));
+const SCREENSHOT_THUMBNAIL_CACHE_BYTES: usize = 32 * 1024 * 1024;
 
 fn safe_extract_relative_path(name: &str) -> Option<std::path::PathBuf> {
     let path = std::path::Path::new(name);
@@ -325,8 +347,27 @@ pub async fn screenshot_thumbnail(
         .into());
     }
 
+    let max_dimension = max_dimension.clamp(1, 1024);
+    let metadata = tokio::fs::metadata(&canonical_source).await?;
+    let key = LocalIconCacheKey {
+        source: canonical_source.clone(),
+        size: metadata.len(),
+        modified: metadata.modified()?,
+        max_dimension,
+    };
+    let _permit = SCREENSHOT_DECODER.acquire().await.map_err(|error| {
+        theseus::Error::from(theseus::ErrorKind::OtherError(error.to_string()))
+    })?;
+    if let Ok(mut cache) = SCREENSHOT_THUMBNAILS.lock() {
+        if let Some(index) = cache.iter().position(|(cached, _)| cached == &key)
+        {
+            let entry = cache.remove(index).unwrap();
+            let bytes = entry.1.clone();
+            cache.push_back(entry);
+            return Ok(tauri::ipc::Response::new(bytes));
+        }
+    }
     let bytes = tokio::fs::read(&canonical_source).await?;
-    let max_dimension = max_dimension.max(1);
     let thumbnail = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
         let (width, height) =
             image::ImageReader::new(Cursor::new(bytes.as_slice()))
@@ -375,6 +416,24 @@ pub async fn screenshot_thumbnail(
         )))
     })??;
 
+    if thumbnail.len() <= SCREENSHOT_THUMBNAIL_CACHE_BYTES {
+        if let Ok(mut cache) = SCREENSHOT_THUMBNAILS.lock() {
+            cache.retain(|(cached, _)| {
+                cached.source != key.source
+                    || cached.max_dimension != key.max_dimension
+            });
+            let mut size =
+                cache.iter().map(|(_, bytes)| bytes.len()).sum::<usize>();
+            while size + thumbnail.len() > SCREENSHOT_THUMBNAIL_CACHE_BYTES {
+                if let Some((_, bytes)) = cache.pop_front() {
+                    size -= bytes.len();
+                } else {
+                    break;
+                }
+            }
+            cache.push_back((key, thumbnail.clone()));
+        }
+    }
     Ok(tauri::ipc::Response::new(thumbnail))
 }
 
@@ -390,8 +449,32 @@ pub(crate) async fn local_instance_icon_path(
 
     for file_name in LOCAL_ICON_NAMES {
         let source = base.join(file_name);
-        if !source.is_file() {
+        let Ok(metadata) = tokio::fs::metadata(&source).await else {
             continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let cache_key =
+            metadata.modified().ok().map(|modified| LocalIconCacheKey {
+                source: source.clone(),
+                size: metadata.len(),
+                modified,
+                max_dimension,
+            });
+        let cached = cache_key.as_ref().and_then(|key| {
+            let mut cache = LOCAL_ICON_CACHE.lock().ok()?;
+            let index =
+                cache.iter().position(|(cached_key, _)| cached_key == key)?;
+            let entry = cache.remove(index)?;
+            let path = entry.1.clone();
+            cache.push_back(entry);
+            Some(path)
+        });
+        if let Some(path) = cached {
+            if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+                return Ok(Some(path));
+            }
         }
 
         let candidate: Result<Option<String>> = async {
@@ -463,6 +546,18 @@ pub(crate) async fn local_instance_icon_path(
         .await;
 
         if let Ok(Some(path)) = candidate {
+            if let Some(key) = cache_key {
+                if let Ok(mut cache) = LOCAL_ICON_CACHE.lock() {
+                    cache.retain(|(existing, _)| {
+                        existing.source != key.source
+                            || existing.max_dimension != key.max_dimension
+                    });
+                    cache.push_back((key, path.clone()));
+                    while cache.len() > 256 {
+                        cache.pop_front();
+                    }
+                }
+            }
             return Ok(Some(path));
         }
     }

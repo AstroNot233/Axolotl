@@ -3,7 +3,9 @@ import { defineMessages, StyledInput, Toggle, useVIntl } from '@modrinth/ui'
 import { platform } from '@tauri-apps/plugin-os'
 import { ref, watch } from 'vue'
 
-import { get, set } from '@/helpers/settings.ts'
+import EnvironmentVariablesInput from '@/components/ui/EnvironmentVariablesInput.vue'
+import { get, update } from '@/helpers/settings.ts'
+import { createSettingsPatchSaver } from '@/helpers/settings-patch'
 
 import LogShareSettings from './LogShareSettings.vue'
 import SettingsRow from './SettingsRow.vue'
@@ -142,22 +144,14 @@ const messages = defineMessages({
 })
 
 const fetchSettings = await get()
+const saveDraft = createSettingsPatchSaver(fetchSettings, update)
 const supportsMaximizeWindow = (await platform()) === 'windows'
-const settings = ref({
-    ...fetchSettings,
-    envVars: fetchSettings.custom_env_vars.map((x) => x.join('=')).join(' '),
-})
+const settings = ref(fetchSettings)
 
 watch(
     settings,
     async () => {
         const setSettings = JSON.parse(JSON.stringify(settings.value))
-
-        setSettings.custom_env_vars = setSettings.envVars
-            .trim()
-            .split(/\s+/)
-            .filter(Boolean)
-            .map((x: string) => x.split('=').filter(Boolean))
 
         if (!setSettings.hooks.pre_launch) {
             setSettings.hooks.pre_launch = null
@@ -173,7 +167,7 @@ watch(
             setSettings.custom_dir = null
         }
 
-        await set(setSettings)
+        await saveDraft(setSettings)
     },
     { deep: true },
 )
@@ -285,13 +279,12 @@ watch(
             <SettingsRow stacked>
                 <template #label>{{ formatMessage(messages.environmentVariables) }}</template>
                 <template #control>
-                    <StyledInput
+                    <EnvironmentVariablesInput
                         id="env-vars"
-                        v-model="settings.envVars"
+                        v-model="settings.custom_env_vars"
                         autocomplete="off"
                         type="text"
                         :placeholder="formatMessage(messages.environmentVariablesPlaceholder)"
-                        wrapper-class="w-full"
                     />
                 </template>
             </SettingsRow>

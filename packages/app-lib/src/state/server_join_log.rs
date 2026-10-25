@@ -22,11 +22,11 @@ impl JoinLogEntry {
 
         sqlx::query!(
             "
-			INSERT INTO join_log (instance_id, host, port, join_time)
-			VALUES (?, ?, ?, ?)
-			ON CONFLICT (instance_id, host, port) DO UPDATE SET
-				join_time = excluded.join_time
-			",
+            INSERT INTO join_log (instance_id, host, port, join_time)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (instance_id, host, port) DO UPDATE SET
+                join_time = excluded.join_time
+            ",
             instance_id,
             host,
             port,
@@ -45,10 +45,10 @@ pub async fn get_joins(
 ) -> crate::Result<HashMap<(String, u16), DateTime<Utc>>> {
     let joins = sqlx::query!(
         "
-		SELECT host, port, join_time
-		FROM join_log
-		WHERE instance_id = ?
-		",
+        SELECT host, port, join_time
+        FROM join_log
+        WHERE instance_id = ?
+        ",
         instance_id,
     )
     .fetch_all(exec)

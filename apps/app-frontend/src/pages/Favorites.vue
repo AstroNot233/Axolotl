@@ -13,6 +13,7 @@ import {
     SpinnerIcon,
 } from '@modrinth/assets'
 import {
+    Admonition,
     type BrowseInstallContext,
     BrowseInstallHeader,
     Button,
@@ -22,39 +23,39 @@ import {
     getLatestMatchingInstallVersion,
     getTargetInstallPreferences,
     injectNotificationManager,
-    LoadingIndicator,
     NavTabs,
     Pagination,
     PopoutMenu,
     ProjectCard,
     ProjectCardList,
+    ProjectCardSkeleton,
     SelectedProjectsFloatingBar,
     StyledInput,
     useStickyObserver,
     useVIntl,
 } from '@modrinth/ui'
-import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 
 import BrowseInstanceSelector from '@/components/browse/BrowseInstanceSelector.vue'
 import InstanceIcon from '@/components/ui/InstanceIcon.vue'
 import { useContentFavorites } from '@/composables/useContentFavorites'
 import { createBrowseProjectTabs, getBrowseProjectTabOptions } from '@/helpers/browse-project-tabs'
-import { get_project, get_project_many, get_version_many } from '@/helpers/cache.js'
+import { get_project, get_version_many } from '@/helpers/cache.js'
 import {
     type ContentFavorite,
     contentFavoriteKey,
     type FavoriteContentType,
     type FavoriteProvider,
+    prefetchContentFavorites,
+    resolveContentFavorite,
 } from '@/helpers/content-favorites'
-import {
-    type CurseForgeProject,
-    getCurseForgeFiles,
-    getCurseForgeImageUrl,
-    getCurseForgeProjects,
-} from '@/helpers/curseforge'
+import { getCurseForgeFiles } from '@/helpers/curseforge'
 import { getDisplayInstanceIcon } from '@/helpers/instance-icons'
 import { runAfterPageTransitionSettle } from '@/helpers/page-transition'
+import { createProjectDetailsQuery } from '@/helpers/project-links'
+import { createProjectPreviewState } from '@/helpers/project-preview'
+import type { SourceProjectMetadata } from '@/helpers/resources'
 import {
     getLastBrowseContentDisplayMode,
     setLastBrowseContentDisplayMode,
@@ -88,6 +89,14 @@ type FavoriteProject = {
     unavailable: boolean
 }
 
+type FavoriteRow = { favorite: ContentFavorite; project?: FavoriteProject }
+type FavoritesView = {
+    search: string
+    filter: FavoriteFilter
+    page: number
+    projects: FavoriteProject[]
+}
+
 type FavoritesReturnState = {
     projects: FavoriteProject[]
 }
@@ -109,12 +118,11 @@ const { handleError } = injectNotificationManager()
 const contentSelection = injectContentSelection()
 const contentFavorites = useContentFavorites()
 const instanceSelector = ref<InstanceType<typeof BrowseInstanceSelector>>()
-const stickyInstallHeaderRef = ref<HTMLElement | null>(null)
-const { isStuck: isInstallHeaderStuck } = useStickyObserver(
-    stickyInstallHeaderRef,
-    'FavoritesInstallHeader',
-)
+const stickyChromeRef = ref<HTMLElement | null>(null)
+const { isStuck: isChromeStuck } = useStickyObserver(stickyChromeRef, 'FavoritesToolbarChrome')
 const projects = shallowRef<FavoriteProject[]>([])
+let projectsController: AbortController | null = null
+let disposed = false
 const loadingProjects = ref(false)
 const installingKeys = ref(new Set<string>())
 const displayMode = ref<FavoriteDisplayMode>(getLastBrowseContentDisplayMode())
@@ -123,8 +131,28 @@ const browseReturnSnapshot = navReturn.consumeBrowseReturnSnapshot<FavoritesRetu
     route.fullPath,
 )
 if (browseReturnSnapshot) projects.value = browseReturnSnapshot.state.projects
+const projectsLoadFailed = ref(false)
+const hasProjectsSnapshot = ref(!!browseReturnSnapshot)
+const metadataComplete = ref(false)
+const committedView = shallowRef<FavoritesView | null>(null)
 
 const messages = defineMessages({
+    refreshing: {
+        id: 'app.content-favorites.refreshing',
+        defaultMessage: 'Updating favorites…',
+    },
+    browseResources: {
+        id: 'app.content-favorites.browse-resources',
+        defaultMessage: 'Browse resources',
+    },
+    clearFilters: {
+        id: 'app.content-favorites.clear-filters',
+        defaultMessage: 'Clear search and filters',
+    },
+    loadFailed: {
+        id: 'app.content-favorites.load-failed',
+        defaultMessage: 'Failed to load favorites',
+    },
     title: {
         id: 'app.content-favorites.title',
         defaultMessage: 'Favorites',
@@ -264,6 +292,15 @@ function updateQuery(values: Record<string, string | undefined>) {
     })
 }
 
+function browseResources() {
+    const { q: _q, kind: _kind, page: _page, ...query } = route.query
+    void router.push({ path: '/browse/mod', query })
+}
+
+function clearFilters() {
+    updateQuery({ q: undefined, kind: undefined, page: undefined })
+}
+
 const search = computed({
     get: () => queryValue(route.query.q),
     set: (value: string) => updateQuery({ q: value || undefined, page: undefined }),
@@ -353,7 +390,9 @@ function toUnavailable(favorite: ContentFavorite): FavoriteProject {
             ? 'CurseForge'
             : favorite.provider === 'mcarchive'
               ? 'MCArchive'
-              : 'Modrinth'
+              : favorite.provider === 'planet_minecraft'
+                ? 'Planet Minecraft'
+                : 'Modrinth'
     return {
         favorite,
         provider: favorite.provider,
@@ -368,168 +407,260 @@ function toUnavailable(favorite: ContentFavorite): FavoriteProject {
     }
 }
 
-function toModrinthFavorite(
-    project: Labrinth.Projects.v2.Project,
-    favorite: ContentFavorite,
-): FavoriteProject {
+function toProject(favorite: ContentFavorite, metadata: SourceProjectMetadata): FavoriteProject {
     return {
         favorite,
-        provider: 'modrinth',
-        projectId: project.id,
-        title: project.title,
-        description: project.description,
-        slug: project.slug,
-        iconUrl: project.icon_url,
-        downloads: project.downloads,
-        categories: [typeLabel(favorite.content_type), ...project.categories],
-        dateCreated: project.published,
-        dateModified: project.updated,
-        banner: project.gallery?.find((image) => image.featured)?.url,
-        color: project.color,
-        environment: {
-            clientSide: project.client_side,
-            serverSide: project.server_side,
-        },
+        provider: metadata.project.source,
+        projectId: metadata.project.projectId,
+        title: metadata.title,
+        description: metadata.summary,
+        slug: metadata.slug ?? undefined,
+        iconUrl: metadata.iconUrl ?? undefined,
+        downloads: metadata.downloads ?? undefined,
+        categories: [typeLabel(favorite.content_type), ...metadata.categories],
+        dateCreated: metadata.createdAt ?? undefined,
+        dateModified: metadata.updatedAt ?? undefined,
+        banner: metadata.gallery[0],
         unavailable: false,
     }
 }
 
-function toCurseForgeFavorite(
-    project: CurseForgeProject,
-    favorite: ContentFavorite,
-): FavoriteProject {
-    return {
-        favorite,
-        provider: 'curseforge',
-        projectId: project.id.toString(),
-        title: project.name,
-        description: project.summary,
-        slug: project.slug,
-        iconUrl: getCurseForgeImageUrl(project.logo?.thumbnailUrl),
-        downloads: project.downloadCount,
-        categories: [
-            typeLabel(favorite.content_type),
-            ...project.categories.map((category) => category.slug),
-        ],
-        dateCreated: project.dateCreated,
-        dateModified: project.dateModified,
-        banner: getCurseForgeImageUrl(project.screenshots[0]?.thumbnailUrl, 960),
-        unavailable: false,
+function restoreCachedProjects() {
+    if (!contentFavorites.loaded.value) return
+    const cached = contentFavorites.favorites.value.flatMap((favorite) => {
+        const metadata = contentFavorites.getMetadata(favorite)
+        if (metadata) return [toProject(favorite, metadata)]
+        const previous = projects.value.find(
+            (project) => JSON.stringify(project.favorite) === JSON.stringify(favorite),
+        )
+        return previous ? [previous] : []
+    })
+    if (cached.length || contentFavorites.favorites.value.length === 0) {
+        projects.value = cached
+        hasProjectsSnapshot.value = true
     }
 }
 
-async function loadModrinthFavorites(projectIds: string[]) {
-    try {
-        return (await get_project_many(projectIds, 'bypass')) as Labrinth.Projects.v2.Project[]
-    } catch (error) {
-        handleError(error)
-        return await get_project_many(projectIds, 'cache_only').catch((cacheError) => {
-            handleError(cacheError)
-            return [] as Labrinth.Projects.v2.Project[]
-        })
-    }
-}
-
-async function loadCurseForgeFavorites(projectIds: number[]) {
-    try {
-        return await getCurseForgeProjects(projectIds, 'bypass')
-    } catch (error) {
-        handleError(error)
-        return await getCurseForgeProjects(projectIds, 'cache_only').catch((cacheError) => {
-            handleError(cacheError)
-            return [] as CurseForgeProject[]
-        })
-    }
-}
+if (!browseReturnSnapshot) restoreCachedProjects()
+metadataComplete.value =
+    contentFavorites.loaded.value &&
+    contentFavorites.favorites.value.every((favorite) =>
+        projects.value.some(
+            (project) => JSON.stringify(project.favorite) === JSON.stringify(favorite),
+        ),
+    )
 
 async function refreshProjects() {
+    if (disposed) return
     const requestId = ++projectRequestId
+    projectsController?.abort()
+    projectsController = new AbortController()
+    const signal = projectsController.signal
     loadingProjects.value = true
+    projectsLoadFailed.value = false
+    const isCurrent = () => requestId === projectRequestId && !signal.aborted && !disposed
     try {
         await contentFavorites.load(true)
+        if (!isCurrent()) return
+        metadataComplete.value = false
         const favorites = [...contentFavorites.favorites.value]
-        if (favorites.length === 0) {
-            if (requestId === projectRequestId) projects.value = []
-            return
+        hasProjectsSnapshot.value = true
+        const candidates = (favorite: ContentFavorite) => [
+            { source: favorite.provider, projectId: favorite.project_id },
+            ...(favorite.projects ?? []),
+        ]
+        const restoreLocal = (local: ReadonlyMap<string, SourceProjectMetadata>) => {
+            if (!isCurrent()) return
+            for (const favorite of favorites) {
+                const metadata = candidates(favorite)
+                    .map((project) => local.get(`${project.source}:${project.projectId}`))
+                    .find(Boolean)
+                if (metadata && !contentFavorites.getMetadata(favorite))
+                    contentFavorites.setMetadata(favorite, metadata)
+            }
+            restoreCachedProjects()
         }
-
-        const modrinthIds = favorites
-            .filter((favorite) => favorite.provider === 'modrinth')
-            .map((favorite) => favorite.project_id)
-        const curseForgeIds = favorites
-            .filter((favorite) => favorite.provider === 'curseforge')
-            .map((favorite) => Number(favorite.project_id))
-            .filter(Number.isSafeInteger)
-        const [modrinthResult, curseForgeResult] = await Promise.all([
-            modrinthIds.length
-                ? loadModrinthFavorites(modrinthIds)
-                : Promise.resolve([] as Labrinth.Projects.v2.Project[]),
-            curseForgeIds.length
-                ? loadCurseForgeFavorites(curseForgeIds)
-                : Promise.resolve([] as CurseForgeProject[]),
-        ])
-        if (requestId !== projectRequestId) return
-
-        const modrinthById = new Map(modrinthResult.map((project) => [project.id, project]))
-        const curseForgeById = new Map(
-            curseForgeResult.map((project) => [project.id.toString(), project]),
+        const local = await prefetchContentFavorites(
+            favorites,
+            signal,
+            'onlyCached',
+            (_source, metadata) => restoreLocal(metadata),
         )
-        projects.value = favorites.map((favorite) => {
-            if (favorite.provider === 'modrinth') {
-                const project = modrinthById.get(favorite.project_id)
-                return project ? toModrinthFavorite(project, favorite) : toUnavailable(favorite)
+        if (!isCurrent()) return
+        restoreLocal(local)
+
+        const settledSources = new Set<FavoriteProvider>()
+        const resolutions = new Map<string, Promise<FavoriteProject>>()
+        const publish = (project: FavoriteProject) => {
+            if (
+                !isCurrent() ||
+                !contentFavorites.favorites.value.some(
+                    (favorite) => JSON.stringify(favorite) === JSON.stringify(project.favorite),
+                )
+            )
+                return
+            const key = contentFavoriteKey(project.favorite.provider, project.favorite.project_id)
+            projects.value = [
+                ...projects.value.filter(
+                    (previous) =>
+                        contentFavoriteKey(
+                            previous.favorite.provider,
+                            previous.favorite.project_id,
+                        ) !== key,
+                ),
+                project,
+            ]
+        }
+        const schedule = (cached: ReadonlyMap<string, SourceProjectMetadata>) => {
+            if (!isCurrent()) return
+            for (const favorite of favorites) {
+                const key = contentFavoriteKey(favorite.provider, favorite.project_id)
+                const references = candidates(favorite)
+                if (
+                    resolutions.has(key) ||
+                    references.some(
+                        (project) =>
+                            (project.source === 'modrinth' || project.source === 'curseforge') &&
+                            !settledSources.has(project.source),
+                    )
+                )
+                    continue
+                const resolution = (async (): Promise<FavoriteProject> => {
+                    try {
+                        const metadata =
+                            references
+                                .map((project) =>
+                                    cached.get(`${project.source}:${project.projectId}`),
+                                )
+                                .find(Boolean) ?? (await resolveContentFavorite(favorite, signal))
+                        if (isCurrent()) contentFavorites.setMetadata(favorite, metadata)
+                        return toProject(favorite, metadata)
+                    } catch {
+                        const metadata = contentFavorites.getMetadata(favorite)
+                        return metadata ? toProject(favorite, metadata) : toUnavailable(favorite)
+                    }
+                })().then((project) => {
+                    publish(project)
+                    return project
+                })
+                resolutions.set(key, resolution)
             }
-            if (favorite.provider === 'curseforge') {
-                const project = curseForgeById.get(favorite.project_id)
-                return project ? toCurseForgeFavorite(project, favorite) : toUnavailable(favorite)
-            }
-            return toUnavailable(favorite)
-        })
-    } catch (error) {
-        handleError(error)
+        }
+        schedule(new Map())
+        const cached = await prefetchContentFavorites(
+            favorites,
+            signal,
+            'useFresh',
+            (source, metadata) => {
+                settledSources.add(source)
+                schedule(metadata)
+            },
+        )
+        if (!isCurrent()) return
+        // A source can be absent from the prefetch batch for historical favorites.
+        settledSources.add('modrinth')
+        settledSources.add('curseforge')
+        schedule(cached)
+        const resolved = await Promise.all(resolutions.values())
+        if (isCurrent()) {
+            projects.value = resolved
+            metadataComplete.value = true
+        }
+    } catch {
+        if (requestId === projectRequestId && !signal.aborted) projectsLoadFailed.value = true
     } finally {
         if (requestId === projectRequestId) loadingProjects.value = false
     }
 }
 
-const activeFavoriteKeys = computed(
-    () =>
-        new Set(
-            contentFavorites.favorites.value.map((favorite) =>
-                contentFavoriteKey(favorite.provider, favorite.project_id),
-            ),
-        ),
+onBeforeUnmount(() => {
+    disposed = true
+    projectsController?.abort()
+})
+
+const activeFavoriteIdentities = computed(
+    () => new Set(contentFavorites.favorites.value.map((favorite) => JSON.stringify(favorite))),
 )
 
 const availableProjects = computed(() =>
     projects.value
-        .filter((project) =>
-            activeFavoriteKeys.value.has(contentFavoriteKey(project.provider, project.projectId)),
-        )
+        .filter((project) => activeFavoriteIdentities.value.has(JSON.stringify(project.favorite)))
         .sort((left, right) => right.favorite.saved_at - left.favorite.saved_at),
 )
 
-const filteredProjects = computed(() => {
-    const normalizedSearch = search.value.trim().toLocaleLowerCase()
-    return availableProjects.value.filter((project) => {
-        if (filter.value !== 'all' && project.favorite.content_type !== filter.value) return false
-        if (!normalizedSearch) return true
-        return [project.title, project.description, project.provider, project.projectId]
+function matchesFilter(project: FavoriteProject, query: string, kind: FavoriteFilter) {
+    if (kind !== 'all' && project.favorite.content_type !== kind) return false
+    const normalizedSearch = query.trim().toLocaleLowerCase()
+    return (
+        !normalizedSearch ||
+        [project.title, project.description, project.provider, project.projectId]
             .join('\n')
             .toLocaleLowerCase()
             .includes(normalizedSearch)
-    })
+    )
+}
+
+watch(
+    [search, filter, currentPage, loadingProjects],
+    () => {
+        if (!loadingProjects.value && metadataComplete.value) {
+            const matching = availableProjects.value.filter((project) =>
+                matchesFilter(project, search.value, filter.value),
+            )
+            committedView.value = {
+                search: search.value,
+                filter: filter.value,
+                page: Math.min(
+                    currentPage.value,
+                    Math.max(1, Math.ceil(matching.length / PAGE_SIZE)),
+                ),
+                projects: matching,
+            }
+        } else if (
+            !search.value.trim() &&
+            filter.value === 'all' &&
+            (!committedView.value ||
+                (!committedView.value.search.trim() && committedView.value.filter === 'all'))
+        ) {
+            committedView.value = {
+                search: '',
+                filter: 'all',
+                page: currentPage.value,
+                projects: [],
+            }
+        }
+    },
+    { immediate: true },
+)
+
+const displayRows = computed<FavoriteRow[]>(() => {
+    const view = committedView.value
+    if (!view) return []
+    if (view.search.trim() || view.filter !== 'all')
+        return view.projects
+            .filter((project) =>
+                activeFavoriteIdentities.value.has(JSON.stringify(project.favorite)),
+            )
+            .map((project) => ({ favorite: project.favorite, project }))
+    const known = new Map(
+        availableProjects.value.map((project) => [JSON.stringify(project.favorite), project]),
+    )
+    return contentFavorites.favorites.value.map((favorite) => ({
+        favorite,
+        project: known.get(JSON.stringify(favorite)),
+    }))
+})
+const pageCount = computed(() => Math.max(1, Math.ceil(displayRows.value.length / PAGE_SIZE)))
+const displayedPage = computed(() =>
+    Math.min(committedView.value?.page ?? currentPage.value, pageCount.value),
+)
+const pagedRows = computed(() => {
+    const offset = (displayedPage.value - 1) * PAGE_SIZE
+    return displayRows.value.slice(offset, offset + PAGE_SIZE)
 })
 
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredProjects.value.length / PAGE_SIZE)))
-const pagedProjects = computed(() => {
-    const page = Math.min(currentPage.value, pageCount.value)
-    const offset = (page - 1) * PAGE_SIZE
-    return filteredProjects.value.slice(offset, offset + PAGE_SIZE)
-})
-
-watch(pageCount, (count) => {
-    if (currentPage.value > count) currentPage.value = count
+watch([pageCount, loadingProjects], ([count, loading]) => {
+    if (!loading && metadataComplete.value && currentPage.value > count) currentPage.value = count
 })
 
 const installContext = computed<BrowseInstallContext | null>(() => {
@@ -606,6 +737,10 @@ async function getModrinthVersions(projectId: string) {
 
 async function toggleProjectSelection(project: FavoriteProject) {
     if (project.unavailable) return
+    if (project.provider === 'mcarchive' || project.provider === 'planet_minecraft') {
+        await router.push(getProjectLink(project)!)
+        return
+    }
     if (!contentSelection.targetInstance.value) {
         await contentSelection.refreshInstances(queryValue(route.query.i) || undefined)
         instanceSelector.value?.show()
@@ -639,6 +774,7 @@ async function toggleProjectSelection(project: FavoriteProject) {
                   ).files
                       .find((file) => file.isAvailable)
                       ?.id.toString()
+        if (contentSelection.targetInstance.value?.id !== target.id) return
         if (!versionId) throw new Error(formatMessage(messages.noCompatibleVersion))
 
         await contentSelection.add({
@@ -652,9 +788,10 @@ async function toggleProjectSelection(project: FavoriteProject) {
             iconUrl: project.iconUrl,
             slug: project.slug,
             preferences,
+            targetInstanceId: target.id,
         })
     } catch (error) {
-        handleError(error)
+        if (contentSelection.targetInstance.value?.id === target.id) handleError(error)
     } finally {
         setInstalling(key, false)
     }
@@ -662,7 +799,7 @@ async function toggleProjectSelection(project: FavoriteProject) {
 
 async function removeFavorite(project: FavoriteProject) {
     try {
-        await contentFavorites.remove(project.provider, project.projectId)
+        await contentFavorites.remove(project.favorite.provider, project.favorite.project_id)
     } catch (error) {
         handleError(error)
     }
@@ -681,12 +818,19 @@ function setDisplayMode(mode: FavoriteDisplayMode) {
 
 function getProjectLink(project: FavoriteProject) {
     if (project.unavailable) return undefined
+    const path = project.favorite.resource_id
+        ? `/resource/${project.favorite.resource_id}`
+        : project.provider === 'curseforge'
+          ? `/project/curseforge/${project.projectId}`
+          : project.provider === 'mcarchive'
+            ? `/project/mcarchive/${project.slug ?? project.projectId}`
+            : project.provider === 'planet_minecraft'
+              ? `/project/planet-minecraft/${project.projectId}`
+              : `/project/${project.slug ?? project.projectId}`
     return {
-        path:
-            project.provider === 'curseforge'
-                ? `/project/curseforge/${project.projectId}`
-                : `/project/${project.slug ?? project.projectId}`,
-        query: { ...route.query, b: route.fullPath },
+        path,
+        query: createProjectDetailsQuery(route.query, route.fullPath),
+        state: createProjectPreviewState(path, project.title),
     }
 }
 
@@ -710,14 +854,24 @@ onBeforeRouteLeave((to) => {
 watch(
     () =>
         contentFavorites.favorites.value
-            .map((favorite) => `${favorite.provider}:${favorite.project_id}`)
+            .map((favorite) =>
+                JSON.stringify([
+                    favorite.provider,
+                    favorite.project_id,
+                    favorite.resource_id,
+                    favorite.locator,
+                    favorite.projects,
+                ]),
+            )
             .join('|'),
     () => void refreshProjects(),
 )
 
-onMounted(async () => {
+onMounted(() => {
     breadcrumbs.setName('FavoritesTitle', formatMessage(messages.title))
-    await contentSelection.refreshInstances(queryValue(route.query.i) || undefined)
+    void contentSelection
+        .refreshInstances(queryValue(route.query.i) || undefined)
+        .catch(handleError)
     if (browseReturnSnapshot) {
         void nextTick().then(
             () =>
@@ -742,117 +896,149 @@ onMounted(async () => {
 <template>
     <div data-onboarding-id="browse-favorites-content" class="flex flex-col gap-3 p-6">
         <div
-            v-if="installContext?.showInstallHeader"
-            ref="stickyInstallHeaderRef"
-            class="browse-install-header sticky top-0 z-20 -mx-6 -mt-6 rounded-tl-[--radius-xl] border-0 border-b border-solid bg-surface-1 p-3 border-surface-5"
-            :class="[isInstallHeaderStuck ? 'border-t' : '']"
+            ref="stickyChromeRef"
+            class="browse-toolbar-chrome sticky top-0 z-20 -mx-6 -mt-6 flex flex-col gap-3 rounded-tl-[--radius-xl] rounded-tr-[--radius-xl] border-0 border-b border-solid border-surface-5 bg-[color-mix(in_srgb,var(--surface-1-opaque,var(--surface-1))_20%,transparent)] backdrop-blur-xl"
+            :class="isChromeStuck ? 'border-t shadow-[0_8px_16px_-12px_rgba(0,0,0,0.35)]' : ''"
         >
-            <BrowseInstallHeader :install-context="installContext" />
-        </div>
+            <div v-if="installContext?.showInstallHeader" class="p-3 pb-0">
+                <BrowseInstallHeader :install-context="installContext" />
+            </div>
 
-        <div class="flex min-h-12 items-center justify-between">
-            <NavTabs :links="projectTabs" />
-        </div>
+            <div class="flex flex-col gap-3 p-3">
+                <div class="flex min-w-0 items-center gap-2">
+                    <NavTabs :links="projectTabs" class="min-w-0" />
+                </div>
 
-        <div class="flex flex-wrap items-center gap-2">
-            <StyledInput
-                v-model="search"
-                :icon="SearchIcon"
-                type="text"
-                autocomplete="off"
-                clearable
-                :placeholder="formatMessage(messages.search)"
-                wrapper-class="flex-1"
-                input-class="h-12"
-            />
-            <Button
-                size="md"
-                class="flex min-w-0 items-center gap-2"
-                @click="instanceSelector?.show()"
-                ><InstanceIcon
-                    v-if="contentSelection.targetInstance.value"
-                    class="shrink-0"
-                    size="1.25rem"
-                    :icon-path="contentSelection.targetInstance.value.icon_path"
-                    :instance-id="contentSelection.targetInstance.value.id"
-                    :loader="contentSelection.targetInstance.value.loader"
-                />
-                <PlusIcon v-else class="size-5 shrink-0" />
-                <span class="max-w-40 truncate font-medium">
-                    {{
-                        contentSelection.targetInstance.value?.name ??
-                        formatMessage(messages.chooseInstance)
-                    }}
-                </span>
-                <span
-                    aria-hidden="true"
-                    class="flex size-4 shrink-0 items-center justify-center text-[var(--color-text-tertiary)]"
-                >
-                    <ChevronDownIcon class="size-4" />
-                </span>
-            </Button>
-            <PopoutMenu placement="bottom-end">
-                <Button size="md" class="flex items-center gap-2"
-                    ><BookmarkIcon class="size-5" />
-                    <span>{{ currentFavoriteTypeLabel }}</span>
-                </Button>
-                <template #menu>
-                    <div class="flex w-48 flex-col gap-1 p-1">
-                        <Button
-                            v-for="option in favoriteTypeOptions"
-                            :key="option.id"
-                            :type="filter === option.id ? 'colored' : 'quiet'"
-                            class="flex w-full !justify-start text-left"
-                            :aria-pressed="filter === option.id"
-                            @click="filter = option.id"
+                <div class="flex flex-wrap items-center gap-2">
+                    <StyledInput
+                        v-model="search"
+                        :icon="SearchIcon"
+                        type="text"
+                        autocomplete="off"
+                        clearable
+                        :placeholder="formatMessage(messages.search)"
+                        wrapper-class="flex-1"
+                        input-class="h-12"
+                    />
+                    <Button
+                        size="md"
+                        class="flex min-w-0 items-center gap-2"
+                        @click="instanceSelector?.show()"
+                        ><InstanceIcon
+                            v-if="contentSelection.targetInstance.value"
+                            class="shrink-0"
+                            size="1.25rem"
+                            :icon-path="contentSelection.targetInstance.value.icon_path"
+                            :instance-id="contentSelection.targetInstance.value.id"
+                            :loader="contentSelection.targetInstance.value.loader"
+                        />
+                        <PlusIcon v-else class="size-5 shrink-0" />
+                        <span class="max-w-40 truncate font-medium">
+                            {{
+                                contentSelection.targetInstance.value?.name ??
+                                formatMessage(messages.chooseInstance)
+                            }}
+                        </span>
+                        <span
+                            aria-hidden="true"
+                            class="flex size-4 shrink-0 items-center justify-center text-[var(--color-text-tertiary)]"
                         >
-                            {{ option.label }}
+                            <ChevronDownIcon class="size-4" />
+                        </span>
+                    </Button>
+                    <PopoutMenu placement="bottom-end">
+                        <Button size="md" class="flex items-center gap-2"
+                            ><BookmarkIcon class="size-5" />
+                            <span>{{ currentFavoriteTypeLabel }}</span>
                         </Button>
-                    </div>
-                </template>
-            </PopoutMenu>
+                        <template #menu>
+                            <div class="flex w-48 flex-col gap-1 p-1">
+                                <Button
+                                    v-for="option in favoriteTypeOptions"
+                                    :key="option.id"
+                                    :type="filter === option.id ? 'colored' : 'quiet'"
+                                    class="flex w-full !justify-start text-left"
+                                    :aria-pressed="filter === option.id"
+                                    @click="filter = option.id"
+                                >
+                                    {{ option.label }}
+                                </Button>
+                            </div>
+                        </template>
+                    </PopoutMenu>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-sm font-medium text-[var(--color-text-tertiary)]">{{
+                        formatMessage(messages.recentlySaved)
+                    }}</span>
+                    <PopoutMenu
+                        :tooltip="formatMessage(messages.view)"
+                        placement="bottom-end"
+                        class="ml-auto"
+                    >
+                        <Button circular icon-only :aria-label="formatMessage(messages.view)"
+                            ><component :is="currentDisplayMode?.icon" />
+                        </Button>
+                        <template #menu>
+                            <div class="flex w-44 flex-col gap-1 p-1">
+                                <Button
+                                    v-for="option in displayModeOptions"
+                                    :key="option.id"
+                                    :type="displayMode === option.id ? 'colored' : 'quiet'"
+                                    class="flex w-full items-center gap-2 !justify-start text-left"
+                                    :aria-pressed="displayMode === option.id"
+                                    @click="setDisplayMode(option.id)"
+                                >
+                                    <component :is="option.icon" class="size-4" />
+                                    {{ option.label }}
+                                </Button>
+                            </div>
+                        </template>
+                    </PopoutMenu>
+                    <Pagination
+                        :page="displayedPage"
+                        :count="pageCount"
+                        @switch-page="currentPage = $event"
+                    />
+                </div>
+            </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
-            <span class="text-sm font-medium text-[var(--color-text-tertiary)]">{{
-                formatMessage(messages.recentlySaved)
-            }}</span>
-            <PopoutMenu
-                :tooltip="formatMessage(messages.view)"
-                placement="bottom-end"
-                class="ml-auto"
-            >
-                <Button circular icon-only :aria-label="formatMessage(messages.view)"
-                    ><component :is="currentDisplayMode?.icon" />
-                </Button>
-                <template #menu>
-                    <div class="flex w-44 flex-col gap-1 p-1">
-                        <Button
-                            v-for="option in displayModeOptions"
-                            :key="option.id"
-                            :type="displayMode === option.id ? 'colored' : 'quiet'"
-                            class="flex w-full items-center gap-2 !justify-start text-left"
-                            :aria-pressed="displayMode === option.id"
-                            @click="setDisplayMode(option.id)"
-                        >
-                            <component :is="option.icon" class="size-4" />
-                            {{ option.label }}
-                        </Button>
-                    </div>
-                </template>
-            </PopoutMenu>
-            <Pagination
-                :page="currentPage"
-                :count="pageCount"
-                @switch-page="currentPage = $event"
-            />
-        </div>
-
+        <p
+            v-if="loadingProjects && committedView"
+            role="status"
+            class="m-0 text-sm text-[var(--color-text-tertiary)]"
+        >
+            {{ formatMessage(messages.refreshing) }}
+        </p>
+        <Admonition
+            v-if="projectsLoadFailed && hasProjectsSnapshot"
+            type="warning"
+            :header="formatMessage(messages.loadFailed)"
+        >
+            <Button type="outlined" :loading="loadingProjects" @click="refreshProjects">{{
+                formatMessage(commonMessages.retryButton)
+            }}</Button>
+        </Admonition>
+        <EmptyState
+            v-if="projectsLoadFailed && !hasProjectsSnapshot"
+            type="error"
+            :heading="formatMessage(messages.loadFailed)"
+        >
+            <template #actions>
+                <Button type="outlined" :loading="loadingProjects" @click="refreshProjects">{{
+                    formatMessage(commonMessages.retryButton)
+                }}</Button>
+            </template>
+        </EmptyState>
         <section
-            v-if="loadingProjects && availableProjects.length === 0"
-            class="flex min-h-64 items-center justify-center"
+            v-else-if="!committedView || (!contentFavorites.loaded.value && !hasProjectsSnapshot)"
+            aria-busy="true"
         >
-            <LoadingIndicator />
+            <ProjectCardList :layout="displayMode">
+                <ProjectCardSkeleton v-for="index in 6" :key="index" :layout="displayMode" />
+            </ProjectCardList>
         </section>
         <EmptyState
             v-else-if="
@@ -861,75 +1047,101 @@ onMounted(async () => {
             type="empty-inbox"
             :heading="formatMessage(messages.emptyTitle)"
             :description="formatMessage(messages.emptyDescription)"
-        />
+        >
+            <template #actions>
+                <Button type="colored" color="brand" @click="browseResources">{{
+                    formatMessage(messages.browseResources)
+                }}</Button>
+            </template>
+        </EmptyState>
         <EmptyState
-            v-else-if="filteredProjects.length === 0"
+            v-else-if="displayRows.length === 0"
             type="no-search-result"
             :heading="formatMessage(messages.noMatchesTitle)"
             :description="formatMessage(messages.noMatchesDescription)"
-        />
-        <ProjectCardList v-else :layout="displayMode">
-            <ProjectCard
-                v-for="project in pagedProjects"
-                :key="`${project.provider}:${project.projectId}`"
-                :layout="displayMode"
-                :link="getProjectLink(project)"
-                :title="project.title"
-                :summary="project.description"
-                :icon-url="project.iconUrl"
-                :downloads="project.downloads"
-                :tags="project.categories"
-                :date-published="project.dateCreated"
-                :date-updated="project.dateModified"
-                :banner="project.banner"
-                :color="project.color"
-                :environment="project.environment"
-                :provider="project.provider"
+        >
+            <template #actions>
+                <Button type="outlined" @click="clearFilters">{{
+                    formatMessage(messages.clearFilters)
+                }}</Button>
+            </template>
+        </EmptyState>
+        <ProjectCardList v-else :layout="displayMode" :aria-busy="loadingProjects">
+            <template
+                v-for="row in pagedRows"
+                :key="contentFavoriteKey(row.favorite.provider, row.favorite.project_id)"
             >
-                <template #actions>
-                    <div class="flex gap-2">
-                        <Button
-                            v-if="!project.unavailable"
-                            color="brand"
-                            type="outlined"
-                            :size="displayMode === 'compact' ? '2xs' : 'md'"
-                            :disabled="isInstalling(project)"
-                            @click.stop="toggleProjectSelection(project)"
-                        >
-                            <SpinnerIcon v-if="isInstalling(project)" class="animate-spin" />
-                            <CheckIcon v-else-if="isSelected(project)" />
-                            <PlusIcon v-else />
-                            {{ installLabel(project) }}
-                        </Button>
-                        <Button
-                            v-tooltip="formatMessage(messages.remove)"
-                            circular
-                            icon-only
-                            color="brand"
-                            type="quiet"
-                            :size="displayMode === 'compact' ? '2xs' : 'md'"
-                            :disabled="
-                                contentFavorites.isPending(project.provider, project.projectId)
-                            "
-                            :label="formatMessage(messages.remove)"
-                            @click.stop="removeFavorite(project)"
-                        >
-                            <SpinnerIcon
-                                v-if="
-                                    contentFavorites.isPending(project.provider, project.projectId)
+                <ProjectCardSkeleton v-if="!row.project" :layout="displayMode" />
+                <ProjectCard
+                    v-else
+                    :layout="displayMode"
+                    :link="getProjectLink(row.project)"
+                    :title="row.project.title"
+                    :summary="row.project.description"
+                    :icon-url="row.project.iconUrl"
+                    :downloads="row.project.downloads"
+                    :tags="row.project.categories"
+                    :date-published="row.project.dateCreated"
+                    :date-updated="row.project.dateModified"
+                    :banner="row.project.banner"
+                    :color="row.project.color"
+                    :environment="row.project.environment"
+                    :provider="row.project.provider"
+                >
+                    <template #actions>
+                        <div class="flex gap-2">
+                            <Button
+                                v-if="!row.project.unavailable"
+                                color="brand"
+                                type="outlined"
+                                :size="displayMode === 'compact' ? '2xs' : 'md'"
+                                :disabled="isInstalling(row.project)"
+                                @click.stop="toggleProjectSelection(row.project)"
+                            >
+                                <SpinnerIcon
+                                    v-if="isInstalling(row.project)"
+                                    class="animate-spin"
+                                />
+                                <CheckIcon v-else-if="isSelected(row.project)" />
+                                <PlusIcon v-else />
+                                {{ installLabel(row.project) }}
+                            </Button>
+                            <Button
+                                v-tooltip="formatMessage(messages.remove)"
+                                circular
+                                icon-only
+                                color="brand"
+                                type="quiet"
+                                :size="displayMode === 'compact' ? '2xs' : 'md'"
+                                :disabled="
+                                    contentFavorites.isPending(
+                                        row.project.provider,
+                                        row.project.projectId,
+                                    )
                                 "
-                                class="animate-spin"
-                            />
-                            <BookmarkFilledIcon v-else />
-                        </Button>
-                    </div>
-                </template>
-            </ProjectCard>
+                                :label="formatMessage(messages.remove)"
+                                @click.stop="removeFavorite(row.project)"
+                            >
+                                <SpinnerIcon
+                                    v-if="
+                                        contentFavorites.isPending(
+                                            row.project.provider,
+                                            row.project.projectId,
+                                        )
+                                    "
+                                    class="animate-spin"
+                                />
+                                <BookmarkFilledIcon v-else />
+                            </Button>
+                        </div>
+                    </template>
+                </ProjectCard>
+            </template>
         </ProjectCardList>
 
         <div class="flex justify-end">
             <Pagination
-                :page="currentPage"
+                :page="displayedPage"
                 :count="pageCount"
                 @switch-page="currentPage = $event"
             />

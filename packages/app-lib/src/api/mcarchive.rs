@@ -209,9 +209,9 @@ pub async fn get_file_by_sha256(
 pub async fn download_file(file: &McArchiveFile) -> crate::Result<Vec<u8>> {
     let url = file.download_url().ok_or_else(|| {
         crate::ErrorKind::InputError(
-			"MCArchive does not expose a verifiable direct archive URL for this file"
-				.to_string(),
-		)
+            "MCArchive does not expose a verifiable direct archive URL for this file"
+                .to_string(),
+        )
     })?;
     let state = State::get().await?;
     let _permit = state.download_semaphore.0.acquire().await?;
@@ -272,7 +272,7 @@ where
     Ok(value.and_then(OneOrCollection::into_first))
 }
 
-async fn get_json<T>(url: &str, fields: &str) -> crate::Result<T>
+pub(crate) async fn get_json<T>(url: &str, fields: &str) -> crate::Result<T>
 where
     T: for<'de> Deserialize<'de>,
 {

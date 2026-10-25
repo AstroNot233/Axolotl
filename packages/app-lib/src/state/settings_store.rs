@@ -34,7 +34,7 @@ use crate::state::{DirectoryInfo, Settings};
 use crate::util::proxy::ProxyConfig;
 
 const DIR_NAME: &str = "settings";
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 /// The marker a finished settings handover leaves behind.
 const HANDOVER_MARKER_FILE: &str = ".handed-over";
@@ -99,6 +99,8 @@ const DOMAINS: &[(&str, &[&str])] = &[
             "minecraft_metadata_source",
             "modrinth_source",
             "mojang_auth_source",
+            "resource_chinese_filenames",
+            "resource_preserve_filenames",
         ],
     ),
     (

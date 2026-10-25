@@ -144,6 +144,8 @@ export type AppSettings = DohSettings & {
     modrinth_source: DownloadSourceMode
     curseforge_source: DownloadSourceMode
     bypass_curseforge_download_restrictions: boolean
+    resource_chinese_filenames: boolean
+    resource_preserve_filenames: boolean
     ignore_ssl_errors: boolean
     mojang_auth_source: DownloadSourceMode
 
@@ -263,6 +265,8 @@ function normalizeDownloadSettings(settings: AppSettings & LegacyMirrorSettings)
             ? 'auto'
             : legacySource(settings.use_curseforge_mirror)
     settings.bypass_curseforge_download_restrictions ??= true
+    settings.resource_chinese_filenames ??= true
+    settings.resource_preserve_filenames ??= true
     settings.ignore_ssl_errors ??= false
     settings.mojang_auth_source ??= 'auto'
     settings.terracotta_public_nodes ??= ['wss://center.node.1tmc.top']
@@ -285,33 +289,6 @@ function normalizeDownloadSettings(settings: AppSettings & LegacyMirrorSettings)
     }
 
     return settings
-}
-
-function syncLegacyMirrorSettings(settings: AppSettings & LegacyMirrorSettings) {
-    const legacyValue = (source: DownloadSourceMode, current: boolean | undefined) => {
-        if (source === 'mirror_preferred') return true
-        if (source === 'official_only') return false
-        return current ?? false
-    }
-
-    if (typeof settings.use_minecraft_mirror === 'boolean') {
-        settings.use_minecraft_mirror = legacyValue(
-            settings.minecraft_file_source,
-            settings.use_minecraft_mirror,
-        )
-    }
-    if (typeof settings.use_modrinth_mirror === 'boolean') {
-        settings.use_modrinth_mirror = legacyValue(
-            settings.modrinth_source,
-            settings.use_modrinth_mirror,
-        )
-    }
-    if (typeof settings.use_curseforge_mirror === 'boolean') {
-        settings.use_curseforge_mirror = legacyValue(
-            settings.curseforge_source,
-            settings.use_curseforge_mirror,
-        )
-    }
 }
 
 export const appSettingsKeys = {
@@ -337,7 +314,11 @@ export function parseEnvVars(input: string | undefined | null): [string, string]
     const vars: [string, string][] = []
     for (const entry of input.trim().split(/\s+/)) {
         const separator = entry.indexOf('=')
-        if (separator <= 0) continue
+        if (separator <= 0 || entry.includes('\0')) {
+            throw new Error(
+                'Environment variables must use NAME=value and cannot contain null characters.',
+            )
+        }
         vars.push([entry.slice(0, separator), entry.slice(separator + 1)])
     }
     return vars
@@ -351,11 +332,15 @@ export async function get() {
     return settings
 }
 
-// Set full settings object
-export async function set(settings: AppSettings) {
-    syncLegacyMirrorSettings(settings)
-    const result = await invoke('plugin:settings|settings_set', { settings })
-    return result
+export type AppSettingsPatch = {
+    [K in keyof AppSettings]?: AppSettings[K] extends Record<string, unknown>
+        ? Partial<AppSettings[K]>
+        : AppSettings[K]
+}
+
+/** Merges edited fields into the authoritative backend settings. */
+export async function update(patch: AppSettingsPatch): Promise<AppSettings> {
+    return normalizeDownloadSettings(await invoke('plugin:settings|settings_patch', { patch }))
 }
 
 export async function cancel_directory_change(): Promise<void> {

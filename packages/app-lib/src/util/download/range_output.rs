@@ -1,12 +1,19 @@
 //! Positional output for native HTTP/1.1 and HTTP/2 range downloads.
 
+use crate::util::download::constants::{
+    RANGE_OUTPUT_CREATING_RANGED_DOWNLOAD_OUTPUT,
+    RANGE_OUTPUT_FLUSHING_RANGED_DOWNLOAD_OUTPUT,
+    RANGE_OUTPUT_INVALID_RANGE_BOUNDS, RANGE_OUTPUT_OFFSET_OVERFLOW,
+    RANGE_OUTPUT_OPENING_RANGED_DOWNLOAD_OUTPUT,
+    RANGE_OUTPUT_RANGE_OUTPUT_LENGTH_CHANGED, RANGE_OUTPUT_WRITE_EXCEEDS_RANGE,
+};
 use crate::util::io::{self, IOError};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt, BufWriter, SeekFrom};
 
-const RANGE_WRITER_BUFFER_CAPACITY: usize = 256 * 1024;
+use super::constants::RANGE_WRITER_BUFFER_CAPACITY;
 
 #[cfg(test)]
 struct RangeWriteTestProbe {
@@ -36,6 +43,42 @@ pub(crate) struct RangeWriter {
 }
 
 impl RangeOutput {
+    /// Extend a contiguous partial file without overwriting its accepted prefix.
+    /// The caller holds the destination lock and verifies the final file hash.
+    pub(crate) async fn resume_prefix(
+        path: &Path,
+        size: u64,
+        prefix: u64,
+    ) -> Result<Arc<Self>, IOError> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .await
+            .map_err(|error| IOError::with_path(error, path))?;
+        let metadata = file
+            .metadata()
+            .await
+            .map_err(|error| IOError::with_path(error, path))?;
+        if prefix == 0
+            || prefix >= size
+            || !metadata.is_file()
+            || metadata.len() != prefix
+        {
+            return Err(IOError::with_path(
+                std::io::Error::other(RANGE_OUTPUT_RANGE_OUTPUT_LENGTH_CHANGED),
+                path,
+            ));
+        }
+        super::local_resources::write(path, 0, file.set_len(size))
+            .await
+            .map_err(|error| IOError::with_path(error, path))?;
+        Ok(Arc::new(Self {
+            path: path.to_path_buf(),
+            size,
+        }))
+    }
+
     pub(crate) async fn reopen(
         path: &Path,
         size: u64,
@@ -45,7 +88,7 @@ impl RangeOutput {
             .map_err(|error| IOError::with_path(error, path))?;
         if !metadata.is_file() || metadata.len() != size {
             return Err(IOError::with_path(
-                std::io::Error::other("range output length changed"),
+                std::io::Error::other(RANGE_OUTPUT_RANGE_OUTPUT_LENGTH_CHANGED),
                 path,
             ));
         }
@@ -60,7 +103,7 @@ impl RangeOutput {
     ) -> Result<Arc<Self>, IOError> {
         io::retry_windows_sharing_violation(
             path,
-            "creating ranged download output",
+            RANGE_OUTPUT_CREATING_RANGED_DOWNLOAD_OUTPUT,
             || async {
                 let file = OpenOptions::new()
                     .create(true)
@@ -91,7 +134,7 @@ impl RangeOutput {
             return Err(IOError::with_path(
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "invalid range bounds",
+                    RANGE_OUTPUT_INVALID_RANGE_BOUNDS,
                 ),
                 &self.path,
             ));
@@ -99,7 +142,7 @@ impl RangeOutput {
         let path = self.path.clone();
         let mut file = io::retry_windows_sharing_violation(
             &path,
-            "opening ranged download output",
+            RANGE_OUTPUT_OPENING_RANGED_DOWNLOAD_OUTPUT,
             || async {
                 OpenOptions::new().read(true).write(true).open(&path).await
             },
@@ -129,7 +172,7 @@ impl RangeOutput {
             IOError::with_path(
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "offset overflow",
+                    RANGE_OUTPUT_OFFSET_OVERFLOW,
                 ),
                 path,
             )
@@ -144,7 +187,7 @@ impl RangeOutput {
     pub(crate) async fn flush(&self, path: &Path) -> Result<(), IOError> {
         let mut file = io::retry_windows_sharing_violation(
             path,
-            "flushing ranged download output",
+            RANGE_OUTPUT_FLUSHING_RANGED_DOWNLOAD_OUTPUT,
             || async {
                 OpenOptions::new().read(true).write(true).open(path).await
             },
@@ -175,7 +218,7 @@ impl RangeWriter {
             return Err(IOError::with_path(
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "write exceeds range",
+                    RANGE_OUTPUT_WRITE_EXCEEDS_RANGE,
                 ),
                 &self.path,
             ));
@@ -227,6 +270,22 @@ mod tests {
     use super::*;
     use futures::future::try_join_all;
     use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn extends_only_an_unchanged_contiguous_prefix() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("resume.part");
+        tokio::fs::write(&path, [7; 128]).await.unwrap();
+        assert!(RangeOutput::resume_prefix(&path, 512, 127).await.is_err());
+        assert_eq!(tokio::fs::metadata(&path).await.unwrap().len(), 128);
+        let output = RangeOutput::resume_prefix(&path, 512, 128).await.unwrap();
+        let mut writer = output.open_range(128, 512).await.unwrap();
+        writer.write_next(&[8; 384]).await.unwrap();
+        writer.flush().await.unwrap();
+        let bytes = tokio::fs::read(&path).await.unwrap();
+        assert_eq!(&bytes[..128], &[7; 128]);
+        assert_eq!(&bytes[128..], &[8; 384]);
+    }
 
     #[tokio::test]
     async fn writes_non_overlapping_ranges_with_independent_writers() {
