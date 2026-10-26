@@ -153,7 +153,7 @@ where
                         || minecraft_users_len == 1,
                     yggdrasil: None,
                 }
-                .upsert(exec)
+                .upsert(handle)
                 .await?;
             }
 
@@ -176,7 +176,7 @@ where
                         y: device_token.y,
                     },
                 }
-                .upsert(exec)
+                .upsert(handle)
                 .await?;
             }
         }
