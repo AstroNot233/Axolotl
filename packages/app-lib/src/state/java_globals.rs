@@ -38,7 +38,9 @@ impl JavaVersion {
     }
 
     /// Every default runtime the launcher holds, the highest version first.
-    pub async fn get_all_defaults(handle: &Handle) -> crate::Result<Vec<Self>> {
+    pub(crate) async fn get_all_defaults(
+        handle: &Handle,
+    ) -> crate::Result<Vec<Self>> {
         let mut unit = atom(handle).await?;
         let mut versions = Vec::new();
         for (_, default) in JavaDefaultVersions::atom_get_all(&mut unit).await?
@@ -57,7 +59,7 @@ impl JavaVersion {
         Ok(versions)
     }
 
-    pub async fn get_all(handle: &Handle) -> crate::Result<Vec<Self>> {
+    pub(crate) async fn get_all(handle: &Handle) -> crate::Result<Vec<Self>> {
         Ok(Self::from_records(JavaVersions::get_all(handle).await?))
     }
 
@@ -67,7 +69,7 @@ impl JavaVersion {
         Ok(Self::from_records(JavaVersions::atom_get_all(unit).await?))
     }
 
-    pub async fn upsert(&self, handle: &Handle) -> crate::Result<()> {
+    pub(crate) async fn upsert(&self, handle: &Handle) -> crate::Result<()> {
         let mut unit = atom(handle).await?;
         self.upsert_in(&mut unit).await?;
         unit.commit().await
@@ -137,7 +139,10 @@ impl JavaVersion {
         Ok(())
     }
 
-    pub async fn delete(path: &str, handle: &Handle) -> crate::Result<()> {
+    pub(crate) async fn delete(
+        path: &str,
+        handle: &Handle,
+    ) -> crate::Result<()> {
         JavaVersions::set(handle, &path.to_string(), None).await
     }
 
