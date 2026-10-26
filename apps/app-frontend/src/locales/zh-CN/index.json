@@ -39,7 +39,7 @@
     "message": "预览完全访问模式（不改变实际权限）"
   },
   "app.settings.tabs.mcp": {
-    "message": "MCP"
+    "message": "MCP 服务器"
   },
   "app.mcp.introduction": {
     "message": "通过 Model Context Protocol，让 AI 客户端管理你的启动器。"

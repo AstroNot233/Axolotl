@@ -2,6 +2,8 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 
+use sqlx::SqliteConnection;
+
 use super::{Collection, Handle};
 
 /// The server join log, kept per instance and server address.
@@ -15,6 +17,11 @@ pub(crate) struct JoinLogKey {
     pub port: u16,
 }
 
+/// Every server of one instance.
+pub(crate) struct InstanceJoins {
+    pub instance_id: String,
+}
+
 /// What a join left behind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct JoinLogEntry {
@@ -23,10 +30,37 @@ pub(crate) struct JoinLogEntry {
 
 impl Collection for JoinLog {
     type Key = JoinLogKey;
+    type Scope = InstanceJoins;
     type Record = JoinLogEntry;
 
-    async fn set(
-        handle: &Handle,
+    fn in_scope(scope: &Self::Scope, key: &Self::Key) -> bool {
+        scope.instance_id == key.instance_id
+    }
+
+    async fn read(
+        conn: &mut SqliteConnection,
+        key: &Self::Key,
+    ) -> crate::Result<Option<Self::Record>> {
+        let join_time: Option<i64> = sqlx::query_scalar(
+            "
+            SELECT join_time
+            FROM join_log
+            WHERE instance_id = ? AND host = ? AND port = ?
+            ",
+        )
+        .bind(&key.instance_id)
+        .bind(&key.host)
+        .bind(i64::from(key.port))
+        .fetch_optional(&mut *conn)
+        .await?;
+
+        Ok(join_time.map(|join_time| Self::Record {
+            join_time: to_time(join_time),
+        }))
+    }
+
+    async fn write(
+        conn: &mut SqliteConnection,
         key: &Self::Key,
         record: Option<&Self::Record>,
     ) -> crate::Result<()> {
@@ -40,117 +74,223 @@ impl Collection for JoinLog {
             .bind(&key.instance_id)
             .bind(&key.host)
             .bind(i64::from(key.port))
-            .execute(handle.pool())
+            .execute(&mut *conn)
             .await?;
 
             return Ok(());
         };
 
-        sqlx::query(
-            "
-            INSERT INTO join_log (instance_id, host, port, join_time)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT (instance_id, host, port) DO UPDATE SET
-                join_time = excluded.join_time
-            ",
-        )
-        .bind(&key.instance_id)
-        .bind(&key.host)
-        .bind(i64::from(key.port))
-        .bind(record.join_time.timestamp())
-        .execute(handle.pool())
-        .await?;
-
-        Ok(())
+        write_row(conn, key, record).await
     }
 
-    async fn get(
-        handle: &Handle,
-        key: &Self::Key,
-    ) -> crate::Result<Option<Self::Record>> {
-        let join_time: Option<i64> = sqlx::query_scalar(
-            "
-            SELECT join_time
-            FROM join_log
-            WHERE instance_id = ? AND host = ? AND port = ?
-            ",
-        )
-        .bind(&key.instance_id)
-        .bind(&key.host)
-        .bind(i64::from(key.port))
-        .fetch_optional(handle.pool())
-        .await?;
-
-        Ok(join_time.map(|join_time| Self::Record {
-            join_time: to_time(join_time),
-        }))
-    }
-
-    async fn set_all(
-        handle: &Handle,
-        records: &[(Self::Key, Self::Record)],
-    ) -> crate::Result<()> {
-        let mut transaction = handle.pool().begin().await?;
-        for (key, record) in records {
-            sqlx::query(
-                "
-                INSERT INTO join_log (instance_id, host, port, join_time)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (instance_id, host, port) DO UPDATE SET
-                    join_time = excluded.join_time
-                ",
-            )
-            .bind(&key.instance_id)
-            .bind(&key.host)
-            .bind(i64::from(key.port))
-            .bind(record.join_time.timestamp())
-            .execute(&mut *transaction)
-            .await?;
-        }
-        transaction.commit().await?;
-
-        Ok(())
-    }
-
-    async fn get_all(
-        handle: &Handle,
+    async fn read_all(
+        conn: &mut SqliteConnection,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
         let rows: Vec<(String, String, i64, i64)> = sqlx::query_as(
-            "
-            SELECT instance_id, host, port, join_time
-            FROM join_log
-            ",
+            "SELECT instance_id, host, port, join_time FROM join_log",
         )
-        .fetch_all(handle.pool())
+        .fetch_all(&mut *conn)
         .await?;
 
         Ok(rows
             .into_iter()
             .filter_map(|(instance_id, host, port, join_time)| {
-                let Some(port) = u16::try_from(port).ok() else {
-                    tracing::warn!(
-                        %instance_id,
-                        %host,
-                        port,
-                        "Ignoring a join log entry whose port is out of range"
-                    );
-                    return None;
-                };
-                Some((
-                    JoinLogKey {
-                        instance_id,
-                        host,
-                        port,
-                    },
-                    JoinLogEntry {
-                        join_time: to_time(join_time),
-                    },
-                ))
+                to_record(instance_id, host, port, join_time)
             })
             .collect())
     }
+
+    async fn replace_all(
+        conn: &mut SqliteConnection,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        sqlx::query("DELETE FROM join_log")
+            .execute(&mut *conn)
+            .await?;
+        for (key, record) in records {
+            write_row(conn, key, record).await?;
+        }
+        Ok(())
+    }
+
+    async fn read_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+    ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
+        let rows: Vec<(String, i64, i64)> = sqlx::query_as(
+            "
+            SELECT host, port, join_time
+            FROM join_log
+            WHERE instance_id = ?
+            ",
+        )
+        .bind(&scope.instance_id)
+        .fetch_all(&mut *conn)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|(host, port, join_time)| {
+                to_record(scope.instance_id.clone(), host, port, join_time)
+            })
+            .collect())
+    }
+
+    async fn replace_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        sqlx::query("DELETE FROM join_log WHERE instance_id = ?")
+            .bind(&scope.instance_id)
+            .execute(&mut *conn)
+            .await?;
+        for (key, record) in records {
+            write_row(conn, key, record).await?;
+        }
+        Ok(())
+    }
 }
 
+async fn write_row(
+    conn: &mut SqliteConnection,
+    key: &JoinLogKey,
+    record: &JoinLogEntry,
+) -> crate::Result<()> {
+    sqlx::query(
+        "
+        INSERT INTO join_log (instance_id, host, port, join_time)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (instance_id, host, port) DO UPDATE SET
+            join_time = excluded.join_time
+        ",
+    )
+    .bind(&key.instance_id)
+    .bind(&key.host)
+    .bind(i64::from(key.port))
+    .bind(record.join_time.timestamp())
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
+}
+
+/// The record a row describes, or nothing when its port does not fit the key.
+fn to_record(
+    instance_id: String,
+    host: String,
+    port: i64,
+    join_time: i64,
+) -> Option<(JoinLogKey, JoinLogEntry)> {
+    let Some(port) = u16::try_from(port).ok() else {
+        tracing::warn!(
+            %instance_id,
+            %host,
+            port,
+            "Ignoring a join log entry whose port is out of range"
+        );
+        return None;
+    };
+    Some((
+        JoinLogKey {
+            instance_id,
+            host,
+            port,
+        },
+        JoinLogEntry {
+            join_time: to_time(join_time),
+        },
+    ))
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use super::*;
+
+    async fn handle(instance: &str) -> Handle {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO instances
+                (id, path, install_stage, launcher_feature_version,
+                 name, created, modified)
+             VALUES (?, ?, 'installed', '1', ?, 1, 1)",
+        )
+        .bind(instance)
+        .bind(instance)
+        .bind(instance)
+        .execute(&pool)
+        .await
+        .unwrap();
+        Handle::new(pool)
+    }
+
+    fn key(instance: &str, host: &str) -> JoinLogKey {
+        JoinLogKey {
+            instance_id: instance.to_string(),
+            host: host.to_string(),
+            port: 25565,
+        }
+    }
+
+    fn record(seconds: i64) -> JoinLogEntry {
+        JoinLogEntry {
+            join_time: Utc.timestamp_opt(seconds, 0).unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_scoped_replace_refuses_another_instance() {
+        let handle = handle("first").await;
+        sqlx::query(
+            "INSERT INTO instances
+                (id, path, install_stage, launcher_feature_version,
+                 name, created, modified)
+             VALUES ('second', 'second', 'installed', '1', 's', 1, 1)",
+        )
+        .execute(handle.pool())
+        .await
+        .unwrap();
+
+        assert!(
+            JoinLog::set_scoped(
+                &handle,
+                &InstanceJoins {
+                    instance_id: "first".to_string(),
+                },
+                &[(key("second", "mc.example.com"), record(1))],
+            )
+            .await
+            .is_err()
+        );
+        assert!(JoinLog::get_all(&handle).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_scoped_replace_keeps_the_given_times() {
+        let handle = handle("instance").await;
+        let scope = InstanceJoins {
+            instance_id: "instance".to_string(),
+        };
+
+        JoinLog::set_scoped(
+            &handle,
+            &scope,
+            &[(key("instance", "mc.example.com"), record(5))],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            JoinLog::get_scoped(&handle, &scope).await.unwrap(),
+            vec![(key("instance", "mc.example.com"), record(5))]
+        );
+    }
+}
 fn to_time(timestamp: i64) -> DateTime<Utc> {
     Utc.timestamp_opt(timestamp, 0)
         .single()

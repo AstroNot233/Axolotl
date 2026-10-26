@@ -1,5 +1,7 @@
 //! The content a person keeps for later.
 
+use sqlx::SqliteConnection;
+
 use super::{Collection, Handle};
 use crate::state::content_types::{
     ContentFavoriteProvider, ContentFavoriteType,
@@ -24,52 +26,15 @@ pub(crate) struct ContentFavoriteRecord {
 
 impl Collection for ContentFavorites {
     type Key = ContentFavoriteKey;
+    type Scope = ContentFavoriteKey;
     type Record = ContentFavoriteRecord;
 
-    async fn set(
-        handle: &Handle,
-        key: &Self::Key,
-        record: Option<&Self::Record>,
-    ) -> crate::Result<()> {
-        let provider = key.provider.as_str();
-
-        let Some(record) = record else {
-            sqlx::query(
-                "DELETE FROM content_favorites
-                 WHERE provider = ? AND project_id = ?",
-            )
-            .bind(provider)
-            .bind(&key.project_id)
-            .execute(handle.pool())
-            .await?;
-
-            return Ok(());
-        };
-
-        // Writing a favorite that exists refreshes what it points at and keeps
-        // the moment it was first saved, so two writes of one favorite cannot
-        // read a moment the other has already moved past.
-        sqlx::query(
-            "
-            INSERT INTO content_favorites
-                (provider, project_id, content_type, saved_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT (provider, project_id) DO UPDATE SET
-                content_type = excluded.content_type
-            ",
-        )
-        .bind(provider)
-        .bind(&key.project_id)
-        .bind(record.content_type.as_str())
-        .bind(record.saved_at)
-        .execute(handle.pool())
-        .await?;
-
-        Ok(())
+    fn in_scope(scope: &Self::Scope, key: &Self::Key) -> bool {
+        scope == key
     }
 
-    async fn get(
-        handle: &Handle,
+    async fn read(
+        conn: &mut SqliteConnection,
         key: &Self::Key,
     ) -> crate::Result<Option<Self::Record>> {
         let row: Option<(String, i64)> = sqlx::query_as(
@@ -79,7 +44,7 @@ impl Collection for ContentFavorites {
         )
         .bind(key.provider.as_str())
         .bind(&key.project_id)
-        .fetch_optional(handle.pool())
+        .fetch_optional(&mut *conn)
         .await?;
 
         Ok(row.and_then(|(content_type, saved_at)| {
@@ -90,47 +55,35 @@ impl Collection for ContentFavorites {
         }))
     }
 
-    async fn set_all(
-        handle: &Handle,
-        records: &[(Self::Key, Self::Record)],
+    async fn write(
+        conn: &mut SqliteConnection,
+        key: &Self::Key,
+        record: Option<&Self::Record>,
     ) -> crate::Result<()> {
-        let mut transaction = handle.pool().begin().await?;
-        // The call replaces the collection, so a key the caller leaves out is
-        // gone rather than left behind for a later read to return.
-        sqlx::query("DELETE FROM content_favorites")
-            .execute(&mut *transaction)
-            .await?;
-        for (key, record) in records {
+        let Some(record) = record else {
             sqlx::query(
-                "
-                INSERT INTO content_favorites
-                    (provider, project_id, content_type, saved_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (provider, project_id) DO UPDATE SET
-                    content_type = excluded.content_type,
-                    saved_at = excluded.saved_at
-                ",
+                "DELETE FROM content_favorites
+                 WHERE provider = ? AND project_id = ?",
             )
             .bind(key.provider.as_str())
             .bind(&key.project_id)
-            .bind(record.content_type.as_str())
-            .bind(record.saved_at)
-            .execute(&mut *transaction)
+            .execute(&mut *conn)
             .await?;
-        }
-        transaction.commit().await?;
 
-        Ok(())
+            return Ok(());
+        };
+
+        write_row(conn, key, record).await
     }
 
-    async fn get_all(
-        handle: &Handle,
+    async fn read_all(
+        conn: &mut SqliteConnection,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
         let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
             "SELECT provider, project_id, content_type, saved_at
              FROM content_favorites",
         )
-        .fetch_all(handle.pool())
+        .fetch_all(&mut *conn)
         .await?;
 
         Ok(rows
@@ -149,6 +102,94 @@ impl Collection for ContentFavorites {
             })
             .collect())
     }
+
+    async fn replace_all(
+        conn: &mut SqliteConnection,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        sqlx::query("DELETE FROM content_favorites")
+            .execute(&mut *conn)
+            .await?;
+        for (key, record) in records {
+            insert_row(conn, key, record).await?;
+        }
+        Ok(())
+    }
+
+    async fn read_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+    ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
+        Ok(Self::read(conn, scope)
+            .await?
+            .map(|record| vec![(scope.clone(), record)])
+            .unwrap_or_default())
+    }
+
+    async fn replace_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        sqlx::query(
+            "DELETE FROM content_favorites WHERE provider = ? AND project_id = ?",
+        )
+        .bind(scope.provider.as_str())
+        .bind(&scope.project_id)
+        .execute(&mut *conn)
+        .await?;
+        for (key, record) in records {
+            insert_row(conn, key, record).await?;
+        }
+        Ok(())
+    }
+}
+
+async fn write_row(
+    conn: &mut SqliteConnection,
+    key: &ContentFavoriteKey,
+    record: &ContentFavoriteRecord,
+) -> crate::Result<()> {
+    sqlx::query(
+        "
+        INSERT INTO content_favorites
+            (provider, project_id, content_type, saved_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (provider, project_id) DO UPDATE SET
+            content_type = excluded.content_type
+        ",
+    )
+    .bind(key.provider.as_str())
+    .bind(&key.project_id)
+    .bind(record.content_type.as_str())
+    .bind(record.saved_at)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
+}
+
+/// A replace writes the moment it was given, so a batch carries its own times.
+async fn insert_row(
+    conn: &mut SqliteConnection,
+    key: &ContentFavoriteKey,
+    record: &ContentFavoriteRecord,
+) -> crate::Result<()> {
+    sqlx::query(
+        "
+        INSERT INTO content_favorites
+            (provider, project_id, content_type, saved_at)
+        VALUES (?, ?, ?, ?)
+        ",
+    )
+    .bind(key.provider.as_str())
+    .bind(&key.project_id)
+    .bind(record.content_type.as_str())
+    .bind(record.saved_at)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
 }
 
 /// The provider a stored favorite names, or nothing when this build does not
@@ -359,6 +400,87 @@ mod tests {
                     saved_at: 1,
                 },
             )]
+        );
+    }
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use super::*;
+
+    async fn handle() -> Handle {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        Handle::new(pool)
+    }
+
+    fn key(project_id: &str) -> ContentFavoriteKey {
+        ContentFavoriteKey {
+            provider: ContentFavoriteProvider::Modrinth,
+            project_id: project_id.to_string(),
+        }
+    }
+
+    fn record(saved_at: i64) -> ContentFavoriteRecord {
+        ContentFavoriteRecord {
+            content_type: ContentFavoriteType::Mod,
+            saved_at,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_batch_keeps_the_time_it_was_given() {
+        let handle = handle().await;
+
+        ContentFavorites::set_all(&handle, &[(key("sodium"), record(7))])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            ContentFavorites::get(&handle, &key("sodium"))
+                .await
+                .unwrap(),
+            Some(record(7))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_refuses_the_same_key_twice() {
+        let handle = handle().await;
+
+        assert!(
+            ContentFavorites::set_all(
+                &handle,
+                &[(key("sodium"), record(1)), (key("sodium"), record(2))],
+            )
+            .await
+            .is_err()
+        );
+        assert!(ContentFavorites::get_all(&handle).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_scoped_replace_refuses_a_key_outside_its_scope() {
+        let handle = handle().await;
+
+        assert!(
+            ContentFavorites::set_scoped(
+                &handle,
+                &key("sodium"),
+                &[(key("lithium"), record(1))],
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            ContentFavorites::get(&handle, &key("lithium"))
+                .await
+                .unwrap()
+                .is_none()
         );
     }
 }
