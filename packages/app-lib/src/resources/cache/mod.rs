@@ -313,7 +313,15 @@ impl ResourceCache {
             .map_err(cache_error)?;
         if let Some(state) = current {
             let bumped = ResourceCacheStateRecord {
-                generation: state.generation.saturating_add(1),
+                // The generation is what tells a write started before this
+                // clear that it no longer belongs here, so it may not stand
+                // still: at the end of its range the cache has to be reset by
+                // hand rather than cleared into the same generation.
+                generation: state.generation.checked_add(1).ok_or_else(|| {
+                    cache_error(crate::ErrorKind::OtherError(
+                        "The cache generation is exhausted; reset the cache database".to_string(),
+                    ))
+                })?,
             };
             ResourceCacheState::atom_set(&mut unit, &(), Some(&bumped))
                 .await

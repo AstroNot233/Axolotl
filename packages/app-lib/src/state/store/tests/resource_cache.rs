@@ -70,8 +70,12 @@ fn plan(instance_id: &str, revision: i64) -> ResourceOperationPlanRecord {
 }
 
 fn history(recorded_at: i64) -> ResourceHistoryRecord {
+    history_of("instance", recorded_at)
+}
+
+fn history_of(instance_id: &str, recorded_at: i64) -> ResourceHistoryRecord {
     ResourceHistoryRecord {
-        instance_id: "instance".to_string(),
+        instance_id: instance_id.to_string(),
         entry_id: "entry".to_string(),
         recorded_at,
         payload: "{\"history\":true}".to_string(),
@@ -86,6 +90,7 @@ fn history(recorded_at: i64) -> ResourceHistoryRecord {
 async fn handle_with_instance() -> Handle {
     let pool = support::pool().await;
     support::add_instance(&pool, "instance").await;
+    support::add_instance(&pool, "other").await;
     handle_of(&pool)
 }
 
@@ -286,6 +291,13 @@ async fn the_history_of_one_entry_leaves_the_other_entries_out() {
     ResourceHistory::set(&handle, &"theirs".to_string(), Some(&other))
         .await
         .unwrap();
+    ResourceHistory::set(
+        &handle,
+        &"elsewhere".to_string(),
+        Some(&history_of("other", 1)),
+    )
+    .await
+    .unwrap();
 
     let scoped = ResourceHistory::get_scoped(
         &handle,
@@ -312,6 +324,13 @@ async fn the_history_of_an_instance_reads_every_entry_of_it() {
     ResourceHistory::set(&handle, &"theirs".to_string(), Some(&other))
         .await
         .unwrap();
+    ResourceHistory::set(
+        &handle,
+        &"elsewhere".to_string(),
+        Some(&history_of("other", 3)),
+    )
+    .await
+    .unwrap();
 
     let scoped = ResourceHistory::get_scoped(
         &handle,

@@ -176,6 +176,7 @@ impl Collection for ResourceHistory {
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
         ensure_records_are_in_scope(scope, records)?;
+        ensure_keys_belong_to_scope(conn, scope, records).await?;
         delete_omitted(conn, scope, records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
@@ -329,4 +330,39 @@ fn ensure_records_are_in_scope(
             .to_string(),
     )
     .into())
+}
+
+/// A scoped replacement writes by id, so an id already recorded under another
+/// instance — or another entry — would be taken from its owner instead of
+/// replaced here.
+async fn ensure_keys_belong_to_scope(
+    conn: &mut SqliteConnection,
+    scope: &ResourceHistoryScope,
+    records: &[(ResourceHistoryKey, ResourceHistoryRecord)],
+) -> crate::Result<()> {
+    for (key, _) in records {
+        let Some(existing) = ResourceHistory::read(conn, key).await? else {
+            continue;
+        };
+        let in_scope = match scope {
+            ResourceHistoryScope::Instance(instance_id) => {
+                &existing.instance_id == instance_id
+            }
+            ResourceHistoryScope::Entry {
+                instance_id,
+                entry_id,
+            } => {
+                &existing.instance_id == instance_id
+                    && &existing.entry_id == entry_id
+            }
+        };
+        if !in_scope {
+            return Err(crate::ErrorKind::InputError(format!(
+                "History entry {key} belongs to another scope"
+            ))
+            .into());
+        }
+    }
+
+    Ok(())
 }

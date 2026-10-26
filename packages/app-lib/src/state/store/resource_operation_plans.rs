@@ -134,6 +134,7 @@ impl Collection for ResourceOperationPlans {
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
         ensure_records_are_in_scope(scope, records)?;
+        ensure_keys_belong_to_scope(conn, scope, records).await?;
         delete_omitted(conn, scope, records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
@@ -233,4 +234,27 @@ fn ensure_records_are_in_scope(
             .to_string(),
     )
     .into())
+}
+
+/// A scoped replacement writes by id, so an id already recorded under another
+/// instance would be taken from that instance instead of replaced here.
+async fn ensure_keys_belong_to_scope(
+    conn: &mut SqliteConnection,
+    scope: &ResourceOperationPlanScope,
+    records: &[(ResourceOperationPlanKey, ResourceOperationPlanRecord)],
+) -> crate::Result<()> {
+    for (key, _) in records {
+        let Some(existing) = ResourceOperationPlans::read(conn, key).await?
+        else {
+            continue;
+        };
+        if &existing.instance_id != scope {
+            return Err(crate::ErrorKind::InputError(format!(
+                "Plan {key} belongs to another instance"
+            ))
+            .into());
+        }
+    }
+
+    Ok(())
 }
