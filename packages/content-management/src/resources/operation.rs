@@ -197,12 +197,39 @@ pub enum ResourceIssueCode {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub enum ResourceConflictReason {
+    ConflictingReleases,
+    IncompatibleResource,
+    IncompatibleInstalledDependent,
+    DependencyVersion,
+    VersionConstraints,
+    InstalledDependent,
+    InstalledDependencyDisabled,
+    InstalledDependencyMissing,
+    InstalledDependencyVersion,
+    NotNewerRelease,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceConflictDetails {
+    pub reason: ResourceConflictReason,
+    pub subject: Option<String>,
+    pub related: Option<String>,
+    pub required: Option<String>,
+    pub actual: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourcePlanIssue {
     pub code: ResourceIssueCode,
     pub selection_id: Option<SelectionId>,
     pub entry_id: Option<InstalledEntryId>,
     pub blocking: bool,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conflict: Option<ResourceConflictDetails>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -325,4 +352,37 @@ pub struct ResourceBackupFile {
 pub struct ResourceHistoryCleanupResult {
     pub removed: Vec<HistoryId>,
     pub failures: Vec<(HistoryId, String)>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conflict_details_preserve_existing_plan_payloads_and_round_trip() {
+        let legacy = serde_json::json!({
+            "code": "versionConflict",
+            "selectionId": "root",
+            "entryId": null,
+            "blocking": true,
+            "message": "incompatible resource is active"
+        });
+        let mut issue: ResourcePlanIssue =
+            serde_json::from_value(legacy.clone()).unwrap();
+        assert!(issue.conflict.is_none());
+        assert_eq!(serde_json::to_value(&issue).unwrap(), legacy);
+        issue.conflict = Some(ResourceConflictDetails {
+            reason: ResourceConflictReason::IncompatibleResource,
+            subject: Some("Canvas".into()),
+            related: Some("Sodium.jar".into()),
+            required: Some("*".into()),
+            actual: None,
+        });
+        let serialized = serde_json::to_value(&issue).unwrap();
+        assert_eq!(serialized["conflict"]["reason"], "incompatibleResource");
+        assert_eq!(
+            serde_json::from_value::<ResourcePlanIssue>(serialized).unwrap(),
+            issue
+        );
+    }
 }

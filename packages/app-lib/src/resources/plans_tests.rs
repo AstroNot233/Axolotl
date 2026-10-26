@@ -1059,6 +1059,19 @@ async fn incompatible_roots_are_blocked_in_both_selection_orders() {
             .find(|edge| edge.kind == ResourceDependencyKind::Incompatible)
             .unwrap();
         assert_eq!(edge.child.as_str(), "b");
+        let details = plan
+            .issues
+            .iter()
+            .find_map(|issue| issue.conflict.as_ref())
+            .unwrap();
+        assert_eq!(
+            details.reason,
+            ResourceConflictReason::IncompatibleResource
+        );
+        assert_eq!(
+            details.related.as_deref(),
+            b.artifacts[0].file_name.as_deref()
+        );
     }
     let b2 = release("root1111", "2", 'c');
     let (_directory2, other) = self::service(vec![a.clone(), b2.clone()]).await;

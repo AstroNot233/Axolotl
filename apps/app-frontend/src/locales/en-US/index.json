@@ -12176,11 +12176,74 @@
   "app.resources.operation.header": {
     "message": "Review content changes"
   },
-  "app.resources.operation.install-selected-only": {
-    "message": "Force install selected content only"
+  "app.resources.operation.conflict.details": {
+    "message": "Conflict details"
   },
-  "app.resources.operation.selected-only": {
-    "message": "Only the selected content will be installed. Dependencies will not be checked or installed."
+  "app.resources.operation.compatibility-summary": {
+    "message": "Compatibility is unknown or mismatched."
+  },
+  "app.resources.operation.dependency-analysis-summary": {
+    "message": "Dependency checks could not be completed."
+  },
+  "app.resources.operation.file-write-summary": {
+    "message": "Some files cannot be written."
+  },
+  "app.resources.operation.preview-unavailable": {
+    "message": "Installation checks could not be completed."
+  },
+  "app.resources.operation.manual-download-summary": {
+    "message": "This file requires a manual download."
+  },
+  "app.resources.operation.stale-summary": {
+    "message": "The instance content has changed."
+  },
+  "app.resources.operation.conflict.selected-content": {
+    "message": "The selected content"
+  },
+  "app.resources.operation.conflict.dependency": {
+    "message": "a required dependency"
+  },
+  "app.resources.operation.conflict.required-release": {
+    "message": "the required release or file"
+  },
+  "app.resources.operation.conflict.unresolved-version": {
+    "message": "version unknown"
+  },
+  "app.resources.operation.conflict.all-versions": {
+    "message": "all versions"
+  },
+  "app.resources.operation.conflict.conflicting-releases": {
+    "message": "{subject} is required with different files: {required}. The selected file is {actual}."
+  },
+  "app.resources.operation.conflict.incompatible-resource": {
+    "message": "{subject} declares an incompatibility with {related} ({required})."
+  },
+  "app.resources.operation.conflict.incompatible-installed-dependent": {
+    "message": "Installed {related} declares an incompatibility with {subject} ({required})."
+  },
+  "app.resources.operation.conflict.dependency-version": {
+    "message": "{subject} requires {related} to match {required}; the selected version or file is {actual}."
+  },
+  "app.resources.operation.conflict.version-constraints": {
+    "message": "No release of {subject} satisfies all requirements: {required}."
+  },
+  "app.resources.operation.conflict.retained-version-constraints": {
+    "message": "No release of {subject} satisfies the requirements of {related}: {required}."
+  },
+  "app.resources.operation.conflict.installed-dependent": {
+    "message": "Installed {related} requires {subject} to match {required}; the selected version is {actual}."
+  },
+  "app.resources.operation.conflict.installed-dependency-disabled": {
+    "message": "The installed dependency {related} is disabled."
+  },
+  "app.resources.operation.conflict.installed-dependency-missing": {
+    "message": "The installed dependency file {related} is missing."
+  },
+  "app.resources.operation.conflict.installed-dependency-version": {
+    "message": "Installed {related} does not satisfy {subject}: required {required}, installed {actual}."
+  },
+  "app.resources.operation.conflict.not-newer-release": {
+    "message": "{subject} version {actual} is not newer than the installed version {required}. Use Switch version to install it."
   },
   "app.resources.operation.skip-unwritable": {
     "message": "Force install writable files"
@@ -12252,10 +12315,10 @@
     "message": "Some optional dependencies could not be resolved."
   },
   "app.resources.operation.unselected-dependency": {
-    "message": "Automatic dependency installation is off. Add this required dependency to continue."
+    "message": "Automatic dependency installation is off. This required dependency is not selected."
   },
   "app.resources.operation.version-conflict": {
-    "message": "A version conflict prevents installing this item."
+    "message": "A version conflict was detected."
   },
   "app.resources.operation.world": {
     "message": "Target world for data packs"
