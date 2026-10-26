@@ -714,13 +714,11 @@ pub(crate) async fn censor_credentials(
 async fn minecraft_tokens(handle: &Handle) -> crate::Result<Vec<String>> {
     let mut tokens = Vec::new();
 
-    for (_, user) in MinecraftUsers::get_all(handle).await? {
-        // Offline accounts use a non-secret "0" placeholder as their token.
-        if user.account_type == StoredAccountType::Offline {
-            continue;
-        }
-        tokens.push(user.access_token);
-        tokens.push(user.refresh_token);
+    for (access_token, refresh_token) in
+        MinecraftUsers::token_pairs(handle).await?
+    {
+        tokens.push(access_token);
+        tokens.push(refresh_token);
     }
 
     Ok(tokens)

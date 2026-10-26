@@ -1967,8 +1967,12 @@ mod refresh_coalescing_tests {
         let error = credential.refresh(&handle).await.unwrap_err();
         assert!(Arc::ptr_eq(&error.raw, &kind));
         credential.refresh_token = "new-login".into();
-        credential.expires = Utc::now() + Duration::hours(1);
-        credential.refresh(&handle).await.unwrap();
+        credential.expires = Utc::now() - Duration::hours(1);
+        // The cached failure belongs to the token that was rejected, so a login
+        // that replaced it cannot be answered with that failure.
+        if let Err(error) = credential.refresh(&handle).await {
+            assert!(!Arc::ptr_eq(&error.raw, &kind));
+        }
         CREDENTIAL_REFRESHES.remove(&key);
     }
 }

@@ -126,6 +126,7 @@ impl Collection for MinecraftUsers {
         conn: &mut SqliteConnection,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
+        ensure_one_active(records)?;
         delete_omitted(conn, None, records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
@@ -148,6 +149,7 @@ impl Collection for MinecraftUsers {
         scope: &Self::Scope,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
+        ensure_one_active(records)?;
         delete_omitted(conn, Some(scope), records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
@@ -156,11 +158,44 @@ impl Collection for MinecraftUsers {
     }
 }
 
+/// The table says one account is active; it no longer has an index that says so,
+/// so every write that marks an account active clears the others first.
+async fn clear_other_active(
+    conn: &mut SqliteConnection,
+    key: &str,
+) -> crate::Result<()> {
+    sqlx::query("UPDATE minecraft_users SET active = 0 WHERE account_id <> ?")
+        .bind(key)
+        .execute(&mut *conn)
+        .await?;
+
+    Ok(())
+}
+
+/// At most one of the records a replacement carries may be the active one.
+fn ensure_one_active(
+    records: &[(MinecraftUserKey, MinecraftUserRecord)],
+) -> crate::Result<()> {
+    let active = records.iter().filter(|(_, record)| record.active).count();
+    if active > 1 {
+        return Err(crate::ErrorKind::InputError(
+            "More than one account was written as the active one".to_string(),
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
 async fn write_row(
     conn: &mut SqliteConnection,
     account_id: &str,
     record: &MinecraftUserRecord,
 ) -> crate::Result<()> {
+    if record.active {
+        clear_other_active(conn, account_id).await?;
+    }
+
     sqlx::query(
         "
         INSERT INTO minecraft_users (
@@ -272,4 +307,22 @@ fn to_account_type(account_type: &str) -> Option<AccountType> {
         );
         None
     })
+}
+
+/// The token pairs of every account that is not offline, whether or not this
+/// build can read the row as an account: a token it cannot attribute is still a
+/// secret that has to be hidden.
+pub(crate) async fn token_pairs(
+    handle: &Handle,
+) -> crate::Result<Vec<(String, String)>> {
+    let mut connection = handle.connection().await?;
+    let rows = sqlx::query_as(
+        "SELECT access_token, refresh_token
+         FROM minecraft_users
+         WHERE account_type <> 'offline'",
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+
+    Ok(rows)
 }

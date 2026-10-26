@@ -230,23 +230,33 @@ async fn delete_omitted(
     scope: Option<&String>,
     records: &[(CustomMinecraftSkinKey, CustomMinecraftSkinRecord)],
 ) -> crate::Result<()> {
-    let existing: Vec<(String, String)> = match scope {
-        Some(minecraft_user_uuid) => sqlx::query_as(
-            "SELECT minecraft_user_uuid, texture_key
+    let existing: Vec<(String, String, String)> = match scope {
+        Some(minecraft_user_uuid) => {
+            sqlx::query_as(
+                "SELECT minecraft_user_uuid, texture_key, variant
              FROM custom_minecraft_skins
              WHERE minecraft_user_uuid = ?",
-        )
-        .bind(minecraft_user_uuid)
-        .fetch_all(&mut *conn)
-        .await?,
-        None => sqlx::query_as(
-            "SELECT minecraft_user_uuid, texture_key FROM custom_minecraft_skins",
-        )
-        .fetch_all(&mut *conn)
-        .await?,
+            )
+            .bind(minecraft_user_uuid)
+            .fetch_all(&mut *conn)
+            .await?
+        }
+        None => {
+            sqlx::query_as(
+                "SELECT minecraft_user_uuid, texture_key, variant
+             FROM custom_minecraft_skins",
+            )
+            .fetch_all(&mut *conn)
+            .await?
+        }
     };
 
-    for (minecraft_user_uuid, texture_key) in existing {
+    for (minecraft_user_uuid, texture_key, variant) in existing {
+        // A skin whose variant this build cannot read was never part of the
+        // replacement, so it is not one the replacement leaves out.
+        if to_variant(&variant).is_none() {
+            continue;
+        }
         let kept = records.iter().any(|(key, _)| {
             key.minecraft_user_uuid == minecraft_user_uuid
                 && key.texture_key == texture_key
