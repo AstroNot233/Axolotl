@@ -1,4 +1,6 @@
 use crate::api::curseforge::CurseForgeProject;
+use crate::state::store::cache::{Cache, CacheKey, CacheRecord};
+use crate::state::store::{Collection as _, Handle};
 use crate::state::{
     CurseForgeProjectId, ModrinthProjectId, ModrinthVersionId, ProjectType,
 };
@@ -288,6 +290,14 @@ fn cache_read_failure(
         sqlite_code,
     }
     .into()
+}
+
+/// The cache rows of `pool`, named the way the store names them.
+///
+/// The callers of this module are handed the pool itself, so the handle they
+/// will pass once they name one is built here in the meantime.
+fn cache_rows(pool: &SqlitePool) -> Handle {
+    Handle::new(pool.clone())
 }
 
 /// Cached modpack file hashes for filtering content
@@ -1931,6 +1941,27 @@ impl CachedEntry {
         );
     }
 
+    /// The row this entry is stored as.
+    fn stored(&self) -> crate::Result<(CacheKey, CacheRecord)> {
+        let data = self
+            .data
+            .as_ref()
+            .map(|value| serde_json::to_string(&value.to_json_value()?))
+            .transpose()?;
+
+        Ok((
+            CacheKey {
+                data_type: self.type_.as_str().to_string(),
+                id: self.id.clone(),
+            },
+            CacheRecord {
+                alias: self.alias.clone(),
+                data,
+                expires: self.expires,
+            },
+        ))
+    }
+
     #[tracing::instrument(skip(pool, fetch_semaphore))]
     pub async fn get(
         type_: CacheValueType,
@@ -3009,7 +3040,15 @@ impl CachedEntry {
         if service.cache().generation().await > 0 {
             return Ok(None);
         }
-        let data: Option<String> = sqlx::query_scalar("SELECT data FROM cache WHERE id = ? AND data_type = 'modpack_files' AND length(CAST(data AS BLOB)) <= 1048576").bind(version_id).fetch_optional(pool).await?;
+        let data = Cache::get(
+            &cache_rows(pool),
+            &CacheKey {
+                data_type: CacheValueType::ModpackFiles.as_str().to_string(),
+                id: version_id.to_string(),
+            },
+        )
+        .await?
+        .and_then(|row| row.data);
         let index = data
             .and_then(|data| {
                 serde_json::from_str::<CachedModpackFiles>(&data).ok()
@@ -3061,7 +3100,7 @@ pub async fn cache_file_hash(
     known_hash: Option<&str>,
     project_type: Option<ProjectType>,
     known_modrinth_file: Option<KnownModrinthFile<'_>>,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    pool: &SqlitePool,
 ) -> crate::Result<()> {
     let size = bytes.len();
 
@@ -3078,7 +3117,7 @@ pub async fn cache_file_hash(
         hash,
         project_type,
         known_modrinth_file,
-        exec,
+        pool,
     )
     .await
 }
@@ -3090,7 +3129,7 @@ pub async fn cache_file_hash_metadata(
     hash: String,
     project_type: Option<ProjectType>,
     known_modrinth_file: Option<KnownModrinthFile<'_>>,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    pool: &SqlitePool,
 ) -> crate::Result<()> {
     let (project_id, version_id) =
         known_modrinth_file.map_or((None, None), |metadata| {
@@ -3101,19 +3140,18 @@ pub async fn cache_file_hash_metadata(
         });
 
     // Streamed extraction already computed these values, so avoid buffering the file just to cache them.
-    CachedEntry::upsert_many(
-        &[CacheValue::FileHash(CachedFileHash {
-            path: format!("{instance_path}/{path}"),
-            size,
-            hash,
-            project_type,
-            project_id,
-            version_id,
-        })
-        .get_entry()],
-        exec,
-    )
-    .await?;
+    let (key, record) = CacheValue::FileHash(CachedFileHash {
+        path: format!("{instance_path}/{path}"),
+        size,
+        hash,
+        project_type,
+        project_id,
+        version_id,
+    })
+    .get_entry()
+    .stored()?;
+
+    Cache::set(&cache_rows(pool), &key, Some(&record)).await?;
 
     Ok(())
 }

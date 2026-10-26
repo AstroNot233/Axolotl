@@ -4,7 +4,9 @@
 //! tests live here together instead of inside the module that writes the
 //! statements: a change to a verb is answered once, in one place.
 
+mod cache;
 mod content_favorites;
+mod credentials;
 mod game_option_locale_origins;
 mod game_option_pack_bases;
 mod game_option_update_state;
@@ -12,6 +14,7 @@ mod install_jobs;
 mod install_store;
 mod instance_sync_checkpoints;
 mod instance_sync_preferences;
+mod java_globals;
 mod join_log;
 mod official_login_proof;
 mod resource_cache;
@@ -24,3 +27,4 @@ mod sync_feature_settings;
 mod synced_game_option_preferences;
 mod synced_game_option_state;
 mod synced_game_option_values;
+mod telemetry;

@@ -85,7 +85,7 @@ impl Collection for InstallJobs {
     async fn read_all(
         conn: &mut SqliteConnection,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let rows: Vec<(String, JobRow)> = sqlx::query_as(
+        let rows: Vec<JobRowWithKey> = sqlx::query_as(
             "
             SELECT id, instance_id, kind, status, state, created, modified,
                 finished, dismissed
@@ -95,10 +95,7 @@ impl Collection for InstallJobs {
         .fetch_all(&mut *conn)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(id, row)| (id, to_record(row)))
-            .collect())
+        Ok(rows.into_iter().map(split_row).collect())
     }
 
     async fn replace_all(
@@ -116,7 +113,7 @@ impl Collection for InstallJobs {
         conn: &mut SqliteConnection,
         scope: &Self::Scope,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let rows: Vec<(String, JobRow)> = match scope {
+        let rows: Vec<JobRowWithKey> = match scope {
             InstallJobScope::Status(status) => {
                 sqlx::query_as(
                     "
@@ -145,10 +142,7 @@ impl Collection for InstallJobs {
             }
         };
 
-        Ok(rows
-            .into_iter()
-            .map(|(id, row)| (id, to_record(row)))
-            .collect())
+        Ok(rows.into_iter().map(split_row).collect())
     }
 
     async fn replace_scoped(
@@ -157,6 +151,7 @@ impl Collection for InstallJobs {
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
         ensure_records_are_in_scope(scope, records)?;
+        ensure_keys_belong_to_scope(conn, scope, records).await?;
         delete_omitted(conn, Some(scope), records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
@@ -175,6 +170,46 @@ type JobRow = (
     Option<i64>,
     bool,
 );
+
+type JobRowWithKey = (
+    String,
+    Option<String>,
+    String,
+    String,
+    String,
+    i64,
+    i64,
+    Option<i64>,
+    bool,
+);
+
+fn split_row(
+    (
+        id,
+        instance_id,
+        kind,
+        status,
+        state,
+        created,
+        modified,
+        finished,
+        dismissed,
+    ): JobRowWithKey,
+) -> (String, InstallJobRecord) {
+    (
+        id,
+        InstallJobRecord {
+            instance_id,
+            kind,
+            status,
+            state,
+            created,
+            modified,
+            finished,
+            dismissed,
+        },
+    )
+}
 
 fn to_record(row: JobRow) -> InstallJobRecord {
     let (
@@ -242,26 +277,32 @@ async fn write_row(
 /// off it.
 async fn delete_omitted(
     conn: &mut SqliteConnection,
-    scope: Option<&String>,
+    scope: Option<&InstallJobScope>,
     records: &[(InstallJobKey, InstallJobRecord)],
 ) -> crate::Result<()> {
-    let existing: Vec<(String, String)> = match scope {
-        Some(status) => {
-            sqlx::query_as(
-                "SELECT id, status FROM install_jobs WHERE status = ?",
+    let existing: Vec<String> = match scope {
+        Some(InstallJobScope::Status(status)) => {
+            sqlx::query_scalar("SELECT id FROM install_jobs WHERE status = ?")
+                .bind(status)
+                .fetch_all(&mut *conn)
+                .await?
+        }
+        Some(InstallJobScope::Instance(instance_id)) => {
+            sqlx::query_scalar(
+                "SELECT id FROM install_jobs WHERE instance_id = ?",
             )
-            .bind(status)
+            .bind(instance_id)
             .fetch_all(&mut *conn)
             .await?
         }
         None => {
-            sqlx::query_as("SELECT id, status FROM install_jobs")
+            sqlx::query_scalar("SELECT id FROM install_jobs")
                 .fetch_all(&mut *conn)
                 .await?
         }
     };
 
-    for (id, _) in existing {
+    for id in existing {
         if records.iter().any(|(key, _)| key == &id) {
             continue;
         }
@@ -292,6 +333,34 @@ fn ensure_records_are_in_scope(
         if !in_scope {
             return Err(crate::ErrorKind::InputError(format!(
                 "Install job {key} is not among the jobs of the scope it was written to"
+            ))
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
+/// A scoped replacement writes by key, so a key that already belongs to another
+/// scope would move that job between groups instead of replacing this one.
+async fn ensure_keys_belong_to_scope(
+    conn: &mut SqliteConnection,
+    scope: &InstallJobScope,
+    records: &[(InstallJobKey, InstallJobRecord)],
+) -> crate::Result<()> {
+    for (key, _) in records {
+        let Some(existing) = InstallJobs::read(conn, key).await? else {
+            continue;
+        };
+        let in_scope = match scope {
+            InstallJobScope::Status(status) => &existing.status == status,
+            InstallJobScope::Instance(instance_id) => {
+                existing.instance_id.as_deref() == Some(instance_id)
+            }
+        };
+        if !in_scope {
+            return Err(crate::ErrorKind::InputError(format!(
+                "Install job {key} belongs to another scope"
             ))
             .into());
         }

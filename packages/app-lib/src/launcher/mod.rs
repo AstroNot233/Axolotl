@@ -1462,7 +1462,7 @@ async fn install_minecraft_with_local_source(
             run_install_database_write(
                 &state.install_db_semaphore,
                 &database_cancellation,
-                java_version.upsert(&state.pool),
+                java_version.upsert(&state.data),
             )
             .await?;
         }
