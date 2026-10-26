@@ -15,6 +15,8 @@
 
 pub(crate) mod content_favorites;
 pub(crate) mod content_update_jobs;
+pub(crate) mod custom_minecraft_skin_textures;
+pub(crate) mod custom_minecraft_skins;
 pub(crate) mod game_option_locale_origins;
 pub(crate) mod game_option_pack_bases;
 pub(crate) mod game_option_update_state;
@@ -22,7 +24,10 @@ pub(crate) mod install_jobs;
 pub(crate) mod instance_sync_checkpoints;
 pub(crate) mod instance_sync_preferences;
 pub(crate) mod join_log;
+pub(crate) mod minecraft_device_tokens;
+pub(crate) mod minecraft_users;
 pub(crate) mod official_login_proof;
+pub(crate) mod offline_minecraft_skins;
 pub(crate) mod resource_source_projects;
 pub(crate) mod settings;
 pub(crate) mod sync_feature_settings;
