@@ -30,10 +30,10 @@ pub(in crate::api::instance) async fn initialize_from_source_instance(
     let (document, _) = read_document(&path).await?;
     let launcher_keys = currently_launcher_owned_keys(metadata);
     let entries = document.effective_entries();
-    let current_values = load_shared_game_options(&state.pool).await?;
-    let current_preferences = load_game_option_preferences(&state.pool).await?;
+    let current_values = load_shared_game_options(&state.data).await?;
+    let current_preferences = load_game_option_preferences(&state.data).await?;
     let (current_revision, _) =
-        load_game_options_sync_state(&state.pool, CATALOG_REVISION).await?;
+        load_game_options_sync_state(&state.data, CATALOG_REVISION).await?;
     let now = Utc::now().timestamp();
     let source_version = metadata.applied_content_set.game_version.as_str();
     let source_id = metadata.instance.id.as_str();

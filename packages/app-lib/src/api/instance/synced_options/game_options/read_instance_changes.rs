@@ -25,8 +25,8 @@ pub(super) async fn read_instance_changes_into_shared_settings(
     document: &GameOptionsDocument,
     state: &State,
 ) -> crate::Result<bool> {
-    let values = load_shared_game_options(&state.pool).await?;
-    let preferences = load_game_option_preferences(&state.pool).await?;
+    let values = load_shared_game_options(&state.data).await?;
+    let preferences = load_game_option_preferences(&state.data).await?;
     let launcher_keys = currently_launcher_owned_keys(metadata);
     let now = Utc::now().timestamp();
     let mut updates = Vec::new();
@@ -107,7 +107,7 @@ pub(super) async fn read_instance_changes_into_shared_settings(
     let mut fullscreen_value = None;
     if !updates.is_empty() {
         let (canonical_revision, _) =
-            load_game_options_sync_state(&state.pool, CATALOG_REVISION).await?;
+            load_game_options_sync_state(&state.data, CATALOG_REVISION).await?;
         let mut tx = state.pool.begin().await?;
         for (option_id, candidate, revision) in updates {
             let next_revision = revision.saturating_add(1) as i64;
@@ -173,10 +173,10 @@ pub(super) async fn discover_custom_settings(
     excluded_keys: &HashSet<String>,
     state: &State,
 ) -> crate::Result<bool> {
-    let existing = load_shared_game_options(&state.pool).await?;
-    let preferences = load_game_option_preferences(&state.pool).await?;
+    let existing = load_shared_game_options(&state.data).await?;
+    let preferences = load_game_option_preferences(&state.data).await?;
     let (canonical_revision, _) =
-        load_game_options_sync_state(&state.pool, CATALOG_REVISION).await?;
+        load_game_options_sync_state(&state.data, CATALOG_REVISION).await?;
     let entries = document.effective_entries();
     let now = Utc::now().timestamp();
     let mut discovered = false;

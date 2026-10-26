@@ -13,14 +13,14 @@ const FULLSCREEN_OPTION_ID: &str = "fullscreen";
 pub(crate) async fn shared_fullscreen_value(
     state: &State,
 ) -> crate::Result<Option<bool>> {
-    let preferences = load_game_option_preferences(&state.pool).await?;
+    let preferences = load_game_option_preferences(&state.data).await?;
     if !preferences
         .get(FULLSCREEN_OPTION_ID)
         .is_some_and(|preference| preference.enabled)
     {
         return Ok(None);
     }
-    let values = load_shared_game_options(&state.pool).await?;
+    let values = load_shared_game_options(&state.data).await?;
     Ok(values.get(FULLSCREEN_OPTION_ID).and_then(|stored| {
         if !stored.seeded {
             return None;
@@ -36,8 +36,8 @@ pub(crate) async fn update_shared_fullscreen_from_app(
     state: &State,
     value: bool,
 ) -> crate::Result<bool> {
-    let values = load_shared_game_options(&state.pool).await?;
-    let preferences = load_game_option_preferences(&state.pool).await?;
+    let values = load_shared_game_options(&state.data).await?;
+    let preferences = load_game_option_preferences(&state.data).await?;
     let stored = values.get(FULLSCREEN_OPTION_ID);
     let preference = preferences.get(FULLSCREEN_OPTION_ID);
     let value_matches = stored.is_some_and(|stored| {
@@ -62,7 +62,7 @@ pub(crate) async fn update_shared_fullscreen_from_app(
         )
         .saturating_add(1) as i64;
     let (canonical_revision, _) =
-        load_game_options_sync_state(&state.pool, CATALOG_REVISION).await?;
+        load_game_options_sync_state(&state.data, CATALOG_REVISION).await?;
     let next_canonical_revision = canonical_revision.saturating_add(1) as i64;
     let canonical = CanonicalValue::Bool(value);
     let value_json = serde_json::to_string(&canonical)?;

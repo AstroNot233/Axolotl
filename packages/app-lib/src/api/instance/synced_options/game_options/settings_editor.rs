@@ -43,9 +43,9 @@ pub(super) async fn load_settings_editor(
     state: &State,
 ) -> crate::Result<GameSettingsEditorState> {
     let (canonical_revision, catalog_revision) =
-        load_game_options_sync_state(&state.pool, CATALOG_REVISION).await?;
-    let values = load_shared_game_options(&state.pool).await?;
-    let preferences = load_game_option_preferences(&state.pool).await?;
+        load_game_options_sync_state(&state.data, CATALOG_REVISION).await?;
+    let values = load_shared_game_options(&state.data).await?;
+    let preferences = load_game_option_preferences(&state.data).await?;
     let participants = load_participating_instances(state).await?;
     let mut settings = Vec::new();
 
@@ -277,7 +277,7 @@ pub async fn save_changes(
 ) -> crate::Result<SaveGameSettingsResult> {
     let state = State::get().await?;
     let _guard = state.lock_synced_options().await;
-    if !game_options_sync_is_enabled(&state.pool).await? {
+    if !game_options_sync_is_enabled(&state.data).await? {
         return Err(input_error(
             "Turn on game-settings sync before editing shared values.",
         ));
@@ -302,7 +302,7 @@ pub async fn save_changes(
             ..SaveGameSettingsResult::default()
         });
     }
-    let stored_values = load_shared_game_options(&state.pool).await?;
+    let stored_values = load_shared_game_options(&state.data).await?;
     let participants = load_participating_instances(&state).await?;
     let mut conflicts = Vec::new();
     let mut accepted = Vec::new();
