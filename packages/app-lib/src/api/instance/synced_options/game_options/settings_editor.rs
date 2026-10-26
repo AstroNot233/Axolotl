@@ -434,7 +434,7 @@ pub async fn save_changes(
                 let record = GameOptionValueRecord {
                     kind,
                     raw_key: setting.raw_key.clone(),
-                    canonical_type,
+                    canonical_type: canonical_type.to_string(),
                     canonical_value: Some(value_json),
                     value_codec: value_codec.to_string(),
                     seeded: true,

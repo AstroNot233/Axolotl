@@ -7,6 +7,10 @@ use crate::state::store::settings::{
     DownloadSource, HomeLayout, Settings, SettingsRecord, Singleton,
 };
 
+fn handle_of(pool: &sqlx::SqlitePool) -> Handle {
+    Handle::new(pool.clone())
+}
+
 fn record() -> SettingsRecord {
     SettingsRecord {
         max_concurrent_downloads: 7,

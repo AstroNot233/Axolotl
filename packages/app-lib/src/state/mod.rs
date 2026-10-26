@@ -1223,6 +1223,7 @@ impl State {
         DirectoryInfo::move_launcher_directory(
             &mut settings,
             &data,
+            &pool,
             &io_semaphore,
             &app_identifier,
         )

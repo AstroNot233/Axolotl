@@ -351,7 +351,7 @@ pub(super) async fn install_manual_download(
         instance_id,
         format!("{target_folder}/{file_name}"),
         localized_candidate,
-        &state.pool,
+        &state,
     )
     .await?;
     let full_path = crate::api::instance::get_full_path(instance_id)
