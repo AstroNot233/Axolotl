@@ -16,6 +16,7 @@
 pub(crate) mod content_favorites;
 pub(crate) mod game_option_pack_bases;
 pub(crate) mod game_option_update_state;
+pub(crate) mod instance_sync_checkpoints;
 pub(crate) mod join_log;
 pub(crate) mod official_login_proof;
 pub(crate) mod resource_source_projects;
