@@ -182,7 +182,7 @@ async fn prepare_snapshot(
     let share_settings = get_log_share_settings().await?;
     let analysis = analyze_crash(instance_id).await?;
     let state = State::get().await?;
-    let credentials = Credentials::get_all(&state.pool)
+    let credentials = Credentials::get_all(&state.data)
         .await?
         .into_iter()
         .collect::<Vec<_>>();

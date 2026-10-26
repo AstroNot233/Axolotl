@@ -105,7 +105,7 @@ async fn run_with_extra_launch_args_inner(
             MAX_LAUNCH_PREPARATION_TIMEOUT,
         );
     let default_account = if offline_mode {
-        Credentials::get_offline_credential(&state.pool)
+        Credentials::get_offline_credential(&state.data)
             .await?
             .ok_or_else(|| {
                 crate::ErrorKind::LauncherError(
@@ -115,7 +115,7 @@ async fn run_with_extra_launch_args_inner(
                 .as_error()
             })?
     } else {
-        Credentials::get_default_credential(&state.pool)
+        Credentials::get_default_credential(&state.data)
             .await?
             .ok_or_else(|| crate::ErrorKind::NoCredentialsError.as_error())?
     };

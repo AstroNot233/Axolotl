@@ -6,6 +6,7 @@
 
 mod cache;
 mod content_favorites;
+mod credentials;
 mod game_option_locale_origins;
 mod game_option_pack_bases;
 mod game_option_update_state;
