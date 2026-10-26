@@ -282,16 +282,21 @@ pub(super) async fn discover_custom_settings(
                 }),
             )
             .await?;
-            SyncedGameOptionPreferences::atom_set(
-                &mut unit,
-                &option_id,
-                Some(&GameOptionPreferenceRecord {
-                    enabled: definition.default_on,
-                    source: GameOptionPreferenceSource::CatalogDefault,
-                    revision: 1,
-                }),
-            )
-            .await?;
+            if SyncedGameOptionPreferences::atom_get(&mut unit, &option_id)
+                .await?
+                .is_none()
+            {
+                SyncedGameOptionPreferences::atom_set(
+                    &mut unit,
+                    &option_id,
+                    Some(&GameOptionPreferenceRecord {
+                        enabled: definition.default_on,
+                        source: GameOptionPreferenceSource::CatalogDefault,
+                        revision: 1,
+                    }),
+                )
+                .await?;
+            }
             discovered = true;
         }
     }

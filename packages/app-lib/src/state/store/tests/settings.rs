@@ -218,3 +218,34 @@ async fn clearing_removes_the_row() {
     assert_eq!(Settings::get(&handle, &Singleton).await.unwrap(), None);
     assert!(Settings::get_all(&handle).await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn a_replacement_keeps_the_columns_it_does_not_carry() {
+    let pool = support::pool().await;
+    let handle = handle_of(&pool);
+    sqlx::query(
+        "
+        UPDATE settings
+        SET proxy_url = 'http://proxy.invalid:8080', curseforge_api_key = 'key'
+        WHERE id = 0
+        ",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    Settings::set_all(&handle, &[(Singleton, record())])
+        .await
+        .unwrap();
+
+    let row: (String, String) = sqlx::query_as(
+        "SELECT proxy_url, curseforge_api_key FROM settings WHERE id = 0",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        row,
+        ("http://proxy.invalid:8080".to_string(), "key".to_string(),)
+    );
+}

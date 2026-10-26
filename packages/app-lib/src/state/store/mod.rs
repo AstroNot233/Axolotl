@@ -75,9 +75,14 @@ impl Atom {
 }
 
 /// Opens an atomic unit on `handle`.
+///
+/// The unit takes its write reservation as it opens, the way the callers that
+/// read a record and write it back need: a unit that read first and only then
+/// asked to write could find another writer had committed in between, and be
+/// refused instead of applied.
 pub(crate) async fn atom(handle: &Handle) -> crate::Result<Atom> {
     Ok(Atom {
-        transaction: handle.pool.begin().await?,
+        transaction: handle.pool.begin_with("BEGIN IMMEDIATE").await?,
     })
 }
 

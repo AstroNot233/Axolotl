@@ -160,9 +160,6 @@ pub async fn set_privacy(
     settings.telemetry_consent_version = privacy.consent_version;
     settings.save_in(&mut unit).await?;
     unit.commit().await?;
-    sqlx::query("DELETE FROM telemetry_outbox")
-        .execute(&state.pool)
-        .await?;
 
     if let Err(error) =
         crate::telemetry::set_enabled(&state, privacy.telemetry).await
@@ -184,9 +181,6 @@ pub async fn set_telemetry(enabled: bool) -> crate::Result<PrivacySettings> {
     settings.telemetry = enabled;
     settings.save_in(&mut unit).await?;
     unit.commit().await?;
-    sqlx::query("DELETE FROM telemetry_outbox")
-        .execute(&state.pool)
-        .await?;
     if let Err(error) = crate::telemetry::set_enabled(&state, enabled).await {
         tracing::debug!(target: "theseus::telemetry", %error, "Failed to apply telemetry state");
     }

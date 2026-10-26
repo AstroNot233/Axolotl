@@ -260,9 +260,12 @@ impl Collection for Settings {
         conn: &mut SqliteConnection,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
-        sqlx::query("DELETE FROM settings")
-            .execute(&mut *conn)
-            .await?;
+        if records.is_empty() {
+            sqlx::query("DELETE FROM settings")
+                .execute(&mut *conn)
+                .await?;
+            return Ok(());
+        }
         for (_, record) in records {
             write_row(conn, record).await?;
         }
@@ -441,7 +444,7 @@ async fn write_row(
             resource_preserve_filenames
         )
         VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, jsonb(?),
+            0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, jsonb(?),
             jsonb(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,

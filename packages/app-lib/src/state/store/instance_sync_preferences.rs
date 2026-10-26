@@ -99,9 +99,7 @@ impl Collection for InstanceSyncPreferences {
         conn: &mut SqliteConnection,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
-        sqlx::query("DELETE FROM instance_sync_preferences")
-            .execute(&mut *conn)
-            .await?;
+        delete_omitted(conn, None, records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
         }
@@ -142,12 +140,7 @@ impl Collection for InstanceSyncPreferences {
         scope: &Self::Scope,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
-        sqlx::query(
-            "DELETE FROM instance_sync_preferences WHERE instance_id = ?",
-        )
-        .bind(scope)
-        .execute(&mut *conn)
-        .await?;
+        delete_omitted(conn, Some(scope), records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
         }
@@ -173,6 +166,53 @@ async fn write_row(
     .bind(record.enabled)
     .execute(&mut *conn)
     .await?;
+
+    Ok(())
+}
+
+/// Removes the preferences the replacement leaves out, and only those: a row
+/// the replacement keeps has to survive, because the checkpoints of that
+/// instance and feature hang off it.
+async fn delete_omitted(
+    conn: &mut SqliteConnection,
+    scope: Option<&String>,
+    records: &[(InstancePreferenceKey, InstancePreferenceRecord)],
+) -> crate::Result<()> {
+    let existing: Vec<(String, String)> =
+        match scope {
+            Some(instance_id) => {
+                sqlx::query_as(
+                    "SELECT instance_id, feature
+             FROM instance_sync_preferences
+             WHERE instance_id = ?",
+                )
+                .bind(instance_id)
+                .fetch_all(&mut *conn)
+                .await?
+            }
+            None => sqlx::query_as(
+                "SELECT instance_id, feature FROM instance_sync_preferences",
+            )
+            .fetch_all(&mut *conn)
+            .await?,
+        };
+
+    for (instance_id, feature) in existing {
+        let kept = records.iter().any(|(key, _)| {
+            key.instance_id == instance_id && key.feature == feature
+        });
+        if kept {
+            continue;
+        }
+        sqlx::query(
+            "DELETE FROM instance_sync_preferences
+             WHERE instance_id = ? AND feature = ?",
+        )
+        .bind(&instance_id)
+        .bind(&feature)
+        .execute(&mut *conn)
+        .await?;
+    }
 
     Ok(())
 }
