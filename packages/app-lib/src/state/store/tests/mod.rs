@@ -24,3 +24,4 @@ mod sync_feature_settings;
 mod synced_game_option_preferences;
 mod synced_game_option_state;
 mod synced_game_option_values;
+mod telemetry;

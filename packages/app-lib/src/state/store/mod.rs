@@ -30,6 +30,8 @@ pub(crate) mod sync_feature_settings;
 pub(crate) mod synced_game_option_preferences;
 pub(crate) mod synced_game_option_state;
 pub(crate) mod synced_game_option_values;
+pub(crate) mod telemetry_identity;
+pub(crate) mod telemetry_outbox;
 
 #[cfg(test)]
 mod tests;
