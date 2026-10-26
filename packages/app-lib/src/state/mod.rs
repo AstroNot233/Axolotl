@@ -1534,6 +1534,14 @@ mod auto_concurrency_tests {
         }
     }
 
+    /// A window in which the provider throttled at least one request.
+    fn throttled_window(active: usize) -> AutoConcurrencySample {
+        AutoConcurrencySample {
+            throttles: 1,
+            ..healthy(active, 100)
+        }
+    }
+
     #[test]
     fn contaminated_trial_restores_previous_target_and_requires_new_baseline() {
         let now = Instant::now();
@@ -1566,20 +1574,31 @@ mod auto_concurrency_tests {
         assert_eq!(controller.next_target(now, 72, 128, healthy(72, 100)), 72);
         assert_eq!(controller.next_target(now, 72, 128, healthy(72, 100)), 64);
 
-        let throttled = AutoConcurrencySample {
-            throttles: 1,
-            ..healthy(96, 100)
-        };
-        // A single throttled window is absorbed by the per-host limiter.
+        // A single throttled window is absorbed by the per-host limiter, and so
+        // is every window below the sustained-pressure threshold. The threshold
+        // is a tuned product decision, so the window count is spelled out here
+        // rather than read from the constant: a silent retune has to fail this
+        // test instead of passing unnoticed.
+        let throttled = throttled_window(96);
         let mut throttled_controller = AutoConcurrencyController::default();
+        for window in 1..8 {
+            assert_eq!(
+                throttled_controller.next_target(now, 96, 128, throttled),
+                96,
+                "pressured window {window} of 8 must not back off yet"
+            );
+        }
+        // Sustained pressure backs off by one step
+        // (AUTO_DOWNLOAD_CONCURRENCY_STEP), not a quarter.
+        let stepped = throttled_controller.next_target(now, 96, 128, throttled);
         assert_eq!(
-            throttled_controller.next_target(now, 96, 128, throttled),
-            96
+            stepped, 88,
+            "the eighth pressured window steps down one step"
         );
-        // Sustained pressure backs off by one step, not a quarter.
-        assert_eq!(
-            throttled_controller.next_target(now, 96, 128, throttled),
-            88
+        assert_ne!(
+            stepped,
+            96 - 96 / 4,
+            "the backoff must be a single step, not a quarter of the target"
         );
     }
 
@@ -1587,22 +1606,48 @@ mod auto_concurrency_tests {
     fn sustained_pressure_steps_down_across_cooldowns_and_recovers() {
         let mut controller = AutoConcurrencyController::default();
         let now = Instant::now();
-        let throttled = AutoConcurrencySample {
-            throttles: 1,
-            ..healthy(96, 100)
-        };
-        assert_eq!(controller.next_target(now, 96, 128, throttled), 96);
-        assert_eq!(controller.next_target(now, 96, 128, throttled), 88);
-        // Backing off starts a cooldown that absorbs further pressure.
-        assert_eq!(controller.next_target(now, 88, 128, throttled), 88);
+        let throttled = throttled_window(96);
+
+        // Spend the whole eight-window budget at a single timestamp: only the
+        // last window steps down. The boundary itself is covered window by
+        // window in the test above.
+        let mut current = 96;
+        for _ in 0..8 {
+            current = controller.next_target(now, current, 128, throttled);
+        }
+        assert_eq!(current, 88, "eight pressured windows step down once");
+        assert_eq!(
+            controller.pressure_windows, 8,
+            "the step down must consume the full window budget"
+        );
+        assert_eq!(
+            controller.cooldown_until,
+            Some(now + Duration::from_secs(30)),
+            "stepping down starts the probe cooldown"
+        );
+
+        // Backing off starts a cooldown that absorbs further pressure: inside
+        // it the target holds and the pressure count does not grow.
+        let during = now + Duration::from_secs(29);
+        assert_eq!(controller.next_target(during, 88, 128, throttled), 88);
+        assert_eq!(
+            controller.pressure_windows, 8,
+            "pressure absorbed by the cooldown must not accumulate"
+        );
+
         // After the cooldown, continued pressure steps down again.
         let later = now + Duration::from_secs(31);
         assert_eq!(controller.next_target(later, 88, 128, throttled), 80);
+
         // Clean samples reset pressure and allow growth after the cooldown.
         let later_2 = now + Duration::from_secs(62);
         assert_eq!(
             controller.next_target(later_2, 80, 128, healthy(80, 100)),
             80
+        );
+        assert_eq!(
+            controller.pressure_windows, 0,
+            "a clean sample resets the pressure count"
         );
         assert_eq!(
             controller.next_target(later_2, 80, 128, healthy(80, 100)),
