@@ -173,8 +173,9 @@ pub(crate) trait Collection: Sized {
         key: &Self::Key,
         record: Option<&Self::Record>,
     ) -> crate::Result<()> {
-        let mut connection = handle.connection().await?;
-        Self::write(&mut connection, key, record).await
+        let mut unit = atom(handle).await?;
+        Self::write(unit.connection(), key, record).await?;
+        unit.commit().await
     }
 
     /// Every record the collection holds, with the key each is stored under.

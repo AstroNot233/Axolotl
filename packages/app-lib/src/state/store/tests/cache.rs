@@ -51,16 +51,27 @@ async fn a_key_of_one_type_is_not_a_key_of_another() {
     let pool = support::pool().await;
     let handle = handle_of(&pool);
 
-    Cache::set(
-        &handle,
-        &key("report_types", "0"),
-        Some(&record(None, None, 1)),
-    )
-    .await
-    .unwrap();
+    let report = record(None, None, 1);
+    let loaders = record(Some("fabric"), Some("{\"id\":\"loaders\"}"), 2);
+    Cache::set(&handle, &key("report_types", "0"), Some(&report))
+        .await
+        .unwrap();
+    Cache::set(&handle, &key("loaders", "0"), Some(&loaders))
+        .await
+        .unwrap();
 
     assert_eq!(
+        Cache::get(&handle, &key("report_types", "0"))
+            .await
+            .unwrap(),
+        Some(report)
+    );
+    assert_eq!(
         Cache::get(&handle, &key("loaders", "0")).await.unwrap(),
+        Some(loaders)
+    );
+    assert_eq!(
+        Cache::get(&handle, &key("loaders", "1")).await.unwrap(),
         None
     );
 }
