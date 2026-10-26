@@ -6,7 +6,9 @@ use crate::state::store::Handle;
 use crate::state::store::content_update_jobs::{
     ContentUpdateJobRecord, ContentUpdateJobs,
 };
-use crate::state::store::install_jobs::{InstallJobRecord, InstallJobs};
+use crate::state::store::install_jobs::{
+    InstallJobRecord, InstallJobScope, InstallJobs,
+};
 
 fn handle_of(pool: &sqlx::SqlitePool) -> Handle {
     Handle::new(pool.clone())
@@ -55,9 +57,12 @@ async fn a_status_reads_only_the_jobs_it_names() {
             .unwrap();
     }
 
-    let running = InstallJobs::get_scoped(&handle, &"running".to_string())
-        .await
-        .unwrap();
+    let running = InstallJobs::get_scoped(
+        &handle,
+        &InstallJobScope::Status("running".to_string()),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(running.len(), 1);
     assert_eq!(running[0].0, "running");
@@ -141,4 +146,47 @@ async fn a_plan_link_round_trips_and_clears() {
             .unwrap(),
         None
     );
+}
+
+#[tokio::test]
+async fn a_scoped_replacement_refuses_a_job_of_another_scope() {
+    let handle = support::handle().await;
+
+    let refused = InstallJobs::set_scoped(
+        &handle,
+        &InstallJobScope::Status("running".to_string()),
+        &[("job".to_string(), job("queued"))],
+    )
+    .await;
+
+    assert!(refused.is_err());
+    assert_eq!(
+        InstallJobs::get(&handle, &"job".to_string()).await.unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn an_instance_scope_reads_the_jobs_of_that_instance() {
+    let pool = support::pool().await;
+    support::add_instance(&pool, "one").await;
+    support::add_instance(&pool, "two").await;
+    let handle = handle_of(&pool);
+    for (id, instance_id) in [("first", "one"), ("second", "two")] {
+        let mut record = job("queued");
+        record.instance_id = Some(instance_id.to_string());
+        InstallJobs::set(&handle, &id.to_string(), Some(&record))
+            .await
+            .unwrap();
+    }
+
+    let jobs = InstallJobs::get_scoped(
+        &handle,
+        &InstallJobScope::Instance("one".to_string()),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].0, "first");
 }

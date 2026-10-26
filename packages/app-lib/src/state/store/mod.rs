@@ -76,6 +76,19 @@ impl Atom {
     }
 }
 
+/// Whether a write was refused because it named a row that is not there.
+///
+/// SQLite reports a foreign key the statement cannot satisfy as
+/// `SQLITE_CONSTRAINT_FOREIGNKEY`, which is the one refusal a caller can answer
+/// by dropping the reference itself.
+pub(crate) fn names_a_missing_row(error: &crate::Error) -> bool {
+    matches!(
+        error.raw.as_ref(),
+        crate::ErrorKind::Sqlx(sqlx::Error::Database(database))
+            if database.code().as_deref() == Some("787")
+    )
+}
+
 /// Opens an atomic unit on `handle`.
 ///
 /// The unit takes its write reservation as it opens, the way the callers that

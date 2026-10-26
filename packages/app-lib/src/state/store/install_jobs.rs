@@ -10,9 +10,12 @@ pub(crate) struct InstallJobs;
 /// A job is identified by its own id.
 pub(crate) type InstallJobKey = String;
 
-/// A job's status groups it with the other jobs in the same state, which is how
-/// a caller asks for the jobs it has to pick up.
-pub(crate) type InstallJobScope = String;
+/// Which jobs a read wants: those in one status, or those of one instance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InstallJobScope {
+    Status(String),
+    Instance(String),
+}
 
 /// What a job carries.
 ///
@@ -36,8 +39,9 @@ impl Collection for InstallJobs {
     type Record = InstallJobRecord;
 
     /// A job's status changes under it, so the collection cannot tell from the
-    /// key whether a job is in a given scope: the scope names the jobs a read
-    /// wants, and the caller that writes a job addresses it by id.
+    /// key whether a job is in a given scope: what decides that is the record,
+    /// and the replacement checks each record against the scope before it
+    /// writes anything.
     fn in_scope(_scope: &Self::Scope, _key: &Self::Key) -> bool {
         true
     }
@@ -112,17 +116,34 @@ impl Collection for InstallJobs {
         conn: &mut SqliteConnection,
         scope: &Self::Scope,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let rows: Vec<(String, JobRow)> = sqlx::query_as(
-            "
-            SELECT id, instance_id, kind, status, state, created, modified,
-                finished, dismissed
-            FROM install_jobs
-            WHERE status = ?
-            ",
-        )
-        .bind(scope)
-        .fetch_all(&mut *conn)
-        .await?;
+        let rows: Vec<(String, JobRow)> = match scope {
+            InstallJobScope::Status(status) => {
+                sqlx::query_as(
+                    "
+                    SELECT id, instance_id, kind, status, state, created,
+                        modified, finished, dismissed
+                    FROM install_jobs
+                    WHERE status = ?
+                    ",
+                )
+                .bind(status)
+                .fetch_all(&mut *conn)
+                .await?
+            }
+            InstallJobScope::Instance(instance_id) => {
+                sqlx::query_as(
+                    "
+                    SELECT id, instance_id, kind, status, state, created,
+                        modified, finished, dismissed
+                    FROM install_jobs
+                    WHERE instance_id = ?
+                    ",
+                )
+                .bind(instance_id)
+                .fetch_all(&mut *conn)
+                .await?
+            }
+        };
 
         Ok(rows
             .into_iter()
@@ -135,6 +156,7 @@ impl Collection for InstallJobs {
         scope: &Self::Scope,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
+        ensure_records_are_in_scope(scope, records)?;
         delete_omitted(conn, Some(scope), records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
@@ -247,6 +269,32 @@ async fn delete_omitted(
             .bind(&id)
             .execute(&mut *conn)
             .await?;
+    }
+
+    Ok(())
+}
+
+/// A scoped replacement may only touch the jobs of that scope, and the jobs it
+/// writes must be in it: a job whose status differs from the status being
+/// replaced would move another group, and one that names another instance would
+/// move between instances.
+fn ensure_records_are_in_scope(
+    scope: &InstallJobScope,
+    records: &[(InstallJobKey, InstallJobRecord)],
+) -> crate::Result<()> {
+    for (key, record) in records {
+        let in_scope = match scope {
+            InstallJobScope::Status(status) => &record.status == status,
+            InstallJobScope::Instance(instance_id) => {
+                record.instance_id.as_deref() == Some(instance_id)
+            }
+        };
+        if !in_scope {
+            return Err(crate::ErrorKind::InputError(format!(
+                "Install job {key} is not among the jobs of the scope it was written to"
+            ))
+            .into());
+        }
     }
 
     Ok(())

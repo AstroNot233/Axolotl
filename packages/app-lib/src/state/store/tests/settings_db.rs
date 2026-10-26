@@ -4,7 +4,7 @@
 
 use super::support;
 use crate::state::settings::{
-    DownloadSourceMode, Settings, default_terracotta_public_nodes,
+    DownloadSourceMode, HomeLayout, Settings, default_terracotta_public_nodes,
 };
 use crate::state::store::Handle;
 

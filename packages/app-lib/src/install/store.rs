@@ -5,9 +5,9 @@ use crate::state::store::content_update_jobs::{
     ContentUpdateJobRecord, ContentUpdateJobs,
 };
 use crate::state::store::install_jobs::{
-    InstallJobRecord as StoredJob, InstallJobs,
+    InstallJobRecord as StoredJob, InstallJobScope, InstallJobs,
 };
-use crate::state::store::{Atom, Collection as _, atom};
+use crate::state::store::{Atom, Collection as _, atom, names_a_missing_row};
 use crate::state::{InstanceInstallStage, State};
 use chrono::{DateTime, TimeZone, Utc};
 use uuid::Uuid;
@@ -93,7 +93,7 @@ pub(crate) async fn insert_with_content_plan(
     };
 
     let mut unit = atom(&app_state.data).await?;
-    InstallJobs::atom_set(&mut unit, &key, Some(&row)).await?;
+    write_job(&mut unit, &key, row).await?;
     if let Some(plan_id) = plan_id {
         let link = ContentUpdateJobRecord {
             job_id: Some(key.clone()),
@@ -129,34 +129,26 @@ pub async fn list(
     include_finished: bool,
     app_state: &State,
 ) -> crate::Result<Vec<InstallJobRecord>> {
-    let statuses: &[InstallJobStatus] = if include_finished {
-        &[
-            InstallJobStatus::Queued,
-            InstallJobStatus::Running,
-            InstallJobStatus::Canceling,
-            InstallJobStatus::WaitingForUser,
-            InstallJobStatus::Succeeded,
-            InstallJobStatus::Failed,
-            InstallJobStatus::Interrupted,
-            InstallJobStatus::Canceled,
-        ]
+    let rows = if include_finished {
+        InstallJobs::get_all(&app_state.data).await?
     } else {
-        &[
+        let mut unit = atom(&app_state.data).await?;
+        let mut rows = Vec::new();
+        for status in [
             InstallJobStatus::Queued,
             InstallJobStatus::Running,
             InstallJobStatus::Failed,
             InstallJobStatus::Interrupted,
             InstallJobStatus::Canceling,
             InstallJobStatus::WaitingForUser,
-        ]
+        ] {
+            let scope = InstallJobScope::Status(status.as_str().to_string());
+            rows.extend(InstallJobs::atom_get_scoped(&mut unit, &scope).await?);
+        }
+        rows
     };
-
-    let mut rows = Vec::new();
-    for status in statuses {
-        let scope = status.as_str().to_string();
-        let scoped = InstallJobs::get_scoped(&app_state.data, &scope).await?;
-        rows.extend(scoped.into_iter().filter(|(_, row)| !row.dismissed));
-    }
+    let mut rows: Vec<_> =
+        rows.into_iter().filter(|(_, row)| !row.dismissed).collect();
     rows.sort_unstable_by_key(|(_, row)| row.created);
 
     records(rows)
@@ -165,14 +157,15 @@ pub async fn list(
 pub async fn list_interrupted_candidates(
     app_state: &State,
 ) -> crate::Result<Vec<InstallJobRecord>> {
+    let mut unit = atom(&app_state.data).await?;
     let mut rows = Vec::new();
     for status in [
         InstallJobStatus::Queued,
         InstallJobStatus::Running,
         InstallJobStatus::Canceling,
     ] {
-        let scope = status.as_str().to_string();
-        rows.extend(InstallJobs::get_scoped(&app_state.data, &scope).await?);
+        let scope = InstallJobScope::Status(status.as_str().to_string());
+        rows.extend(InstallJobs::atom_get_scoped(&mut unit, &scope).await?);
     }
 
     records(rows)
@@ -476,7 +469,7 @@ pub async fn clear_finished(app_state: &State) -> crate::Result<u64> {
         InstallJobStatus::Interrupted,
         InstallJobStatus::Canceled,
     ] {
-        let scope = status.as_str().to_string();
+        let scope = InstallJobScope::Status(status.as_str().to_string());
         let finished = InstallJobs::atom_get_scoped(&mut unit, &scope).await?;
         for (key, mut row) in finished {
             if row.dismissed {
@@ -498,8 +491,9 @@ pub async fn mark_instance_deleted(
     app_state: &State,
 ) -> crate::Result<Vec<InstallJobRecord>> {
     let mut updated = Vec::new();
-    for (key, row) in InstallJobs::get_all(&app_state.data).await? {
-        if row.instance_id.as_deref() != Some(instance_id) || row.dismissed {
+    let scope = InstallJobScope::Instance(instance_id.to_string());
+    for (key, row) in InstallJobs::get_scoped(&app_state.data, &scope).await? {
+        if row.dismissed {
             continue;
         }
         let mut record = row_to_record(&key, row)?;
@@ -563,6 +557,9 @@ async fn compare_and_swap_status(
 /// Writes `row` back under `key`, dropping its instance reference when the
 /// database refuses it: the statement this replaced stored a job's instance
 /// only while that instance still existed.
+/// Writes the job, dropping the instance it names only when the table refused
+/// that reference: the instance may have been deleted while the install ran, and
+/// the job is still worth keeping without it.
 async fn write_job(
     unit: &mut Atom,
     key: &str,
@@ -571,7 +568,9 @@ async fn write_job(
     let key = key.to_string();
     match InstallJobs::atom_set(unit, &key, Some(&row)).await {
         Ok(()) => Ok(()),
-        Err(_) if row.instance_id.is_some() => {
+        Err(error)
+            if row.instance_id.is_some() && names_a_missing_row(&error) =>
+        {
             row.instance_id = None;
             InstallJobs::atom_set(unit, &key, Some(&row)).await
         }
