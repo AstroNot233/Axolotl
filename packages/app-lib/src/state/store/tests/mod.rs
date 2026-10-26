@@ -13,6 +13,7 @@ mod install_jobs;
 mod install_store;
 mod instance_sync_checkpoints;
 mod instance_sync_preferences;
+mod java_globals;
 mod join_log;
 mod official_login_proof;
 mod resource_source_projects;

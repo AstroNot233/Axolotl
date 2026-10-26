@@ -22,6 +22,8 @@ pub(crate) mod game_option_update_state;
 pub(crate) mod install_jobs;
 pub(crate) mod instance_sync_checkpoints;
 pub(crate) mod instance_sync_preferences;
+pub(crate) mod java_default_versions;
+pub(crate) mod java_versions;
 pub(crate) mod join_log;
 pub(crate) mod official_login_proof;
 pub(crate) mod resource_source_projects;
