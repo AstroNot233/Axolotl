@@ -18,7 +18,7 @@ A caller names a collection and the fields it looks a record up by, through the 
 
 The store package is the only place a storage is named:
 
-- Add a collection by creating a module under `src/state/store/` that declares its `Key`, its `Scope` and its `Record`, and answers the six statements the verbs are written in terms of — read, write, read-all, replace-all, read-scoped and replace-scoped, each on a `&mut SqliteConnection`. Its statements live in that module and nowhere else; a collection with no narrower group sets `Scope = Key`.
+- Add a collection by creating a module under `src/state/store/` that declares its `Key`, its `Scope` and its `Record`, and answers the six statements the verbs are written in terms of — read, write, read-all, replace-all, read-scoped and replace-scoped, each on a `&mut SqliteConnection`. Its statements live in that module and nowhere else; a collection with no narrower group sets `Scope = Key`. A collection implements those statements rather than the verbs: the verbs, and the checks that a replace carries unique keys and no key outside its scope, are the trait defaults and must not be re-implemented per collection.
 - Prefer the scoped verbs and atomic units to reading a whole collection and filtering it in the caller: a full read there is the performance defect this interface exists to avoid.
 - `sqlx` may only appear inside `src/state/store/`. `Handle::pool` is visible to that package alone; using it elsewhere pins the crate to one storage.
 - Signatures return the crate's own `Result`; a storage's error type must not appear in them, so a replacement storage can report the same failures.

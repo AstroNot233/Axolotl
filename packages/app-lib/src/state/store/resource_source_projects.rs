@@ -25,6 +25,10 @@ impl Collection for ResourceSourceProjects {
     type Scope = ResourceSourceProjectKey;
     type Record = ResourceSourceProjectRecord;
 
+    fn in_scope(scope: &Self::Scope, key: &Self::Key) -> bool {
+        scope == key
+    }
+
     async fn read(
         conn: &mut SqliteConnection,
         key: &Self::Key,

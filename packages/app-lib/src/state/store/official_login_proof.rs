@@ -22,6 +22,10 @@ impl Collection for OfficialLoginProof {
     type Scope = Installation;
     type Record = OfficialLoginProofRecord;
 
+    fn in_scope(_scope: &Self::Scope, _key: &Self::Key) -> bool {
+        true
+    }
+
     async fn read(
         conn: &mut SqliteConnection,
         _key: &Self::Key,

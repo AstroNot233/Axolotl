@@ -29,6 +29,10 @@ impl Collection for ContentFavorites {
     type Scope = ContentFavoriteKey;
     type Record = ContentFavoriteRecord;
 
+    fn in_scope(scope: &Self::Scope, key: &Self::Key) -> bool {
+        scope == key
+    }
+
     async fn read(
         conn: &mut SqliteConnection,
         key: &Self::Key,
@@ -107,7 +111,7 @@ impl Collection for ContentFavorites {
             .execute(&mut *conn)
             .await?;
         for (key, record) in records {
-            write_row(conn, key, record).await?;
+            insert_row(conn, key, record).await?;
         }
         Ok(())
     }
@@ -127,8 +131,17 @@ impl Collection for ContentFavorites {
         scope: &Self::Scope,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
-        Self::write(conn, scope, records.first().map(|(_, record)| record))
-            .await
+        sqlx::query(
+            "DELETE FROM content_favorites WHERE provider = ? AND project_id = ?",
+        )
+        .bind(scope.provider.as_str())
+        .bind(&scope.project_id)
+        .execute(&mut *conn)
+        .await?;
+        for (key, record) in records {
+            insert_row(conn, key, record).await?;
+        }
+        Ok(())
     }
 }
 
@@ -144,6 +157,29 @@ async fn write_row(
         VALUES (?, ?, ?, ?)
         ON CONFLICT (provider, project_id) DO UPDATE SET
             content_type = excluded.content_type
+        ",
+    )
+    .bind(key.provider.as_str())
+    .bind(&key.project_id)
+    .bind(record.content_type.as_str())
+    .bind(record.saved_at)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
+}
+
+/// A replace writes the moment it was given, so a batch carries its own times.
+async fn insert_row(
+    conn: &mut SqliteConnection,
+    key: &ContentFavoriteKey,
+    record: &ContentFavoriteRecord,
+) -> crate::Result<()> {
+    sqlx::query(
+        "
+        INSERT INTO content_favorites
+            (provider, project_id, content_type, saved_at)
+        VALUES (?, ?, ?, ?)
         ",
     )
     .bind(key.provider.as_str())
@@ -364,6 +400,87 @@ mod tests {
                     saved_at: 1,
                 },
             )]
+        );
+    }
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use super::*;
+
+    async fn handle() -> Handle {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        Handle::new(pool)
+    }
+
+    fn key(project_id: &str) -> ContentFavoriteKey {
+        ContentFavoriteKey {
+            provider: ContentFavoriteProvider::Modrinth,
+            project_id: project_id.to_string(),
+        }
+    }
+
+    fn record(saved_at: i64) -> ContentFavoriteRecord {
+        ContentFavoriteRecord {
+            content_type: ContentFavoriteType::Mod,
+            saved_at,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_batch_keeps_the_time_it_was_given() {
+        let handle = handle().await;
+
+        ContentFavorites::set_all(&handle, &[(key("sodium"), record(7))])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            ContentFavorites::get(&handle, &key("sodium"))
+                .await
+                .unwrap(),
+            Some(record(7))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_refuses_the_same_key_twice() {
+        let handle = handle().await;
+
+        assert!(
+            ContentFavorites::set_all(
+                &handle,
+                &[(key("sodium"), record(1)), (key("sodium"), record(2))],
+            )
+            .await
+            .is_err()
+        );
+        assert!(ContentFavorites::get_all(&handle).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_scoped_replace_refuses_a_key_outside_its_scope() {
+        let handle = handle().await;
+
+        assert!(
+            ContentFavorites::set_scoped(
+                &handle,
+                &key("sodium"),
+                &[(key("lithium"), record(1))],
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            ContentFavorites::get(&handle, &key("lithium"))
+                .await
+                .unwrap()
+                .is_none()
         );
     }
 }

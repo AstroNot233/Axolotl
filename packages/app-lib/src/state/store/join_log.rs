@@ -33,6 +33,10 @@ impl Collection for JoinLog {
     type Scope = InstanceJoins;
     type Record = JoinLogEntry;
 
+    fn in_scope(scope: &Self::Scope, key: &Self::Key) -> bool {
+        scope.instance_id == key.instance_id
+    }
+
     async fn read(
         conn: &mut SqliteConnection,
         key: &Self::Key,
@@ -199,6 +203,94 @@ fn to_record(
     ))
 }
 
+#[cfg(test)]
+mod replace_tests {
+    use super::*;
+
+    async fn handle(instance: &str) -> Handle {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO instances
+                (id, path, install_stage, launcher_feature_version,
+                 name, created, modified)
+             VALUES (?, ?, 'installed', '1', ?, 1, 1)",
+        )
+        .bind(instance)
+        .bind(instance)
+        .bind(instance)
+        .execute(&pool)
+        .await
+        .unwrap();
+        Handle::new(pool)
+    }
+
+    fn key(instance: &str, host: &str) -> JoinLogKey {
+        JoinLogKey {
+            instance_id: instance.to_string(),
+            host: host.to_string(),
+            port: 25565,
+        }
+    }
+
+    fn record(seconds: i64) -> JoinLogEntry {
+        JoinLogEntry {
+            join_time: Utc.timestamp_opt(seconds, 0).unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_scoped_replace_refuses_another_instance() {
+        let handle = handle("first").await;
+        sqlx::query(
+            "INSERT INTO instances
+                (id, path, install_stage, launcher_feature_version,
+                 name, created, modified)
+             VALUES ('second', 'second', 'installed', '1', 's', 1, 1)",
+        )
+        .execute(handle.pool())
+        .await
+        .unwrap();
+
+        assert!(
+            JoinLog::set_scoped(
+                &handle,
+                &InstanceJoins {
+                    instance_id: "first".to_string(),
+                },
+                &[(key("second", "mc.example.com"), record(1))],
+            )
+            .await
+            .is_err()
+        );
+        assert!(JoinLog::get_all(&handle).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_scoped_replace_keeps_the_given_times() {
+        let handle = handle("instance").await;
+        let scope = InstanceJoins {
+            instance_id: "instance".to_string(),
+        };
+
+        JoinLog::set_scoped(
+            &handle,
+            &scope,
+            &[(key("instance", "mc.example.com"), record(5))],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            JoinLog::get_scoped(&handle, &scope).await.unwrap(),
+            vec![(key("instance", "mc.example.com"), record(5))]
+        );
+    }
+}
 fn to_time(timestamp: i64) -> DateTime<Utc> {
     Utc.timestamp_opt(timestamp, 0)
         .single()

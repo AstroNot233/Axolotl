@@ -28,6 +28,10 @@ impl Collection for GameOptionUpdateState {
     type Scope = UpdateStateKey;
     type Record = UpdateStateRecord;
 
+    fn in_scope(scope: &Self::Scope, key: &Self::Key) -> bool {
+        scope == key
+    }
+
     async fn read(
         conn: &mut SqliteConnection,
         key: &Self::Key,

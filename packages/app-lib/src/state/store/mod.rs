@@ -78,13 +78,16 @@ pub(crate) async fn atom(handle: &Handle) -> crate::Result<Atom> {
 /// answer the same way.
 pub(crate) trait Collection: Sized {
     /// The fields one record is identified by.
-    type Key;
+    type Key: PartialEq;
 
     /// The narrower set of fields that names a group of records.
     type Scope;
 
     /// What one record carries beyond its key.
     type Record;
+
+    /// Whether `key` is one of the records `scope` names.
+    fn in_scope(scope: &Self::Scope, key: &Self::Key) -> bool;
 
     async fn read(
         conn: &mut SqliteConnection,
@@ -152,6 +155,7 @@ pub(crate) trait Collection: Sized {
         handle: &Handle,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
+        ensure_unique::<Self>(records)?;
         let mut atom = atom(handle).await?;
         Self::replace_all(atom.connection(), records).await?;
         atom.commit().await
@@ -172,6 +176,7 @@ pub(crate) trait Collection: Sized {
         scope: &Self::Scope,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
+        ensure_in_scope::<Self>(scope, records)?;
         let mut atom = atom(handle).await?;
         Self::replace_scoped(atom.connection(), scope, records).await?;
         atom.commit().await
@@ -206,6 +211,7 @@ pub(crate) trait Collection: Sized {
         atom: &mut Atom,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
+        ensure_unique::<Self>(records)?;
         Self::replace_all(atom.connection(), records).await
     }
 
@@ -223,6 +229,39 @@ pub(crate) trait Collection: Sized {
         scope: &Self::Scope,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
+        ensure_in_scope::<Self>(scope, records)?;
         Self::replace_scoped(atom.connection(), scope, records).await
     }
+}
+
+/// A replace writes exactly what it was given, so one key twice is a mistake
+/// worth reporting rather than a silent last-one-wins.
+fn ensure_unique<C: Collection>(
+    records: &[(C::Key, C::Record)],
+) -> crate::Result<()> {
+    for (index, (key, _)) in records.iter().enumerate() {
+        if records[..index].iter().any(|(earlier, _)| earlier == key) {
+            return Err(crate::ErrorKind::InputError(
+                "A replace cannot hold the same key twice".to_string(),
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+/// A scoped replace only touches the records its scope names, so a key outside
+/// it would change state the caller did not ask about.
+fn ensure_in_scope<C: Collection>(
+    scope: &C::Scope,
+    records: &[(C::Key, C::Record)],
+) -> crate::Result<()> {
+    ensure_unique::<C>(records)?;
+    if records.iter().all(|(key, _)| C::in_scope(scope, key)) {
+        return Ok(());
+    }
+    Err(crate::ErrorKind::InputError(
+        "A scoped replace cannot write a key outside its scope".to_string(),
+    )
+    .into())
 }
