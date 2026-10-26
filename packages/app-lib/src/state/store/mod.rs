@@ -10,6 +10,8 @@
 //! held, so a caller never needs a second verb for that.
 
 pub(crate) mod content_favorites;
+pub(crate) mod game_option_pack_bases;
+pub(crate) mod game_option_update_state;
 pub(crate) mod join_log;
 pub(crate) mod resource_source_projects;
 
