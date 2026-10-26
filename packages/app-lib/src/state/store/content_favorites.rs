@@ -1,5 +1,7 @@
 //! The content a person keeps for later.
 
+use sqlx::SqliteConnection;
+
 use super::{Collection, Handle};
 use crate::state::content_types::{
     ContentFavoriteProvider, ContentFavoriteType,
@@ -24,52 +26,11 @@ pub(crate) struct ContentFavoriteRecord {
 
 impl Collection for ContentFavorites {
     type Key = ContentFavoriteKey;
+    type Scope = ContentFavoriteKey;
     type Record = ContentFavoriteRecord;
 
-    async fn set(
-        handle: &Handle,
-        key: &Self::Key,
-        record: Option<&Self::Record>,
-    ) -> crate::Result<()> {
-        let provider = key.provider.as_str();
-
-        let Some(record) = record else {
-            sqlx::query(
-                "DELETE FROM content_favorites
-                 WHERE provider = ? AND project_id = ?",
-            )
-            .bind(provider)
-            .bind(&key.project_id)
-            .execute(handle.pool())
-            .await?;
-
-            return Ok(());
-        };
-
-        // Writing a favorite that exists refreshes what it points at and keeps
-        // the moment it was first saved, so two writes of one favorite cannot
-        // read a moment the other has already moved past.
-        sqlx::query(
-            "
-            INSERT INTO content_favorites
-                (provider, project_id, content_type, saved_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT (provider, project_id) DO UPDATE SET
-                content_type = excluded.content_type
-            ",
-        )
-        .bind(provider)
-        .bind(&key.project_id)
-        .bind(record.content_type.as_str())
-        .bind(record.saved_at)
-        .execute(handle.pool())
-        .await?;
-
-        Ok(())
-    }
-
-    async fn get(
-        handle: &Handle,
+    async fn read(
+        conn: &mut SqliteConnection,
         key: &Self::Key,
     ) -> crate::Result<Option<Self::Record>> {
         let row: Option<(String, i64)> = sqlx::query_as(
@@ -79,7 +40,7 @@ impl Collection for ContentFavorites {
         )
         .bind(key.provider.as_str())
         .bind(&key.project_id)
-        .fetch_optional(handle.pool())
+        .fetch_optional(&mut *conn)
         .await?;
 
         Ok(row.and_then(|(content_type, saved_at)| {
@@ -90,47 +51,35 @@ impl Collection for ContentFavorites {
         }))
     }
 
-    async fn set_all(
-        handle: &Handle,
-        records: &[(Self::Key, Self::Record)],
+    async fn write(
+        conn: &mut SqliteConnection,
+        key: &Self::Key,
+        record: Option<&Self::Record>,
     ) -> crate::Result<()> {
-        let mut transaction = handle.pool().begin().await?;
-        // The call replaces the collection, so a key the caller leaves out is
-        // gone rather than left behind for a later read to return.
-        sqlx::query("DELETE FROM content_favorites")
-            .execute(&mut *transaction)
-            .await?;
-        for (key, record) in records {
+        let Some(record) = record else {
             sqlx::query(
-                "
-                INSERT INTO content_favorites
-                    (provider, project_id, content_type, saved_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (provider, project_id) DO UPDATE SET
-                    content_type = excluded.content_type,
-                    saved_at = excluded.saved_at
-                ",
+                "DELETE FROM content_favorites
+                 WHERE provider = ? AND project_id = ?",
             )
             .bind(key.provider.as_str())
             .bind(&key.project_id)
-            .bind(record.content_type.as_str())
-            .bind(record.saved_at)
-            .execute(&mut *transaction)
+            .execute(&mut *conn)
             .await?;
-        }
-        transaction.commit().await?;
 
-        Ok(())
+            return Ok(());
+        };
+
+        write_row(conn, key, record).await
     }
 
-    async fn get_all(
-        handle: &Handle,
+    async fn read_all(
+        conn: &mut SqliteConnection,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
         let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
             "SELECT provider, project_id, content_type, saved_at
              FROM content_favorites",
         )
-        .fetch_all(handle.pool())
+        .fetch_all(&mut *conn)
         .await?;
 
         Ok(rows
@@ -149,6 +98,62 @@ impl Collection for ContentFavorites {
             })
             .collect())
     }
+
+    async fn replace_all(
+        conn: &mut SqliteConnection,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        sqlx::query("DELETE FROM content_favorites")
+            .execute(&mut *conn)
+            .await?;
+        for (key, record) in records {
+            write_row(conn, key, record).await?;
+        }
+        Ok(())
+    }
+
+    async fn read_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+    ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
+        Ok(Self::read(conn, scope)
+            .await?
+            .map(|record| vec![(scope.clone(), record)])
+            .unwrap_or_default())
+    }
+
+    async fn replace_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        Self::write(conn, scope, records.first().map(|(_, record)| record))
+            .await
+    }
+}
+
+async fn write_row(
+    conn: &mut SqliteConnection,
+    key: &ContentFavoriteKey,
+    record: &ContentFavoriteRecord,
+) -> crate::Result<()> {
+    sqlx::query(
+        "
+        INSERT INTO content_favorites
+            (provider, project_id, content_type, saved_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (provider, project_id) DO UPDATE SET
+            content_type = excluded.content_type
+        ",
+    )
+    .bind(key.provider.as_str())
+    .bind(&key.project_id)
+    .bind(record.content_type.as_str())
+    .bind(record.saved_at)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
 }
 
 /// The provider a stored favorite names, or nothing when this build does not

@@ -1,5 +1,7 @@
 //! Which resource a provider project is stored as.
 
+use sqlx::SqliteConnection;
+
 use super::{Collection, Handle};
 
 /// The provider projects that have a resource of their own.
@@ -20,10 +22,28 @@ pub(crate) struct ResourceSourceProjectRecord {
 
 impl Collection for ResourceSourceProjects {
     type Key = ResourceSourceProjectKey;
+    type Scope = ResourceSourceProjectKey;
     type Record = ResourceSourceProjectRecord;
 
-    async fn set(
-        handle: &Handle,
+    async fn read(
+        conn: &mut SqliteConnection,
+        key: &Self::Key,
+    ) -> crate::Result<Option<Self::Record>> {
+        let resource_id: Option<String> = sqlx::query_scalar(
+            "SELECT resource_id
+             FROM resource_source_projects
+             WHERE source = ? AND project_id = ?",
+        )
+        .bind(&key.source)
+        .bind(&key.project_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+
+        Ok(resource_id.map(|resource_id| Self::Record { resource_id }))
+    }
+
+    async fn write(
+        conn: &mut SqliteConnection,
         key: &Self::Key,
         record: Option<&Self::Record>,
     ) -> crate::Result<()> {
@@ -34,86 +54,23 @@ impl Collection for ResourceSourceProjects {
             )
             .bind(&key.source)
             .bind(&key.project_id)
-            .execute(handle.pool())
+            .execute(&mut *conn)
             .await?;
 
             return Ok(());
         };
 
-        sqlx::query(
-            "
-            INSERT INTO resource_source_projects
-                (source, project_id, resource_id)
-            VALUES (?, ?, ?)
-            ON CONFLICT (source, project_id) DO UPDATE SET
-                resource_id = excluded.resource_id
-            ",
-        )
-        .bind(&key.source)
-        .bind(&key.project_id)
-        .bind(&record.resource_id)
-        .execute(handle.pool())
-        .await?;
-
-        Ok(())
+        write_row(conn, key, record).await
     }
 
-    async fn get(
-        handle: &Handle,
-        key: &Self::Key,
-    ) -> crate::Result<Option<Self::Record>> {
-        let resource_id: Option<String> = sqlx::query_scalar(
-            "SELECT resource_id
-             FROM resource_source_projects
-             WHERE source = ? AND project_id = ?",
-        )
-        .bind(&key.source)
-        .bind(&key.project_id)
-        .fetch_optional(handle.pool())
-        .await?;
-
-        Ok(resource_id.map(|resource_id| Self::Record { resource_id }))
-    }
-
-    async fn set_all(
-        handle: &Handle,
-        records: &[(Self::Key, Self::Record)],
-    ) -> crate::Result<()> {
-        let mut transaction = handle.pool().begin().await?;
-        // The call replaces the collection, so a key the caller leaves out is
-        // gone rather than left behind for a later read to return.
-        sqlx::query("DELETE FROM resource_source_projects")
-            .execute(&mut *transaction)
-            .await?;
-        for (key, record) in records {
-            sqlx::query(
-                "
-                INSERT INTO resource_source_projects
-                    (source, project_id, resource_id)
-                VALUES (?, ?, ?)
-                ON CONFLICT (source, project_id) DO UPDATE SET
-                    resource_id = excluded.resource_id
-                ",
-            )
-            .bind(&key.source)
-            .bind(&key.project_id)
-            .bind(&record.resource_id)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        transaction.commit().await?;
-
-        Ok(())
-    }
-
-    async fn get_all(
-        handle: &Handle,
+    async fn read_all(
+        conn: &mut SqliteConnection,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
         let rows: Vec<(String, String, String)> = sqlx::query_as(
             "SELECT source, project_id, resource_id
              FROM resource_source_projects",
         )
-        .fetch_all(handle.pool())
+        .fetch_all(&mut *conn)
         .await?;
 
         Ok(rows
@@ -126,6 +83,61 @@ impl Collection for ResourceSourceProjects {
             })
             .collect())
     }
+
+    async fn replace_all(
+        conn: &mut SqliteConnection,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        sqlx::query("DELETE FROM resource_source_projects")
+            .execute(&mut *conn)
+            .await?;
+        for (key, record) in records {
+            write_row(conn, key, record).await?;
+        }
+        Ok(())
+    }
+
+    async fn read_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+    ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
+        Ok(Self::read(conn, scope)
+            .await?
+            .map(|record| vec![(scope.clone(), record)])
+            .unwrap_or_default())
+    }
+
+    async fn replace_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        Self::write(conn, scope, records.first().map(|(_, record)| record))
+            .await
+    }
+}
+
+async fn write_row(
+    conn: &mut SqliteConnection,
+    key: &ResourceSourceProjectKey,
+    record: &ResourceSourceProjectRecord,
+) -> crate::Result<()> {
+    sqlx::query(
+        "
+        INSERT INTO resource_source_projects
+            (source, project_id, resource_id)
+        VALUES (?, ?, ?)
+        ON CONFLICT (source, project_id) DO UPDATE SET
+            resource_id = excluded.resource_id
+        ",
+    )
+    .bind(&key.source)
+    .bind(&key.project_id)
+    .bind(&record.resource_id)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]

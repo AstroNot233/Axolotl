@@ -1,11 +1,14 @@
 //! Proof that the official Minecraft login succeeded on this installation.
 
+use sqlx::SqliteConnection;
+
 use super::{Collection, Handle};
 
 /// The proof that official login was verified once.
 pub(crate) struct OfficialLoginProof;
 
 /// There is one proof per installation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Installation;
 
 /// What the proof carries.
@@ -16,40 +19,11 @@ pub(crate) struct OfficialLoginProofRecord {
 
 impl Collection for OfficialLoginProof {
     type Key = Installation;
+    type Scope = Installation;
     type Record = OfficialLoginProofRecord;
 
-    async fn set(
-        handle: &Handle,
-        _key: &Self::Key,
-        record: Option<&Self::Record>,
-    ) -> crate::Result<()> {
-        let Some(record) = record else {
-            sqlx::query("DELETE FROM official_login_proof WHERE id = 0")
-                .execute(handle.pool())
-                .await?;
-
-            return Ok(());
-        };
-
-        sqlx::query(
-            "
-            INSERT INTO official_login_proof (id, verified, version, mac)
-            VALUES (0, 1, 1, ?)
-            ON CONFLICT (id) DO UPDATE SET
-                verified = 1,
-                version = 1,
-                mac = excluded.mac
-            ",
-        )
-        .bind(&record.mac)
-        .execute(handle.pool())
-        .await?;
-
-        Ok(())
-    }
-
-    async fn get(
-        handle: &Handle,
+    async fn read(
+        conn: &mut SqliteConnection,
         _key: &Self::Key,
     ) -> crate::Result<Option<Self::Record>> {
         let mac: Option<String> = sqlx::query_scalar(
@@ -59,55 +33,89 @@ impl Collection for OfficialLoginProof {
             WHERE id = 0 AND verified = 1 AND version = 1
             ",
         )
-        .fetch_optional(handle.pool())
+        .fetch_optional(&mut *conn)
         .await?;
 
         Ok(mac.map(|mac| Self::Record { mac }))
     }
 
-    async fn set_all(
-        handle: &Handle,
+    async fn write(
+        conn: &mut SqliteConnection,
+        _key: &Self::Key,
+        record: Option<&Self::Record>,
+    ) -> crate::Result<()> {
+        let Some(record) = record else {
+            sqlx::query("DELETE FROM official_login_proof WHERE id = 0")
+                .execute(&mut *conn)
+                .await?;
+
+            return Ok(());
+        };
+
+        write_row(conn, record).await
+    }
+
+    async fn read_all(
+        conn: &mut SqliteConnection,
+    ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
+        Ok(Self::read(conn, &Installation)
+            .await?
+            .map(|record| vec![(Installation, record)])
+            .unwrap_or_default())
+    }
+
+    async fn replace_all(
+        conn: &mut SqliteConnection,
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
-        let mut transaction = handle.pool().begin().await?;
-        // One installation holds at most one proof, so a whole write is the
-        // proof it is given, or none.
         sqlx::query("DELETE FROM official_login_proof")
-            .execute(&mut *transaction)
+            .execute(&mut *conn)
             .await?;
         for (_, record) in records {
-            sqlx::query(
-                "
-                INSERT INTO official_login_proof (id, verified, version, mac)
-                VALUES (0, 1, 1, ?)
-                ",
-            )
-            .bind(&record.mac)
-            .execute(&mut *transaction)
-            .await?;
+            write_row(conn, record).await?;
         }
-        transaction.commit().await?;
-
         Ok(())
     }
 
-    async fn get_all(
-        handle: &Handle,
+    async fn read_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let mac: Option<String> = sqlx::query_scalar(
-            "
-            SELECT mac
-            FROM official_login_proof
-            WHERE id = 0 AND verified = 1 AND version = 1
-            ",
-        )
-        .fetch_optional(handle.pool())
-        .await?;
-
-        Ok(mac
-            .map(|mac| vec![(Installation, Self::Record { mac })])
+        Ok(Self::read(conn, scope)
+            .await?
+            .map(|record| vec![(scope.clone(), record)])
             .unwrap_or_default())
     }
+
+    async fn replace_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        Self::write(conn, scope, records.first().map(|(_, record)| record))
+            .await
+    }
+}
+
+async fn write_row(
+    conn: &mut SqliteConnection,
+    record: &OfficialLoginProofRecord,
+) -> crate::Result<()> {
+    sqlx::query(
+        "
+        INSERT INTO official_login_proof (id, verified, version, mac)
+        VALUES (0, 1, 1, ?)
+        ON CONFLICT (id) DO UPDATE SET
+            verified = 1,
+            version = 1,
+            mac = excluded.mac
+        ",
+    )
+    .bind(&record.mac)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]

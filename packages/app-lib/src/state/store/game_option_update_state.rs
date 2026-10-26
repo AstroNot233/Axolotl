@@ -1,5 +1,7 @@
 //! The `options.txt` an instance had before a modpack update replaced it.
 
+use sqlx::SqliteConnection;
+
 use super::{Collection, Handle};
 
 /// The update state, one per instance.
@@ -23,10 +25,32 @@ pub(crate) enum UpdateStateRecord {
 
 impl Collection for GameOptionUpdateState {
     type Key = UpdateStateKey;
+    type Scope = UpdateStateKey;
     type Record = UpdateStateRecord;
 
-    async fn set(
-        handle: &Handle,
+    async fn read(
+        conn: &mut SqliteConnection,
+        key: &Self::Key,
+    ) -> crate::Result<Option<Self::Record>> {
+        let row: Option<(bool, Option<String>, Option<Vec<u8>>)> =
+            sqlx::query_as(
+                "
+                SELECT had_file, sha1, document
+                FROM instance_game_option_update_state
+                WHERE instance_id = ?
+                ",
+            )
+            .bind(&key.instance_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+
+        Ok(row.and_then(|(had_file, sha1, document)| {
+            to_record(&key.instance_id, had_file, sha1, document)
+        }))
+    }
+
+    async fn write(
+        conn: &mut SqliteConnection,
         key: &Self::Key,
         record: Option<&Self::Record>,
     ) -> crate::Result<()> {
@@ -36,7 +60,7 @@ impl Collection for GameOptionUpdateState {
                  WHERE instance_id = ?",
             )
             .bind(&key.instance_id)
-            .execute(handle.pool())
+            .execute(&mut *conn)
             .await?;
 
             return Ok(());
@@ -58,66 +82,14 @@ impl Collection for GameOptionUpdateState {
         .bind(had_file)
         .bind(sha1)
         .bind(document)
-        .execute(handle.pool())
+        .execute(&mut *conn)
         .await?;
 
         Ok(())
     }
 
-    async fn get(
-        handle: &Handle,
-        key: &Self::Key,
-    ) -> crate::Result<Option<Self::Record>> {
-        let row: Option<(bool, Option<String>, Option<Vec<u8>>)> =
-            sqlx::query_as(
-                "
-                SELECT had_file, sha1, document
-                FROM instance_game_option_update_state
-                WHERE instance_id = ?
-                ",
-            )
-            .bind(&key.instance_id)
-            .fetch_optional(handle.pool())
-            .await?;
-
-        Ok(row.and_then(|(had_file, sha1, document)| {
-            to_record(&key.instance_id, had_file, sha1, document)
-        }))
-    }
-
-    async fn set_all(
-        handle: &Handle,
-        records: &[(Self::Key, Self::Record)],
-    ) -> crate::Result<()> {
-        let mut transaction = handle.pool().begin().await?;
-        // The call replaces the collection, so a key the caller leaves out is
-        // gone rather than left behind for a later read to return.
-        sqlx::query("DELETE FROM instance_game_option_update_state")
-            .execute(&mut *transaction)
-            .await?;
-        for (key, record) in records {
-            let (had_file, sha1, document) = columns(record);
-            sqlx::query(
-                "
-                INSERT INTO instance_game_option_update_state
-                    (instance_id, had_file, sha1, document)
-                VALUES (?, ?, ?, ?)
-                ",
-            )
-            .bind(&key.instance_id)
-            .bind(had_file)
-            .bind(sha1)
-            .bind(document)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        transaction.commit().await?;
-
-        Ok(())
-    }
-
-    async fn get_all(
-        handle: &Handle,
+    async fn read_all(
+        conn: &mut SqliteConnection,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
         let rows: Vec<(String, bool, Option<String>, Option<Vec<u8>>)> =
             sqlx::query_as(
@@ -126,7 +98,7 @@ impl Collection for GameOptionUpdateState {
                 FROM instance_game_option_update_state
                 ",
             )
-            .fetch_all(handle.pool())
+            .fetch_all(&mut *conn)
             .await?;
 
         Ok(rows
@@ -136,6 +108,38 @@ impl Collection for GameOptionUpdateState {
                 Some((UpdateStateKey { instance_id }, record))
             })
             .collect())
+    }
+
+    async fn replace_all(
+        conn: &mut SqliteConnection,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        sqlx::query("DELETE FROM instance_game_option_update_state")
+            .execute(&mut *conn)
+            .await?;
+        for (key, record) in records {
+            Self::write(conn, key, Some(record)).await?;
+        }
+        Ok(())
+    }
+
+    async fn read_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+    ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
+        Ok(Self::read(conn, scope)
+            .await?
+            .map(|record| vec![(scope.clone(), record)])
+            .unwrap_or_default())
+    }
+
+    async fn replace_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        Self::write(conn, scope, records.first().map(|(_, record)| record))
+            .await
     }
 }
 

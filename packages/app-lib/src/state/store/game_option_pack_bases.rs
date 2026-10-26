@@ -1,5 +1,7 @@
 //! The `options.txt` a modpack ships, kept per instance as its base.
 
+use sqlx::SqliteConnection;
+
 use super::{Collection, Handle};
 
 /// The pack bases, one per instance.
@@ -50,53 +52,11 @@ pub(crate) struct PackBaseRecord {
 
 impl Collection for GameOptionPackBases {
     type Key = PackBaseKey;
+    type Scope = PackBaseKey;
     type Record = PackBaseRecord;
 
-    async fn set(
-        handle: &Handle,
-        key: &Self::Key,
-        record: Option<&Self::Record>,
-    ) -> crate::Result<()> {
-        let Some(record) = record else {
-            sqlx::query(
-                "DELETE FROM instance_game_option_pack_bases
-                 WHERE instance_id = ?",
-            )
-            .bind(&key.instance_id)
-            .execute(handle.pool())
-            .await?;
-
-            return Ok(());
-        };
-
-        sqlx::query(
-            "
-            INSERT INTO instance_game_option_pack_bases
-                (instance_id, pack_version_id, source, sha1, encoding,
-                 document)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT (instance_id) DO UPDATE SET
-                pack_version_id = excluded.pack_version_id,
-                source = excluded.source,
-                sha1 = excluded.sha1,
-                encoding = excluded.encoding,
-                document = excluded.document
-            ",
-        )
-        .bind(&key.instance_id)
-        .bind(&record.pack_version_id)
-        .bind(record.source.as_str())
-        .bind(&record.sha1)
-        .bind(&record.encoding)
-        .bind(&record.document)
-        .execute(handle.pool())
-        .await?;
-
-        Ok(())
-    }
-
-    async fn get(
-        handle: &Handle,
+    async fn read(
+        conn: &mut SqliteConnection,
         key: &Self::Key,
     ) -> crate::Result<Option<Self::Record>> {
         let row: Option<(
@@ -113,7 +73,7 @@ impl Collection for GameOptionPackBases {
             ",
         )
         .bind(&key.instance_id)
-        .fetch_optional(handle.pool())
+        .fetch_optional(&mut *conn)
         .await?;
 
         Ok(row.and_then(
@@ -129,41 +89,28 @@ impl Collection for GameOptionPackBases {
         ))
     }
 
-    async fn set_all(
-        handle: &Handle,
-        records: &[(Self::Key, Self::Record)],
+    async fn write(
+        conn: &mut SqliteConnection,
+        key: &Self::Key,
+        record: Option<&Self::Record>,
     ) -> crate::Result<()> {
-        let mut transaction = handle.pool().begin().await?;
-        // The call replaces the collection, so a key the caller leaves out is
-        // gone rather than left behind for a later read to return.
-        sqlx::query("DELETE FROM instance_game_option_pack_bases")
-            .execute(&mut *transaction)
-            .await?;
-        for (key, record) in records {
+        let Some(record) = record else {
             sqlx::query(
-                "
-                INSERT INTO instance_game_option_pack_bases
-                    (instance_id, pack_version_id, source, sha1, encoding,
-                     document)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ",
+                "DELETE FROM instance_game_option_pack_bases
+                 WHERE instance_id = ?",
             )
             .bind(&key.instance_id)
-            .bind(&record.pack_version_id)
-            .bind(record.source.as_str())
-            .bind(&record.sha1)
-            .bind(&record.encoding)
-            .bind(&record.document)
-            .execute(&mut *transaction)
+            .execute(&mut *conn)
             .await?;
-        }
-        transaction.commit().await?;
 
-        Ok(())
+            return Ok(());
+        };
+
+        write_row(conn, key, record).await
     }
 
-    async fn get_all(
-        handle: &Handle,
+    async fn read_all(
+        conn: &mut SqliteConnection,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
         let rows: Vec<(
             String,
@@ -179,7 +126,7 @@ impl Collection for GameOptionPackBases {
             FROM instance_game_option_pack_bases
             ",
         )
-        .fetch_all(handle.pool())
+        .fetch_all(&mut *conn)
         .await?;
 
         Ok(rows
@@ -207,6 +154,68 @@ impl Collection for GameOptionPackBases {
             )
             .collect())
     }
+
+    async fn replace_all(
+        conn: &mut SqliteConnection,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        sqlx::query("DELETE FROM instance_game_option_pack_bases")
+            .execute(&mut *conn)
+            .await?;
+        for (key, record) in records {
+            write_row(conn, key, record).await?;
+        }
+        Ok(())
+    }
+
+    async fn read_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+    ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
+        Ok(Self::read(conn, scope)
+            .await?
+            .map(|record| vec![(scope.clone(), record)])
+            .unwrap_or_default())
+    }
+
+    async fn replace_scoped(
+        conn: &mut SqliteConnection,
+        scope: &Self::Scope,
+        records: &[(Self::Key, Self::Record)],
+    ) -> crate::Result<()> {
+        Self::write(conn, scope, records.first().map(|(_, record)| record))
+            .await
+    }
+}
+
+async fn write_row(
+    conn: &mut SqliteConnection,
+    key: &PackBaseKey,
+    record: &PackBaseRecord,
+) -> crate::Result<()> {
+    sqlx::query(
+        "
+        INSERT INTO instance_game_option_pack_bases
+            (instance_id, pack_version_id, source, sha1, encoding, document)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (instance_id) DO UPDATE SET
+            pack_version_id = excluded.pack_version_id,
+            source = excluded.source,
+            sha1 = excluded.sha1,
+            encoding = excluded.encoding,
+            document = excluded.document
+        ",
+    )
+    .bind(&key.instance_id)
+    .bind(&record.pack_version_id)
+    .bind(record.source.as_str())
+    .bind(&record.sha1)
+    .bind(&record.encoding)
+    .bind(&record.document)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
 }
 
 /// The source a stored base names, or nothing when this build does not know
