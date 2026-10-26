@@ -372,14 +372,14 @@ pub(super) async fn discover_custom_settings(
         .execute(&mut *tx)
         .await?;
     }
+    tx.commit().await?;
     super::locales::record_observations(
-        &mut tx,
+        &state.data,
         metadata,
         document,
         locale_snapshot.as_deref(),
     )
     .await;
-    tx.commit().await?;
     if discovered {
         super::locales::queue_game_locale_index();
     }

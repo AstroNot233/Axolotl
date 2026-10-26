@@ -304,14 +304,14 @@ pub(in crate::api::instance) async fn initialize_from_source_instance(
         update_app_fullscreen_setting(&mut tx, value, fullscreen_sync_enabled)
             .await?;
     }
+    tx.commit().await?;
     super::locales::record_observations(
-        &mut tx,
+        &state.data,
         metadata,
         &document,
         locale_snapshot.as_deref(),
     )
     .await;
-    tx.commit().await?;
     super::locales::queue_game_locale_index();
     Ok(())
 }
