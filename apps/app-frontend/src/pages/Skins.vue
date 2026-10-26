@@ -40,6 +40,7 @@ import { useMojangAuthStatus } from '@/composables/useMojangAuth'
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { accountSelectionRevision } from '@/helpers/account-state'
 import { get_default_user, users } from '@/helpers/auth'
+import { DEFAULT_UI_FONT_STACK, resolveFontFamily } from '@/helpers/font-family.ts'
 import type { RenderResult } from '@/helpers/rendering/batch-skin-renderer.ts'
 import { setActiveSkinPreviews, skinBlobUrlMap } from '@/helpers/rendering/batch-skin-renderer.ts'
 import { createSkinAccountSession } from '@/helpers/skin-account-session'
@@ -382,6 +383,13 @@ const skinTexture = computedAsync(async () => {
 const capeTexture = computed(() => currentCape.value?.texture)
 const skinVariant = computed(() => selectedSkin.value?.variant)
 const skinNametag = computed(() => (themeStore.hideNametagSkinsPage ? undefined : username.value))
+// Uses the interface's custom font when the setting is on; without one it falls
+// back to the default UI font stack. Undefined keeps the pixel font.
+const nametagFontFamily = computed(() =>
+    themeStore.nametagUsesAppFont
+        ? resolveFontFamily(themeStore.uiFont, DEFAULT_UI_FONT_STACK)
+        : undefined,
+)
 const isSkinManagementReadOnly = computed(
     () =>
         currentAccountType.value === 'yggdrasil' ||
@@ -1214,6 +1222,7 @@ watch(offline, () => {
                     :texture-src="skinTexture || ''"
                     :variant="skinVariant"
                     :nametag="skinNametag"
+                    :nametag-font-family="nametagFontFamily"
                     :initial-rotation="Math.PI / 8"
                 >
                     <template v-if="hasPendingSkinChange" #nametag-badge>
