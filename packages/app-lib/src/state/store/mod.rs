@@ -21,6 +21,9 @@ pub(crate) mod instance_sync_checkpoints;
 pub(crate) mod join_log;
 pub(crate) mod official_login_proof;
 pub(crate) mod resource_source_projects;
+pub(crate) mod sync_feature_settings;
+pub(crate) mod synced_game_option_preferences;
+pub(crate) mod synced_game_option_state;
 pub(crate) mod synced_game_option_values;
 
 #[cfg(test)]
