@@ -23,6 +23,9 @@ pub(crate) mod official_login_proof;
 pub(crate) mod resource_source_projects;
 pub(crate) mod synced_game_option_values;
 
+#[cfg(test)]
+mod tests;
+
 use sqlx::{Sqlite, SqliteConnection, SqlitePool};
 
 /// What a caller passes on instead of a storage: a handle on the launcher's
