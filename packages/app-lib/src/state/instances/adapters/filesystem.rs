@@ -318,7 +318,10 @@ fn root_content_folder_of(relative_path: &str) -> Option<(ProjectType, bool)> {
     let mut components = Path::new(relative_path).components();
     let folder_name = components.next()?.as_os_str().to_str()?;
     let project_type = ProjectType::from_folder_name(folder_name)?;
-    let nested = components.next().is_some();
+    // The component right after the folder is the file itself; only a component
+    // past it means the path sits below the scanned level, which just schematics
+    // are scanned for.
+    let nested = components.nth(1).is_some();
     Some((project_type, nested))
 }
 
