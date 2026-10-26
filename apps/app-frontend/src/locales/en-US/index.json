@@ -3152,6 +3152,9 @@
   "app.instance.dependencies.tree-view": {
     "message": "Dependency tree"
   },
+  "app.instance.dependencies.unknown-type": {
+    "message": "Unknown"
+  },
   "app.instance.dependencies.unresolved": {
     "message": "Unresolved"
   },

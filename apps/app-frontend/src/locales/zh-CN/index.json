@@ -3056,6 +3056,9 @@
   "app.instance.dependencies.tree-view": {
     "message": "依赖树"
   },
+  "app.instance.dependencies.unknown-type": {
+    "message": "未知"
+  },
   "app.instance.dependencies.unresolved": {
     "message": "未解析"
   },
