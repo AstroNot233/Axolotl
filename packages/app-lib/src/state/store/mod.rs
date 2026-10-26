@@ -14,9 +14,11 @@
 //!   lands together or not at all.
 
 pub(crate) mod content_favorites;
+pub(crate) mod content_update_jobs;
 pub(crate) mod game_option_locale_origins;
 pub(crate) mod game_option_pack_bases;
 pub(crate) mod game_option_update_state;
+pub(crate) mod install_jobs;
 pub(crate) mod instance_sync_checkpoints;
 pub(crate) mod instance_sync_preferences;
 pub(crate) mod join_log;
