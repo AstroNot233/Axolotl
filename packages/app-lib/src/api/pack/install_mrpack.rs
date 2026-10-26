@@ -1081,7 +1081,7 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
         Arc::new(Mutex::new(None::<HashMap<String, ModrinthHashMatch>>));
     let file_infos_loading = Arc::new(Mutex::new(()));
     let chinese_naming_enabled =
-        Settings::get(&state.pool).await?.locale == "zh-CN";
+        Settings::get(&state.data).await?.locale == "zh-CN";
     let chinese_titles_by_sha1 = Arc::new(if chinese_naming_enabled {
         // Chinese titles shape the on-disk file names, so they must be known
         // before any download starts. All other installs resolve them lazily

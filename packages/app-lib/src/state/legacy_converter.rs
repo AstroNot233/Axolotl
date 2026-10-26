@@ -24,14 +24,18 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use super::MinecraftProfile;
+use crate::state::store::Handle;
 
-pub async fn migrate_legacy_data<'a, E>(exec: E) -> crate::Result<()>
+pub async fn migrate_legacy_data<'a, E>(
+    handle: &Handle,
+    exec: E,
+) -> crate::Result<()>
 where
     E: sqlx::Executor<'a, Database = sqlx::Sqlite>
         + sqlx::Acquire<'a, Database = sqlx::Sqlite>
         + Copy,
 {
-    let mut settings = state::Settings::get(exec).await?;
+    let mut settings = state::Settings::get(handle).await?;
 
     if settings.migrated {
         return Ok(());
@@ -408,7 +412,7 @@ where
         .await?;
 
         settings.migrated = true;
-        settings.update(exec).await?;
+        settings.update(handle).await?;
     }
 
     Ok(())

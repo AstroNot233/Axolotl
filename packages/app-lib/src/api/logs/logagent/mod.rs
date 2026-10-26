@@ -186,7 +186,7 @@ async fn prepare_snapshot(
         .await?
         .into_iter()
         .collect::<Vec<_>>();
-    let locale = crate::state::Settings::get(&state.pool).await?.locale;
+    let locale = crate::state::Settings::get(&state.data).await?.locale;
     let mut remaining = 16 * 1024 * 1024usize;
     let files = analysis
         .sources

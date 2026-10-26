@@ -18,9 +18,11 @@ pub(crate) mod game_option_locale_origins;
 pub(crate) mod game_option_pack_bases;
 pub(crate) mod game_option_update_state;
 pub(crate) mod instance_sync_checkpoints;
+pub(crate) mod instance_sync_preferences;
 pub(crate) mod join_log;
 pub(crate) mod official_login_proof;
 pub(crate) mod resource_source_projects;
+pub(crate) mod settings;
 pub(crate) mod sync_feature_settings;
 pub(crate) mod synced_game_option_preferences;
 pub(crate) mod synced_game_option_state;
@@ -73,9 +75,14 @@ impl Atom {
 }
 
 /// Opens an atomic unit on `handle`.
+///
+/// The unit takes its write reservation as it opens, the way the callers that
+/// read a record and write it back need: a unit that read first and only then
+/// asked to write could find another writer had committed in between, and be
+/// refused instead of applied.
 pub(crate) async fn atom(handle: &Handle) -> crate::Result<Atom> {
     Ok(Atom {
-        transaction: handle.pool.begin().await?,
+        transaction: handle.pool.begin_with("BEGIN IMMEDIATE").await?,
     })
 }
 
