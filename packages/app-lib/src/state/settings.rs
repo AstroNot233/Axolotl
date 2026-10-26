@@ -144,6 +144,7 @@ pub struct Settings {
     pub default_page: DefaultPage,
     pub collapsed_navigation: bool,
     pub hide_nametag_skins_page: bool,
+    pub nametag_uses_app_font: bool,
     pub advanced_rendering: bool,
     pub native_decorations: bool,
     pub toggle_sidebar: bool,
@@ -358,6 +359,7 @@ impl Settings {
             default_page: DefaultPage::from_string(&record.default_page),
             collapsed_navigation: record.collapsed_navigation,
             hide_nametag_skins_page: record.hide_nametag_skins_page,
+            nametag_uses_app_font: record.nametag_uses_app_font,
             advanced_rendering: record.advanced_rendering,
             native_decorations: record.native_decorations,
             toggle_sidebar: record.toggle_sidebar,
@@ -494,6 +496,7 @@ impl Settings {
             toggle_sidebar: self.toggle_sidebar,
             feature_flags: serde_json::to_string(&self.feature_flags)?,
             hide_nametag_skins_page: self.hide_nametag_skins_page,
+            nametag_uses_app_font: self.nametag_uses_app_font,
             skipped_update: self.skipped_update.clone(),
             pending_update_toast_for_version: self
                 .pending_update_toast_for_version
@@ -1212,6 +1215,26 @@ mod tests {
 
         let reloaded = Settings::get(&handle).await.unwrap();
         assert!(reloaded.enter_lightweight_mode_on_game_launch);
+    }
+
+    #[tokio::test]
+    async fn nametag_app_font_setting_defaults_off_and_round_trips() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        let handle = Handle::new(pool.clone());
+
+        let mut settings = Settings::get(&handle).await.unwrap();
+        assert!(!settings.nametag_uses_app_font);
+
+        settings.nametag_uses_app_font = true;
+        settings.update(&handle).await.unwrap();
+
+        let reloaded = Settings::get(&handle).await.unwrap();
+        assert!(reloaded.nametag_uses_app_font);
     }
 
     #[tokio::test]

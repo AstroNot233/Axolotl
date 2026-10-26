@@ -106,6 +106,7 @@ pub(crate) struct SettingsRecord {
     pub toggle_sidebar: bool,
     pub feature_flags: String,
     pub hide_nametag_skins_page: bool,
+    pub nametag_uses_app_font: bool,
     pub skipped_update: Option<String>,
     pub pending_update_toast_for_version: Option<String>,
     pub auto_download_updates: Option<bool>,
@@ -191,7 +192,8 @@ impl Collection for Settings {
                 hook_post_exit, custom_dir, prev_custom_dir, migrated,
                 personalized_ads, toggle_sidebar,
                 json(feature_flags) AS feature_flags,
-                hide_nametag_skins_page, skipped_update,
+                hide_nametag_skins_page, nametag_uses_app_font,
+                skipped_update,
                 pending_update_toast_for_version, auto_download_updates,
                 version, locale, accent_color, custom_background_path,
                 custom_background_blur, custom_background_opacity,
@@ -319,6 +321,7 @@ fn to_record(row: SqliteRow) -> crate::Result<SettingsRecord> {
         toggle_sidebar: row.try_get("toggle_sidebar")?,
         feature_flags: row.try_get("feature_flags")?,
         hide_nametag_skins_page: row.try_get("hide_nametag_skins_page")?,
+        nametag_uses_app_font: row.try_get("nametag_uses_app_font")?,
         skipped_update: row.try_get("skipped_update")?,
         pending_update_toast_for_version: row
             .try_get("pending_update_toast_for_version")?,
@@ -411,7 +414,8 @@ async fn write_row(
             hide_on_process_start, hook_pre_launch, hook_wrapper,
             hook_post_exit, custom_dir, prev_custom_dir, migrated,
             personalized_ads, toggle_sidebar, feature_flags,
-            hide_nametag_skins_page, skipped_update,
+            hide_nametag_skins_page, nametag_uses_app_font,
+            skipped_update,
             pending_update_toast_for_version, auto_download_updates, version,
             locale, accent_color, custom_background_path,
             custom_background_blur, custom_background_opacity,
@@ -441,10 +445,10 @@ async fn write_row(
             jsonb(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, jsonb(?), ?, jsonb(?),
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, jsonb(?), ?,
+            jsonb(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?
+            ?, ?
         )
         ON CONFLICT (id) DO UPDATE SET
             max_concurrent_downloads = excluded.max_concurrent_downloads,
@@ -475,6 +479,7 @@ async fn write_row(
             toggle_sidebar = excluded.toggle_sidebar,
             feature_flags = excluded.feature_flags,
             hide_nametag_skins_page = excluded.hide_nametag_skins_page,
+            nametag_uses_app_font = excluded.nametag_uses_app_font,
             skipped_update = excluded.skipped_update,
             pending_update_toast_for_version =
                 excluded.pending_update_toast_for_version,
@@ -577,6 +582,7 @@ async fn write_row(
     .bind(record.toggle_sidebar)
     .bind(&record.feature_flags)
     .bind(record.hide_nametag_skins_page)
+    .bind(record.nametag_uses_app_font)
     .bind(&record.skipped_update)
     .bind(&record.pending_update_toast_for_version)
     .bind(record.auto_download_updates)

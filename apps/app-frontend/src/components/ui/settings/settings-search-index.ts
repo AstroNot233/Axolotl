@@ -438,6 +438,19 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
         label: message('app.appearance-settings.hide-nametag.title', 'Hide nametag'),
     },
     {
+        id: 'appearance-nametag-uses-app-font',
+        categoryId: 'interface',
+        targetId: 'settings-target-appearance-nametag-uses-app-font',
+        label: message(
+            'app.appearance-settings.nametag-uses-app-font.title',
+            'Role name tag uses the app font',
+        ),
+        description: message(
+            'app.appearance-settings.nametag-uses-app-font.description',
+            'Shows your role name tag on the skins page in your interface font instead of the Minecraft pixel font.',
+        ),
+    },
+    {
         id: 'appearance-unknown-pack-warning',
         categoryId: 'content-downloads',
         targetId: 'settings-target-appearance-unknown-pack-warning',

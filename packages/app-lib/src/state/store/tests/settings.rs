@@ -37,6 +37,7 @@ fn record() -> SettingsRecord {
         toggle_sidebar: true,
         feature_flags: "{\"page_transitions\":false}".to_string(),
         hide_nametag_skins_page: true,
+        nametag_uses_app_font: true,
         skipped_update: Some("1.0".to_string()),
         pending_update_toast_for_version: None,
         auto_download_updates: Some(false),
@@ -116,6 +117,7 @@ async fn the_migrated_row_reads_as_the_settings_it_holds() {
         stored.terracotta_public_nodes,
         "[\"wss://center.node.1tmc.top\"]"
     );
+    assert!(!stored.nametag_uses_app_font);
     assert_eq!(stored.minecraft_file_source, DownloadSource::Auto);
     assert_eq!(stored.home_layout, HomeLayout::Standard);
     assert_eq!(stored.home_widgets, None);
