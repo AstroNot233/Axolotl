@@ -5,8 +5,8 @@ use crate::state::store::Collection as _;
 use crate::state::store::Handle;
 use crate::state::store::atom;
 use crate::state::store::instance_sync_checkpoints::{
-    CheckpointKey, CheckpointRecord, CheckpointScope, CheckpointStatus,
-    InstanceSyncCheckpoints,
+    CheckpointKey, CheckpointLinkMode, CheckpointRecord, CheckpointScope,
+    CheckpointStatus, InstanceSyncCheckpoints,
 };
 
 async fn handle(instance: &str) -> Handle {
@@ -48,7 +48,7 @@ async fn a_checkpoint_finishes_inside_one_unit() {
         .unwrap()
         .expect("checkpoint");
     record.status = CheckpointStatus::Ready;
-    record.link_mode = Some("hard".to_string());
+    record.link_mode = Some(CheckpointLinkMode::Hard);
     InstanceSyncCheckpoints::atom_set(&mut unit, &checkpoint, Some(&record))
         .await
         .unwrap();
@@ -59,7 +59,48 @@ async fn a_checkpoint_finishes_inside_one_unit() {
         .unwrap()
         .expect("checkpoint");
     assert_eq!(stored.status, CheckpointStatus::Ready);
-    assert_eq!(stored.link_mode.as_deref(), Some("hard"));
+    assert_eq!(stored.link_mode, Some(CheckpointLinkMode::Hard));
+}
+
+#[tokio::test]
+async fn a_checkpoint_with_a_link_mode_this_build_cannot_read_is_no_record() {
+    let pool = support::pool().await;
+    support::add_instance(&pool, "instance").await;
+    support::enable_feature(&pool, "instance", "game_options").await;
+    let handle = Handle::new(pool.clone());
+    sqlx::query("PRAGMA ignore_check_constraints = ON")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "
+        INSERT INTO instance_sync_checkpoints
+            (instance_id, feature, variant, expected_sha1, merge_base,
+             source_revision, status, link_mode)
+        VALUES ('instance', 'game_options', 'default', 'abc', NULL, 1,
+            'ready', 'zip')
+        ",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("PRAGMA ignore_check_constraints = OFF")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        InstanceSyncCheckpoints::get(&handle, &key("default"))
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(
+        InstanceSyncCheckpoints::get_all(&handle)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]

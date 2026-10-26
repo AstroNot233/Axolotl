@@ -2,8 +2,8 @@ use crate::State;
 use crate::state::store::Collection as _;
 use crate::state::store::atom;
 use crate::state::store::instance_sync_checkpoints::{
-    CheckpointKey, CheckpointRecord, CheckpointStatus as StoredStatus,
-    InstanceSyncCheckpoints,
+    CheckpointKey, CheckpointLinkMode as StoredLinkMode, CheckpointRecord,
+    CheckpointStatus as StoredStatus, InstanceSyncCheckpoints,
 };
 use crate::state::{InstanceInstallStage, InstanceMetadata, SyncedOption};
 use crate::util::io;
@@ -35,13 +35,13 @@ pub(in crate::api::instance) enum LinkMode {
 }
 
 impl LinkMode {
-    fn as_str(self) -> &'static str {
+    fn stored(self) -> StoredLinkMode {
         match self {
-            Self::Symbolic => "symbolic",
+            Self::Symbolic => StoredLinkMode::Symbolic,
             #[cfg(windows)]
-            Self::Hard => "hard",
+            Self::Hard => StoredLinkMode::Hard,
             #[cfg(windows)]
-            Self::Copy => "copy",
+            Self::Copy => StoredLinkMode::Copy,
         }
     }
 }
@@ -212,7 +212,7 @@ pub(in crate::api::instance) async fn finish_checkpoint(
         InstanceSyncCheckpoints::atom_get(&mut unit, &key).await?
     {
         record.status = StoredStatus::Ready;
-        record.link_mode = Some(mode.as_str().to_string());
+        record.link_mode = Some(mode.stored());
         InstanceSyncCheckpoints::atom_set(&mut unit, &key, Some(&record))
             .await?;
     }

@@ -46,6 +46,33 @@ impl CheckpointStatus {
     }
 }
 
+/// How the synced file was kept in step with the one it was written from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CheckpointLinkMode {
+    Copy,
+    Hard,
+    Symbolic,
+}
+
+impl CheckpointLinkMode {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Copy => "copy",
+            Self::Hard => "hard",
+            Self::Symbolic => "symbolic",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "copy" => Some(Self::Copy),
+            "hard" => Some(Self::Hard),
+            "symbolic" => Some(Self::Symbolic),
+            _ => None,
+        }
+    }
+}
+
 /// What a checkpoint carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CheckpointRecord {
@@ -53,7 +80,7 @@ pub(crate) struct CheckpointRecord {
     pub merge_base: Option<Vec<u8>>,
     pub source_revision: i64,
     pub status: CheckpointStatus,
-    pub link_mode: Option<String>,
+    pub link_mode: Option<CheckpointLinkMode>,
 }
 
 impl Collection for InstanceSyncCheckpoints {
@@ -97,13 +124,13 @@ impl Collection for InstanceSyncCheckpoints {
                 status,
                 link_mode,
             )| {
-                Some(Self::Record {
+                to_record(
                     expected_sha1,
                     merge_base,
                     source_revision,
-                    status: to_status(&status)?,
-                    link_mode,
-                })
+                    &status,
+                    link_mode.as_deref(),
+                )
             },
         ))
     }
@@ -171,13 +198,13 @@ impl Collection for InstanceSyncCheckpoints {
                             feature,
                             variant,
                         },
-                        CheckpointRecord {
+                        to_record(
                             expected_sha1,
                             merge_base,
                             source_revision,
-                            status: to_status(&status)?,
-                            link_mode,
-                        },
+                            &status,
+                            link_mode.as_deref(),
+                        )?,
                     ))
                 },
             )
@@ -238,13 +265,13 @@ impl Collection for InstanceSyncCheckpoints {
                             feature: scope.feature.clone(),
                             variant,
                         },
-                        CheckpointRecord {
+                        to_record(
                             expected_sha1,
                             merge_base,
                             source_revision,
-                            status: to_status(&status)?,
-                            link_mode,
-                        },
+                            &status,
+                            link_mode.as_deref(),
+                        )?,
                     ))
                 },
             )
@@ -297,11 +324,31 @@ async fn write_row(
     .bind(&record.merge_base)
     .bind(record.source_revision)
     .bind(record.status.as_str())
-    .bind(&record.link_mode)
+    .bind(record.link_mode.map(CheckpointLinkMode::as_str))
     .execute(&mut *conn)
     .await?;
 
     Ok(())
+}
+
+fn to_record(
+    expected_sha1: String,
+    merge_base: Option<Vec<u8>>,
+    source_revision: i64,
+    status: &str,
+    link_mode: Option<&str>,
+) -> Option<CheckpointRecord> {
+    let link_mode = match link_mode {
+        Some(value) => Some(to_link_mode(value)?),
+        None => None,
+    };
+    Some(CheckpointRecord {
+        expected_sha1,
+        merge_base,
+        source_revision,
+        status: to_status(status)?,
+        link_mode,
+    })
 }
 
 fn to_status(status: &str) -> Option<CheckpointStatus> {
@@ -309,6 +356,16 @@ fn to_status(status: &str) -> Option<CheckpointStatus> {
         tracing::warn!(
             %status,
             "Skipping a sync checkpoint whose status this build does not know"
+        );
+        None
+    })
+}
+
+fn to_link_mode(link_mode: &str) -> Option<CheckpointLinkMode> {
+    CheckpointLinkMode::parse(link_mode).or_else(|| {
+        tracing::warn!(
+            %link_mode,
+            "Skipping a sync checkpoint whose link mode this build does not know"
         );
         None
     })
