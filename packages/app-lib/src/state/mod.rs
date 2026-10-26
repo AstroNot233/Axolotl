@@ -751,21 +751,59 @@ impl State {
     }
 
     /// Get the current launcher state, waiting for initialization
+    ///
+    /// Frontend commands routinely race `init`, so a brief wait is expected and
+    /// must not be turned into an error on the first poll. The wait is bounded
+    /// rather than open-ended: without a ceiling, a host that serves a command in
+    /// a process where nothing ever calls `init` waits forever instead of
+    /// reporting why (this is what made isolated lib tests hang).
     pub async fn get() -> crate::Result<Arc<Self>> {
         if !LAUNCHER_STATE.initialized() {
-            // Frontend commands routinely race initialize_state; wait instead of
-            // treating the first poll as a hard error.
             tracing::debug!(
                 "State not ready yet; waiting for launcher initialization before serving command"
             );
+
+            // Why 10s. The callers that legitimately race `init` are early commands
+            // (deep links, window events) that arrive while the frontend is still on
+            // its loading screen: the frontend awaits `initialize_state` before it
+            // issues its own commands, so the race window is the tail of a startup
+            // the user is already waiting on. Opening the database, running
+            // migrations and loading settings take a few seconds on a cold start, so
+            // 10s keeps a wide margin over that. It is deliberately not larger: this
+            // budget is spent per call and one command can call `get` several times,
+            // so a generous ceiling turns "no longer hangs" into "hangs for minutes"
+            // for every caller that can never succeed. Callers that must not wait at
+            // all can use `get_if_initialized` instead.
+            const MAX_WAIT: Duration = Duration::from_secs(10);
+            // Keep the existing poll cadence: it is cheap next to the startup work
+            // and keeps this loop from interacting with the OnceCell any differently
+            // than it did before.
+            const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+            let started = Instant::now();
             while !LAUNCHER_STATE.initialized() {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                if started.elapsed() >= MAX_WAIT {
+                    tracing::error!(
+                        "Launcher state was still not initialized after {:?}; refusing to wait any longer",
+                        MAX_WAIT
+                    );
+                    return Err(crate::ErrorKind::StateNotInitialized(format!(
+                        "The launcher state was not initialized within {:?}. Something must call State::init before commands are served; commands cannot run against an uninitialized state.",
+                        MAX_WAIT
+                    ))
+                    .into());
+                }
+
+                tokio::time::sleep(POLL_INTERVAL).await;
             }
         }
 
-        Ok(Arc::clone(
-            LAUNCHER_STATE.get().expect("State is not initialized!"),
-        ))
+        LAUNCHER_STATE.get().cloned().ok_or_else(|| {
+            crate::ErrorKind::StateNotInitialized(
+                "The launcher state reported itself initialized but no state was stored; this is an internal inconsistency.".to_string(),
+            )
+            .into()
+        })
     }
 
     pub fn initialized() -> bool {
@@ -1735,5 +1773,37 @@ mod instance_lock_tests {
             .await
             .expect("cleanup can acquire the lock after the writer exits");
         drop(guard);
+    }
+}
+
+/// The launcher state is process-wide, so the never-initialized path can only be
+/// observed when nothing else in the process has initialized it. That is exactly
+/// what a runner with one process per test provides; under a shared-process
+/// runner a sibling test may have initialized the state first, and then there is
+/// no wait left to bound. Both branches assert, so the test is never vacuous.
+#[cfg(test)]
+mod uninitialized_state_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn get_gives_up_with_a_readable_error_instead_of_polling_forever() {
+        let started = Instant::now();
+        let result = State::get().await;
+        let waited = started.elapsed();
+
+        match result {
+            Ok(_) => {}
+            Err(error) => {
+                let message = error.to_string();
+                assert!(
+                    message.contains("was not initialized"),
+                    "the failure must say the state was not initialized, got: {message}"
+                );
+                assert!(
+                    waited < Duration::from_secs(30),
+                    "an uninitialized state must fail in bounded time, waited {waited:?}"
+                );
+            }
+        }
     }
 }
