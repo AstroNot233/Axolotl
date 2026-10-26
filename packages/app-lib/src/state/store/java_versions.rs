@@ -122,6 +122,7 @@ impl Collection for JavaVersions {
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
         ensure_records_are_in_scope(scope, records)?;
+        ensure_keys_belong_to_scope(conn, scope, records).await?;
         delete_omitted(conn, Some(*scope), records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
@@ -235,6 +236,31 @@ fn ensure_records_are_in_scope(
             "Java runtime {key} is not among the runtimes of that major version"
         ))
         .into());
+    }
+
+    Ok(())
+}
+
+/// A scoped replacement writes by path, so a path that is already recorded under
+/// another version would move that runtime instead of replacing this one.
+async fn ensure_keys_belong_to_scope(
+    conn: &mut SqliteConnection,
+    scope: &<JavaVersions as Collection>::Scope,
+    records: &[(
+        <JavaVersions as Collection>::Key,
+        <JavaVersions as Collection>::Record,
+    )],
+) -> crate::Result<()> {
+    for (key, _) in records {
+        let Some(existing) = JavaVersions::read(conn, key).await? else {
+            continue;
+        };
+        if existing.major_version != *scope {
+            return Err(crate::ErrorKind::InputError(format!(
+                "Java runtime {key} belongs to another version"
+            ))
+            .into());
+        }
     }
 
     Ok(())

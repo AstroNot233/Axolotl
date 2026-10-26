@@ -173,6 +173,15 @@ impl JavaVersion {
         else {
             return Ok(());
         };
+        if JavaVersions::atom_get(unit, &new_path.to_string())
+            .await?
+            .is_some()
+        {
+            return Err(crate::ErrorKind::InputError(format!(
+                "A Java runtime is already recorded at {new_path}"
+            ))
+            .into());
+        }
 
         JavaVersions::atom_set(unit, &new_path.to_string(), Some(&record))
             .await?;
