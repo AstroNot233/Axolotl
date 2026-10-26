@@ -1,4 +1,3 @@
-import { useStorage } from '@vueuse/core'
 import { computed, readonly, shallowRef } from 'vue'
 
 export function createMcpPreviewSession() {
@@ -31,8 +30,8 @@ export function createMcpPreviewSession() {
     }
 }
 
-// Only the preview preference persists. A connection never survives a reload.
-const fullAccess = useStorage('axolotl-mcp-preview-full-access', false)
+// Debug sessions and their permissions never persist or authorize real clients.
+const fullAccess = shallowRef(false)
 const session = createMcpPreviewSession()
 
 export function useMcpPreview() {

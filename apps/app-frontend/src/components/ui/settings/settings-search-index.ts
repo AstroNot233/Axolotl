@@ -18,6 +18,22 @@ const message = (id: string, defaultMessage: string): MessageDescriptor => ({ id
 
 export const settingsSearchEntries: SettingsSearchEntry[] = [
     {
+        id: 'mcp-authentication',
+        categoryId: 'mcp',
+        targetId: 'settings-target-mcp-access',
+        label: message('app.mcp.require-auth', 'Require authentication'),
+        description: message(
+            'app.mcp.require-auth-description',
+            'Require clients to provide a connection token. Changing this setting disconnects the current session.',
+        ),
+    },
+    {
+        id: 'mcp-enabled',
+        categoryId: 'mcp',
+        targetId: 'settings-target-mcp-enabled',
+        label: message('app.mcp.enabled', 'Enable MCP'),
+    },
+    {
         id: 'mcp-access',
         categoryId: 'mcp',
         targetId: 'settings-target-mcp-access',

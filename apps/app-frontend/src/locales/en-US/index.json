@@ -1,4 +1,43 @@
 {
+  "app.mcp.require-auth": {
+    "message": "Require authentication"
+  },
+  "app.mcp.require-auth-description": {
+    "message": "Require clients to provide a connection token. Changing this setting disconnects the current session."
+  },
+  "app.mcp.copy-token": { "message": "Copy token" },
+  "app.mcp.token-copied": { "message": "Token copied" },
+  "app.mcp.copy-failed": { "message": "Could not copy the token. Try again." },
+  "app.mcp.enabled": {
+    "message": "Enable MCP"
+  },
+  "app.mcp.enabled-description": {
+    "message": "Allow AI clients on this computer to connect to the launcher."
+  },
+  "app.mcp.running": {
+    "message": "Listening for connections"
+  },
+  "app.mcp.not-running": {
+    "message": "MCP could not start. Resolve the error below and retry."
+  },
+  "app.mcp.disabled": {
+    "message": "MCP is off. Existing connections are closed."
+  },
+  "app.mcp.token": {
+    "message": "Connection token"
+  },
+  "app.mcp.retry": {
+    "message": "Retry"
+  },
+  "app.mcp.enable-first": {
+    "message": "Enable MCP above to see your connection address and configuration."
+  },
+  "app.mcp.connection-help": {
+    "message": "Keep the launcher running. These settings are for clients running on this computer."
+  },
+  "app.mcp.debug-full-access": {
+    "message": "Preview full access (does not change real permissions)"
+  },
   "app.settings.tabs.mcp": {
     "message": "MCP"
   },
@@ -15,7 +54,7 @@
     "message": "Full access mode"
   },
   "app.mcp.full-access-description": {
-    "message": "Allow connections without approval, deletion tools, and direct control of the launcher interface."
+    "message": "Skip control-session approval and allow deletion tools and direct control of the launcher interface."
   },
   "app.mcp.standard-mode": {
     "message": "Standard access"
@@ -24,7 +63,7 @@
     "message": "Full access"
   },
   "app.mcp.manual-approval": {
-    "message": "Approve each connection before an agent can act."
+    "message": "Approve each control session before an agent can act."
   },
   "app.mcp.no-deletion": {
     "message": "Deletion tools are unavailable."
@@ -33,7 +72,7 @@
     "message": "Agents use launcher tools and cannot directly control the interface."
   },
   "app.mcp.full-mode-notice": {
-    "message": "Agents can connect without approval, delete data, and directly control the interface. Only connect clients you trust."
+    "message": "Agents can start control sessions without approval, delete data, and directly control the interface. Only connect clients you trust."
   },
   "app.mcp.disconnect-hint": {
     "message": "While connected, you can click “AI connected” in the title bar to disconnect at any time."
@@ -42,7 +81,7 @@
     "message": "Enable full access mode?"
   },
   "app.mcp.warning-description": {
-    "message": "Connected agents will be able to act without connection approval, use deletion tools, and control the launcher interface. Mistakes or malicious instructions could delete worlds and instances, change files, or expose private data."
+    "message": "Agents will be able to start control sessions without approval, use deletion tools, and control the launcher interface. Mistakes or malicious instructions could delete worlds and instances, change files, or expose private data."
   },
   "app.mcp.warning-session": {
     "message": "Changing access mode disconnects the current session. The next connection uses the new permissions."
@@ -66,7 +105,7 @@
     "message": "The examples use MCP_URL as a placeholder. Replace it with the launcher’s service URL when MCP becomes available, then keep the launcher running."
   },
   "app.mcp.codex-step": {
-    "message": "Run this command in a terminal. Use codex mcp list to verify the server configuration."
+    "message": "Merge this into ~/.codex/config.toml. Replace any existing axolotl section instead of adding a duplicate, then restart Codex to load the configuration."
   },
   "app.mcp.claude-step": {
     "message": "Run this command in a terminal. Open /mcp in Claude Code to check the connection."
@@ -75,10 +114,10 @@
     "message": "Add this entry to ~/.cursor/mcp.json for all projects, or .cursor/mcp.json for the current project. Merge it with any existing mcpServers entries."
   },
   "app.mcp.vscode-step": {
-    "message": "Open the Command Palette and run “MCP: Add Server”. Choose HTTP, enter the launcher’s service URL, name it axolotl, and select a configuration location."
+    "message": "Use “MCP: Open User Configuration” in the Command Palette and merge this server into your configuration. The example uses the VS Code servers format."
   },
   "app.mcp.after-setup": {
-    "message": "Ask the agent to connect to the launcher before starting work. In standard access mode, approve the connection in the launcher."
+    "message": "Use get_launcher_info to check the connection. Call start_session when you want the agent to operate the launcher, and end_session when finished. Standard access asks for approval when starting a control session."
   },
   "app.mcp.official-guide": {
     "message": "Official setup guide"
@@ -87,10 +126,10 @@
     "message": "AI client"
   },
   "app.mcp.connection-title": {
-    "message": "Allow AI to connect?"
+    "message": "Allow AI to control the launcher?"
   },
   "app.mcp.connection-description": {
-    "message": "{client} is requesting access to your launcher."
+    "message": "{client} wants to start a launcher control session."
   },
   "app.mcp.allow-connection": {
     "message": "Allow connection"

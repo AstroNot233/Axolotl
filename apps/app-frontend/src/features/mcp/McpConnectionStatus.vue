@@ -2,10 +2,10 @@
 import { PlugIcon, ShieldIcon, XIcon } from '@modrinth/assets'
 import { useVIntl } from '@modrinth/ui'
 
+import { useMcpConnection } from './connection'
 import { mcpMessages as messages } from './messages'
-import { useMcpPreview } from './preview'
 
-const { connectedClient, fullAccess, disconnect } = useMcpPreview()
+const { connectedClient, fullAccess, disconnect } = useMcpConnection()
 const { formatMessage } = useVIntl()
 </script>
 

@@ -1,24 +1,33 @@
 <script setup lang="ts">
 import { Button, NewModal, useVIntl } from '@modrinth/ui'
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 
+import { useMcpConnection } from './connection'
 import { mcpMessages as messages } from './messages'
-import { useMcpPreview } from './preview'
 
 defineProps<{ rounded?: boolean }>()
 
-const { connectedClient, pendingClient, approveConnection, disconnect } = useMcpPreview()
+const {
+    connectedClient,
+    pendingClient,
+    pendingConnectionId,
+    approveConnection,
+    disconnect,
+    error,
+} = useMcpConnection()
 const { formatMessage } = useVIntl()
 const modal = ref<InstanceType<typeof NewModal>>()
 const requestingClient = ref('')
+const requestingId = ref('')
 
 watch(
-    pendingClient,
-    async (client) => {
-        if (client) {
-            requestingClient.value = client
+    pendingConnectionId,
+    async (id) => {
+        if (id && pendingClient.value) {
+            requestingClient.value = pendingClient.value
+            requestingId.value = id
             await nextTick()
-            if (pendingClient.value === client) modal.value?.show()
+            if (pendingConnectionId.value === id) modal.value?.show()
         } else {
             modal.value?.hide()
         }
@@ -26,11 +35,22 @@ watch(
     { immediate: true },
 )
 
-function decline() {
-    if (pendingClient.value) disconnect()
+const approving = ref(false)
+async function allow() {
+    if (approving.value) return
+    approving.value = true
+    try {
+        await approveConnection(requestingId.value)
+    } finally {
+        approving.value = false
+        await nextTick()
+        if (!pendingClient.value) modal.value?.hide()
+    }
 }
 
-onBeforeUnmount(disconnect)
+function decline() {
+    if (pendingClient.value && !approving.value) disconnect()
+}
 </script>
 
 <template>
@@ -50,8 +70,10 @@ onBeforeUnmount(disconnect)
         :header="formatMessage(messages.connectionTitle)"
         width="min(30rem, calc(100vw - 2rem))"
         :on-hide="decline"
+        :disable-close="approving"
     >
         <div class="flex flex-col gap-4">
+            <p v-if="error" role="alert" class="m-0 text-sm text-red">{{ error }}</p>
             <p class="m-0 text-base text-[var(--color-text-primary)]">
                 {{ formatMessage(messages.connectionDescription, { client: requestingClient }) }}
             </p>
@@ -67,8 +89,15 @@ onBeforeUnmount(disconnect)
         </div>
         <template #actions>
             <div class="flex flex-wrap justify-end gap-2">
-                <Button @click="disconnect">{{ formatMessage(messages.denyConnection) }}</Button>
-                <Button type="colored" data-testid="mcp-approve" @click="approveConnection">
+                <Button :disabled="approving" @click="disconnect">{{
+                    formatMessage(messages.denyConnection)
+                }}</Button>
+                <Button
+                    type="colored"
+                    :disabled="approving"
+                    data-testid="mcp-approve"
+                    @click="allow"
+                >
                     {{ formatMessage(messages.allowConnection) }}
                 </Button>
             </div>

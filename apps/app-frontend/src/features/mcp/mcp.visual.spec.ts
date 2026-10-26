@@ -1,5 +1,5 @@
 import { provideI18n } from '@modrinth/ui'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
 import { defineComponent, h, nextTick, ref } from 'vue'
 
@@ -11,6 +11,57 @@ import McpConnectionOverlay from './McpConnectionOverlay.vue'
 import McpConnectionStatus from './McpConnectionStatus.vue'
 import McpDebugSettings from './McpDebugSettings.vue'
 import { useMcpPreview } from './preview'
+import { type McpState, startMcpStateSync, useMcpRuntime } from './runtime'
+
+const native = vi.hoisted(() => ({
+    revision: 0,
+    connection: null as McpState['connection'],
+    enabled: false,
+    fullAccess: false,
+    requireAuth: false,
+    fail: false,
+    listener: undefined as ((event: { payload: McpState }) => void) | undefined,
+}))
+
+vi.mock('@tauri-apps/api/event', () => ({
+    listen: async (_name: string, listener: (event: { payload: McpState }) => void) => {
+        native.listener = listener
+        return () => {
+            native.listener = undefined
+        }
+    },
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+    invoke: async (command: string, args?: Record<string, unknown>) => {
+        if (native.fail) throw new Error('MCP configuration failed')
+        if (command.endsWith('mcp_configure')) {
+            native.enabled = !!args?.enabled
+            native.fullAccess = !!args?.fullAccess
+            native.requireAuth = !!args?.requireAuth
+            native.connection = null
+        }
+        if (command.endsWith('mcp_disconnect')) native.connection = null
+        if (command.endsWith('mcp_respond') && native.connection) {
+            native.connection.connected = true
+            native.connection.awaiting_approval = false
+        }
+        return nativeSnapshot()
+    },
+}))
+
+function nativeSnapshot(): McpState {
+    return {
+        revision: ++native.revision,
+        enabled: native.enabled,
+        running: native.enabled,
+        full_access: native.fullAccess,
+        require_auth: native.requireAuth,
+        connection: native.connection ? { ...native.connection } : null,
+        endpoint: native.enabled ? 'http://127.0.0.1:5219/mcp' : null,
+        token: native.enabled && native.requireAuth ? 'local-test-token' : null,
+        error: null,
+    }
+}
 
 const cleanup: (() => void)[] = []
 const preview = useMcpPreview()
@@ -22,6 +73,13 @@ afterEach(() => {
 
 async function render(locale = 'en-US', theme: 'light' | 'dark' = 'dark', width = 900) {
     preview.setFullAccess(false)
+    native.enabled = false
+    native.fullAccess = false
+    native.requireAuth = false
+    native.connection = null
+    native.fail = false
+    const stop = await startMcpStateSync()
+    cleanup.push(stop)
     await page.viewport(width, 1000)
     const Harness = defineComponent({
         setup() {
@@ -190,7 +248,7 @@ it('declines dismissed requests and lets a later request ask again', async () =>
     expect(preview.connectedClient.value).toBeNull()
     preview.simulateConnection('Codex')
     await expect
-        .element(page.getByText('Codex is requesting access to your launcher.'))
+        .element(page.getByText('Codex wants to start a launcher control session.'))
         .toBeVisible()
     preview.disconnect()
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
@@ -207,8 +265,15 @@ it('keeps full access off until risk acknowledgement and disconnects when permis
     await wrapper.get('#mcp-full-access').trigger('click')
     await page.getByRole('checkbox').click()
     await enable.click()
-    expect(preview.fullAccess.value).toBe(true)
-    preview.simulateConnection('Codex')
+    expect(useMcpRuntime().state.value.full_access).toBe(true)
+    native.enabled = true
+    native.connection = {
+        id: 'real-codex',
+        client: 'Codex',
+        connected: true,
+        awaiting_approval: false,
+    }
+    native.listener?.({ payload: nativeSnapshot() })
     await expect
         .element(page.getByRole('button', { name: 'Disconnect Codex', exact: true }))
         .toBeVisible()
@@ -220,8 +285,8 @@ it('keeps full access off until risk acknowledgement and disconnects when permis
     paletteColor.remove()
     expect(preview.pendingClient.value).toBeNull()
     await wrapper.get('#mcp-full-access').trigger('click')
-    expect(preview.fullAccess.value).toBe(false)
-    expect(preview.connectedClient.value).toBeNull()
+    await expect.poll(() => useMcpRuntime().state.value.full_access).toBe(false)
+    expect(useMcpRuntime().state.value.connection).toBeNull()
     expect(wrapper.find('[data-testid="mcp-full-access-shield"]').exists()).toBe(false)
     await expect
         .poll(() => document.querySelector('[data-testid="mcp-connection-border"]'))
@@ -248,7 +313,7 @@ it('shows verified client instructions and contains Chinese content at a narrow 
     for (const theme of ['dark', 'light'] as const) {
         const wrapper = await render('zh-CN', theme, 560)
         expect(wrapper.text()).toContain('完全访问模式')
-        expect(wrapper.text()).toContain('MCP 连接暂不可用')
+        expect(wrapper.text()).toContain('启用 MCP')
         for (const name of ['Codex', 'Claude Code', 'Cursor', 'VS Code']) {
             await page.getByRole('button', { name, exact: true }).click()
             expect(wrapper.get('a[target="_blank"]').attributes('href')).toMatch(/^https:\/\//)
@@ -257,4 +322,75 @@ it('shows verified client instructions and contains Chinese content at a narrow 
         wrapper.unmount()
         cleanup.pop()
     }
+})
+
+it('starts and stops the native service and preserves configuration when saving fails', async () => {
+    const wrapper = await render()
+    expect(wrapper.get('#mcp-enabled').attributes('aria-checked')).toBe('false')
+    await wrapper.get('#mcp-enabled').trigger('click')
+    await expect.poll(() => useMcpRuntime().state.value.running).toBe(true)
+    expect(wrapper.text()).toContain('http://127.0.0.1:5219/mcp')
+    expect(wrapper.get('#mcp-require-auth').attributes('aria-checked')).toBe('false')
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+    expect(wrapper.get('pre').text()).toContain('startup_timeout_sec = 60')
+    expect(wrapper.get('pre').text()).not.toContain('Authorization')
+    await wrapper.get('#mcp-require-auth').trigger('click')
+    await expect.poll(() => useMcpRuntime().state.value.require_auth).toBe(true)
+    expect(wrapper.get('pre').text()).toContain('Authorization = "Bearer local-test-token"')
+    const writeClipboard = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    try {
+        await page.getByRole('button', { name: 'Copy token', exact: true }).click()
+        expect(writeClipboard).toHaveBeenCalledWith('local-test-token')
+        await expect
+            .element(page.getByRole('button', { name: 'Token copied', exact: true }))
+            .toBeVisible()
+    } finally {
+        writeClipboard.mockRestore()
+    }
+    await page.getByRole('button', { name: 'Cursor', exact: true }).click()
+    expect(wrapper.get('pre').text()).toContain('Authorization')
+    await wrapper.get('#mcp-require-auth').trigger('click')
+    await expect.poll(() => useMcpRuntime().state.value.require_auth).toBe(false)
+    expect(wrapper.get('pre').text()).not.toContain('Authorization')
+    expect(useMcpRuntime().state.value.token).toBeNull()
+    native.fail = true
+    await wrapper.get('#mcp-enabled').trigger('click')
+    await expect.element(page.getByRole('alert')).toHaveTextContent('MCP configuration failed')
+    expect(wrapper.get('#mcp-enabled').attributes('aria-checked')).toBe('true')
+    native.fail = false
+    await wrapper.get('#mcp-enabled').trigger('click')
+    await expect.poll(() => useMcpRuntime().state.value.running).toBe(false)
+    expect(useMcpRuntime().state.value.token).toBeNull()
+})
+
+it('drives the confirmation and connected effects from real session events and ignores stale snapshots', async () => {
+    await render()
+    preview.setFullAccess(true)
+    preview.simulateConnection('Preview agent')
+    native.enabled = true
+    native.connection = {
+        id: 'real-session',
+        client: 'Native Agent',
+        connected: false,
+        awaiting_approval: true,
+    }
+    const pending = nativeSnapshot()
+    native.listener?.({ payload: pending })
+    expect(preview.connectedClient.value).toBeNull()
+    await expect
+        .element(page.getByText('Native Agent wants to start a launcher control session.'))
+        .toBeVisible()
+    await page.getByRole('button', { name: 'Allow connection', exact: true }).click()
+    await expect
+        .element(page.getByRole('button', { name: 'Disconnect Native Agent', exact: true }))
+        .toBeVisible()
+    native.listener?.({ payload: pending })
+    expect(useMcpRuntime().state.value.connection?.connected).toBe(true)
+    await page.getByRole('button', { name: 'Disconnect Native Agent', exact: true }).click()
+    await expect.poll(() => useMcpRuntime().state.value.connection).toBeNull()
+    await expect
+        .poll(() => document.querySelector('[data-testid="mcp-connection-border"]'))
+        .toBeNull()
+    native.listener?.({ payload: pending })
+    expect(useMcpRuntime().state.value.connection).toBeNull()
 })

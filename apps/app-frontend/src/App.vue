@@ -109,6 +109,7 @@ import { setupMojangAuthMonitor, useMojangAuthStatus } from '@/composables/useMo
 import { useNetworkStatus } from '@/composables/useNetworkStatus'
 import { AxolotlBrandConfig, config, getOfficialLabrinthBaseUrl } from '@/config'
 import McpConnectionOverlay from '@/features/mcp/McpConnectionOverlay.vue'
+import { startMcpStateSync } from '@/features/mcp/runtime'
 import { trackEvent } from '@/helpers/analytics'
 import { get_user, get_version } from '@/helpers/cache.js'
 import { configureCurseForgeManualDownloadWatcher } from '@/helpers/curseforge'
@@ -425,6 +426,7 @@ watch(
 )
 
 const stateInitialized = ref(false)
+let stopMcpStateSync: (() => void) | undefined
 const privacyConsentModal = ref<InstanceType<typeof PrivacyConsentModal>>()
 const privacyConsentPending = ref(false)
 const titlebar = ref<InstanceType<typeof AppTitlebar>>()
@@ -875,6 +877,7 @@ function startDirectLinkSync() {
 }
 
 onUnmounted(async () => {
+    stopMcpStateSync?.()
     appUnmounted = true
     windowAppearance.dispose()
     stopNativeEditMenu?.()
@@ -1553,6 +1556,9 @@ async function setupApp() {
     themeStore.shortcutBindings = resolveAllBindings()
     await localePreparation
     stateInitialized.value = true
+    const stopMcpSync = await startMcpStateSync()
+    if (appUnmounted) stopMcpSync()
+    else stopMcpStateSync = stopMcpSync
     if (privacyConsentPending.value) {
         await nextTick()
         privacyConsentModal.value?.show({

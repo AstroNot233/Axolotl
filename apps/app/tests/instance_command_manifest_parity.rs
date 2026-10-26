@@ -1,5 +1,26 @@
 use std::collections::BTreeSet;
 
+#[test]
+fn mcp_commands_are_registered_and_limited_to_the_main_window() {
+    let runtime = runtime_commands(include_str!("../src/api/mcp/mod.rs"))
+        .into_iter()
+        .map(|command| command.strip_prefix("commands::").unwrap_or(command))
+        .collect::<BTreeSet<_>>();
+    let manifest = manifest_commands(include_str!("../build.rs"), "mcp");
+    assert_eq!(runtime, manifest);
+    let capability: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/plugins.json"))
+            .unwrap();
+    assert_eq!(capability["windows"], serde_json::json!(["main"]));
+    assert!(
+        capability["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|permission| permission == "mcp:default")
+    );
+}
+
 fn bracket_contents_after<'a>(source: &'a str, marker: &str) -> &'a str {
     let start = source
         .find(marker)

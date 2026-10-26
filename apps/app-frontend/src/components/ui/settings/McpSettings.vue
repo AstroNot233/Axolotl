@@ -1,65 +1,194 @@
 <script setup lang="ts">
 import { ExternalIcon, ShieldCheckIcon, ShieldIcon } from '@modrinth/assets'
 import { Button, Checkbox, NewModal, Toggle, useVIntl } from '@modrinth/ui'
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { mcpMessages as messages } from '@/features/mcp/messages'
-import { useMcpPreview } from '@/features/mcp/preview'
+import { useMcpRuntime } from '@/features/mcp/runtime'
 
 import SettingsRow from './SettingsRow.vue'
 import SettingsSection from './SettingsSection.vue'
 
 const { formatMessage } = useVIntl()
-const { fullAccess, setFullAccess } = useMcpPreview()
+const { state, loaded, busy, error, configure } = useMcpRuntime()
+const fullAccess = computed(() => state.value.full_access)
+const endpoint = computed(() => state.value.endpoint ?? 'MCP_URL')
+const bearer = computed(() => state.value.token ?? 'MCP_TOKEN')
+const authorizationHeaders = computed(() =>
+    state.value.require_auth ? { Authorization: `Bearer ${bearer.value}` } : undefined,
+)
 const warningModal = ref<InstanceType<typeof NewModal>>()
 const acknowledged = ref(false)
 const selectedClient = ref(0)
+const tokenCopied = ref(false)
+const copyError = ref(false)
+watch(
+    () => state.value.token,
+    () => {
+        tokenCopied.value = false
+        copyError.value = false
+    },
+)
 
-const clients = [
-    {
-        name: 'Codex',
-        instructions: messages.codexStep,
-        code: 'codex mcp add axolotl --url "MCP_URL"',
-        url: 'https://developers.openai.com/codex/mcp/',
-    },
-    {
-        name: 'Claude Code',
-        instructions: messages.claudeStep,
-        code: 'claude mcp add --transport http axolotl "MCP_URL"',
-        url: 'https://code.claude.com/docs/en/mcp',
-    },
-    {
-        name: 'Cursor',
-        instructions: messages.cursorStep,
-        code: JSON.stringify({ mcpServers: { axolotl: { url: 'MCP_URL' } } }, null, 2),
-        url: 'https://cursor.com/docs/mcp',
-    },
-    {
-        name: 'VS Code',
-        instructions: messages.vscodeStep,
-        code: null,
-        url: 'https://code.visualstudio.com/docs/agent-customization/mcp-servers',
-    },
-] as const
+async function copyToken() {
+    if (!state.value.token) return
+    copyError.value = false
+    try {
+        await navigator.clipboard.writeText(state.value.token)
+        tokenCopied.value = true
+    } catch {
+        copyError.value = true
+    }
+}
+
+const clients = computed(
+    () =>
+        [
+            {
+                name: 'Codex',
+                instructions: messages.codexStep,
+                code: [
+                    '[mcp_servers.axolotl]',
+                    `url = ${JSON.stringify(endpoint.value)}`,
+                    'startup_timeout_sec = 60',
+                    ...(state.value.require_auth
+                        ? [
+                              `http_headers = { Authorization = ${JSON.stringify(`Bearer ${bearer.value}`)} }`,
+                          ]
+                        : []),
+                ].join('\n'),
+                url: 'https://developers.openai.com/codex/mcp/',
+            },
+            {
+                name: 'Claude Code',
+                instructions: messages.claudeStep,
+                code: `claude mcp add --transport http axolotl "${endpoint.value}"${state.value.require_auth ? ` --header "Authorization: Bearer ${bearer.value}"` : ''}`,
+                url: 'https://code.claude.com/docs/en/mcp',
+            },
+            {
+                name: 'Cursor',
+                instructions: messages.cursorStep,
+                code: JSON.stringify(
+                    {
+                        mcpServers: {
+                            axolotl: {
+                                url: endpoint.value,
+                                headers: authorizationHeaders.value,
+                            },
+                        },
+                    },
+                    null,
+                    2,
+                ),
+                url: 'https://cursor.com/docs/mcp',
+            },
+            {
+                name: 'VS Code',
+                instructions: messages.vscodeStep,
+                code: JSON.stringify(
+                    {
+                        servers: {
+                            axolotl: {
+                                type: 'http',
+                                url: endpoint.value,
+                                headers: authorizationHeaders.value,
+                            },
+                        },
+                    },
+                    null,
+                    2,
+                ),
+                url: 'https://code.visualstudio.com/docs/agent-customization/mcp-servers',
+            },
+        ] as const,
+)
 
 function changeFullAccess(enabled: boolean) {
     if (!enabled) {
-        setFullAccess(false)
+        void configure(state.value.enabled, false)
         return
     }
     acknowledged.value = false
     warningModal.value?.show()
 }
 
-function enableFullAccess() {
+async function enableFullAccess() {
     if (!acknowledged.value) return
-    setFullAccess(true)
-    warningModal.value?.hide()
+    if (await configure(state.value.enabled, true)) warningModal.value?.hide()
 }
 </script>
 
 <template>
     <div class="flex min-w-0 flex-col gap-6">
+        <SettingsSection
+            :title="formatMessage(messages.title)"
+            title-id="settings-target-mcp-enabled"
+        >
+            <SettingsRow inline-control>
+                <template #label
+                    ><label for="mcp-enabled">{{
+                        formatMessage(messages.enabled)
+                    }}</label></template
+                >
+                <template #description>{{ formatMessage(messages.enabledDescription) }}</template>
+                <template #control
+                    ><Toggle
+                        id="mcp-enabled"
+                        :model-value="state.enabled"
+                        :disabled="!loaded || busy"
+                        @update:model-value="(enabled) => configure(enabled, fullAccess)"
+                /></template>
+            </SettingsRow>
+            <div class="flex flex-col gap-2 px-4 pb-4">
+                <p role="status" class="m-0 text-sm text-[var(--color-text-tertiary)]">
+                    {{
+                        formatMessage(
+                            state.running
+                                ? messages.running
+                                : state.enabled
+                                  ? messages.notRunning
+                                  : messages.disabled,
+                        )
+                    }}
+                </p>
+                <template v-if="state.running">
+                    <code class="break-all text-sm text-[var(--color-text-primary)]">{{
+                        state.endpoint
+                    }}</code>
+                    <template v-if="state.require_auth">
+                        <label class="flex flex-col gap-1 text-sm text-[var(--color-text-tertiary)]"
+                            >{{ formatMessage(messages.token) }}
+                            <input
+                                type="password"
+                                readonly
+                                :value="state.token ?? ''"
+                                class="rounded-lg border border-solid border-surface-4 bg-surface-2 p-2 text-[var(--color-text-primary)]"
+                                @focus="($event.target as HTMLInputElement).select()"
+                            />
+                        </label>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <Button :disabled="!state.token" @click="copyToken">{{
+                                formatMessage(
+                                    tokenCopied ? messages.tokenCopied : messages.copyToken,
+                                )
+                            }}</Button>
+                            <span v-if="copyError" role="alert" class="text-sm text-red">{{
+                                formatMessage(messages.copyFailed)
+                            }}</span>
+                        </div>
+                    </template>
+                </template>
+                <p v-if="error" role="alert" class="m-0 break-words text-sm text-red">
+                    {{ error }}
+                </p>
+                <Button
+                    v-if="state.enabled && !state.running"
+                    :disabled="busy"
+                    @click="configure(true, fullAccess)"
+                    >{{ formatMessage(messages.retry) }}</Button
+                >
+            </div>
+        </SettingsSection>
         <div class="flex flex-col gap-2">
             <p class="m-0 text-base leading-relaxed text-[var(--color-text-primary)]">
                 {{ formatMessage(messages.introduction) }}
@@ -70,6 +199,25 @@ function enableFullAccess() {
             :title="formatMessage(messages.accessTitle)"
             title-id="settings-target-mcp-access"
         >
+            <SettingsRow inline-control>
+                <template #label
+                    ><label for="mcp-require-auth">{{
+                        formatMessage(messages.requireAuth)
+                    }}</label></template
+                >
+                <template #description>{{
+                    formatMessage(messages.requireAuthDescription)
+                }}</template>
+                <template #control
+                    ><Toggle
+                        id="mcp-require-auth"
+                        :model-value="state.require_auth"
+                        :disabled="!loaded || busy"
+                        @update:model-value="
+                            (required) => configure(state.enabled, fullAccess, required)
+                        "
+                /></template>
+            </SettingsRow>
             <SettingsRow inline-control>
                 <template #label>
                     <label for="mcp-full-access">{{ formatMessage(messages.fullAccess) }}</label>
@@ -83,6 +231,7 @@ function enableFullAccess() {
                     <Toggle
                         id="mcp-full-access"
                         :model-value="fullAccess"
+                        :disabled="!loaded || busy"
                         aria-describedby="mcp-full-access-description"
                         @update:model-value="changeFullAccess"
                     />
@@ -142,6 +291,12 @@ function enableFullAccess() {
                     </Button>
                 </div>
                 <div class="flex min-w-0 flex-col gap-3">
+                    <p v-if="!state.running" class="m-0 text-sm text-[var(--color-text-tertiary)]">
+                        {{ formatMessage(messages.enableFirst) }}
+                    </p>
+                    <p v-else class="m-0 text-sm text-[var(--color-text-tertiary)]">
+                        {{ formatMessage(messages.connectionHelp) }}
+                    </p>
                     <h3 class="m-0 text-base font-semibold text-[var(--color-text-primary)]">
                         {{ clients[selectedClient].name }}
                     </h3>
@@ -174,6 +329,7 @@ function enableFullAccess() {
         :header="formatMessage(messages.warningTitle)"
         width="min(32rem, calc(100vw - 2rem))"
         fade="warning"
+        :disable-close="busy"
         :on-hide="() => (acknowledged = false)"
     >
         <div class="flex flex-col gap-4">
@@ -184,6 +340,7 @@ function enableFullAccess() {
                 {{ formatMessage(messages.warningSession) }}
             </p>
             <Checkbox v-model="acknowledged" :label="formatMessage(messages.acknowledge)" />
+            <p v-if="error" role="alert" class="m-0 text-sm text-red">{{ error }}</p>
         </div>
         <template #actions>
             <div class="flex flex-wrap justify-end gap-2">
@@ -191,7 +348,7 @@ function enableFullAccess() {
                 <Button
                     type="colored"
                     color="orange"
-                    :disabled="!acknowledged"
+                    :disabled="!acknowledged || busy"
                     data-testid="mcp-enable-full-access"
                     @click="enableFullAccess"
                     >{{ formatMessage(messages.enableFullAccess) }}</Button

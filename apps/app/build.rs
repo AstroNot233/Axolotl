@@ -911,6 +911,19 @@ fn main() {
                     ),
             )
             .plugin(
+                "mcp",
+                InlinedPlugin::new()
+                    .commands(&[
+                        "mcp_get_state",
+                        "mcp_configure",
+                        "mcp_respond",
+                        "mcp_disconnect",
+                    ])
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
+            )
+            .plugin(
                 "ai",
                 InlinedPlugin::new()
                     .commands(&[

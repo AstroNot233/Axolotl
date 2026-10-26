@@ -7,6 +7,7 @@ members = [
   "packages/ariadne",
   "packages/content-management",
   "packages/daedalus",
+  "packages/launcher-mcp",
   "packages/path-util",
 ]
 
@@ -16,6 +17,9 @@ rust-version = "1.90.0"
 repository = "https://github.com/Mystic-Stars/Axolotl"
 
 [workspace.dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
+launcher-mcp = { path = "packages/launcher-mcp" }
+rmcp = { version = "3.7.0", default-features = false, features = ["server", "transport-streamable-http-server"] }
 ariadne = { path = "packages/ariadne" }
 async-minecraft-ping = { path = "packages/async-minecraft-ping" }
 async-recursion = "1.1.1"
