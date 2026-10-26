@@ -454,6 +454,7 @@ fn valid_privileged_setting(key: &str, value: &str) -> bool {
         "collapsed_navigation"
         | "toggle_sidebar"
         | "hide_nametag_skins_page"
+        | "nametag_uses_app_font"
         | "advanced_rendering"
         | "native_decorations"
         | "auto_hide_downloads_button"

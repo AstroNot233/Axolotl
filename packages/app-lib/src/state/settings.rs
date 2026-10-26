@@ -139,6 +139,7 @@ pub struct Settings {
     pub default_page: DefaultPage,
     pub collapsed_navigation: bool,
     pub hide_nametag_skins_page: bool,
+    pub nametag_uses_app_font: bool,
     pub advanced_rendering: bool,
     pub native_decorations: bool,
     pub toggle_sidebar: bool,
@@ -370,6 +371,12 @@ impl Settings {
                 .fetch_one(&mut *connection)
                 .await?;
 
+        let nametag_uses_app_font: i64 = sqlx::query_scalar(
+            "SELECT nametag_uses_app_font FROM settings WHERE id = 0",
+        )
+        .fetch_one(&mut *connection)
+        .await?;
+
         let mono_font: Option<String> =
             sqlx::query_scalar("SELECT mono_font FROM settings WHERE id = 0")
                 .fetch_one(&mut *connection)
@@ -483,6 +490,7 @@ impl Settings {
                 custom_background_component_opacity.clamp(0, 100) as u32,
             ui_font: sanitize_font_family(ui_font),
             mono_font: sanitize_font_family(mono_font),
+            nametag_uses_app_font: nametag_uses_app_font == 1,
             transparent_background: res.transparent_background == 1,
             transparent_background_opacity: res.transparent_background_opacity
                 as u32,
@@ -786,6 +794,13 @@ impl Settings {
             "UPDATE settings SET enter_lightweight_mode_on_game_launch = ? WHERE id = 0",
         )
         .bind(self.enter_lightweight_mode_on_game_launch)
+        .execute(&mut *connection)
+        .await?;
+
+        sqlx::query(
+            "UPDATE settings SET nametag_uses_app_font = ? WHERE id = 0",
+        )
+        .bind(self.nametag_uses_app_font)
         .execute(&mut *connection)
         .await?;
 
@@ -1460,6 +1475,25 @@ mod tests {
 
         let reloaded = Settings::get(&pool).await.unwrap();
         assert!(reloaded.enter_lightweight_mode_on_game_launch);
+    }
+
+    #[tokio::test]
+    async fn nametag_app_font_setting_defaults_off_and_round_trips() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+
+        let mut settings = Settings::get(&pool).await.unwrap();
+        assert!(!settings.nametag_uses_app_font);
+
+        settings.nametag_uses_app_font = true;
+        settings.update(&pool).await.unwrap();
+
+        let reloaded = Settings::get(&pool).await.unwrap();
+        assert!(reloaded.nametag_uses_app_font);
     }
 
     #[tokio::test]
