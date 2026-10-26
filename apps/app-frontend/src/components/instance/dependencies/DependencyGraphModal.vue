@@ -74,10 +74,7 @@ const messages = defineMessages({
         defaultMessage: '{count, number} isolated items are kept out of the relationship graph.',
     },
     allTypes: { id: 'app.instance.dependencies.all-types', defaultMessage: 'All types' },
-    unknownType: {
-        id: 'app.instance.dependencies.unknown-type',
-        defaultMessage: 'Unknown',
-    },
+    unknownType: { id: 'app.instance.dependencies.unknown-type', defaultMessage: 'Unknown' },
     allSources: { id: 'app.instance.dependencies.all-sources', defaultMessage: 'All sources' },
     allStatuses: { id: 'app.instance.dependencies.all-statuses', defaultMessage: 'All statuses' },
     packManaged: { id: 'app.instance.dependencies.pack-managed', defaultMessage: 'Pack managed' },
