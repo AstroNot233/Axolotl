@@ -4,6 +4,7 @@
 //! tests live here together instead of inside the module that writes the
 //! statements: a change to a verb is answered once, in one place.
 
+mod cache;
 mod content_favorites;
 mod game_option_locale_origins;
 mod game_option_pack_bases;

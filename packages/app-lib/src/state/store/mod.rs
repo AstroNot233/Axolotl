@@ -13,6 +13,7 @@
 //! - `atom_` runs the same verb inside an atomic unit, so a group of writes
 //!   lands together or not at all.
 
+pub(crate) mod cache;
 pub(crate) mod content_favorites;
 pub(crate) mod content_update_jobs;
 pub(crate) mod game_option_locale_origins;
