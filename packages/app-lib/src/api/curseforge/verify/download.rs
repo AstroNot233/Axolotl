@@ -194,7 +194,7 @@ pub(crate) async fn download_installed_file(
                 instance_id,
                 format!("{folder}/{file_name}"),
                 localized_candidate,
-                &state.pool,
+                state,
             )
             .await?
         }

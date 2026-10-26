@@ -2,6 +2,7 @@
 use crate::LoadingBarType;
 use crate::event::emit::{emit_loading, init_loading};
 use crate::state::LAUNCHER_STATE;
+use crate::state::store::Handle;
 use crate::state::{JavaVersion, Settings};
 use crate::util::fetch::IoSemaphore;
 use dashmap::DashSet;
@@ -316,9 +317,10 @@ impl DirectoryInfo {
         std::env::var_os(name).map(PathBuf::from)
     }
 
-    #[tracing::instrument(skip(settings, exec, io_semaphore))]
+    #[tracing::instrument(skip(settings, handle, exec, io_semaphore))]
     pub async fn move_launcher_directory<'a, E>(
         settings: &mut Settings,
+        handle: &Handle,
         exec: E,
         io_semaphore: &IoSemaphore,
         app_identifier: &str,
@@ -706,7 +708,7 @@ impl DirectoryInfo {
             settings.custom_dir = Some(app_dir.to_string_lossy().to_string());
         }
 
-        settings.update(exec).await?;
+        settings.update(handle).await?;
 
         Ok(())
     }

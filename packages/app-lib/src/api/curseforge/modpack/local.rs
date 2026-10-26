@@ -388,7 +388,7 @@ pub(crate) async fn install_local_manifest_files(
         .collect::<HashSet<_>>(),
     );
     let prefer_localized_names =
-        Settings::get(&state.pool).await?.resource_chinese_filenames;
+        Settings::get(&state.data).await?.resource_chinese_filenames;
     let content_total_bytes = selected_files
         .iter()
         .map(|file| {

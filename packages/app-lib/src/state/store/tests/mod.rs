@@ -13,6 +13,7 @@ mod join_log;
 mod official_login_proof;
 mod resource_source_projects;
 mod settings;
+mod settings_api;
 mod support;
 mod sync_feature_settings;
 mod synced_game_option_preferences;

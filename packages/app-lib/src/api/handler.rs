@@ -411,7 +411,7 @@ fn settings_params(
 // 特权双闸：两开关均开启才放行，取不到状态时拒绝
 async fn require_privileged() -> crate::Result<()> {
     let allowed = match crate::State::get().await {
-        Ok(state) => match Settings::get(&state.pool).await {
+        Ok(state) => match Settings::get(&state.data).await {
             Ok(settings) => {
                 settings.allow_external_scheme
                     && settings.allow_privileged_scheme
@@ -585,7 +585,7 @@ fn decoded(raw: &str) -> String {
 
 async fn external_scheme_allowed() -> bool {
     match crate::State::get().await {
-        Ok(state) => match Settings::get(&state.pool).await {
+        Ok(state) => match Settings::get(&state.data).await {
             Ok(settings) => settings.allow_external_scheme,
             Err(_) => true,
         },

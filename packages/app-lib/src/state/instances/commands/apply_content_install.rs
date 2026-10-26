@@ -726,7 +726,7 @@ pub(crate) async fn prepare_modrinth_content_change_action(
             current_path,
             current_provider_file_name.as_deref(),
             &target_provider_file_name,
-            &state.pool,
+            state,
         )
         .await?,
     );
@@ -862,9 +862,9 @@ async fn configured_update_relative_path(
     current_path: &str,
     old_name: Option<&str>,
     new_name: &str,
-    pool: &sqlx::SqlitePool,
+    state: &State,
 ) -> crate::Result<String> {
-    let settings = crate::state::Settings::get(pool).await?;
+    let settings = crate::state::Settings::get(&state.data).await?;
     let current_name = current_path.rsplit('/').next().unwrap_or(current_path);
     let current_name = current_name
         .strip_suffix(".disabled")
@@ -892,7 +892,7 @@ pub(crate) async fn finalize_updated_project_path(
         old_path,
         old_provider_file_name,
         new_provider_file_name,
-        &state.pool,
+        state,
     )
     .await?;
     let mut old_archived = false;
@@ -1581,12 +1581,12 @@ pub(crate) async fn resolve_content_install_relative_path(
     instance_id: &str,
     original_relative_path: String,
     localized_candidate: Option<String>,
-    pool: &sqlx::SqlitePool,
+    state: &State,
 ) -> crate::Result<String> {
     if content_rows::get_instance_file_by_relative_path(
         instance_id,
         &original_relative_path,
-        pool,
+        &state.pool,
     )
     .await?
     .is_some()
@@ -1599,14 +1599,14 @@ pub(crate) async fn resolve_content_install_relative_path(
     if content_rows::get_instance_file_by_relative_path(
         instance_id,
         &localized_candidate,
-        pool,
+        &state.pool,
     )
     .await?
     .is_some()
     {
         return Ok(localized_candidate);
     }
-    if crate::state::Settings::get(pool)
+    if crate::state::Settings::get(&state.data)
         .await?
         .resource_chinese_filenames
     {
@@ -1622,7 +1622,7 @@ async fn modrinth_chinese_file_name_candidate(
     file_name: &str,
     state: &State,
 ) -> Option<String> {
-    if !crate::state::Settings::get(&state.pool)
+    if !crate::state::Settings::get(&state.data)
         .await
         .ok()?
         .resource_chinese_filenames
@@ -1679,7 +1679,7 @@ pub(crate) async fn add_downloaded_project_version(
         instance_id,
         format!("{}/{}", project_type.get_folder(), file_name),
         localized_candidate,
-        &state.pool,
+        state,
     )
     .await?;
     let full_path = join_content_path(
@@ -1898,7 +1898,7 @@ pub(crate) async fn materialize_project_download_batch(
                 download.file_name
             ),
             localized,
-            &state.pool,
+            state,
         )
         .await?;
         if !destinations.insert(materialization_path_key(&relative_path)) {

@@ -3135,7 +3135,7 @@ async fn initialize_operation(
         skip_unwritable_files: false,
         import_files: Default::default(),
         naming: {
-            let settings = crate::state::Settings::get(&state.pool).await?;
+            let settings = crate::state::Settings::get(&state.data).await?;
             super::naming::NamingPreferences {
                 chinese: settings.resource_chinese_filenames,
                 preserve: settings.resource_preserve_filenames,
