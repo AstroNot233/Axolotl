@@ -372,6 +372,8 @@ const {
 
 const { offline } = useNetworkStatus()
 
+// Temporarily pause automatic tours while keeping manual replay available.
+const autoStartOnboarding = false
 const showOnboarding = ref(false)
 const onboardingMode = ref('main')
 const onboardingSettings = ref(null)
@@ -1507,7 +1509,7 @@ async function setupApp() {
     const dev = await isDev()
     isDevEnvironment.value = dev
     pendingUpdateAnnouncementVersion.value = pending_update_toast_for_version
-    if (!onboarded && route.path !== '/') await router.replace('/')
+    if (autoStartOnboarding && !onboarded && route.path !== '/') await router.replace('/')
     privacyConsentPending.value = telemetry_consent_version < 1
     showOnboarding.value = false
     onboardingSettings.value = initialSettings
@@ -1570,7 +1572,7 @@ async function setupApp() {
             consent_version: telemetry_consent_version,
         })
     } else {
-        showOnboarding.value = !onboarded
+        showOnboarding.value = autoStartOnboarding && !onboarded
     }
 
     unlistenWindowResize = await getCurrentWindow().onResized(() => {
@@ -1738,7 +1740,7 @@ async function handlePrivacyConsentSaved(privacy: PrivacySettings) {
         onboardingSettings.value.discord_rpc = privacy.discord_rpc
         onboardingSettings.value.telemetry_consent_version = privacy.consent_version
     }
-    if (!onboardingSettings.value?.onboarded) {
+    if (autoStartOnboarding && !onboardingSettings.value?.onboarded) {
         startOnboarding('main')
     } else {
         await scheduleStartupDialogs()
@@ -2086,6 +2088,7 @@ watch(
     () => route.path,
     (path) => {
         if (
+            autoStartOnboarding &&
             path.startsWith('/instance/') &&
             onboardingSettings.value?.onboarded &&
             !onboardingSettings.value?.onboarding_instance_tour_completed &&
