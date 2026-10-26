@@ -13,6 +13,9 @@ use crate::state::store::game_option_pack_bases::{
 use crate::state::store::game_option_update_state::{
     GameOptionUpdateState, UpdateStateKey, UpdateStateRecord,
 };
+use crate::state::store::instance_sync_checkpoints::{
+    CheckpointScope, InstanceSyncCheckpoints,
+};
 use crate::state::{InstanceLink, InstanceMetadata, State, SyncedOption};
 use crate::util::io;
 use encoding_rs::{UTF_8, UTF_16BE, UTF_16LE};
@@ -137,15 +140,14 @@ pub(in crate::api::instance) async fn detach_instance(
     state: &State,
 ) -> crate::Result<()> {
     let feature = SyncedOption::GameOptions.as_str();
-    sqlx::query!(
-        "
-        DELETE FROM instance_sync_checkpoints
-        WHERE instance_id = ? AND feature = ?
-        ",
-        metadata.instance.id,
-        feature,
+    InstanceSyncCheckpoints::set_scoped(
+        &state.data,
+        &CheckpointScope {
+            instance_id: metadata.instance.id.clone(),
+            feature: feature.to_string(),
+        },
+        &[],
     )
-    .execute(&state.pool)
     .await?;
     Ok(())
 }
@@ -204,15 +206,14 @@ pub async fn capture_pack_base(
         .ok_or_else(|| input_error("Unknown instance"))?;
     let path = options_path(&metadata, &state)?;
     let feature = SyncedOption::GameOptions.as_str();
-    sqlx::query!(
-        "
-        DELETE FROM instance_sync_checkpoints
-        WHERE instance_id = ? AND feature = ?
-        ",
-        instance_id,
-        feature,
+    InstanceSyncCheckpoints::set_scoped(
+        &state.data,
+        &CheckpointScope {
+            instance_id: instance_id.to_string(),
+            feature: feature.to_string(),
+        },
+        &[],
     )
-    .execute(&state.pool)
     .await?;
 
     if source.is_none() {
