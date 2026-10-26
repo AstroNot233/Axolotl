@@ -41,7 +41,9 @@ impl ContentFavoriteInput {
     }
 }
 
-pub async fn list(handle: &Handle) -> crate::Result<Vec<ContentFavorite>> {
+pub(crate) async fn list(
+    handle: &Handle,
+) -> crate::Result<Vec<ContentFavorite>> {
     let mut favorites = Vec::new();
     for (key, record) in ContentFavorites::get_all(handle).await? {
         favorites.push(with_resource(handle, key, record).await?);
@@ -57,7 +59,7 @@ pub async fn list(handle: &Handle) -> crate::Result<Vec<ContentFavorite>> {
     Ok(favorites)
 }
 
-pub async fn add(
+pub(crate) async fn add(
     favorite: ContentFavoriteInput,
     handle: &Handle,
 ) -> crate::Result<ContentFavorite> {
@@ -87,7 +89,7 @@ pub async fn add(
     }
 }
 
-pub async fn remove(
+pub(crate) async fn remove(
     provider: ContentFavoriteProvider,
     project_id: &str,
     handle: &Handle,
