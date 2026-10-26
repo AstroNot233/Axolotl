@@ -13,6 +13,7 @@
 //! - `atom_` runs the same verb inside an atomic unit, so a group of writes
 //!   lands together or not at all.
 
+pub(crate) mod cache;
 pub(crate) mod content_favorites;
 pub(crate) mod content_update_jobs;
 pub(crate) mod game_option_locale_origins;
@@ -21,6 +22,8 @@ pub(crate) mod game_option_update_state;
 pub(crate) mod install_jobs;
 pub(crate) mod instance_sync_checkpoints;
 pub(crate) mod instance_sync_preferences;
+pub(crate) mod java_default_versions;
+pub(crate) mod java_versions;
 pub(crate) mod join_log;
 pub(crate) mod official_login_proof;
 pub(crate) mod resource_source_projects;
@@ -29,6 +32,8 @@ pub(crate) mod sync_feature_settings;
 pub(crate) mod synced_game_option_preferences;
 pub(crate) mod synced_game_option_state;
 pub(crate) mod synced_game_option_values;
+pub(crate) mod telemetry_identity;
+pub(crate) mod telemetry_outbox;
 
 #[cfg(test)]
 mod tests;
@@ -168,8 +173,9 @@ pub(crate) trait Collection: Sized {
         key: &Self::Key,
         record: Option<&Self::Record>,
     ) -> crate::Result<()> {
-        let mut connection = handle.connection().await?;
-        Self::write(&mut connection, key, record).await
+        let mut unit = atom(handle).await?;
+        Self::write(unit.connection(), key, record).await?;
+        unit.commit().await
     }
 
     /// Every record the collection holds, with the key each is stored under.

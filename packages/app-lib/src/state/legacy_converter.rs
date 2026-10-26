@@ -106,7 +106,7 @@ where
             if let Ok(java_version) =
                 check_jre(PathBuf::from(legacy_version.path)).await
             {
-                java_version.upsert(exec).await?;
+                java_version.upsert(handle).await?;
             }
         }
 
