@@ -1943,11 +1943,12 @@ impl CachedEntry {
 
     /// The row this entry is stored as.
     fn stored(&self) -> crate::Result<(CacheKey, CacheRecord)> {
-        let data = self
-            .data
-            .as_ref()
-            .map(|value| serde_json::to_string(&value.to_json_value()?))
-            .transpose()?;
+        let data = match self.data.as_ref() {
+            Some(value) => {
+                Some(serde_json::to_string(&value.to_json_value()?)?)
+            }
+            None => None,
+        };
 
         Ok((
             CacheKey {

@@ -6,9 +6,7 @@ use super::model::{
 use super::store;
 use crate::state::store::Collection as _;
 use crate::state::store::Handle;
-use crate::state::store::minecraft_users::{
-    AccountType as StoredAccountType, MinecraftUsers,
-};
+use crate::state::store::minecraft_users;
 use crate::state::{ModrinthCredentials, State};
 use regex::{Captures, Regex};
 use std::fmt::Write as _;
@@ -53,7 +51,7 @@ pub async fn build_job_support_details(
     write_raw_snapshot(&mut details, &snapshot);
     write_latest_log(&mut details, state).await;
 
-    censor_support_text(details, &state.pool).await
+    censor_support_text(details, &state.pool, &state.data).await
 }
 
 fn result_summary(
@@ -715,7 +713,7 @@ async fn minecraft_tokens(handle: &Handle) -> crate::Result<Vec<String>> {
     let mut tokens = Vec::new();
 
     for (access_token, refresh_token) in
-        MinecraftUsers::token_pairs(handle).await?
+        minecraft_users::token_pairs(handle).await?
     {
         tokens.push(access_token);
         tokens.push(refresh_token);
@@ -766,7 +764,9 @@ mod tests {
     use super::*;
     use crate::state::Credentials;
     use crate::state::store::Collection as _;
-    use crate::state::store::minecraft_users::MinecraftUserRecord;
+    use crate::state::store::minecraft_users::{
+        AccountType as StoredAccountType, MinecraftUserRecord, MinecraftUsers,
+    };
 
     async fn test_pool() -> sqlx::SqlitePool {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()

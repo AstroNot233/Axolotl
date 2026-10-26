@@ -2,7 +2,6 @@
 //! the migrations leave, the round trip of every column the record carries, and
 //! the upgrades that rewrite a stored settings row.
 
-use super::support;
 use crate::state::settings::{
     DownloadSourceMode, HomeLayout, Settings, default_terracotta_public_nodes,
 };

@@ -250,7 +250,7 @@ async fn a_scoped_replace_refuses_a_key_outside_its_scope() {
 }
 #[tokio::test]
 async fn content_favorites_are_provider_qualified_and_idempotent() {
-    let handle = handle().await;
+    let handle = support::handle().await;
     let modrinth = add(
         ContentFavoriteInput {
             provider: ContentFavoriteProvider::Modrinth,
@@ -297,7 +297,7 @@ async fn content_favorites_are_provider_qualified_and_idempotent() {
 
 #[tokio::test]
 async fn removing_a_content_favorite_is_idempotent() {
-    let handle = handle().await;
+    let handle = support::handle().await;
     remove(ContentFavoriteProvider::Modrinth, "missing", &handle)
         .await
         .expect("remove missing favorite");
@@ -306,7 +306,7 @@ async fn removing_a_content_favorite_is_idempotent() {
 
 #[tokio::test]
 async fn readding_after_remove_gets_a_new_saved_time() {
-    let handle = handle().await;
+    let handle = support::handle().await;
     let first = add(
         ContentFavoriteInput {
             provider: ContentFavoriteProvider::Modrinth,
@@ -337,7 +337,7 @@ async fn readding_after_remove_gets_a_new_saved_time() {
 
 #[tokio::test]
 async fn favorites_are_ordered_by_when_they_were_saved() {
-    let handle = handle().await;
+    let handle = support::handle().await;
     for (provider, project_id, saved_at) in [
         (ContentFavoriteProvider::Modrinth, "older", 1),
         (ContentFavoriteProvider::Curseforge, "newer", 2),

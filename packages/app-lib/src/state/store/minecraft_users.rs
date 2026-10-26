@@ -174,7 +174,7 @@ async fn clear_other_active(
 
 /// At most one of the records a replacement carries may be the active one.
 fn ensure_one_active(
-    records: &[(MinecraftUserKey, MinecraftUserRecord)],
+    records: &[(<MinecraftUsers as Collection>::Key, MinecraftUserRecord)],
 ) -> crate::Result<()> {
     let active = records.iter().filter(|(_, record)| record.active).count();
     if active > 1 {
@@ -313,7 +313,7 @@ fn to_account_type(account_type: &str) -> Option<AccountType> {
 /// build can read the row as an account: a token it cannot attribute is still a
 /// secret that has to be hidden.
 pub(crate) async fn token_pairs(
-    handle: &Handle,
+    handle: &super::Handle,
 ) -> crate::Result<Vec<(String, String)>> {
     let mut connection = handle.connection().await?;
     let rows = sqlx::query_as(
