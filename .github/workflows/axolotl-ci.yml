@@ -166,6 +166,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Prepare build resources
         run: node scripts/axolotl/prepare-build-resources.mjs
+      - name: Test Java agent cache and offline behavior
+        run: node --test scripts/axolotl/java-build.test.mjs
       - name: Upload build resources
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -227,6 +229,9 @@ jobs:
       - name: Test provider-neutral resource layer
         if: runner.os == 'Linux'
         run: cargo test --package theseus resources
+      - name: Test Java build fingerprints
+        if: runner.os == 'Linux'
+        run: cargo test --package theseus --test java_build_cache
       - run: cargo check --package theseus_gui --features updater
       - name: Test Windows installer UI and core
         if: runner.os == 'Windows'
