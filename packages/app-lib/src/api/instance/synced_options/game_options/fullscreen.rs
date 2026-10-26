@@ -89,7 +89,7 @@ pub(crate) async fn update_shared_fullscreen_from_app(
         Some(&GameOptionValueRecord {
             kind: GameOptionValueKind::Vanilla,
             raw_key: None,
-            canonical_type,
+            canonical_type: canonical_type.to_string(),
             canonical_value: Some(value_json),
             value_codec: "catalog".to_string(),
             seeded: true,

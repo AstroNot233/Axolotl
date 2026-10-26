@@ -14,9 +14,11 @@
 //!   lands together or not at all.
 
 pub(crate) mod content_favorites;
+pub(crate) mod content_update_jobs;
 pub(crate) mod game_option_locale_origins;
 pub(crate) mod game_option_pack_bases;
 pub(crate) mod game_option_update_state;
+pub(crate) mod install_jobs;
 pub(crate) mod instance_sync_checkpoints;
 pub(crate) mod instance_sync_preferences;
 pub(crate) mod join_log;
@@ -72,6 +74,19 @@ impl Atom {
         self.transaction.commit().await?;
         Ok(())
     }
+}
+
+/// Whether a write was refused because it named a row that is not there.
+///
+/// SQLite reports a foreign key the statement cannot satisfy as
+/// `SQLITE_CONSTRAINT_FOREIGNKEY`, which is the one refusal a caller can answer
+/// by dropping the reference itself.
+pub(crate) fn names_a_missing_row(error: &crate::Error) -> bool {
+    matches!(
+        error.raw.as_ref(),
+        crate::ErrorKind::Sqlx(sqlx::Error::Database(database))
+            if database.code().as_deref() == Some("787")
+    )
 }
 
 /// Opens an atomic unit on `handle`.
