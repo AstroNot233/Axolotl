@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { defineMessages, StyledInput, Toggle, useVIntl } from '@modrinth/ui'
 import { platform } from '@tauri-apps/plugin-os'
-import { ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 
 import EnvironmentVariablesInput from '@/components/ui/EnvironmentVariablesInput.vue'
 import { get, update } from '@/helpers/settings.ts'
 import { createSettingsPatchSaver } from '@/helpers/settings-patch'
+import { usableU16 } from '@/helpers/usable-u16'
 
 import LogShareSettings from './LogShareSettings.vue'
 import SettingsRow from './SettingsRow.vue'
@@ -151,24 +152,20 @@ const settings = ref(fetchSettings)
 // stored pair again instead of the text the user cleared.
 const dimensionResetToken = ref(0)
 
-// `game_resolution` is a `WindowSize(u16, u16)` on the Rust side, so only integers in
-// `0..=65535` survive `settings_set`. A cleared or half-typed `<input type="number">`
-// reports `undefined`/`NaN` (JSON `null`), and decimals or out-of-range numbers fail
-// the `u16` deserialization as well; each of those drops the whole patch. Re-assign
-// the stored pair so the field re-renders with it instead of staying blank.
-const MAX_WINDOW_DIMENSION = 65535
+const widthInput = ref<InstanceType<typeof StyledInput>>()
+const heightInput = ref<InstanceType<typeof StyledInput>>()
 
-function usableDimension(value: unknown): number | null {
-    if (typeof value !== 'number' || !Number.isInteger(value)) return null
-    return value >= 0 && value <= MAX_WINDOW_DIMENSION ? value : null
-}
-
-function setResolutionDimension(index: 0 | 1, value: number) {
+function setResolutionDimension(index: 0 | 1, value: unknown) {
     const current = settings.value.game_resolution
-    const usable = usableDimension(value)
+    const usable = usableU16(value)
     if (usable === null) {
+        // Re-mount the field so it shows the value that is still stored, then put the
+        // caret back in the field the user was editing.
         dimensionResetToken.value += 1
-        return
+        return nextTick().then(() => {
+            const field = index === 0 ? widthInput.value : heightInput.value
+            field?.focus()
+        })
     }
     const next: [number, number] = [...current]
     next[index] = usable
@@ -242,13 +239,17 @@ watch(
                 <template #control>
                     <StyledInput
                         id="width"
+                        ref="widthInput"
                         :key="`width-${dimensionResetToken}`"
                         :model-value="settings.game_resolution[0]"
                         :disabled="settings.force_fullscreen"
                         autocomplete="off"
                         type="number"
+                        min="1"
+                        max="65535"
+                        step="1"
                         :placeholder="formatMessage(messages.widthPlaceholder)"
-                        @update:model-value="(value: number) => setResolutionDimension(0, value)"
+                        @update:model-value="(value: unknown) => setResolutionDimension(0, value)"
                     />
                 </template>
             </SettingsRow>
@@ -258,13 +259,17 @@ watch(
                 <template #control>
                     <StyledInput
                         id="height"
+                        ref="heightInput"
                         :key="`height-${dimensionResetToken}`"
                         :model-value="settings.game_resolution[1]"
                         :disabled="settings.force_fullscreen"
                         autocomplete="off"
                         type="number"
+                        min="1"
+                        max="65535"
+                        step="1"
                         :placeholder="formatMessage(messages.heightPlaceholder)"
-                        @update:model-value="(value: number) => setResolutionDimension(1, value)"
+                        @update:model-value="(value: unknown) => setResolutionDimension(1, value)"
                     />
                 </template>
             </SettingsRow>

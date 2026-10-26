@@ -8,10 +8,11 @@ import {
     useVIntl,
 } from '@modrinth/ui'
 import { platform } from '@tauri-apps/plugin-os'
-import { type Ref, ref, watch } from 'vue'
+import { nextTick, type Ref, ref, watch } from 'vue'
 
 import { edit } from '@/helpers/instance'
 import { get } from '@/helpers/settings.ts'
+import { usableU16 } from '@/helpers/usable-u16'
 import { injectInstanceSettings } from '@/providers/instance-settings'
 
 import type { AppSettings, GameInstance } from '../../../helpers/types'
@@ -43,27 +44,21 @@ const windowTitle = ref(initialInstance.window_title ?? '')
 const dimensionResetToken = ref(0)
 let saveQueue = Promise.resolve()
 
-// `game_resolution` is a `WindowSize(u16, u16)` on the Rust side, so the only values
-// that survive `instance_edit` are integers in `0..=65535`. A cleared or half-typed
-// `<input type="number">` reports `undefined`/`NaN` (which serialize to JSON `null`),
-// and decimals or out-of-range numbers fail the `u16` deserialization too; all of
-// those lose the edit. Ignore such an update instead, so the model keeps the last
-// usable size and the field falls back to it.
-const MAX_WINDOW_DIMENSION = 65535
+const widthInput = ref<InstanceType<typeof StyledInput>>()
+const heightInput = ref<InstanceType<typeof StyledInput>>()
 
-function usableDimension(value: unknown): number | null {
-    if (typeof value !== 'number' || !Number.isInteger(value)) return null
-    return value >= 0 && value <= MAX_WINDOW_DIMENSION ? value : null
-}
-
-function setDimension(index: 0 | 1, value: number) {
-    const usable = usableDimension(value)
+function setDimension(index: 0 | 1, value: unknown) {
+    const usable = usableU16(value)
     if (usable === null) {
         // Re-mount the field so it shows the value that is still stored: re-assigning an
         // equal number does not change the bound prop, so Vue would leave the cleared
-        // text in place.
+        // text in place. Focus the field the user was editing again, so discarding the
+        // update does not cost them a click.
         dimensionResetToken.value += 1
-        return
+        return nextTick().then(() => {
+            const field = index === 0 ? widthInput.value : heightInput.value
+            field?.focus()
+        })
     }
     resolution.value = index === 0 ? [usable, resolution.value[1]] : [resolution.value[0], usable]
 }
@@ -229,13 +224,17 @@ const messages = defineMessages({
             </div>
             <StyledInput
                 id="width"
+                ref="widthInput"
                 :key="`width-${dimensionResetToken}`"
                 :model-value="resolution[0]"
                 autocomplete="off"
                 :disabled="!overrideWindowSettings || fullscreenSetting"
                 type="number"
+                min="1"
+                max="65535"
+                step="1"
                 :placeholder="formatMessage(messages.enterWidth)"
-                @update:model-value="(value: number) => setDimension(0, value)"
+                @update:model-value="(value: unknown) => setDimension(0, value)"
             />
         </div>
 
@@ -250,13 +249,17 @@ const messages = defineMessages({
             </div>
             <StyledInput
                 id="height"
+                ref="heightInput"
                 :key="`height-${dimensionResetToken}`"
                 :model-value="resolution[1]"
                 autocomplete="off"
                 :disabled="!overrideWindowSettings || fullscreenSetting"
                 type="number"
+                min="1"
+                max="65535"
+                step="1"
                 :placeholder="formatMessage(messages.enterHeight)"
-                @update:model-value="(value: number) => setDimension(1, value)"
+                @update:model-value="(value: unknown) => setDimension(1, value)"
             />
         </div>
         <div

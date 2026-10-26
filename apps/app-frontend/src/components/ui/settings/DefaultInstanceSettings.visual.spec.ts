@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
-import { defineComponent, h, Suspense } from 'vue'
+import { defineComponent, h, ref, Suspense } from 'vue'
 
 import DefaultInstanceSettings from './DefaultInstanceSettings.vue'
 
@@ -47,26 +47,34 @@ vi.mock('@modrinth/ui', async () => {
         }),
         StyledInput: defineComponent({
             props: ['modelValue', 'type'],
-            setup:
-                (props, { emit }) =>
-                () =>
+            setup(props, { emit, expose }) {
+                const input = ref<HTMLInputElement>()
+                // The real StyledInput exposes both, and the component uses them to put
+                // the caret back into a field it had to re-mount.
+                expose({
+                    focus: () => input.value?.focus(),
+                    select: () => input.value?.select(),
+                })
+                return () =>
                     h('input', {
+                        ref: input,
                         value: props.modelValue,
                         type: props.type,
                         // Mirrors the real StyledInput: a cleared number field reports
                         // `undefined`, unparsable text reports `NaN`.
                         onInput: (event: Event) => {
-                            const input = event.target as HTMLInputElement
+                            const element = event.target as HTMLInputElement
                             emit(
                                 'update:modelValue',
                                 props.type === 'number'
-                                    ? input.value === ''
+                                    ? element.value === ''
                                         ? undefined
-                                        : Number(input.value)
-                                    : input.value,
+                                        : Number(element.value)
+                                    : element.value,
                             )
                         },
-                    }),
+                    })
+            },
         }),
         defineMessages: (messages: unknown) => messages,
         useVIntl: () => ({
@@ -117,7 +125,7 @@ it('never sends a cleared window dimension to the settings command', async () =>
 
 it('never sends a dimension the u16 field cannot hold', async () => {
     const wrapper = await openSettings([1920, 1080])
-    for (const invalid of ['1920.5', '-1', '65536']) {
+    for (const invalid of ['1920.5', '-1', '0', '65536']) {
         await wrapper.get('#width').setValue(invalid)
         await flushPromises()
     }
