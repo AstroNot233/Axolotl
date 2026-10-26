@@ -11,6 +11,7 @@
 
 pub(crate) mod content_favorites;
 pub(crate) mod join_log;
+pub(crate) mod official_login_proof;
 pub(crate) mod resource_source_projects;
 
 use sqlx::SqlitePool;
