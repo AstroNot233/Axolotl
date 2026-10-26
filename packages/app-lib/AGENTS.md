@@ -8,16 +8,18 @@ For behavior exposed to the frontend through a new or changed native command, fo
 
 Every record this crate keeps between runs is read and written through `packages/app-lib/src/state/store/`. **Do not reach the database on your own**: no business module may use `sqlx`, open a transaction, or query through `State::pool`. Which storage answers, and how it is asked, is the store package's business alone, so that a storage can be replaced without touching a caller.
 
-A caller names a collection and the fields it looks a record up by, through the handle in `State::data`. Four verbs exist:
+A caller names a collection and the fields it looks a record up by, through the handle in `State::data`. The verbs are centred on `get` and `set`, and qualify them the same way everywhere:
 
-- `set(handle, key, Some(record))` writes the record under the key; passing `None` removes the record that key held.
 - `get(handle, key) -> Result<Option<Record>>` reads one record; `Ok(None)` means the key holds nothing, which is not an error.
-- `set_all(handle, records)` writes a whole collection as one unit.
-- `get_all(handle) -> Result<Vec<(Key, Record)>>` reads a whole collection, each record together with its key.
+- `set(handle, key, Some(record))` writes the record under the key; passing `None` removes the record that key held.
+- `get_all(handle)` / `set_all(handle, records)` reach a whole collection.
+- `get_scoped(handle, scope)` / `set_scoped(handle, scope, records)` reach the records one scope names.
+- `atom_get` / `atom_set` / `atom_get_all` / `atom_set_all` / `atom_get_scoped` / `atom_set_scoped` take a `&mut Atom` instead of the handle and run inside one atomic unit: everything written through it lands together, or nothing does. Open one with `store::atom(&handle)` and finish with `Atom::commit`; dropping an uncommitted unit rolls it back.
 
 The store package is the only place a storage is named:
 
-- Add a collection by creating a module under `src/state/store/` that declares its `Key` and `Record` and implements the four verbs; its statements live in that module and nowhere else.
+- Add a collection by creating a module under `src/state/store/` that declares its `Key`, its `Scope` and its `Record`, and answers the six statements the verbs are written in terms of — read, write, read-all, replace-all, read-scoped and replace-scoped, each on a `&mut SqliteConnection`. Its statements live in that module and nowhere else; a collection with no narrower group sets `Scope = Key`. A collection implements those statements rather than the verbs: the verbs, and the checks that a replace carries unique keys and no key outside its scope, are the trait defaults and must not be re-implemented per collection.
+- Prefer the scoped verbs and atomic units to reading a whole collection and filtering it in the caller: a full read there is the performance defect this interface exists to avoid.
 - `sqlx` may only appear inside `src/state/store/`. `Handle::pool` is visible to that package alone; using it elsewhere pins the crate to one storage.
 - Signatures return the crate's own `Result`; a storage's error type must not appear in them, so a replacement storage can report the same failures.
 - A record that cannot be interpreted (for example a stored port outside its type) is logged inside the store and skipped, while a collection that cannot be read at all returns `Err` for the caller to decide whether to degrade.
