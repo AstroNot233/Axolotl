@@ -9,6 +9,7 @@ mod game_option_locale_origins;
 mod game_option_pack_bases;
 mod game_option_update_state;
 mod install_jobs;
+mod install_store;
 mod instance_sync_checkpoints;
 mod instance_sync_preferences;
 mod join_log;
