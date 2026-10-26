@@ -12,11 +12,13 @@ pub(crate) struct UpdateStateKey {
 }
 
 /// What the instance's `options.txt` looked like before the update.
+///
+/// A file the instance had is kept together with its bytes, so a state cannot
+/// claim one without them: restoring the previous options needs the document.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct UpdateStateRecord {
-    pub had_file: bool,
-    pub sha1: Option<String>,
-    pub document: Option<Vec<u8>>,
+pub(crate) enum UpdateStateRecord {
+    Replaced { sha1: String, document: Vec<u8> },
+    Absent,
 }
 
 impl Collection for GameOptionUpdateState {
@@ -40,6 +42,7 @@ impl Collection for GameOptionUpdateState {
             return Ok(());
         };
 
+        let (had_file, sha1, document) = columns(record);
         sqlx::query(
             "
             INSERT INTO instance_game_option_update_state
@@ -52,9 +55,9 @@ impl Collection for GameOptionUpdateState {
             ",
         )
         .bind(&key.instance_id)
-        .bind(record.had_file)
-        .bind(&record.sha1)
-        .bind(&record.document)
+        .bind(had_file)
+        .bind(sha1)
+        .bind(document)
         .execute(handle.pool())
         .await?;
 
@@ -77,10 +80,8 @@ impl Collection for GameOptionUpdateState {
             .fetch_optional(handle.pool())
             .await?;
 
-        Ok(row.map(|(had_file, sha1, document)| Self::Record {
-            had_file,
-            sha1,
-            document,
+        Ok(row.and_then(|(had_file, sha1, document)| {
+            to_record(&key.instance_id, had_file, sha1, document)
         }))
     }
 
@@ -95,6 +96,7 @@ impl Collection for GameOptionUpdateState {
             .execute(&mut *transaction)
             .await?;
         for (key, record) in records {
+            let (had_file, sha1, document) = columns(record);
             sqlx::query(
                 "
                 INSERT INTO instance_game_option_update_state
@@ -103,9 +105,9 @@ impl Collection for GameOptionUpdateState {
                 ",
             )
             .bind(&key.instance_id)
-            .bind(record.had_file)
-            .bind(&record.sha1)
-            .bind(&record.document)
+            .bind(had_file)
+            .bind(sha1)
+            .bind(document)
             .execute(&mut *transaction)
             .await?;
         }
@@ -129,17 +131,46 @@ impl Collection for GameOptionUpdateState {
 
         Ok(rows
             .into_iter()
-            .map(|(instance_id, had_file, sha1, document)| {
-                (
-                    UpdateStateKey { instance_id },
-                    UpdateStateRecord {
-                        had_file,
-                        sha1,
-                        document,
-                    },
-                )
+            .filter_map(|(instance_id, had_file, sha1, document)| {
+                let record = to_record(&instance_id, had_file, sha1, document)?;
+                Some((UpdateStateKey { instance_id }, record))
             })
             .collect())
+    }
+}
+
+fn columns(
+    record: &UpdateStateRecord,
+) -> (bool, Option<&String>, Option<&Vec<u8>>) {
+    match record {
+        UpdateStateRecord::Replaced { sha1, document } => {
+            (true, Some(sha1), Some(document))
+        }
+        UpdateStateRecord::Absent => (false, None, None),
+    }
+}
+
+/// The record a row describes, or nothing when it claims a file without
+/// keeping its bytes. Such a row cannot restore what it promises, and reading
+/// it as an empty state would delete the file the player had.
+fn to_record(
+    instance_id: &str,
+    had_file: bool,
+    sha1: Option<String>,
+    document: Option<Vec<u8>>,
+) -> Option<UpdateStateRecord> {
+    match (had_file, sha1, document) {
+        (false, _, _) => Some(UpdateStateRecord::Absent),
+        (true, Some(sha1), Some(document)) => {
+            Some(UpdateStateRecord::Replaced { sha1, document })
+        }
+        (true, _, _) => {
+            tracing::warn!(
+                %instance_id,
+                "Ignoring an update state that lost the document it kept"
+            );
+            None
+        }
     }
 }
 
@@ -147,25 +178,27 @@ impl Collection for GameOptionUpdateState {
 mod tests {
     use super::*;
 
-    async fn handle(instance: &str) -> Handle {
+    async fn handle(instances: &[&str]) -> Handle {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
             .unwrap();
         sqlx::migrate!().run(&pool).await.unwrap();
-        sqlx::query(
-            "INSERT INTO instances
-                (id, path, install_stage, launcher_feature_version,
-                 name, created, modified)
-             VALUES (?, ?, 'installed', '1', ?, 1, 1)",
-        )
-        .bind(instance)
-        .bind(instance)
-        .bind(instance)
-        .execute(&pool)
-        .await
-        .unwrap();
+        for instance in instances {
+            sqlx::query(
+                "INSERT INTO instances
+                    (id, path, install_stage, launcher_feature_version,
+                     name, created, modified)
+                 VALUES (?, ?, 'installed', '1', ?, 1, 1)",
+            )
+            .bind(instance)
+            .bind(instance)
+            .bind(instance)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
         Handle::new(pool)
     }
 
@@ -175,27 +208,43 @@ mod tests {
         }
     }
 
+    fn replaced() -> UpdateStateRecord {
+        UpdateStateRecord::Replaced {
+            sha1: "abc".to_string(),
+            document: b"options".to_vec(),
+        }
+    }
+
     #[tokio::test]
     async fn an_update_state_round_trips_and_clears() {
-        let handle = handle("instance").await;
-        let record = UpdateStateRecord {
-            had_file: true,
-            sha1: Some("abc".to_string()),
-            document: Some(b"options".to_vec()),
-        };
+        let handle = handle(&["instance"]).await;
 
-        GameOptionUpdateState::set(&handle, &key("instance"), Some(&record))
-            .await
-            .unwrap();
+        GameOptionUpdateState::set(
+            &handle,
+            &key("instance"),
+            Some(&replaced()),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             GameOptionUpdateState::get(&handle, &key("instance"))
                 .await
                 .unwrap(),
-            Some(record)
+            Some(replaced())
         );
+
+        GameOptionUpdateState::set(
+            &handle,
+            &key("instance"),
+            Some(&UpdateStateRecord::Absent),
+        )
+        .await
+        .unwrap();
         assert_eq!(
-            GameOptionUpdateState::get_all(&handle).await.unwrap().len(),
-            1
+            GameOptionUpdateState::get(&handle, &key("instance"))
+                .await
+                .unwrap(),
+            Some(UpdateStateRecord::Absent)
         );
 
         GameOptionUpdateState::set(&handle, &key("instance"), None)
@@ -211,38 +260,47 @@ mod tests {
 
     #[tokio::test]
     async fn writing_a_whole_collection_drops_what_it_leaves_out() {
-        let handle = handle("kept").await;
+        let handle = handle(&["kept", "dropped"]).await;
+        GameOptionUpdateState::set(&handle, &key("kept"), Some(&replaced()))
+            .await
+            .unwrap();
+        GameOptionUpdateState::set(&handle, &key("dropped"), Some(&replaced()))
+            .await
+            .unwrap();
+
+        GameOptionUpdateState::set_all(&handle, &[(key("kept"), replaced())])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            GameOptionUpdateState::get_all(&handle).await.unwrap(),
+            vec![(key("kept"), replaced())]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_state_that_lost_its_document_is_ignored() {
+        let handle = handle(&["instance"]).await;
         sqlx::query(
-            "INSERT INTO instances
-                (id, path, install_stage, launcher_feature_version,
-                 name, created, modified)
-             VALUES ('dropped', 'dropped', 'installed', '1', 'dropped', 1, 1)",
+            "INSERT INTO instance_game_option_update_state
+                (instance_id, had_file, sha1, document)
+             VALUES ('instance', 1, 'abc', NULL)",
         )
         .execute(handle.pool())
         .await
         .unwrap();
-        let record = UpdateStateRecord {
-            had_file: false,
-            sha1: None,
-            document: None,
-        };
-        GameOptionUpdateState::set(&handle, &key("kept"), Some(&record))
-            .await
-            .unwrap();
-        GameOptionUpdateState::set(&handle, &key("dropped"), Some(&record))
-            .await
-            .unwrap();
-
-        GameOptionUpdateState::set_all(
-            &handle,
-            &[(key("kept"), record.clone())],
-        )
-        .await
-        .unwrap();
 
         assert_eq!(
-            GameOptionUpdateState::get_all(&handle).await.unwrap(),
-            vec![(key("kept"), record)]
+            GameOptionUpdateState::get(&handle, &key("instance"))
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(
+            GameOptionUpdateState::get_all(&handle)
+                .await
+                .unwrap()
+                .is_empty()
         );
     }
 }

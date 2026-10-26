@@ -164,7 +164,7 @@ pub(in crate::api::instance) async fn prepare_instance_update_with_state(
         let _ = capture_instance_options(metadata, state, true).await?;
     }
     let path = options_path(metadata, state)?;
-    let (had_file, bytes, sha1) = if path.exists() {
+    let record = if path.exists() {
         let file_metadata = tokio::fs::symlink_metadata(&path)
             .await
             .map_err(|error| io::IOError::with_path(error, &path))?;
@@ -179,20 +179,15 @@ pub(in crate::api::instance) async fn prepare_instance_update_with_state(
             ));
         }
         let bytes = io::read(&path).await?;
-        (true, Some(bytes.clone()), Some(sha1_bytes(&bytes)))
-    } else {
-        (false, None, None)
-    };
-    GameOptionUpdateState::set(
-        &state.data,
-        &update_state,
-        Some(&UpdateStateRecord {
-            had_file,
-            sha1,
+        UpdateStateRecord::Replaced {
+            sha1: sha1_bytes(&bytes),
             document: bytes,
-        }),
-    )
-    .await?;
+        }
+    } else {
+        UpdateStateRecord::Absent
+    };
+    GameOptionUpdateState::set(&state.data, &update_state, Some(&record))
+        .await?;
     Ok(())
 }
 
@@ -229,12 +224,15 @@ pub async fn capture_pack_base(
         )
         .await?;
         if let Some(pending) = pending {
-            if pending.had_file {
-                if let Some(document) = pending.document {
+            match pending {
+                UpdateStateRecord::Replaced { document, .. } => {
                     io::write(&path, document).await?;
                 }
-            } else if path.exists() {
-                io::remove_file(&path).await?;
+                UpdateStateRecord::Absent => {
+                    if path.exists() {
+                        io::remove_file(&path).await?;
+                    }
+                }
             }
         }
     }
