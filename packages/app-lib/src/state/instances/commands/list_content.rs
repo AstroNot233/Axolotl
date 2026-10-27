@@ -11,6 +11,7 @@ use crate::state::instances::{
     ContentSourceKind, Instance, InstanceFile, InstanceInstallCandidate,
     InstanceInstallTarget, InstanceLink,
 };
+use crate::state::store::Handle;
 use crate::state::{
     CacheBehaviour, CachedEntry, ContentFile, ContentItem, ContentItemOwner,
     ContentItemProject, ContentItemRollback, ContentItemUpdate,
@@ -333,7 +334,7 @@ pub(crate) async fn list_content(
             Some((_, version_id)) => {
                 get_cached_modpack_identifiers(
                     version_id,
-                    &state.pool,
+                    &state.data,
                     &state.api_semaphore,
                 )
                 .await?
@@ -2572,11 +2573,11 @@ impl ModpackIdentifiers {
 
 async fn get_cached_modpack_identifiers(
     version_id: &str,
-    pool: &SqlitePool,
+    handle: &Handle,
     fetch_semaphore: &FetchSemaphore,
 ) -> crate::Result<Option<ModpackIdentifiers>> {
     let Some(cached) =
-        CachedEntry::get_modpack_files(version_id, pool, fetch_semaphore)
+        CachedEntry::get_modpack_files(version_id, handle, fetch_semaphore)
             .await?
     else {
         return Ok(None);
