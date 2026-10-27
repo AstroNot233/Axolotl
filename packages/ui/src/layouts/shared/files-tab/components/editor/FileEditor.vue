@@ -135,6 +135,7 @@ const originalContent = ref('')
 const isEditingImage = ref(false)
 const imagePreview = ref<Blob | null>(null)
 const isLoading = ref(false)
+const saving = ref(false)
 const editorInstance = ref<Ace.Editor | null>(null)
 const editorContainer = ref<HTMLElement | null>(null)
 const editorHeight = ref('300px')
@@ -193,15 +194,19 @@ async function loadFileContent(file: { name: string; path: string }) {
 
         if (isImageFile(extension)) {
             const content = await ctx.readFileAsBlob(normalizedPath)
+            if (props.file?.path !== file.path) return
             isEditingImage.value = true
             imagePreview.value = content
         } else {
             isEditingImage.value = false
             const content = await ctx.readFile(normalizedPath)
+            // A file opened while this one was still loading owns the editor now.
+            if (props.file?.path !== file.path) return
             fileContent.value = content
             originalContent.value = content
         }
     } catch (error) {
+        if (props.file?.path !== file.path) return
         console.error('Error fetching file content:', error)
         addNotification({
             title: formatMessage(messages.failedToOpenTitle),
@@ -260,27 +265,20 @@ function onEditorInit(editor: Ace.Editor) {
     })
 }
 
-async function saveFileContent(exit: boolean = false) {
-    if (!props.file) return
-    if (ctx.isBusy?.value) return
+/**
+ * Writes the text as it was when saving started and resolves whether that
+ * write succeeded. Only that snapshot is marked as saved, so input typed while
+ * the write was pending stays unsaved.
+ */
+async function saveFileContent(exit: boolean = false): Promise<boolean> {
+    const file = props.file
+    if (!file || ctx.isBusy?.value || saving.value) return false
 
+    const normalizedPath = file.path.startsWith('/') ? file.path : `/${file.path}`
+    const snapshot = fileContent.value
+    saving.value = true
     try {
-        const normalizedPath = props.file.path.startsWith('/')
-            ? props.file.path
-            : `/${props.file.path}`
-        await ctx.writeFile(normalizedPath, fileContent.value)
-
-        originalContent.value = fileContent.value
-
-        if (exit) {
-            emit('close')
-        }
-
-        addNotification({
-            title: formatMessage(messages.fileSavedTitle),
-            text: formatMessage(messages.fileSavedText),
-            type: 'success',
-        })
+        await ctx.writeFile(normalizedPath, snapshot)
     } catch (error) {
         console.error('Error saving file content:', error)
         addNotification({
@@ -288,7 +286,21 @@ async function saveFileContent(exit: boolean = false) {
             text: formatMessage(messages.saveFailedText),
             type: 'error',
         })
+        return false
+    } finally {
+        saving.value = false
     }
+
+    if (props.file?.path === file.path) {
+        originalContent.value = snapshot
+        if (exit && fileContent.value === snapshot) emit('close')
+    }
+    addNotification({
+        title: formatMessage(messages.fileSavedTitle),
+        text: formatMessage(messages.fileSavedText),
+        type: 'success',
+    })
+    return true
 }
 
 async function shareLog() {
@@ -432,6 +444,7 @@ defineExpose({
     isFindOpen,
     fileContent,
     hasUnsavedChanges,
+    saving,
     revertChanges,
     toggleFind,
 })
