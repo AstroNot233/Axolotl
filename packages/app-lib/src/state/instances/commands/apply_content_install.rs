@@ -819,9 +819,7 @@ pub(crate) fn preserved_update_relative_path(
         .strip_suffix(".disabled")
         .unwrap_or(current_name);
     let replacement = match old_provider_file_name.as_deref() {
-        Some(old_name) if current_base == old_name => {
-            new_provider_file_name.to_string()
-        }
+        Some(old_name) if current_base == old_name => new_provider_file_name,
         Some(old_name)
             if !old_name.is_empty()
                 && current_base.match_indices(old_name).count() == 1 =>

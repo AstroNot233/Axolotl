@@ -161,7 +161,7 @@ impl CustomMinecraftSkin {
             Some(display_order) => display_order,
             None => match insert_position {
                 CustomMinecraftSkinInsertPosition::Top => {
-                    for (_, record) in saved.iter_mut() {
+                    for (_, record) in &mut saved {
                         record.display_order += 1;
                     }
 
@@ -173,7 +173,7 @@ impl CustomMinecraftSkin {
                     .max()
                     .map_or(0, |display_order| display_order + 1),
                 CustomMinecraftSkinInsertPosition::At(display_order) => {
-                    for (_, record) in saved.iter_mut() {
+                    for (_, record) in &mut saved {
                         if record.display_order >= display_order {
                             record.display_order += 1;
                         }

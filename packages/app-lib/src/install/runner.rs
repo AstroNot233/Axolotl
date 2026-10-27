@@ -984,10 +984,10 @@ async fn enqueue_with_content_plan(
 ) -> crate::Result<InstallJobSnapshot> {
     let instance = admission::request_instance(&request);
     let _admission = admission::lock(state, instance.as_deref()).await?;
-    if let Some((plan_id, _)) = content_plan {
-        if let Some(job) = content_plan_job(plan_id, state).await? {
-            return Ok(job);
-        }
+    if let Some((plan_id, _)) = content_plan
+        && let Some(job) = content_plan_job(plan_id, state).await?
+    {
+        return Ok(job);
     }
     if let Some(existing) = admission::existing(state, &request, None).await? {
         if let Some((plan_id, _)) = content_plan {
@@ -1044,7 +1044,7 @@ async fn enqueue_with_content_plan(
         Err(error) => {
             return Err(cleanup_failed_initial_install(
                 &mut job_state,
-                &state,
+                state,
                 error,
             )
             .await);

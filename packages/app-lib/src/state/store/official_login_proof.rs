@@ -87,7 +87,7 @@ impl Collection for OfficialLoginProof {
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
         Ok(Self::read(conn, scope)
             .await?
-            .map(|record| vec![(scope.clone(), record)])
+            .map(|record| vec![(*scope, record)])
             .unwrap_or_default())
     }
 

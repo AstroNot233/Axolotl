@@ -195,13 +195,12 @@ impl Artifact {
                     let _ = tokio::fs::remove_file(&destination).await;
                 }
                 result?;
-                if self.always_stale {
-                    if let Err(error) =
+                if self.always_stale
+                    && let Err(error) =
                         io::atomically_replace_file(&destination, &path)
-                    {
-                        let _ = tokio::fs::remove_file(&destination).await;
-                        return Err(error.into());
-                    }
+                {
+                    let _ = tokio::fs::remove_file(&destination).await;
+                    return Err(error.into());
                 }
             }
         }

@@ -65,8 +65,8 @@ pub(super) async fn read_server_snapshot(
     state: &State,
 ) -> crate::Result<(Vec<CanonicalServer>, Vec<LocalServer>)> {
     let mut tx = state.pool.begin().await?;
-    let canonical = read_canonical_with(&mut *tx).await?;
-    let local = load_local_with(instance_id, &mut *tx).await?;
+    let canonical = read_canonical_with(&mut tx).await?;
+    let local = load_local_with(instance_id, &mut tx).await?;
     tx.commit().await?;
     Ok((canonical, local))
 }
@@ -176,7 +176,7 @@ async fn write_canonical_rows(
     servers: &[CanonicalServer],
 ) -> crate::Result<bool> {
     validate_size(servers.len(), 0)?;
-    validate_stored_list(&mut **tx, "synced_servers", None).await?;
+    validate_stored_list(tx, "synced_servers", None).await?;
     let current = sqlx::query!(
         "
         SELECT id, position, nbt

@@ -132,14 +132,13 @@ pub(super) async fn pin(
     let mut pinned = false;
     if let Some(mut record) =
         GameOptionLocaleOrigins::atom_get(&mut unit, &key).await?
+        && record.origin.is_none()
     {
-        if record.origin.is_none() {
-            record.origin = Some(json);
-            GameOptionLocaleOrigins::atom_set(&mut unit, &key, Some(&record))
-                .await?;
-            unit.commit().await?;
-            pinned = true;
-        }
+        record.origin = Some(json);
+        GameOptionLocaleOrigins::atom_set(&mut unit, &key, Some(&record))
+            .await?;
+        unit.commit().await?;
+        pinned = true;
     }
     tracing::debug!(
         pinned,

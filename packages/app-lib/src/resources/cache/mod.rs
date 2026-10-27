@@ -477,7 +477,7 @@ async fn store_entry(
 ) -> crate::Result<()> {
     let mut unit = atom(data).await?;
     let current = ResourceCacheState::atom_get(&mut unit, &()).await?;
-    if !current.is_some_and(|state| state.generation == generation) {
+    if current.is_none_or(|state| state.generation != generation) {
         return Ok(());
     }
     let existing = ResourceCacheEntries::atom_get(&mut unit, key).await?;

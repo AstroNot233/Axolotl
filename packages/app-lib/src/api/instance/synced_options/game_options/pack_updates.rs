@@ -263,14 +263,14 @@ pub async fn capture_pack_base(
         })
         .unwrap_or((None, None, None));
     let source = match source {
-        Some(GameOptionsPackSource::ClientOverrides)
-        | Some(GameOptionsPackSource::ClientOverridesYosbr) => {
-            PackBaseSource::ClientOverrides
-        }
-        Some(GameOptionsPackSource::Overrides)
-        | Some(GameOptionsPackSource::OverridesYosbr) => {
-            PackBaseSource::Overrides
-        }
+        Some(
+            GameOptionsPackSource::ClientOverrides
+            | GameOptionsPackSource::ClientOverridesYosbr,
+        ) => PackBaseSource::ClientOverrides,
+        Some(
+            GameOptionsPackSource::Overrides
+            | GameOptionsPackSource::OverridesYosbr,
+        ) => PackBaseSource::Overrides,
         None => PackBaseSource::None,
     };
     let version_id = pack_version_id(&metadata);

@@ -151,8 +151,8 @@ pub(crate) async fn prepare_curseforge_content_change_action(
         let url = resolve_curseforge_download_url(
             item.project_id,
             item.file_id,
-            &project,
-            &file,
+            project,
+            file,
         )
         .await?;
         let cache_path = state
@@ -187,7 +187,7 @@ pub(crate) async fn prepare_curseforge_content_change_action(
             }),
             integrity: crate::install::ContentChangeFileIntegrity {
                 size: Some(item.size),
-                sha1: curseforge_file_sha1(&file),
+                sha1: curseforge_file_sha1(file),
                 sha512: None,
                 sha256: None,
                 md5: file

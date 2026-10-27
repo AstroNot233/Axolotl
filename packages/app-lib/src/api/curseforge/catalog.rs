@@ -333,10 +333,8 @@ pub(crate) fn derived_curseforge_download_url(
     file_name: &str,
 ) -> crate::Result<String> {
     validate_file_name(file_name)?;
-    Ok(
-        crate::resources::providers::derived_download_url(file_id, file_name)
-            .map_err(crate::resources::protocol::error)?,
-    )
+    crate::resources::providers::derived_download_url(file_id, file_name)
+        .map_err(crate::resources::protocol::error)
 }
 
 pub async fn get_categories(

@@ -116,10 +116,9 @@ impl Collection for MinecraftUsers {
         .fetch_all(&mut *conn)
         .await?;
 
-        Ok(rows
-            .into_iter()
+        rows.into_iter()
             .filter_map(|row| to_record(row).transpose())
-            .collect::<crate::Result<Vec<_>>>()?)
+            .collect::<crate::Result<Vec<_>>>()
     }
 
     async fn replace_all(
