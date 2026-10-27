@@ -1,7 +1,7 @@
 import { defineMessages, type useVIntl } from '@modrinth/ui'
 
-import type { ResourcePage, ResourceSearchExpression, ResourceSearchQuery } from './resources'
 import { resourceFailureFeedback, resourceFailureKind } from './resource-operation-feedback'
+import type { ResourcePage, ResourceSearchExpression, ResourceSearchQuery } from './resources'
 
 export function resourceSourceName(source: string): string {
     switch (source) {

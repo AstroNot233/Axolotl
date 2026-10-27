@@ -341,12 +341,6 @@
   "console.action.share": {
     "defaultMessage": "Share"
   },
-  "console.command-completions.no-results": {
-    "defaultMessage": "No matching completions"
-  },
-  "console.command-completions.search": {
-    "defaultMessage": "Search command completions"
-  },
   "console.command.disabled-placeholder": {
     "defaultMessage": "Command input disabled"
   },

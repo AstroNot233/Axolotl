@@ -6,8 +6,8 @@ import chinese from '@/locales/zh-CN/index.json'
 
 import {
     resourceFailureFeedback,
-    resourcePlanIssueFeedback,
     type ResourceFailureKind,
+    resourcePlanIssueFeedback,
 } from './resource-operation-feedback'
 
 vi.mock('@modrinth/ui', () => ({ defineMessages: (messages: unknown) => messages }))

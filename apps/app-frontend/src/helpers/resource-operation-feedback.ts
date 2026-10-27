@@ -1,4 +1,5 @@
 import { defineMessages, type useVIntl } from '@modrinth/ui'
+
 import type { ResourceOperationPlan } from './resources'
 
 type FormatMessage = ReturnType<typeof useVIntl>['formatMessage']

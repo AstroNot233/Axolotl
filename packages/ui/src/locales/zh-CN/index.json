@@ -311,12 +311,6 @@
   "console.command.server-not-running-placeholder": {
     "defaultMessage": "服务器未运行"
   },
-  "console.command-completions.no-results": {
-    "defaultMessage": "没有匹配的补全项"
-  },
-  "console.command-completions.search": {
-    "defaultMessage": "搜索命令补全项"
-  },
   "console.crash.export-context": {
     "defaultMessage": "导出崩溃上下文"
   },
