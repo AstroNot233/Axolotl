@@ -2208,7 +2208,6 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
             version_id,
             cached_pack_hashes,
             cached_pack_project_ids,
-            &state.pool,
         )
         .await;
     } else {

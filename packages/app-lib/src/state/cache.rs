@@ -2980,7 +2980,6 @@ impl CachedEntry {
         version_id: &str,
         file_hashes: Vec<String>,
         project_ids: Vec<String>,
-        _pool: &SqlitePool,
     ) -> crate::Result<()> {
         let state = crate::State::get().await?;
         let service = state
@@ -3003,15 +3002,10 @@ impl CachedEntry {
         version_id: &str,
         file_hashes: Vec<String>,
         project_ids: Vec<String>,
-        pool: &SqlitePool,
     ) {
-        if let Err(error) = Self::cache_modpack_files(
-            version_id,
-            file_hashes,
-            project_ids,
-            pool,
-        )
-        .await
+        if let Err(error) =
+            Self::cache_modpack_files(version_id, file_hashes, project_ids)
+                .await
         {
             tracing::warn!(%error, "Pack index cache write failed");
         }

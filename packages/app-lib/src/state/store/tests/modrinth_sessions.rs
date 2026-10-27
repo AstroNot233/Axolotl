@@ -188,6 +188,9 @@ async fn the_active_session_reads_on_its_own() {
 #[tokio::test]
 async fn a_session_cannot_be_written_into_a_state_it_is_not_in() {
     let handle = support::handle().await;
+    ModrinthUsers::set(&handle, &"idle".to_string(), Some(&session(false, 5)))
+        .await
+        .unwrap();
     ModrinthUsers::set(
         &handle,
         &"signed-in".to_string(),

@@ -2625,7 +2625,6 @@ async fn get_modpack_identifiers(
             version_id,
             cached.file_hashes.clone(),
             project_ids.clone(),
-            &state.pool,
         )
         .await?;
 
@@ -2761,7 +2760,6 @@ async fn get_modpack_identifiers(
         version_id,
         hashes.clone(),
         project_ids.clone(),
-        &state.pool,
     )
     .await?;
 
