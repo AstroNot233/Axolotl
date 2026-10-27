@@ -3017,7 +3017,7 @@ impl CachedEntry {
         }
     }
 
-    pub async fn get_modpack_files(
+    pub(crate) async fn get_modpack_files(
         version_id: &str,
         handle: &Handle,
         _fetch_semaphore: &FetchSemaphore,
@@ -3088,7 +3088,7 @@ impl CachedEntry {
     }
 }
 
-pub async fn cache_file_hash(
+pub(crate) async fn cache_file_hash(
     bytes: bytes::Bytes,
     instance_path: &str,
     path: &str,
@@ -3117,7 +3117,7 @@ pub async fn cache_file_hash(
     .await
 }
 
-pub async fn cache_file_hash_metadata(
+pub(crate) async fn cache_file_hash_metadata(
     instance_path: &str,
     path: &str,
     size: u64,

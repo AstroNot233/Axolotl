@@ -3478,7 +3478,7 @@ pub async fn revise_with_progress(
     progress: OperationProgress<'_>,
 ) -> ResourceResult<ResourceOperationPlan> {
     let state = crate::State::get().await?;
-    let draft = load(&state.pool, &id, revision).await?;
+    let draft = load(&state.data, &id, revision).await?;
     if instance_revision(&state.pool, &draft.plan.instance_id).await?
         != draft.plan.instance_revision
     {
