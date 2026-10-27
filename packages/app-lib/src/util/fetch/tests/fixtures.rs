@@ -410,7 +410,7 @@ pub(super) fn is_safe_redirect_location(location: &str) -> bool {
     location.len() <= MAX_REDIRECT_LOCATION_BYTES && location.is_ascii()
 }
 
-pub(super) async fn download_endpoint_fixture(
+pub(crate) async fn download_endpoint_fixture(
     request: DownloadRequest,
     destination: &Path,
     semaphore: &FetchSemaphore,
@@ -418,7 +418,7 @@ pub(super) async fn download_endpoint_fixture(
     download_to_path_inner(request, destination, semaphore, None).await
 }
 
-pub(super) async fn download_benchmark_fixture(
+pub(crate) async fn download_benchmark_fixture(
     request: DownloadRequest,
     destination: &Path,
     semaphore: &FetchSemaphore,

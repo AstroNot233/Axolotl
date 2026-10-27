@@ -96,8 +96,10 @@ pub(crate) use super::download::integrity::{
 use super::download::native_request::byte_range_header_value;
 #[cfg(test)]
 use super::download::route_health::resource_family;
-use super::download::route_health::{
-    ROUTE_HEALTH, ResourceFamily, RouteHealth,
+
+#[cfg(test)]
+pub(crate) use self::tests::fixtures::{
+    download_benchmark_fixture, download_endpoint_fixture,
 };
 
 /// Set while a benchmark runs, so the client and the segment scheduler skip

@@ -2,7 +2,7 @@
 
 mod client;
 mod file;
-mod fixtures;
+pub(crate) mod fixtures;
 mod model;
 mod native;
 mod policy;
