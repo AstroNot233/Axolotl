@@ -2410,10 +2410,14 @@ impl ResourceService {
                                 )
                                 .await
                             };
-                            // Look the child up while its siblings still resolve,
-                            // so reaching it in the queue costs no further round
-                            // trip. The lookup is cached and its result unused here.
-                            if let Ok(Some(child)) = &child {
+                            // Look a required child up while its siblings still
+                            // resolve, so reaching it in the queue costs no further
+                            // round trip. Only required children are queued and
+                            // looked up later; the result is unused here.
+                            if dependency.kind
+                                == ResourceDependencyKind::Required
+                                && let Ok(Some(child)) = &child
+                            {
                                 let _ = analysis::canonical(
                                     &service,
                                     &mut child.clone(),
