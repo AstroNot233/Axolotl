@@ -42,6 +42,22 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    InstanceDuplicate {
+        instance_id: String,
+    },
+    InstanceReinstall {
+        instance_id: String,
+        force: bool,
+    },
+    InstanceCheckInstallation {
+        instance_id: String,
+    },
+    InstanceDeletePreview {
+        instance_id: String,
+    },
+    InstanceDelete {
+        preview_id: uuid::Uuid,
+    },
     ServerInstallForge {
         server_id: String,
         build: String,
@@ -672,6 +688,9 @@ impl Command {
                 | Self::ServerInstallForge { .. }
                 | Self::ServerInstallNeoforge { .. }
                 | Self::ServerInstallModpack { .. }
+                | Self::InstanceDuplicate { .. }
+                | Self::InstanceReinstall { .. }
+                | Self::InstanceDelete { .. }
         )
     }
 

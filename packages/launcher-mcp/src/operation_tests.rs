@@ -206,6 +206,15 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             "java_install",
             json!({"vendor":"Vendor Name","major_version":21}),
         ),
+        ("instance_duplicate", json!({"instance_id":"instance"})),
+        (
+            "instance_reinstall",
+            json!({"instance_id":"instance","force":true}),
+        ),
+        (
+            "instance_delete",
+            json!({"preview_id":uuid::Uuid::new_v4()}),
+        ),
         (
             "server_install_forge",
             json!({"server_id":"server-123","build":"47.4.22"}),
@@ -286,7 +295,7 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             true
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 29);
+    assert_eq!(backend.calls.lock().unwrap().len(), 32);
     assert!(matches!(
         &backend.calls.lock().unwrap()[0],
         Command::ResourcePrepareInstall {

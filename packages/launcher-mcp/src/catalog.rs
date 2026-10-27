@@ -6,6 +6,7 @@ use serde_json::{Map, Value, json};
 mod accounts;
 mod backups;
 mod downloads;
+mod instance_maintenance;
 mod java;
 mod launch;
 mod resources;
@@ -80,6 +81,8 @@ fn entry(
                                     | "server_install_forge"
                                     | "server_install_neoforge"
                                     | "server_install_modpack"
+                                    | "instance_reinstall"
+                                    | "instance_duplicate"
                             ),
                     ),
             ),
@@ -408,6 +411,7 @@ pub(crate) fn entries() -> Vec<Entry> {
     entries.extend(downloads::entries());
     entries.extend(accounts::entries());
     entries.extend(servers::entries());
+    entries.extend(instance_maintenance::entries());
     entries
 }
 

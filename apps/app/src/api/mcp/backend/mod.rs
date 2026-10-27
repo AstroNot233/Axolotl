@@ -1,6 +1,7 @@
 mod accounts;
 mod backups;
 mod downloads;
+mod instance_maintenance;
 mod instances;
 mod java;
 mod jobs;
@@ -24,6 +25,7 @@ use serde_json::{Value, json};
 pub(super) struct LauncherBackend {
     plans: ScopedRegistry<theseus::resources::ResourceOperationPlan>,
     restores: ScopedRegistry<backups::RestorePreview>,
+    deletions: ScopedRegistry<instance_maintenance::DeletePreview>,
 }
 
 impl Backend for LauncherBackend {
@@ -34,6 +36,13 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::InstanceDuplicate { .. }
+                | Command::InstanceReinstall { .. }
+                | Command::InstanceCheckInstallation { .. }
+                | Command::InstanceDeletePreview { .. }
+                | Command::InstanceDelete { .. }) => {
+                    instance_maintenance::execute(self, command, context).await
+                }
                 command @ (Command::ServerList { .. }
                 | Command::ServerInstallForge { .. }
                 | Command::ServerInstallNeoforge { .. }
