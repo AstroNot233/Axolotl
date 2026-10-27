@@ -113,10 +113,12 @@ pub enum MinecraftDeviceLoginPoll {
     Complete { credentials: Credentials },
 }
 
+#[tracing::instrument]
 pub async fn login_begin() -> crate::Result<MinecraftLoginFlow> {
     login_begin_with_redirect(AUTH_REPLY_URL).await
 }
 
+#[tracing::instrument]
 pub async fn login_begin_with_redirect(
     redirect_uri: &str,
 ) -> crate::Result<MinecraftLoginFlow> {
@@ -145,6 +147,7 @@ pub async fn login_begin_with_redirect(
     })
 }
 
+#[tracing::instrument]
 pub async fn browser_login_begin() -> crate::Result<MinecraftLoginFlow> {
     login_begin_with_redirect(BROWSER_AUTH_REPLY_URL).await
 }

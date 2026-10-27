@@ -2589,7 +2589,7 @@ async fn get_cached_modpack_identifiers(
 async fn get_modpack_identifiers(
     version_id: &str,
     content_set: &ContentSet,
-    state: &crate::State,
+    state: &State,
     fetch_semaphore: &FetchSemaphore,
 ) -> crate::Result<ModpackIdentifiers> {
     let _cache_usage = crate::storage::usage::lease().await?;
@@ -2663,7 +2663,6 @@ async fn get_modpack_identifiers(
         loader: content_set.loader.as_str().to_string(),
         dependent_on: Some(version_id.to_string()),
     };
-    let state = State::get().await?;
     let file_name = Path::new(&primary_file.filename);
     if file_name.components().count() != 1
         || !matches!(file_name.components().next(), Some(Component::Normal(_)))

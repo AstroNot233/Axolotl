@@ -150,11 +150,13 @@ async fn probe_mojang_services(
 
 #[tracing::instrument]
 pub async fn begin_login() -> crate::Result<MinecraftLoginFlow> {
+    State::get().await?;
     crate::state::login_begin().await
 }
 
 #[tracing::instrument]
 pub async fn begin_browser_login() -> crate::Result<MinecraftLoginFlow> {
+    State::get().await?;
     crate::state::browser_login_begin().await
 }
 
