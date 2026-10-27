@@ -592,6 +592,10 @@ async fn business_tools_require_approved_transport_scoped_sessions() {
     assert_eq!(tool_error(&client.tool("content_remove", json!({"session_id":control,"instance_id":"instance","entry_id":"entry"})).await), "full_access_required");
     for (name, args) in [
         (
+            "server_install_modpack",
+            json!({"session_id":control,"server_id":"server-123","project_id":"pack","release_id":"release"}),
+        ),
+        (
             "server_delete",
             json!({"session_id":control,"server_id":"server-123"}),
         ),
@@ -931,6 +935,26 @@ async fn invalid_arguments_are_rejected_before_backend_execution() {
     let client = connect(&server, false, "Validation").await;
     let control = control_id(&client.tool("start_session", json!({})).await);
     let cases = [
+        (
+            "server_install_forge",
+            json!({"server_id":"server-123","build":"../../outside"}),
+        ),
+        (
+            "server_install_neoforge",
+            json!({"server_id":"server-123","build":"21.1.1?other"}),
+        ),
+        (
+            "server_install_forge",
+            json!({"server_id":"server-123","build":"47.1.1","url":"https://arbitrary/installer"}),
+        ),
+        (
+            "server_install_modpack",
+            json!({"server_id":"server-123","project_id":"pack","release_id":"release","mrpack_url":"https://arbitrary/pack"}),
+        ),
+        (
+            "server_install_modpack",
+            json!({"server_id":"../outside","project_id":"pack","release_id":"release"}),
+        ),
         ("server_get", json!({"server_id":"../outside"})),
         ("server_get", json!({"server_id":"server:stream"})),
         (

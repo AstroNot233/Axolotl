@@ -35,6 +35,9 @@ impl Backend for LauncherBackend {
         Box::pin(async move {
             match command {
                 command @ (Command::ServerList { .. }
+                | Command::ServerInstallForge { .. }
+                | Command::ServerInstallNeoforge { .. }
+                | Command::ServerInstallModpack { .. }
                 | Command::ServerGet { .. }
                 | Command::ServerCreate { .. }
                 | Command::ServerUpdateSettings { .. }

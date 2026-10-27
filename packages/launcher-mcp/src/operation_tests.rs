@@ -207,6 +207,18 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             json!({"vendor":"Vendor Name","major_version":21}),
         ),
         (
+            "server_install_forge",
+            json!({"server_id":"server-123","build":"47.4.22"}),
+        ),
+        (
+            "server_install_neoforge",
+            json!({"server_id":"server-123","build":"21.1.172"}),
+        ),
+        (
+            "server_install_modpack",
+            json!({"server_id":"server-123","project_id":"pack","release_id":"release","artifact_id":"archive"}),
+        ),
+        (
             "server_create",
             json!({"name":"Server","server_type":"vanilla","game_version":"1.21.1","memory_mib":2048}),
         ),
@@ -274,7 +286,7 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             true
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 26);
+    assert_eq!(backend.calls.lock().unwrap().len(), 29);
     assert!(matches!(
         &backend.calls.lock().unwrap()[0],
         Command::ResourcePrepareInstall {

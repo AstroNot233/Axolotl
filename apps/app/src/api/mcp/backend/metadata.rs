@@ -51,7 +51,7 @@ pub(super) async fn games(
     Ok(result)
 }
 
-fn selected_loaders<'a>(
+pub(super) fn selected_loaders<'a>(
     manifest: &'a daedalus::modded::Manifest,
     game_version: &str,
 ) -> &'a [daedalus::modded::LoaderVersion] {

@@ -3,6 +3,7 @@ use base64::Engine;
 use launcher_mcp::{Command, ToolError, log_text};
 use serde_json::{Value, json};
 use theseus::servers::{self, ServerInfo};
+mod install;
 
 fn error(error: theseus::Error) -> ToolError {
     tracing::warn!(%error,"MCP dedicated server operation failed");
@@ -134,6 +135,11 @@ async fn logs(id: &str) -> Result<(String, bool), ToolError> {
 
 pub(super) async fn execute(command: Command) -> Result<Value, ToolError> {
     match command {
+        command @ (Command::ServerInstallForge { .. }
+        | Command::ServerInstallNeoforge { .. }
+        | Command::ServerInstallModpack { .. }) => {
+            install::execute(command).await
+        }
         Command::ServerList { offset, limit } => {
             let mut servers = servers::list().await.map_err(error)?;
             servers.sort_by(|a, b| a.manifest.id.cmp(&b.manifest.id));
@@ -207,6 +213,12 @@ pub(super) async fn execute(command: Command) -> Result<Value, ToolError> {
         Command::ServerStart { server_id } => {
             let current = info(&server_id).await?;
             require_stopped(&current)?;
+            if current.manifest.install_state.is_some() {
+                return Err(ToolError::new(
+                    "server_install_incomplete",
+                    "Finish or repair server installation before starting",
+                ));
+            }
             if !current.eula_accepted {
                 return Err(ToolError::new(
                     "server_eula_required",

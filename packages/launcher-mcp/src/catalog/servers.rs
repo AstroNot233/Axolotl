@@ -16,7 +16,35 @@ pub(super) fn entries() -> Vec<Entry> {
     search["start_line"] =
         json!({"type":"integer","minimum":0,"maximum":4294967295_u64});
     search["limit"] = json!({"type":"integer","minimum":1,"maximum":100});
+    let loader = json!({"server_id":id,"build":{"type":"string","minLength":1,"maxLength":128,"format":"installer-build"},"registered_java_path":text(4096)});
     vec![
+        entry(
+            "server_install_forge",
+            "Download and run the official Forge server installer for this stopped server's existing game version. server_type must be forge; build must match metadata_list_loader_versions (loader=forge), without the Minecraft-version prefix. Optional Java path must be registered. Returns operation_id; poll operations_get and server_get. Reinstallation may overwrite server files; server remains stopped and EULA is never accepted. Admitted installer finishes even after control ends; server_stop/kill do not cancel installers.",
+            Session,
+            false,
+            false,
+            loader.clone(),
+            &["server_id", "build"],
+        ),
+        entry(
+            "server_install_neoforge",
+            "Download and run the official NeoForge server installer for this stopped server's game version. server_type must be neoforge; build must match metadata_list_loader_versions (loader=neoforge). Uses legacy coordinates for Minecraft 1.20.1. Optional Java path must be registered. Returns operation_id; poll operations_get/server_get. Does not start a server or accept EULA; installers already running finish independently of control sessions and are not cancelled by server_stop/kill.",
+            Session,
+            false,
+            false,
+            loader,
+            &["server_id", "build"],
+        ),
+        entry(
+            "server_install_modpack",
+            "Install one exact Modrinth .mrpack release into a stopped managed NeoForge server. Currently supports neoforge only; other types return unsupported. Resolve IDs with resource tools. Requires full access: native installation can replace overrides and remove client-only/unavailable mods. Requires declared matching Minecraft/loader compatibility and valid artifact SHA-1; URL/path overrides are not accepted. Optional artifact_id disambiguates multiple .mrpack files. Returns operation_id; poll operations_get/server_get. Native index/dependency/hash/path validation still applies. Does not accept EULA or start server; admitted installation finishes after session end.",
+            FullAccess,
+            false,
+            false,
+            json!({"server_id":id,"project_id":text(256),"release_id":text(256),"artifact_id":text(256)}),
+            &["server_id", "project_id", "release_id"],
+        ),
         entry(
             "server_list",
             "List launcher-managed local dedicated servers, paginated. Distinct from server_entry_list (multiplayer addresses). Returns lifecycle flags, port, EULA status and selected manifest configuration; command hooks, JVM arguments, stop commands, icon URLs and install diagnostics are omitted.",

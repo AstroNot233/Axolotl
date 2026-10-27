@@ -77,6 +77,9 @@ fn entry(
                                     | "install_job_repair_and_retry"
                                     | "server_start"
                                     | "server_wait_ready"
+                                    | "server_install_forge"
+                                    | "server_install_neoforge"
+                                    | "server_install_modpack"
                             ),
                     ),
             ),
@@ -476,6 +479,16 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
                 && (rule["format"] != "server-address"
                     || crate::world_input::valid_address(s))
                 && (rule["format"] != "account-id" || valid_account_id(s))
+                && (rule["format"] != "installer-build"
+                    || (s.bytes().all(|c| {
+                        c.is_ascii_alphanumeric()
+                            || matches!(c, b'.' | b'-' | b'_')
+                    }) && s
+                        .bytes()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphanumeric())
+                        && !s.ends_with('.')
+                        && !s.contains("..")))
                 && (rule["format"] != "minecraft-username"
                     || s.chars().all(|c| c.is_alphanumeric() || c == '_'))
                 && (rule["format"] != "managed-server-id"

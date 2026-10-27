@@ -42,6 +42,25 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    ServerInstallForge {
+        server_id: String,
+        build: String,
+        #[serde(default)]
+        registered_java_path: Option<String>,
+    },
+    ServerInstallNeoforge {
+        server_id: String,
+        build: String,
+        #[serde(default)]
+        registered_java_path: Option<String>,
+    },
+    ServerInstallModpack {
+        server_id: String,
+        project_id: String,
+        release_id: String,
+        #[serde(default)]
+        artifact_id: Option<String>,
+    },
     ServerList {
         #[serde(default)]
         offset: usize,
@@ -650,6 +669,9 @@ impl Command {
                 | Self::ServerStart { .. }
                 | Self::ServerDelete { .. }
                 | Self::ServerConsoleSend { .. }
+                | Self::ServerInstallForge { .. }
+                | Self::ServerInstallNeoforge { .. }
+                | Self::ServerInstallModpack { .. }
         )
     }
 
