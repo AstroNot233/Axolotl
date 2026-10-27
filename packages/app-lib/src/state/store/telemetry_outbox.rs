@@ -367,21 +367,48 @@ async fn ensure_keys_belong_to_scope(
     scope: &TelemetryOutboxScope,
     records: &[(TelemetryOutboxKey, TelemetryOutboxRecord)],
 ) -> crate::Result<()> {
-    for (key, _) in records {
-        let Some(existing) = TelemetryOutbox::read(conn, key).await? else {
-            continue;
-        };
-        let in_scope = match scope {
-            TelemetryOutboxScope::Kind(kind) => existing.event_type == *kind,
-            TelemetryOutboxScope::Due { kind, .. } => {
-                existing.event_type == *kind
+    for (key, record) in records {
+        // Every row this write would replace: the one under its own id, and any
+        // row already holding its dedupe key, whichever id that row has. Both
+        // are read as stored text, so a row this build cannot read is still
+        // checked rather than mistaken for an absent one.
+        let stored: Vec<(String, String, i64)> = sqlx::query_as(
+            "
+            SELECT event_id, event_type, next_attempt_at
+            FROM telemetry_outbox
+            WHERE event_id = ? OR dedupe_key = ?
+            ",
+        )
+        .bind(key)
+        .bind(&record.dedupe_key)
+        .fetch_all(&mut *conn)
+        .await?;
+
+        for (stored_id, stored_kind, next_attempt_at) in stored {
+            let Some(event_type) = TelemetryEventType::parse(&stored_kind)
+            else {
+                tracing::warn!(
+                    event_id = %stored_id,
+                    stored = %stored_kind,
+                    "Refusing to replace a queued telemetry event of a kind this build does not know"
+                );
+                return Err(crate::ErrorKind::InputError(format!(
+                    "Telemetry event {stored_id} was written by another build"
+                ))
+                .into());
+            };
+            let in_scope = match scope {
+                TelemetryOutboxScope::Kind(kind) => event_type == *kind,
+                TelemetryOutboxScope::Due { kind, at } => {
+                    event_type == *kind && next_attempt_at <= *at
+                }
+            };
+            if !in_scope {
+                return Err(crate::ErrorKind::InputError(format!(
+                    "Telemetry event {stored_id} belongs to another part of the queue"
+                ))
+                .into());
             }
-        };
-        if !in_scope {
-            return Err(crate::ErrorKind::InputError(format!(
-                "Telemetry event {key} belongs to another kind"
-            ))
-            .into());
         }
     }
 
