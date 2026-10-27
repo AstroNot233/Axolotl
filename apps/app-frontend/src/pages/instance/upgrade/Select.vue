@@ -162,16 +162,19 @@ import {
 } from '@modrinth/ui'
 import type { GameVersionTag } from '@modrinth/utils'
 import { useQuery } from '@tanstack/vue-query'
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, triggerRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { createAnalysisTask } from '@/helpers/analysis-task'
 import { loadInstanceContentData } from '@/helpers/instance-content'
 import {
     discard_instance_upgrade_plan,
     get_instance_upgrade_plan,
     type InstanceUpgradeItemProgress,
+    type InstanceUpgradePlan,
     type InstanceUpgradePlanningPhase,
     type InstanceUpgradePlanningProgress,
+    type InstanceUpgradeTargetEnvironment,
     plan_instance_upgrade,
 } from '@/helpers/instance-upgrade'
 import { get_loader_versions } from '@/helpers/metadata'
@@ -443,20 +446,71 @@ function registerControls() {
 }
 onMounted(registerControls)
 watch([canPlan, reusesPlan, () => flow.busy.value], registerControls)
-let planningGeneration = 0
-let disposed = false
-let planningController: AbortController | null = null
-const planningPhase = ref<{
-    phase: InstanceUpgradePlanningPhase
-    completed: number
-    total: number
-} | null>(null)
-const planningItems = ref<InstanceUpgradeItemProgress[]>([])
-const checkedProjects = shallowRef(new Map<string, number>())
+type PlanningInput = { instanceId: string; target: InstanceUpgradeTargetEnvironment }
+type PlanningView = {
+    phase: { phase: InstanceUpgradePlanningPhase; completed: number; total: number } | null
+    items: InstanceUpgradeItemProgress[]
+    checked: ReadonlyMap<string, number>
+}
 const projectKey = (provider: string | null, projectId: string | null) => `${provider}:${projectId}`
 
+function nextPlanningView(
+    view: PlanningView,
+    event: InstanceUpgradePlanningProgress,
+): PlanningView {
+    if (event.kind === 'phase')
+        return {
+            ...view,
+            phase: { phase: event.phase, completed: event.completed, total: event.total },
+        }
+    if (event.kind === 'items') return { ...view, items: event.items }
+    return {
+        ...view,
+        checked: new Map(view.checked).set(
+            projectKey(event.provider, event.projectId),
+            event.compatible,
+        ),
+    }
+}
+
+let disposed = false
+const navigating = ref(false)
+const planning = createAnalysisTask<
+    PlanningInput,
+    PlanningView,
+    { plan: InstanceUpgradePlan; reused: boolean }
+>({
+    label: 'instance-upgrade-planning',
+    async run({ instanceId, target }, { signal, progress }) {
+        if (flow.plan.value) {
+            try {
+                flow.setPlan(await get_instance_upgrade_plan(flow.plan.value.id))
+            } catch {
+                flow.clearPlan()
+            }
+            signal.throwIfAborted()
+        }
+        let view: PlanningView = { phase: null, items: [], checked: new Map() }
+        return await resolveUpgradePlanSelection(instanceId, flow.plan.value, target, (id, next) =>
+            plan_instance_upgrade(id, next, {
+                signal,
+                onProgress: (event) => {
+                    view = nextPlanningView(view, event)
+                    progress(view)
+                },
+            }),
+        )
+    },
+})
+watch(
+    [planning.running, navigating],
+    ([running, moving]) => (flow.busy.value = running || moving),
+    { flush: 'sync' },
+)
+const planningItems = computed(() => planning.progress.value?.items ?? [])
+
 const planningStatusText = computed(() => {
-    const progress = planningPhase.value
+    const progress = planning.progress.value?.phase
     if (!progress)
         return formatMessage(messages.planningStatus, { count: snapshotItemCount.value ?? '…' })
     return formatMessage(messages.planningPhase, {
@@ -484,7 +538,9 @@ function itemState(item: InstanceUpgradeItemProgress) {
         default:
             return 'review'
     }
-    const compatible = checkedProjects.value.get(projectKey(item.provider, item.projectId))
+    const compatible = planning.progress.value?.checked.get(
+        projectKey(item.provider, item.projectId),
+    )
     if (compatible === undefined) return 'checking'
     return compatible > 0 ? 'found' : 'missing'
 }
@@ -493,42 +549,15 @@ function fileName(path: string) {
     return path.split(/[\\/]/).pop() || path
 }
 
-function onPlanningProgress(progress: InstanceUpgradePlanningProgress) {
-    if (progress.kind === 'phase') {
-        planningPhase.value = {
-            phase: progress.phase,
-            completed: progress.completed,
-            total: progress.total,
-        }
-    } else if (progress.kind === 'items') {
-        planningItems.value = progress.items
-    } else {
-        checkedProjects.value.set(
-            projectKey(progress.provider, progress.projectId),
-            progress.compatible,
-        )
-        triggerRef(checkedProjects)
-    }
-}
-
-function resetPlanningProgress() {
-    planningPhase.value = null
-    planningItems.value = []
-    checkedProjects.value = new Map()
-}
-
 /** Stops the running analysis in the planner as well, not only on this page. */
 function cancelPlanning() {
-    planningController?.abort()
-    planningController = null
-    planningGeneration += 1
-    flow.busy.value = false
-    resetPlanningProgress()
+    void planning.cancel()
 }
 
 onBeforeUnmount(() => {
     disposed = true
-    cancelPlanning()
+    planning.dispose()
+    flow.busy.value = false
     flow.registerStepControls(null)
 })
 
@@ -542,64 +571,29 @@ function errorMessage(error: unknown): string {
 async function startPlanning() {
     if (!canPlan.value || !selectedGameVersion.value) return
 
-    const targetEnvironment = requestedTargetEnvironment.value!
     const instanceId = flow.instanceId.value
-    planningController?.abort()
-    const controller = new AbortController()
-    planningController = controller
-    const generation = ++planningGeneration
     flow.error.value = null
-    flow.busy.value = true
-    resetPlanningProgress()
+    const planned = await planning.start({
+        instanceId,
+        target: requestedTargetEnvironment.value!,
+    })
+    if (!planned) {
+        if (!disposed && planning.status.value === 'error') flow.error.value = planning.error.value
+        return
+    }
+    const routeInstanceId = Array.isArray(route.params.id) ? route.params.id[0] : route.params.id
+    if (!isCurrentUpgradeSelectPlanning(disposed, route.name, routeInstanceId, instanceId)) {
+        if (!planned.reused)
+            void discard_instance_upgrade_plan(planned.plan.id).catch(console.error)
+        return
+    }
+    if (!planned.reused) flow.setPlan(planned.plan)
+    flow.setTargetEnvironment(planned.plan.targetEnvironment)
+    navigating.value = true
     try {
-        if (flow.plan.value) {
-            try {
-                flow.setPlan(await get_instance_upgrade_plan(flow.plan.value.id))
-            } catch {
-                flow.clearPlan()
-            }
-        }
-        const planned = await resolveUpgradePlanSelection(
-            instanceId,
-            flow.plan.value,
-            targetEnvironment,
-            (id, target) =>
-                plan_instance_upgrade(id, target, {
-                    signal: controller.signal,
-                    onProgress: (progress) => {
-                        if (generation === planningGeneration) onPlanningProgress(progress)
-                    },
-                }),
-        )
-        const routeInstanceId = Array.isArray(route.params.id)
-            ? route.params.id[0]
-            : route.params.id
-        if (
-            !isCurrentUpgradeSelectPlanning(
-                disposed,
-                generation,
-                planningGeneration,
-                route.name,
-                routeInstanceId,
-                instanceId,
-            )
-        ) {
-            if (!planned.reused)
-                void discard_instance_upgrade_plan(planned.plan.id).catch(console.error)
-            return
-        }
-        if (!planned.reused) flow.setPlan(planned.plan)
-        flow.setTargetEnvironment(planned.plan.targetEnvironment)
         await router.push(`/instance/${encodeURIComponent(instanceId)}/upgrade/compatibility`)
-    } catch (error) {
-        if (!disposed && generation === planningGeneration && !controller.signal.aborted)
-            flow.error.value = error
     } finally {
-        if (!disposed && generation === planningGeneration) {
-            flow.busy.value = false
-            planningController = null
-            resetPlanningProgress()
-        }
+        if (!disposed) navigating.value = false
     }
 }
 </script>

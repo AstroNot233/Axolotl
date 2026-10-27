@@ -4,10 +4,10 @@ import test from 'node:test'
 import { isCurrentUpgradeSelectPlanning } from './planning-navigation.ts'
 
 test('planner continuation navigates only while same Select request remains current', () => {
-    assert.equal(isCurrentUpgradeSelectPlanning(false, 1, 1, 'InstanceUpgrade', 'a', 'a'), true)
-    assert.equal(isCurrentUpgradeSelectPlanning(false, 1, 1, 'InstanceContent', 'a', 'a'), false)
-    assert.equal(isCurrentUpgradeSelectPlanning(false, 1, 2, 'InstanceUpgrade', 'a', 'a'), false)
-    assert.equal(isCurrentUpgradeSelectPlanning(true, 1, 1, 'InstanceUpgrade', 'a', 'a'), false)
+    assert.equal(isCurrentUpgradeSelectPlanning(false, 'InstanceUpgrade', 'a', 'a'), true)
+    assert.equal(isCurrentUpgradeSelectPlanning(false, 'InstanceContent', 'a', 'a'), false)
+    assert.equal(isCurrentUpgradeSelectPlanning(false, 'InstanceUpgrade', 'b', 'a'), false)
+    assert.equal(isCurrentUpgradeSelectPlanning(true, 'InstanceUpgrade', 'a', 'a'), false)
 })
 
 test('pending planner completion does not navigate after route changes', async () => {
@@ -18,7 +18,7 @@ test('pending planner completion does not navigate after route changes', async (
     let routeName = 'InstanceUpgrade'
     let navigations = 0
     const continuation = planner.then(() => {
-        if (isCurrentUpgradeSelectPlanning(false, 1, 1, routeName, 'a', 'a')) navigations += 1
+        if (isCurrentUpgradeSelectPlanning(false, routeName, 'a', 'a')) navigations += 1
     })
 
     routeName = 'InstanceContent'
@@ -35,7 +35,7 @@ test('pending planner completion navigates once while Select remains current', a
     })
     let navigations = 0
     const continuation = planner.then(() => {
-        if (isCurrentUpgradeSelectPlanning(false, 1, 1, 'InstanceUpgrade', 'a', 'a')) {
+        if (isCurrentUpgradeSelectPlanning(false, 'InstanceUpgrade', 'a', 'a')) {
             navigations += 1
         }
     })

@@ -1,4 +1,3 @@
-import { useDebugLogger } from '@modrinth/ui'
 import { type Ref, ref, type ShallowRef, shallowRef } from 'vue'
 
 /**
@@ -57,7 +56,10 @@ const defaultSchedule = (commit: () => void) =>
 export function createAnalysisTask<I, P, R>(
     options: AnalysisTaskOptions<I, P, R>,
 ): AnalysisTask<I, P, R> {
-    const log = useDebugLogger(`analysis:${options.label}`)
+    // Same console channel and prefix as the shared debug logger, without
+    // tying every caller's tests to the UI package.
+    const log = (message: string, data: Record<string, unknown>) =>
+        console.debug(`[analysis:${options.label}]`, message, data)
     const schedule = options.schedule ?? defaultSchedule
     const status = ref<AnalysisTaskStatus>('idle')
     const running = ref(false)

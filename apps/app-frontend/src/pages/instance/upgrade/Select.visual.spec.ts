@@ -146,6 +146,7 @@ it('shows each item as the planner checks it and stops the planner from the Stop
             projectId: 'alpha',
             compatible: 2,
         })
+        await new Promise(requestAnimationFrame)
         await flushPromises()
         const rows = wrapper.findAll('li').map((row) => row.text())
         expect(rows).toEqual([
@@ -158,6 +159,7 @@ it('shows each item as the planner checks it and stops the planner from the Stop
             .findAll('button')
             .find((button) => button.text() === 'Stop analysis')!
             .trigger('click')
+        await flushPromises()
         expect(options.signal!.aborted).toBe(true)
         expect(backend.flow.busy.value).toBe(false)
         expect(wrapper.find('[data-upgrade-planning]').exists()).toBe(false)
