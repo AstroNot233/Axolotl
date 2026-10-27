@@ -82,12 +82,16 @@ it('opens at once while Java installations are still being found', async () => {
 
 it('does not let a slower lookup for an earlier version replace the current one', async () => {
     const older = deferred<{ path: string; version: string }[]>()
-    vi.mocked(find_filtered_jres)
-        .mockReturnValueOnce(older.promise)
-        .mockResolvedValueOnce([{ path: 'C:/java21/bin/javaw.exe', version: '21' }])
+    vi.mocked(find_filtered_jres).mockImplementation((version) =>
+        version === 8
+            ? older.promise
+            : Promise.resolve([{ path: 'C:/java21/bin/javaw.exe', version: '21' }]),
+    )
     const wrapper = mount(JavaDetectionModal)
     try {
         void wrapper.vm.show(8, null)
+        await flushPromises()
+        expect(find_filtered_jres).toHaveBeenLastCalledWith(8, false, false)
         void wrapper.vm.show(21, null)
         await flushPromises()
         older.resolve([{ path: 'C:/java8/bin/javaw.exe', version: '8' }])

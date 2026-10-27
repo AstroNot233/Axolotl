@@ -62,6 +62,7 @@ import {
 } from '@modrinth/ui'
 import { onUnmounted, ref } from 'vue'
 
+import { createAnalysisTask } from '@/helpers/analysis-task'
 import { trackEvent } from '@/helpers/analytics'
 import { java_discovery_listener } from '@/helpers/events'
 import { find_filtered_jres } from '@/helpers/jre.js'
@@ -97,47 +98,46 @@ const javaInstallColumns = [
 ]
 
 const lastRequestedVersion = ref(null)
-const loading = ref(false)
 let unlistenJavaDiscovery = null
 let listening = null
 let disposed = false
-// Each opening owns its results; a slower lookup for an earlier version must not replace them.
-let generation = 0
+// Each opening owns its lookup; a slower lookup for an earlier version is abandoned.
+const lookup = createAnalysisTask({
+    label: 'java-detection',
+    run: ({ version }) => find_filtered_jres(version, false, false),
+})
+const loading = lookup.running
 
 defineExpose({
     show: async (version, currentSelectedJava) => {
-        const request = ++generation
         lastRequestedVersion.value = version ?? null
         currentSelected.value = currentSelectedJava || { path: '', version: '' }
         chosenInstallOptions.value = []
-        loading.value = true
         detectJavaModal.value.show()
         listening ??= java_discovery_listener(refreshInstallOptions).then((unlisten) => {
             if (disposed) unlisten()
             else unlistenJavaDiscovery = unlisten
         })
-        await loadInstallOptions(request)
+        await loadInstallOptions(false)
     },
 })
 
-async function loadInstallOptions(request, quiet = false) {
-    try {
-        const found = await find_filtered_jres(lastRequestedVersion.value, false, false)
-        if (request === generation && found) chosenInstallOptions.value = found
-    } catch (error) {
-        if (request === generation && !quiet) handleError(error)
-    } finally {
-        if (request === generation) loading.value = false
-    }
+/** Discovery refreshes keep the rows already shown and report no errors of their own. */
+async function loadInstallOptions(quiet) {
+    const input = { version: lastRequestedVersion.value }
+    const found = await lookup.start(input)
+    if (found) chosenInstallOptions.value = found
+    else if (!quiet && lookup.input.value === input && lookup.status.value === 'error')
+        handleError(lookup.error.value)
 }
 
 function refreshInstallOptions() {
-    return loadInstallOptions(generation, true)
+    return loadInstallOptions(true)
 }
 
 onUnmounted(() => {
     disposed = true
-    generation++
+    lookup.dispose()
     if (unlistenJavaDiscovery) {
         unlistenJavaDiscovery()
         unlistenJavaDiscovery = null
