@@ -311,6 +311,142 @@ async fn install_snapshot_reuses_hashes_and_only_rehashes_changed_files() {
 }
 
 #[tokio::test]
+async fn installed_identity_reuses_verified_bytes_across_analysis_retries_and_cache_reopen()
+ {
+    use super::installed::installed_file_identity;
+    use crate::util::download::verified_file::track_scans;
+    let (_temp, state, original, _, root) = fixture().await;
+    let cancel = CancellationToken::new();
+    let cache_path = state
+        .directories
+        .caches_dir()
+        .join("local-identity-test.db");
+    let cache = cache::ResourceCache::open(cache_path.clone()).await;
+    let (first, scans) = track_scans(installed_file_identity(
+        &root, &original, &cache, true, &cancel,
+    ))
+    .await;
+    let first = first.unwrap();
+    assert_eq!(scans, 1);
+    assert!(first.fingerprint.is_some());
+    assert!(identity::exact_integrity(
+        &original.integrity,
+        &first.integrity
+    ));
+    let (again, scans) = track_scans(installed_file_identity(
+        &root, &original, &cache, true, &cancel,
+    ))
+    .await;
+    assert_eq!(again.unwrap().fingerprint, first.fingerprint);
+    assert_eq!(
+        scans, 0,
+        "unknown and unrecognized files still reuse byte evidence"
+    );
+    cache.close().await;
+    let cache = cache::ResourceCache::open(cache_path).await;
+    let (again, scans) = track_scans(installed_file_identity(
+        &root, &original, &cache, true, &cancel,
+    ))
+    .await;
+    assert_eq!(again.unwrap().integrity, first.integrity);
+    assert_eq!(scans, 0, "evidence survives a launcher restart");
+
+    let mut changed = original.clone();
+    let bytes = b"changed file contents";
+    std::fs::write(root.join(&changed.relative_path), bytes).unwrap();
+    changed.integrity = ArtifactIntegrity {
+        size: Some(bytes.len() as u64),
+        hashes: vec![ContentHash {
+            algorithm: HashAlgorithm::Sha1,
+            value: sha1_smol::Sha1::from(bytes).hexdigest(),
+        }],
+    };
+    let (result, scans) = track_scans(installed_file_identity(
+        &root, &changed, &cache, true, &cancel,
+    ))
+    .await;
+    assert!(identity::exact_integrity(
+        &changed.integrity,
+        &result.unwrap().integrity
+    ));
+    assert_eq!(scans, 1, "a changed scanner SHA-1 invalidates the evidence");
+    let (result, scans) = track_scans(installed_file_identity(
+        &root, &changed, &cache, false, &cancel,
+    ))
+    .await;
+    result.unwrap();
+    assert_eq!(scans, 1, "explicit checks still verify current bytes");
+
+    cache.clear().await.unwrap();
+    let (result, scans) = track_scans(installed_file_identity(
+        &root, &changed, &cache, true, &cancel,
+    ))
+    .await;
+    result.unwrap();
+    assert_eq!(
+        scans, 1,
+        "clearing resource caches clears local byte evidence too"
+    );
+    cancel.cancel();
+    assert!(matches!(
+        installed_file_identity(&root, &changed, &cache, true, &cancel).await,
+        Err(ResourceError::Canceled)
+    ));
+    cache.close().await;
+    state.pool.close().await;
+}
+
+#[tokio::test]
+async fn local_identity_cache_rejects_stale_writes_and_same_size_content_changes()
+ {
+    use super::installed::installed_file_identity;
+    use crate::util::download::verified_file::track_scans;
+    let (_temp, state, original, _, root) = fixture().await;
+    let cancel = CancellationToken::new();
+    let cache = cache::ResourceCache::open(
+        state
+            .directories
+            .caches_dir()
+            .join("identity-generation.db"),
+    )
+    .await;
+    let generation = cache.generation().await;
+    let first =
+        installed_file_identity(&root, &original, &cache, true, &cancel)
+            .await
+            .unwrap();
+    cache.clear().await.unwrap();
+    cache.store_local_identity(&first, generation).await;
+    assert!(cache.local_identity(&original.integrity).await.is_none());
+
+    let bytes = vec![b'x'; original.integrity.size.unwrap() as usize];
+    std::fs::write(root.join(&original.relative_path), &bytes).unwrap();
+    let mut changed = original.clone();
+    changed.integrity.hashes = vec![ContentHash {
+        algorithm: HashAlgorithm::Sha1,
+        value: sha1_smol::Sha1::from(&bytes).hexdigest(),
+    }];
+    let (result, scans) = track_scans(installed_file_identity(
+        &root, &changed, &cache, true, &cancel,
+    ))
+    .await;
+    assert!(identity::exact_integrity(
+        &changed.integrity,
+        &result.unwrap().integrity
+    ));
+    assert_eq!(scans, 1);
+    assert!(
+        installed_file_identity(&root, &original, &cache, false, &cancel)
+            .await
+            .is_err(),
+        "an out-of-date snapshot cannot bless different bytes"
+    );
+    assert!(cache.local_identity(&original.integrity).await.is_none());
+    cache.close().await;
+    state.pool.close().await;
+}
+
+#[tokio::test]
 async fn unchanged_installed_artifacts_do_not_fetch_project_presentations() {
     use crate::resources::providers::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
