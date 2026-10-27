@@ -1,6 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 
-import { abortable } from './abortable'
+import { abortable } from './abortable.ts'
 import type { InstallJobSnapshot } from './install'
 
 export type SourceId = 'modrinth' | 'curseforge' | 'mcarchive' | 'planet_minecraft'
