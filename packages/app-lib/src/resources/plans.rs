@@ -2993,11 +2993,11 @@ pub async fn prepare_import_files(
         return Err(invalid("local imports must belong to selected roots"));
     }
     let state = crate::State::get().await?;
-    prepare_import_files_with_pool(&state.pool, plan, files, cancel).await
+    prepare_import_files_with_pool(&state.data, plan, files, cancel).await
 }
 
 pub(crate) async fn prepare_import_files_with_pool(
-    pool: &SqlitePool,
+    handle: &Handle,
     plan: ResourceOperationPlan,
     files: HashMap<SelectionId, String>,
     cancel: &CancellationToken,
@@ -3008,7 +3008,7 @@ pub(crate) async fn prepare_import_files_with_pool(
     {
         return Err(invalid("local imports must belong to selected roots"));
     }
-    let mut draft = load(pool, &plan.id, plan.revision).await?;
+    let mut draft = load(handle, &plan.id, plan.revision).await?;
     if files.keys().any(|id| {
         !draft
             .plan
@@ -3029,8 +3029,7 @@ pub(crate) async fn prepare_import_files_with_pool(
         .checked_add(1)
         .ok_or_else(|| invalid("plan revision exhausted"))?;
     let key = plan.id.as_str().to_owned();
-    let data = Handle::new(pool.clone());
-    let mut unit = atom(&data).await?;
+    let mut unit = atom(handle).await?;
     let mut record = ResourceOperationPlans::atom_get(&mut unit, &key)
         .await?
         .filter(|record| {
@@ -3284,11 +3283,10 @@ async fn initialize_operation(
 }
 
 pub(crate) async fn load(
-    pool: &SqlitePool,
+    handle: &Handle,
     id: &PlanId,
     revision: u32,
 ) -> ResourceResult<OperationDraft> {
-    let handle = Handle::new(pool.clone());
     let key = id.as_str().to_owned();
     let record = ResourceOperationPlans::get(&handle, &key)
         .await?
@@ -3480,7 +3478,7 @@ pub async fn revise_with_progress(
     progress: OperationProgress<'_>,
 ) -> ResourceResult<ResourceOperationPlan> {
     let state = crate::State::get().await?;
-    let draft = load(&state.pool, &id, revision).await?;
+    let draft = load(&state.data, &id, revision).await?;
     if instance_revision(&state.pool, &draft.plan.instance_id).await?
         != draft.plan.instance_revision
     {
@@ -3549,7 +3547,7 @@ pub(crate) async fn execute_frozen_plan(
 
 pub(crate) async fn frozen_request_completed(
     request: &crate::install::InstallRequest,
-    pool: &SqlitePool,
+    handle: &Handle,
 ) -> crate::Result<bool> {
     let crate::install::InstallRequest::InstallContentBatch { items, .. } =
         request
@@ -3559,7 +3557,6 @@ pub(crate) async fn frozen_request_completed(
     if items.is_empty() {
         return Ok(false);
     }
-    let handle = Handle::new(pool.clone());
     for item in items {
         let crate::install::InstallContentBatchItem::FrozenResource { plan } =
             item

@@ -2,7 +2,10 @@
 use crate::LoadingBarType;
 use crate::event::emit::{emit_loading, init_loading};
 use crate::state::LAUNCHER_STATE;
-use crate::state::store::{Handle, atom};
+use crate::state::store::discovered_javas::{
+    DiscoveredJavaRecord, DiscoveredJavas,
+};
+use crate::state::store::{Collection as _, Handle, atom};
 use crate::state::{JavaVersion, Settings};
 use crate::util::fetch::IoSemaphore;
 use dashmap::DashSet;
@@ -616,6 +619,29 @@ impl DirectoryInfo {
                 }
 
                 let mut unit = atom(handle).await?;
+                let new_root =
+                    new_dir.trim_end_matches('/').trim_end_matches('\\');
+                // A runtime is keyed by its path, so a moved install is a new
+                // key: the old ones go first, so two that trade places do not
+                // collide on the way.
+                let moved: Vec<(String, String, DiscoveredJavaRecord)> =
+                    DiscoveredJavas::atom_get_all(&mut unit)
+                        .await?
+                        .into_iter()
+                        .filter(|(path, _)| path.starts_with(prev_custom_dir))
+                        .map(|(path, record)| {
+                            let target =
+                                path.replace(prev_custom_dir, new_root);
+                            (path, target, record)
+                        })
+                        .collect();
+                for (old, _, _) in &moved {
+                    DiscoveredJavas::atom_set(&mut unit, old, None).await?;
+                }
+                for (_, target, record) in &moved {
+                    DiscoveredJavas::atom_set(&mut unit, target, Some(record))
+                        .await?;
+                }
                 let java_versions = JavaVersion::get_all_in(&mut unit).await?;
                 for java_version in java_versions {
                     let new_java_path = java_version.path.replace(
@@ -643,17 +669,6 @@ impl DirectoryInfo {
                     }
                 }
                 unit.commit().await?;
-                sqlx::query(
-                    "
-                    UPDATE discovered_javas
-                    SET path = replace(path, $1, $2)
-                    WHERE path LIKE $1 || '%'
-                    ",
-                )
-                .bind(prev_custom_dir)
-                .bind(new_dir.trim_end_matches('/').trim_end_matches('\\'))
-                .execute(exec)
-                .await?;
 
                 let new_dir = new_dir
                     .trim_end_matches('/')

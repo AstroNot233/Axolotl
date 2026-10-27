@@ -2518,7 +2518,7 @@ async fn add_project_bytes_with_provider(
         Some(&sha1),
         Some(project_type),
         None,
-        &state.pool,
+        &state.data,
     )
     .await?;
     fetch::write(&full_path, &bytes, &state.io_semaphore).await?;

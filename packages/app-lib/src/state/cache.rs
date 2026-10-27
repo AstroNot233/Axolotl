@@ -294,12 +294,6 @@ fn cache_read_failure(
 
 /// The cache rows of `pool`, named the way the store names them.
 ///
-/// The callers of this module are handed the pool itself, so the handle they
-/// will pass once they name one is built here in the meantime.
-fn cache_rows(pool: &SqlitePool) -> Handle {
-    Handle::new(pool.clone())
-}
-
 /// Cached modpack file hashes for filtering content
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CachedModpackFiles {
@@ -3023,9 +3017,9 @@ impl CachedEntry {
         }
     }
 
-    pub async fn get_modpack_files(
+    pub(crate) async fn get_modpack_files(
         version_id: &str,
-        pool: &SqlitePool,
+        handle: &Handle,
         _fetch_semaphore: &FetchSemaphore,
     ) -> crate::Result<Option<CachedModpackFiles>> {
         let state = crate::State::get().await?;
@@ -3042,7 +3036,7 @@ impl CachedEntry {
             return Ok(None);
         }
         let data = Cache::get(
-            &cache_rows(pool),
+            handle,
             &CacheKey {
                 data_type: CacheValueType::ModpackFiles.as_str().to_string(),
                 id: version_id.to_string(),
@@ -3094,14 +3088,14 @@ impl CachedEntry {
     }
 }
 
-pub async fn cache_file_hash(
+pub(crate) async fn cache_file_hash(
     bytes: bytes::Bytes,
     instance_path: &str,
     path: &str,
     known_hash: Option<&str>,
     project_type: Option<ProjectType>,
     known_modrinth_file: Option<KnownModrinthFile<'_>>,
-    pool: &SqlitePool,
+    handle: &Handle,
 ) -> crate::Result<()> {
     let size = bytes.len();
 
@@ -3118,19 +3112,19 @@ pub async fn cache_file_hash(
         hash,
         project_type,
         known_modrinth_file,
-        pool,
+        handle,
     )
     .await
 }
 
-pub async fn cache_file_hash_metadata(
+pub(crate) async fn cache_file_hash_metadata(
     instance_path: &str,
     path: &str,
     size: u64,
     hash: String,
     project_type: Option<ProjectType>,
     known_modrinth_file: Option<KnownModrinthFile<'_>>,
-    pool: &SqlitePool,
+    handle: &Handle,
 ) -> crate::Result<()> {
     let (project_id, version_id) =
         known_modrinth_file.map_or((None, None), |metadata| {
@@ -3152,7 +3146,7 @@ pub async fn cache_file_hash_metadata(
     .get_entry()
     .stored()?;
 
-    Cache::set(&cache_rows(pool), &key, Some(&record)).await?;
+    Cache::set(handle, &key, Some(&record)).await?;
 
     Ok(())
 }

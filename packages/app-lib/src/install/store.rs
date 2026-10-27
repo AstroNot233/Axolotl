@@ -336,7 +336,7 @@ pub async fn complete_running_job(
         state.request.completes_instance_install_stage();
     let resource_committed = crate::resources::plans::frozen_request_completed(
         &state.request,
-        &app_state.pool,
+        &app_state.data,
     )
     .await?
         || (matches!(
