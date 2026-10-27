@@ -2198,12 +2198,15 @@ async function reviewResourceChanges(entryIds: string[], release: SourceReleaseR
 }
 
 async function bulkUpdateAllProjects() {
-    if (pendingContentChanges.value.length > 0 || activeContentChangeJobs.value.length > 0)
+    if (
+        bulkUpdateCheck ||
+        pendingContentChanges.value.length > 0 ||
+        activeContentChangeJobs.value.length > 0
+    )
         return false
     localBulkOperating.value = true
     const instanceId = props.instance.id
     const snapshot = contentSnapshot.value
-    bulkUpdateCheck?.abort()
     const controller = new AbortController()
     bulkUpdateCheck = controller
     try {
@@ -2215,8 +2218,15 @@ async function bulkUpdateAllProjects() {
         if (controller.signal.aborted || props.instance.id !== instanceId) return false
         let entries: string[]
         if (scanned) {
+            // An entry whose check failed keeps its earlier update only for display.
+            const failed = new Set(scanned.updateCheckFailedEntries)
             entries = [...scanned.contentItems, ...scanned.linkedContentItems]
-                .filter((item) => item.resourceUpdate && item.instanceEntryId)
+                .filter(
+                    (item) =>
+                        item.resourceUpdate &&
+                        item.instanceEntryId &&
+                        !failed.has(item.instanceEntryId),
+                )
                 .map((item) => item.instanceEntryId!)
         } else {
             const result = await resourceCheckUpdates(instanceId, controller.signal)
@@ -2234,8 +2244,10 @@ async function bulkUpdateAllProjects() {
         if (!controller.signal.aborted) handleError(err as Error)
         return false
     } finally {
-        if (bulkUpdateCheck === controller) bulkUpdateCheck = undefined
-        localBulkOperating.value = false
+        if (bulkUpdateCheck === controller) {
+            bulkUpdateCheck = undefined
+            localBulkOperating.value = false
+        }
     }
 }
 
@@ -2434,6 +2446,9 @@ async function handleModpackUpdateRequest(selectedVersion: Labrinth.Versions.v2.
         if (!updatingModpack.value || pendingModpackUpdateVersion.value !== selectedVersion) return
     }
     const currentVersion = updatingProjectVersions.value.find((v) => v.id === currentVersionId)
+    // The list stopped early, so whether this is a downgrade is unknown. The modal
+    // shows the loading error with a retry; nothing is applied until then.
+    if (!currentVersion && contentVersions.error.value) return
     isModpackUpdateDowngrade.value = currentVersion
         ? new Date(selectedVersion.date_published) < new Date(currentVersion.date_published)
         : false
