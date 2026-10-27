@@ -1,5 +1,6 @@
 mod backups;
 mod instances;
+mod java;
 mod jobs;
 mod launch;
 mod lifecycle;
@@ -30,6 +31,15 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::JavaListVendors {}
+                | Command::JavaListVersions { .. }
+                | Command::JavaInstall { .. }
+                | Command::JavaTest { .. }
+                | Command::JavaSetDefault { .. }
+                | Command::JavaRemoveDefault { .. }
+                | Command::JavaRemoveRegistration { .. }) => {
+                    java::execute(command).await
+                }
                 command @ (Command::WorldList { .. }
                 | Command::WorldGet { .. }
                 | Command::WorldRename { .. }

@@ -4,6 +4,7 @@ use rmcp::{
 };
 use serde_json::{Map, Value, json};
 mod backups;
+mod java;
 mod launch;
 mod resources;
 mod worlds;
@@ -60,6 +61,9 @@ fn entry(
                                     | "server_ping"
                                     | "instance_join_server"
                                     | "instance_launch_world"
+                                    | "java_list_vendors"
+                                    | "java_list_versions"
+                                    | "java_install"
                             ),
                     ),
             ),
@@ -384,6 +388,7 @@ pub(crate) fn entries() -> Vec<Entry> {
     entries.extend(backups::entries());
     entries.extend(launch::entries());
     entries.extend(worlds::entries());
+    entries.extend(java::entries());
     entries
 }
 

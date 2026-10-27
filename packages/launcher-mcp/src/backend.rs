@@ -42,6 +42,32 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    JavaListVendors {},
+    JavaListVersions {
+        vendor: String,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    JavaInstall {
+        vendor: String,
+        major_version: u32,
+    },
+    JavaTest {
+        registered_path: String,
+        major_version: u32,
+    },
+    JavaSetDefault {
+        registered_path: String,
+        major_version: u32,
+    },
+    JavaRemoveDefault {
+        major_version: u32,
+    },
+    JavaRemoveRegistration {
+        registered_path: String,
+    },
     WorldList {
         instance_id: String,
         #[serde(default)]
@@ -461,6 +487,9 @@ impl Command {
                 | Self::WorldDelete { .. }
                 | Self::InstanceLaunchWorld { .. }
                 | Self::InstanceJoinServer { .. }
+                | Self::JavaInstall { .. }
+                | Self::JavaTest { .. }
+                | Self::JavaSetDefault { .. }
         )
     }
 }

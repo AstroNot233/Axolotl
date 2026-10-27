@@ -202,6 +202,18 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             "instance_join_server",
             json!({"instance_id":"instance","address":"mc.example.com"}),
         ),
+        (
+            "java_install",
+            json!({"vendor":"Vendor Name","major_version":21}),
+        ),
+        (
+            "java_test",
+            json!({"registered_path":"C:\\Java\\bin\\javaw.exe","major_version":21}),
+        ),
+        (
+            "java_set_default",
+            json!({"registered_path":"C:\\Java\\bin\\javaw.exe","major_version":21}),
+        ),
     ];
     for (name, mut args) in cases {
         args["session_id"] = json!(session);
@@ -214,7 +226,7 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             true
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 8);
+    assert_eq!(backend.calls.lock().unwrap().len(), 11);
     assert!(matches!(
         &backend.calls.lock().unwrap()[0],
         Command::ResourcePrepareInstall {

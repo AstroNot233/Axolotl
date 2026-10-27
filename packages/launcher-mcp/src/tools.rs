@@ -35,7 +35,7 @@ pub(crate) async fn call(
                 "requires_session": entry.access != Access::Public,
                 "requires_full_access": entry.access == Access::FullAccess,
                 "read_only": entry.read_only,
-                "returns_operation_id": matches!(entry.tool.name.as_ref(), "instance_launch" | "install_job_retry" | "install_job_resume" | "install_job_cancel" | "resource_prepare_install" | "resource_execute_plan" | "resource_revise_plan" | "content_remove" | "backup_enable" | "backup_disable" | "backup_set_exclusions" | "backup_create" | "backup_preview_restore" | "backup_restore" | "backup_delete_snapshot" | "world_backup" | "world_delete" | "instance_launch_world" | "instance_join_server"),
+                "returns_operation_id": matches!(entry.tool.name.as_ref(), "instance_launch" | "install_job_retry" | "install_job_resume" | "install_job_cancel" | "resource_prepare_install" | "resource_execute_plan" | "resource_revise_plan" | "content_remove" | "backup_enable" | "backup_disable" | "backup_set_exclusions" | "backup_create" | "backup_preview_restore" | "backup_restore" | "backup_delete_snapshot" | "world_backup" | "world_delete" | "instance_launch_world" | "instance_join_server" | "java_install" | "java_test" | "java_set_default"),
             })).collect::<Vec<_>>(),
             "restrictions": {
                 "ordinary_mode": {"manual_control_approval": true, "deletion": false, "direct_interface_control": false},
