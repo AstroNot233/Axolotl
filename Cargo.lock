@@ -7374,6 +7374,7 @@ version = "1.10.2"
 dependencies = [
  "ashpd",
  "async_zip",
+ "base64 0.22.1",
  "block2",
  "bytes",
  "cc",

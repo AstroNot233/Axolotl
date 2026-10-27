@@ -9,6 +9,7 @@ mod downloads;
 mod java;
 mod launch;
 mod resources;
+mod servers;
 mod worlds;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -49,6 +50,7 @@ fn entry(
                     .destructive(
                         access == Access::FullAccess
                             || name == "process_kill"
+                            || name == "server_kill"
                             || name == "install_job_cancel"
                             || name == "download_job_cancel"
                             || name == "install_job_skip_missing",
@@ -73,6 +75,8 @@ fn entry(
                                     | "install_job_scan_missing_files"
                                     | "install_job_skip_missing"
                                     | "install_job_repair_and_retry"
+                                    | "server_start"
+                                    | "server_wait_ready"
                             ),
                     ),
             ),
@@ -400,6 +404,7 @@ pub(crate) fn entries() -> Vec<Entry> {
     entries.extend(java::entries());
     entries.extend(downloads::entries());
     entries.extend(accounts::entries());
+    entries.extend(servers::entries());
     entries
 }
 
@@ -473,6 +478,13 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
                 && (rule["format"] != "account-id" || valid_account_id(s))
                 && (rule["format"] != "minecraft-username"
                     || s.chars().all(|c| c.is_alphanumeric() || c == '_'))
+                && (rule["format"] != "managed-server-id"
+                    || (s != "."
+                        && !s.contains("..")
+                        && s.bytes().all(|c| {
+                            c.is_ascii_alphanumeric()
+                                || matches!(c, b'-' | b'_')
+                        })))
         }),
         Some("integer") => value.as_u64().is_some_and(|n| {
             rule["minimum"].as_u64().is_none_or(|min| n >= min)

@@ -42,6 +42,73 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    ServerList {
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    ServerGet {
+        server_id: String,
+    },
+    ServerCreate {
+        name: String,
+        server_type: String,
+        game_version: String,
+        #[serde(default)]
+        loader_version: Option<String>,
+        #[serde(default)]
+        registered_java_path: Option<String>,
+        #[serde(default)]
+        memory_mib: Option<u32>,
+    },
+    ServerUpdateSettings {
+        server_id: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        registered_java_path: Option<String>,
+        #[serde(default)]
+        memory_mib: Option<u32>,
+        #[serde(default)]
+        pinned: Option<bool>,
+    },
+    ServerStart {
+        server_id: String,
+    },
+    ServerWaitReady {
+        server_id: String,
+        #[serde(default = "wait_seconds")]
+        timeout_seconds: u64,
+    },
+    ServerStop {
+        server_id: String,
+    },
+    ServerKill {
+        server_id: String,
+    },
+    ServerDelete {
+        server_id: String,
+    },
+    ServerConsoleSend {
+        server_id: String,
+        command: String,
+    },
+    ServerLogsRead {
+        server_id: String,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "text_bytes")]
+        max_bytes: usize,
+    },
+    ServerLogsSearch {
+        server_id: String,
+        query: String,
+        #[serde(default)]
+        start_line: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
     AccountList {
         #[serde(default)]
         offline_only: bool,
@@ -579,7 +646,15 @@ impl Command {
                 | Self::AccountSetDefault { .. }
                 | Self::AccountRemove { .. }
                 | Self::AccountAddOffline { .. }
+                | Self::ServerCreate { .. }
+                | Self::ServerStart { .. }
+                | Self::ServerDelete { .. }
+                | Self::ServerConsoleSend { .. }
         )
+    }
+
+    pub(crate) fn interrupts_mutation(&self) -> bool {
+        matches!(self, Self::ServerStop { .. } | Self::ServerKill { .. })
     }
 }
 

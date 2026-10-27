@@ -10,6 +10,7 @@ mod logs;
 mod metadata;
 mod queries;
 mod resources;
+mod servers;
 mod worlds;
 
 use futures::future::BoxFuture;
@@ -33,6 +34,20 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::ServerList { .. }
+                | Command::ServerGet { .. }
+                | Command::ServerCreate { .. }
+                | Command::ServerUpdateSettings { .. }
+                | Command::ServerStart { .. }
+                | Command::ServerWaitReady { .. }
+                | Command::ServerStop { .. }
+                | Command::ServerKill { .. }
+                | Command::ServerDelete { .. }
+                | Command::ServerConsoleSend { .. }
+                | Command::ServerLogsRead { .. }
+                | Command::ServerLogsSearch { .. }) => {
+                    servers::execute(command).await
+                }
                 command @ (Command::AccountList { .. }
                 | Command::AccountGet { .. }
                 | Command::AccountGetDefault { .. }

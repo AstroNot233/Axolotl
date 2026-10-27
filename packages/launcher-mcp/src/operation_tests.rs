@@ -207,6 +207,16 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             json!({"vendor":"Vendor Name","major_version":21}),
         ),
         (
+            "server_create",
+            json!({"name":"Server","server_type":"vanilla","game_version":"1.21.1","memory_mib":2048}),
+        ),
+        ("server_start", json!({"server_id":"server-123"})),
+        ("server_delete", json!({"server_id":"server-123"})),
+        (
+            "server_console_send",
+            json!({"server_id":"server-123","command":"say test"}),
+        ),
+        (
             "account_set_default",
             json!({"account_id":format!("account:{}","a".repeat(64))}),
         ),
@@ -264,7 +274,7 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             true
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 22);
+    assert_eq!(backend.calls.lock().unwrap().len(), 26);
     assert!(matches!(
         &backend.calls.lock().unwrap()[0],
         Command::ResourcePrepareInstall {
@@ -308,6 +318,46 @@ async fn ending_session_cancels_deferred_queue_but_drains_active_launch() {
     backend.resume.notify_one();
     wait_for(|| backend.finished.load(Ordering::SeqCst) == 1).await;
     assert_eq!(backend.calls.lock().unwrap().len(), 1);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn server_stop_interrupts_a_running_start_without_waiting_for_mutation_lock()
+ {
+    let backend = Arc::new(TestBackend::default());
+    backend.block.store(true, Ordering::SeqCst);
+    let server = server_with_backend(true, false, backend.clone()).await;
+    let client = connect(&server, false, "Interrupt startup").await;
+    let session = control_id(&client.tool("start_session", json!({})).await);
+    let response = client
+        .tool(
+            "server_start",
+            json!({"session_id":session,"server_id":"server-123"}),
+        )
+        .await;
+    let operation = response["result"]["structuredContent"]["operation_id"]
+        .as_str()
+        .unwrap();
+    poll(&client, &session, operation, "running").await;
+    wait_for(|| backend.calls.lock().unwrap().len() == 1).await;
+    backend.block.store(false, Ordering::SeqCst);
+    let stopped = tokio::time::timeout(
+        Duration::from_secs(3),
+        client.tool(
+            "server_stop",
+            json!({"session_id":session,"server_id":"server-123"}),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(stopped["result"]["structuredContent"]["executed"], true);
+    assert_eq!(backend.calls.lock().unwrap().len(), 2);
+    assert!(matches!(
+        &backend.calls.lock().unwrap()[1],
+        Command::ServerStop { .. }
+    ));
+    backend.resume.notify_one();
+    poll(&client, &session, operation, "succeeded").await;
     server.stop().await;
 }
 

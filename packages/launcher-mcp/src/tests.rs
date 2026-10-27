@@ -592,6 +592,14 @@ async fn business_tools_require_approved_transport_scoped_sessions() {
     assert_eq!(tool_error(&client.tool("content_remove", json!({"session_id":control,"instance_id":"instance","entry_id":"entry"})).await), "full_access_required");
     for (name, args) in [
         (
+            "server_delete",
+            json!({"session_id":control,"server_id":"server-123"}),
+        ),
+        (
+            "server_console_send",
+            json!({"session_id":control,"server_id":"server-123","command":"say test"}),
+        ),
+        (
             "account_remove",
             json!({"session_id":control,"account_id":format!("account:{}","a".repeat(64))}),
         ),
@@ -730,6 +738,26 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             json!({"source":"mcarchive","project_id":"project","release_id":"release"}),
         ),
         ("content_list", json!({"instance_id":"instance"})),
+        ("server_list", json!({"limit":10})),
+        ("server_get", json!({"server_id":"server-123"})),
+        (
+            "server_update_settings",
+            json!({"server_id":"server-123","name":"New","memory_mib":4096,"pinned":false}),
+        ),
+        (
+            "server_wait_ready",
+            json!({"server_id":"server-123","timeout_seconds":2}),
+        ),
+        ("server_stop", json!({"server_id":"server-123"})),
+        ("server_kill", json!({"server_id":"server-123"})),
+        (
+            "server_logs_read",
+            json!({"server_id":"server-123","max_bytes":1024}),
+        ),
+        (
+            "server_logs_search",
+            json!({"server_id":"server-123","query":"error"}),
+        ),
         ("account_list", json!({"offline_only":true,"limit":10})),
         (
             "account_get",
@@ -870,7 +898,7 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             "{name}: {result}"
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 66);
+    assert_eq!(backend.calls.lock().unwrap().len(), 74);
     assert!(
         backend
             .scopes
@@ -903,6 +931,32 @@ async fn invalid_arguments_are_rejected_before_backend_execution() {
     let client = connect(&server, false, "Validation").await;
     let control = control_id(&client.tool("start_session", json!({})).await);
     let cases = [
+        ("server_get", json!({"server_id":"../outside"})),
+        ("server_get", json!({"server_id":"server:stream"})),
+        (
+            "server_wait_ready",
+            json!({"server_id":"server-123","timeout_seconds":21}),
+        ),
+        (
+            "server_create",
+            json!({"name":"Server","server_type":"shell","game_version":"1.21"}),
+        ),
+        (
+            "server_update_settings",
+            json!({"server_id":"server-123","jvm_args":["arbitrary"]}),
+        ),
+        (
+            "server_console_send",
+            json!({"server_id":"server-123","command":"stop\nsay injected"}),
+        ),
+        (
+            "server_console_send",
+            json!({"server_id":"server-123","command":"\u{1b}[A"}),
+        ),
+        (
+            "server_logs_read",
+            json!({"server_id":"server-123","max_bytes":32769}),
+        ),
         ("account_get", json!({"account_id":"native-account-id"})),
         (
             "account_set_default",
