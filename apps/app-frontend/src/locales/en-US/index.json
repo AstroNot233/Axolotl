@@ -5693,6 +5693,9 @@
   "app.lab.seed-map.area.height": {
     "message": "Height range"
   },
+  "app.lab.seed-map.area.incomplete": {
+    "message": "These results cover only the part of the area searched before it stopped."
+  },
   "app.lab.seed-map.area.invalid-y": {
     "message": "Enter a valid height range between {min} and {max}."
   },
@@ -5740,6 +5743,9 @@
   },
   "app.lab.seed-map.area.query": {
     "message": "Item name or minecraft:item_id"
+  },
+  "app.lab.seed-map.area.scanning": {
+    "message": "Results so far. The rest of the area is still being searched."
   },
   "app.lab.seed-map.area.search": {
     "message": "Search container loot"

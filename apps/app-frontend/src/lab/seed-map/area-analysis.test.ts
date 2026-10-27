@@ -370,3 +370,76 @@ test('loot discovery resets progress before details and advances while reading c
     )
     assert.equal(latest.done, 1)
 })
+
+test('mineral counts are published after each batch and the last ones survive a cancel', async () => {
+    const controller = new AbortController()
+    const partials: number[] = []
+    let calls = 0
+    await assert.rejects(
+        analyzeAreaOres(
+            context,
+            area,
+            ['iron'],
+            -64,
+            320,
+            controller.signal,
+            progress,
+            async (request) => {
+                calls++
+                if (calls === 2) controller.abort()
+                return [
+                    {
+                        cx: request.chunks[0],
+                        cz: request.chunks[1],
+                        truncated: false,
+                        hits: [
+                            {
+                                ore: 'iron',
+                                x: calls === 1 ? 0 : -1,
+                                y: 10,
+                                z: 0,
+                                yMin: 10,
+                                yMax: 10,
+                                status: 'terrain_unverified' as const,
+                            },
+                        ],
+                    },
+                ]
+            },
+            (result) => partials.push(result.counts[0]?.count ?? 0),
+        ),
+        { name: 'AbortError' },
+    )
+    assert.deepEqual(partials, [1])
+})
+
+test('loot matches are published after each searched structure', async () => {
+    const partials: number[] = []
+    const result = await searchAreaLoot(
+        context,
+        area,
+        0x3ffffff,
+        (id) => id === 'minecraft:diamond',
+        new AbortController().signal,
+        progress,
+        {
+            features: async (query) =>
+                query.minX < 0
+                    ? [
+                          { kind: 'ancient-city', x: 300, z: 0, approximate: true },
+                          { kind: 'ancient-city', x: 310, z: 0, approximate: true },
+                      ]
+                    : [],
+            details: async () => details,
+            loot: async (): Promise<SeedMapLoot> => ({
+                supported: true,
+                truncated: false,
+                items: [item(1)],
+                limits: [],
+            }),
+        },
+        (partial) => partials.push(partial.matches.length),
+    )
+    assert.deepEqual(partials, [1, 2])
+    assert.equal(result.matches.length, 2)
+})

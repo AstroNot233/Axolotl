@@ -93,6 +93,20 @@ function checkCanceled(signal: AbortSignal) {
 }
 
 export type AreaOreResult = { counts: { ore: SeedMapOreKind; count: number }[]; truncated: boolean }
+function oreSummary(counts: Map<SeedMapOreKind, number>, truncated: boolean): AreaOreResult {
+    return {
+        counts: [...counts]
+            .map(([ore, count]) => ({ ore, count }))
+            .filter((row) => row.count > 0)
+            .sort((a, b) => b.count - a.count),
+        truncated,
+    }
+}
+/**
+ * Counts mineral candidates in an area. `onPartial` receives the counts so far
+ * after every scanned batch, so a caller can show them before the scan ends or
+ * keep them after canceling.
+ */
 export async function analyzeAreaOres(
     context: SeedMapAreaContext,
     area: SeedMapArea,
@@ -102,6 +116,7 @@ export async function analyzeAreaOres(
     signal: AbortSignal,
     onProgress: (progress: AreaProgress) => void,
     scan = scanSeedMapOres,
+    onPartial?: (result: AreaOreResult) => void,
 ): Promise<AreaOreResult> {
     checkArea(area, SEED_MAP_AREA_ORE_MAX_CHUNKS)
     if (!Number.isInteger(yMin) || !Number.isInteger(yMax) || yMin > yMax)
@@ -182,18 +197,18 @@ export async function analyzeAreaOres(
                 }
                 done += batch.length
                 onProgress({ done, total })
+                if (onPartial) {
+                    const sofar = new Map(counts)
+                    for (const [kind, positions] of found)
+                        sofar.set(kind, (sofar.get(kind) ?? 0) + positions.size)
+                    onPartial(oreSummary(sofar, truncated))
+                }
             }
         }
         for (const [ore, positions] of found)
             counts.set(ore, (counts.get(ore) ?? 0) + positions.size)
     }
-    return {
-        counts: [...counts]
-            .map(([ore, count]) => ({ ore, count }))
-            .filter((row) => row.count > 0)
-            .sort((a, b) => b.count - a.count),
-        truncated,
-    }
+    return oreSummary(counts, truncated)
 }
 
 export type AreaLootMatch = {
@@ -211,6 +226,10 @@ export type AreaLootResult = {
     truncated: boolean
     unresolved: boolean
 }
+/**
+ * Searches container loot in an area. `onPartial` receives the matches so far
+ * after every searched structure.
+ */
 export async function searchAreaLoot(
     context: SeedMapAreaContext,
     area: SeedMapArea,
@@ -227,6 +246,7 @@ export async function searchAreaLoot(
         details: getSeedMapStructureDetails,
         loot: getSeedMapContainerLoot,
     },
+    onPartial?: (result: AreaLootResult) => void,
 ): Promise<AreaLootResult> {
     checkArea(area, SEED_MAP_AREA_LOOT_MAX_CHUNKS)
     const result: AreaLootResult = {
@@ -350,6 +370,7 @@ export async function searchAreaLoot(
             result.failed++
         }
         onProgress({ done: ++done, total: structures.size })
+        onPartial?.({ ...result, matches: [...result.matches] })
         if (attempted >= MAX_CONTAINERS || result.matches.length >= MAX_MATCHES) {
             result.truncated = true
             break

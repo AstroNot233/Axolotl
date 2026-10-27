@@ -5,6 +5,12 @@
   "app.java.searching": {
     "message": "正在查找 Java 安装……"
   },
+  "app.lab.seed-map.area.incomplete": {
+    "message": "这些结果只覆盖停止前已搜索的那部分区域。"
+  },
+  "app.lab.seed-map.area.scanning": {
+    "message": "以下是目前的结果，区域其余部分仍在搜索中。"
+  },
   "app.resources.operation.review-issues": {
     "message": "安装问题详情"
   },
