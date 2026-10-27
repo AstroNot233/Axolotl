@@ -28,6 +28,9 @@ use crate::state::store::resource_cache_entries::{
 use crate::state::store::resource_cache_state::{
     ResourceCacheState, ResourceCacheStateRecord,
 };
+use crate::state::store::resource_legacy_import::{
+    ResourceLegacyImport, ResourceLegacyImportRecord, Singleton as Checkpoint,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct CacheKey {
@@ -300,14 +303,25 @@ impl ResourceCache {
         let Some(pool) = &self.pool else {
             return Ok(());
         };
-        sqlx::query(
-            "UPDATE resource_legacy_import SET completed = 1 WHERE id = 1",
-        )
-        .execute(pool)
-        .await
-        .map_err(cache_error)?;
         let data = Handle::new(pool.clone());
         let mut unit = atom(&data).await.map_err(cache_error)?;
+        let checkpoint = ResourceLegacyImport::atom_get(&mut unit, &Checkpoint)
+            .await
+            .map_err(cache_error)?
+            .unwrap_or(ResourceLegacyImportRecord {
+                last_rowid: 0,
+                completed: false,
+            });
+        ResourceLegacyImport::atom_set(
+            &mut unit,
+            &Checkpoint,
+            Some(&ResourceLegacyImportRecord {
+                completed: true,
+                ..checkpoint
+            }),
+        )
+        .await
+        .map_err(cache_error)?;
         let current = ResourceCacheState::atom_get(&mut unit, &())
             .await
             .map_err(cache_error)?;

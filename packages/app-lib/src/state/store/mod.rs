@@ -37,6 +37,7 @@ pub(crate) mod resource_artifact_evidence;
 pub(crate) mod resource_cache_entries;
 pub(crate) mod resource_cache_state;
 pub(crate) mod resource_history;
+pub(crate) mod resource_legacy_import;
 pub(crate) mod resource_operation_plans;
 pub(crate) mod resource_source_projects;
 pub(crate) mod settings;
