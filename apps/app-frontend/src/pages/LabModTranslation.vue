@@ -40,6 +40,7 @@ watch(analyzing, (value) => {
 })
 
 onBeforeUnmount(() => {
+    analysisRequest++
     if (analyzeTimer) clearInterval(analyzeTimer)
 })
 
@@ -100,18 +101,33 @@ function defaultOutputPath(path: string): string {
     return path.replace(/\.jar$/i, '-zh_cn.jar')
 }
 
+// The file being analyzed is fixed when analysis starts. Picking another file
+// or leaving the page discards that analysis, including its error.
+let analysisRequest = 0
+
 async function runAnalyze() {
-    if (!inputPath.value) return
+    const path = inputPath.value
+    if (!path) return
+    const request = ++analysisRequest
     analyzing.value = true
     store.setAnalysis(null)
     try {
-        store.setAnalysis(await analyzeMod(inputPath.value), inputPath.value)
+        const result = await analyzeMod(path)
+        if (request === analysisRequest) store.setAnalysis(result, path)
     } catch (error) {
-        handleError(new Error(errorMessage(error)))
+        if (request === analysisRequest) handleError(new Error(errorMessage(error)))
     } finally {
-        analyzing.value = false
+        if (request === analysisRequest) analyzing.value = false
     }
 }
+
+watch(inputPath, (path) => {
+    if (analyzing.value) {
+        analysisRequest++
+        analyzing.value = false
+    }
+    if (store.analysisInputPath !== path) store.setAnalysis(null)
+})
 
 async function startTranslation() {
     if (!canStart.value) return
