@@ -212,8 +212,12 @@ pub async fn remove_java_version(path: String) -> crate::Result<()> {
 
 const JAVA_RESCAN_DEBOUNCE: Duration = Duration::from_secs(60);
 
-static JAVA_SCAN_STATE: LazyLock<tokio::sync::Mutex<Option<Instant>>> =
+static JAVA_FULL_SCAN_STATE: LazyLock<tokio::sync::Mutex<Option<Instant>>> =
     LazyLock::new(|| tokio::sync::Mutex::new(None));
+
+fn full_java_scan_is_recent(last_full_scan: Option<Instant>) -> bool {
+    last_full_scan.is_some_and(|at| at.elapsed() < JAVA_RESCAN_DEBOUNCE)
+}
 
 // Searches for jres on the system given a java version (ex: 8, 17, 21)
 pub async fn find_filtered_jres(
@@ -223,6 +227,9 @@ pub async fn find_filtered_jres(
     exhaustive: bool,
 ) -> crate::Result<Vec<JavaVersion>> {
     get_available_jres(full_scan, force_fresh, exhaustive).await?;
+    if let Some(major_version) = java_version {
+        find_java_for_version(major_version).await?;
+    }
 
     let state = State::get().await?;
     let jres = JavaVersion::get_all(&state.data).await?;
@@ -239,7 +246,8 @@ pub async fn find_filtered_jres(
 /// Returns all known Java installations, served from the discovery cache
 /// when possible. When the cache is hit, a debounced rescan runs in the
 /// background and a `java_discovery_update` event fires if it changes
-/// anything; the cache being empty forces a full scan instead.
+/// anything. An empty cache forces a quick scan unless a recent full scan
+/// already established that no installations were found.
 ///
 /// When `full_scan` is true the cache is always bypassed and a fresh
 /// full scan (including BFS directory traversal) is performed.
@@ -255,9 +263,9 @@ pub async fn get_available_jres(
     let state = State::get().await?;
 
     if full_scan || exhaustive {
-        let mut last_scan = JAVA_SCAN_STATE.lock().await;
+        let mut last_full_scan = JAVA_FULL_SCAN_STATE.lock().await;
         let jres = refresh_discovered_javas(&state, true, exhaustive).await?;
-        *last_scan = Some(Instant::now());
+        *last_full_scan = Some(Instant::now());
         return Ok(jres);
     }
 
@@ -269,17 +277,19 @@ pub async fn get_available_jres(
         }
     }
 
-    let mut last_scan = JAVA_SCAN_STATE.lock().await;
+    let mut last_full_scan = JAVA_FULL_SCAN_STATE.lock().await;
     if !force_fresh {
         // Re-check after taking the lock: a concurrent caller may have just
         // finished the initial scan while this one was waiting
         let cached = validate_cached_javas(&state).await?;
-        if !cached.is_empty() {
+        if !cached.is_empty() || full_java_scan_is_recent(*last_full_scan) {
             return Ok(cached);
         }
     }
     let jres = refresh_discovered_javas(&state, false, false).await?;
-    *last_scan = Some(Instant::now());
+    // A quick scan replaces the cache with a narrower set of results, so a
+    // previous full scan can no longer establish that a runtime is absent.
+    *last_full_scan = None;
     Ok(jres)
 }
 
@@ -368,10 +378,8 @@ async fn refresh_discovered_javas(
 // Schedules a debounced background rescan of system Javas
 fn schedule_background_java_rescan() {
     tokio::spawn(async {
-        let mut last_scan = JAVA_SCAN_STATE.lock().await;
-        if let Some(at) = *last_scan
-            && at.elapsed() < JAVA_RESCAN_DEBOUNCE
-        {
+        let mut last_full_scan = JAVA_FULL_SCAN_STATE.lock().await;
+        if full_java_scan_is_recent(*last_full_scan) {
             return;
         }
 
@@ -379,7 +387,7 @@ fn schedule_background_java_rescan() {
             return;
         };
         match refresh_discovered_javas(&state, true, false).await {
-            Ok(_) => *last_scan = Some(Instant::now()),
+            Ok(_) => *last_full_scan = Some(Instant::now()),
             Err(e) => {
                 tracing::warn!("Background Java rescan failed: {e}");
             }
@@ -410,10 +418,9 @@ pub async fn find_cached_java(
     Ok(None)
 }
 
-/// Resolves an installed Java for `major_version` without downloading: serves
-/// it from the discovery cache when present, otherwise runs a system scan and
-/// checks again. Returns `None` only when no matching Java is installed, so
-/// launch/install callers fall back to downloading a runtime as a last resort.
+/// Resolves an installed Java for `major_version` without downloading. A miss
+/// in the defaults, cache or quick scan waits for a full scan of likely
+/// installation directories before callers can offer a runtime download.
 pub async fn find_java_for_version(
     major_version: u32,
 ) -> crate::Result<Option<JavaVersion>> {
@@ -442,7 +449,47 @@ pub async fn find_java_for_version(
     }
 
     let scanned = get_available_jres(false, false, false).await?;
-    Ok(scanned
+    if let Some(java) = scanned
+        .into_iter()
+        .find(|java| java.parsed_version == major_version)
+    {
+        return Ok(Some(java));
+    }
+
+    find_java_after_cache_miss(
+        major_version,
+        &JAVA_FULL_SCAN_STATE,
+        || find_cached_java(major_version),
+        || refresh_discovered_javas(&state, true, false),
+    )
+    .await
+}
+
+async fn find_java_after_cache_miss<Cache, Cached, Scan, Scanned>(
+    major_version: u32,
+    scan_state: &tokio::sync::Mutex<Option<Instant>>,
+    cached: Cache,
+    scan: Scan,
+) -> crate::Result<Option<JavaVersion>>
+where
+    Cache: FnOnce() -> Cached,
+    Cached: Future<Output = crate::Result<Option<JavaVersion>>>,
+    Scan: FnOnce() -> Scanned,
+    Scanned: Future<Output = crate::Result<Vec<JavaVersion>>>,
+{
+    let mut last_full_scan = scan_state.lock().await;
+    // Another lookup or background scan may have populated the cache while
+    // this lookup was waiting for the shared scan lock.
+    if let Some(java) = cached().await? {
+        return Ok(Some(java));
+    }
+    if full_java_scan_is_recent(*last_full_scan) {
+        return Ok(None);
+    }
+
+    let jres = scan().await?;
+    *last_full_scan = Some(Instant::now());
+    Ok(jres
         .into_iter()
         .find(|java| java.parsed_version == major_version))
 }
@@ -2111,8 +2158,151 @@ fn count_mods(instance_path: &std::path::Path) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
 
     const GIB: u64 = 1024 * 1024 * 1024;
+
+    fn java(parsed_version: u32, path: &str) -> JavaVersion {
+        JavaVersion {
+            parsed_version,
+            version: parsed_version.to_string(),
+            architecture: "x86_64".to_string(),
+            path: path.to_string(),
+            distribution: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn java_cache_miss_waits_for_supplementary_scan() {
+        let scan_state = tokio::sync::Mutex::new(None);
+        let cached = [java(8, "/java8"), java(21, "/java21")];
+        let started = tokio::sync::Notify::new();
+        let finish = tokio::sync::Notify::new();
+        let expected = java(17, "/custom/java17/bin/java");
+        let mut lookup = Box::pin(find_java_after_cache_miss(
+            17,
+            &scan_state,
+            || async {
+                Ok(cached.iter().find(|j| j.parsed_version == 17).cloned())
+            },
+            || async {
+                started.notify_one();
+                finish.notified().await;
+                let mut found: Vec<_> = (0..243)
+                    .map(|index| java(21, &format!("/runtimes/{index}/java")))
+                    .collect();
+                found.push(expected.clone());
+                Ok(found)
+            },
+        ));
+
+        tokio::select! {
+            _ = started.notified() => {},
+            result = &mut lookup => panic!("Lookup returned before scanning: {result:?}"),
+        }
+        finish.notify_one();
+        assert_eq!(lookup.await.unwrap(), Some(expected));
+        assert!(scan_state.lock().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn concurrent_java_cache_misses_share_scan_results() {
+        let scan_state = tokio::sync::Mutex::new(None);
+        let cached = RefCell::new(vec![java(21, "/java21")]);
+        let scans = Cell::new(0);
+        let expected = java(17, "/custom/java17/bin/java");
+        let lookup = || {
+            find_java_after_cache_miss(
+                17,
+                &scan_state,
+                || async {
+                    Ok(cached
+                        .borrow()
+                        .iter()
+                        .find(|j| j.parsed_version == 17)
+                        .cloned())
+                },
+                || async {
+                    scans.set(scans.get() + 1);
+                    tokio::task::yield_now().await;
+                    cached.borrow_mut().push(expected.clone());
+                    Ok(cached.borrow().clone())
+                },
+            )
+        };
+
+        let (first, second) = tokio::join!(lookup(), lookup());
+        assert_eq!(first.unwrap(), Some(expected.clone()));
+        assert_eq!(second.unwrap(), Some(expected));
+        assert_eq!(scans.get(), 1);
+    }
+
+    #[tokio::test]
+    async fn absent_java_reuses_only_a_recent_full_scan() {
+        let scan_state = tokio::sync::Mutex::new(None);
+        let scans = Cell::new(0);
+        let lookup = |major| {
+            find_java_after_cache_miss(
+                major,
+                &scan_state,
+                || async { Ok(None) },
+                || async {
+                    scans.set(scans.get() + 1);
+                    tokio::task::yield_now().await;
+                    Ok(vec![java(21, "/java21")])
+                },
+            )
+        };
+
+        let (seventeen, eight) = tokio::join!(lookup(17), lookup(8));
+        assert_eq!(seventeen.unwrap(), None);
+        assert_eq!(eight.unwrap(), None);
+        assert_eq!(scans.get(), 1);
+
+        *scan_state.lock().await = Some(Instant::now() - JAVA_RESCAN_DEBOUNCE);
+        assert_eq!(lookup(17).await.unwrap(), None);
+        assert_eq!(scans.get(), 2);
+    }
+
+    #[tokio::test]
+    async fn failed_java_scan_is_an_error_and_can_be_retried() {
+        let scan_state = tokio::sync::Mutex::new(None);
+        let result = find_java_after_cache_miss(
+            17,
+            &scan_state,
+            || async { Ok(None) },
+            || async {
+                Err(crate::ErrorKind::OtherError("scan failed".into()).into())
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(scan_state.lock().await.is_none());
+
+        let expected = java(17, "/custom/java17/bin/java");
+        let result = find_java_after_cache_miss(
+            17,
+            &scan_state,
+            || async { Ok(None) },
+            || async { Ok(vec![expected.clone()]) },
+        )
+        .await;
+        assert_eq!(result.unwrap(), Some(expected));
+    }
+
+    #[tokio::test]
+    async fn java_found_while_waiting_avoids_another_scan() {
+        let scan_state = tokio::sync::Mutex::new(None);
+        let expected = java(17, "/custom/java17/bin/java");
+        let result = find_java_after_cache_miss(
+            17,
+            &scan_state,
+            || async { Ok(Some(expected.clone())) },
+            || async { panic!("A cached match must not trigger a scan") },
+        )
+        .await;
+        assert_eq!(result.unwrap(), Some(expected));
+    }
 
     #[test]
     fn closest_compatible_prefers_exact_then_newest_small_enough() {

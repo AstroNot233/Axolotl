@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     ArtifactIntegrity, HistoryId, InstalledEntryId, PlanId, ResourceArtifact,
     ResourceDependencyKind, ResourceId, ResourceRef, ResourceType, SelectionId,
-    SourceArtifactRef, SourceReleaseRef,
+    SourceArtifactRef, SourceId, SourceReleaseRef,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
