@@ -4,14 +4,17 @@ use super::client::{
     DownloadClients, HTTP1_DIRECT_REQWEST_CLIENT,
     HTTP1_NO_REDIRECT_REQWEST_CLIENT, is_h2_protocol_failure,
 };
+#[cfg(test)]
 use super::file;
 use super::file::{
-    IntegrityHashers, any_route_can_resume, copy, create_download_file,
+    IntegrityHashers, any_route_can_resume, create_download_file,
     finalize_download, hash_existing_part_prefix,
     open_download_file_for_append, parse_content_range,
     preserve_or_remove_partial, remove_if_exists, resource_validator_changed,
-    response_status_error, write,
+    response_status_error,
 };
+#[cfg(test)]
+use super::file::{copy, write};
 use super::model::{
     DownloadRequest, DownloadResult, DownloadRoute, FetchProgressFn,
 };
@@ -20,6 +23,7 @@ use super::policy::{
     record_native_status_failure, record_native_transfer_failure,
     record_route_failure, record_route_success, retry_after,
 };
+#[cfg(test)]
 use super::probe;
 use super::probe::{
     RouteProbeFuture, expected_route_speed, probe_recovery_route,
@@ -27,21 +31,28 @@ use super::probe::{
 use super::record_install_download_progress;
 use super::record_install_download_stage;
 use super::record_install_download_started;
+#[cfg(test)]
 use super::request;
+#[cfg(test)]
 use super::request::fetch;
+#[cfg(test)]
 use super::routes;
+#[cfg(test)]
+use super::routes::route;
 use super::routes::{
     cache_busted_download_url, is_official_route, official_fallback_route,
-    original_route_authority, route, route_host,
-    routes_share_effective_authority, sanitize_url_for_log, url_authority,
+    original_route_authority, route_host, routes_share_effective_authority,
+    sanitize_url_for_log, url_authority,
 };
 use super::segment::{
     acquire_native_connection, allow_low_throughput_route_switch,
-    can_recover_file_ranges, native_first_byte_timeout, range_connection_floor,
+    can_recover_file_ranges, native_first_byte_timeout,
     should_downgrade_slow_http2, should_use_segmented_download,
 };
+#[cfg(test)]
 use super::tail;
 use super::throttle::{FetchSemaphore, record_authority_h2_failure_for};
+#[cfg(test)]
 use super::transfer;
 use super::try_segmented_download;
 use crate::ErrorKind;
@@ -71,14 +82,18 @@ use crate::util::download::native_request::{
 };
 use crate::util::io::IOError;
 use futures::StreamExt;
-use reqwest::{Method, StatusCode, header};
-use sha2::Digest;
+#[cfg(test)]
+use reqwest::header;
+use reqwest::{Method, StatusCode};
 use std::collections::{HashSet, VecDeque};
+#[cfg(test)]
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use std::time::{self, Instant};
+#[cfg(test)]
+use std::time;
+use std::time::Instant;
+#[cfg(test)]
 use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
 
 enum NativeSegmentedAttempt {
     RetryRoute,

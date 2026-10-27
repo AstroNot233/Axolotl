@@ -1,7 +1,10 @@
 use super::model::{DownloadRoute, IN_FLIGHT_DOWNLOADS, Integrity};
 use super::policy::range_splitting_allowed;
+#[cfg(test)]
 use super::routes;
-use super::routes::{route, sanitize_url_for_log};
+#[cfg(test)]
+use super::routes::route;
+use super::routes::sanitize_url_for_log;
 use super::throttle::{IoSemaphore, acquire_native_validation_permit};
 use crate::util::download::constants::{
     DOWNLOAD_BUFFER_BYTES, FETCH_BYTES, FETCH_CREATING_DOWNLOAD_FILE,
@@ -19,16 +22,20 @@ use crate::util::download::retired_sources;
 use crate::util::io::{self, IOError};
 use crate::{ErrorKind, LabrinthError};
 use bytes::Bytes;
+#[cfg(test)]
 use eyre::Context;
 use parking_lot::Mutex;
 use reqwest::{Method, header};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256, Sha512};
+#[cfg(test)]
 use std::error::Error;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{self, Instant};
+#[cfg(test)]
+use std::time;
+use std::time::Instant;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex as AsyncMutex;

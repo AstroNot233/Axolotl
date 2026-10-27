@@ -1,6 +1,9 @@
+#[cfg(test)]
 use super::client;
 use super::model::{DownloadRoute, ProxyPolicy, ResourceClass};
-use super::routes::{effective_route_authority, route, route_host};
+#[cfg(test)]
+use super::routes::route;
+use super::routes::{effective_route_authority, route_host};
 use crate::util::download::constants::{
     API_KEY_HEADER, FETCH_AUTHORIZATION, FETCH_COOKIE, FETCH_GITHUB_COM,
     FETCH_MELOONG_COM, FETCH_MOMOT_RS, FETCH_OPTIFINE_NET,
@@ -15,8 +18,11 @@ use crate::util::download::route_health::{
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use rand::Rng;
-use reqwest::{Method, StatusCode, header};
+#[cfg(test)]
+use reqwest::StatusCode;
+use reqwest::{Method, header};
 use std::collections::{HashMap, HashSet};
+#[cfg(test)]
 use std::error::Error;
 use std::sync::LazyLock;
 use std::time::{self, Instant};

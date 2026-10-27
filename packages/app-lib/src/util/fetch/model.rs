@@ -6,6 +6,7 @@ use crate::util::download::constants::{
     MIN_PARALLEL_RANGES, MIN_SEGMENT_SIZE,
 };
 use parking_lot::Mutex;
+#[cfg(test)]
 use reqwest::header;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

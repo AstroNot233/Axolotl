@@ -10,11 +10,15 @@ use super::policy::{
     range_splitting_allowed, record_route_health_failure, record_route_success,
     route_health_key,
 };
+#[cfg(test)]
 use super::request;
+#[cfg(test)]
 use super::routes;
+#[cfg(test)]
+use super::routes::route;
 use super::routes::{
-    effective_route_authority, order_auto_routes, route,
-    source_mode_for_resource, url_authority,
+    effective_route_authority, order_auto_routes, source_mode_for_resource,
+    url_authority,
 };
 use super::throttle::{
     FetchSemaphore, ROUTE_PROBE_SEMAPHORE, prefer_measured_http1,
@@ -34,7 +38,7 @@ use crate::util::download::route_health::{
     TaskProbeKey,
 };
 use futures::StreamExt;
-use reqwest::{StatusCode, header};
+use reqwest::StatusCode;
 use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;

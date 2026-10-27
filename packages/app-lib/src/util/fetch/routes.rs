@@ -21,6 +21,7 @@ use crate::util::download::constants::{
 use crate::util::download::route_health::{ROUTE_HEALTH, RouteHealth};
 use crate::util::download::{modrinth_cdn, retired_sources, route_policy};
 use std::collections::HashSet;
+#[cfg(test)]
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 use url::Url;

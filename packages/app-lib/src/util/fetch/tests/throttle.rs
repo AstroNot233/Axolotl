@@ -1,5 +1,6 @@
 //! Fetch throttle tests.
 
+#[cfg(test)]
 use std::time::Duration;
 
 use super::super::*;

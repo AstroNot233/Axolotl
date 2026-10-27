@@ -1,6 +1,5 @@
 //! Fetch request tests.
 
-use super::fixtures;
 use std::time::Duration;
 
 use super::super::*;

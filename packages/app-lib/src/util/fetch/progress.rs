@@ -1,13 +1,18 @@
+#[cfg(test)]
 use super::file;
 use super::model::{DownloadRequest, DownloadRoute, ProxyPolicy};
+#[cfg(test)]
 use super::request;
-use super::routes::{route, sanitize_url_for_log};
+#[cfg(test)]
+use super::routes::route;
+use super::routes::sanitize_url_for_log;
 use crate::install::DownloadItemStatus;
 use crate::util::download::constants::{
     DOWNLOAD_DNS_PREWARM_CONCURRENCY, FILE_TCP_KEEPALIVE,
 };
 use futures::StreamExt;
 use std::sync::Arc;
+#[cfg(test)]
 use std::time;
 
 pub(crate) async fn record_install_download_started(

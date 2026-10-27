@@ -1,7 +1,5 @@
 //! Fetch client tests.
 
-use super::fixtures;
-
 use super::super::*;
 use super::fixtures::*;
 

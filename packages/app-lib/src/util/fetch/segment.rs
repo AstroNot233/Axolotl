@@ -1,9 +1,12 @@
 #[cfg(test)]
 use super::BENCHMARK_TIMING;
+#[cfg(test)]
 use super::file;
-use super::file::{remove_if_exists, suffixed_path, write};
+use super::file::{remove_if_exists, suffixed_path};
 use super::model::{DownloadRequest, DownloadRoute};
+#[cfg(test)]
 use super::request;
+#[cfg(test)]
 use super::routes::route;
 use super::tail_candidate_path;
 use super::throttle::FetchSemaphore;
@@ -31,7 +34,6 @@ use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{self, Instant};
-use tokio::io::AsyncWriteExt;
 use tokio::sync::SemaphorePermit;
 
 #[derive(Clone)]

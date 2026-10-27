@@ -1,13 +1,17 @@
 use super::SegmentDownloadError;
 use super::client::{DownloadClients, is_h2_protocol_failure};
+#[cfg(test)]
 use super::file;
+#[cfg(test)]
+use super::file::write;
 use super::file::{
     ResourceValidator, create_download_file, parse_content_range,
-    suffixed_path, validate_resource_version, write,
+    suffixed_path, validate_resource_version,
 };
 use super::model::{DownloadMeta, DownloadRoute, Integrity};
-use super::routes::{route, url_authority};
-use super::segment;
+#[cfg(test)]
+use super::routes::route;
+use super::routes::url_authority;
 use super::segment::{
     DownloadRange, native_first_byte_timeout, range_idle_timeout,
 };
@@ -22,6 +26,7 @@ use futures::StreamExt;
 use parking_lot::Mutex;
 use reqwest::StatusCode;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::time;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex as AsyncMutex;

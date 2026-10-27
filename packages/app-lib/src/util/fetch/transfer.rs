@@ -1,3 +1,4 @@
+#[cfg(test)]
 use super::file;
 use super::file::{
     any_route_can_resume, destination_download_lock, part_resume_expected,
@@ -7,6 +8,7 @@ use super::model::{
     DownloadRequest, DownloadResult, DownloadRoute, DownloadRouteSource,
     FetchProgressFn, Integrity, attach_verified_integrity,
 };
+#[cfg(test)]
 use super::policy;
 use super::policy::{
     header_requires_official_only, range_splitting_allowed,
@@ -15,13 +17,16 @@ use super::policy::{
 };
 use super::prewarm_download_dns;
 use super::probe::prepare_native_download_routes;
+#[cfg(test)]
 use super::request;
+#[cfg(test)]
 use super::routes;
+#[cfg(test)]
+use super::routes::route;
 use super::routes::{
     deduplicate_download_routes, first_h2_route, is_official_route,
     official_route, original_route_authority, resolve_download_routes_for,
-    route, route_host, sanitize_url_for_log, source_mode_for_resource,
-    url_authority,
+    route_host, sanitize_url_for_log, source_mode_for_resource, url_authority,
 };
 use super::run_native_download_attempts;
 use super::segment::cleanup_segment_files;
@@ -36,12 +41,14 @@ use crate::util::download::constants::{
 use crate::util::download::integrity::verify_file;
 use crate::util::download::retired_sources;
 use crate::util::io::{self, IOError};
-use reqwest::header;
 use std::collections::HashSet;
 use std::error::Error;
+#[cfg(test)]
 use std::future::Future;
 use std::path::Path;
-use std::time::{self, Instant};
+#[cfg(test)]
+use std::time;
+use std::time::Instant;
 
 fn error_chain(error: &crate::Error) -> String {
     let mut chain = error.to_string();

@@ -11,6 +11,7 @@ use super::policy::{
     fetch_retry_delay, persisted_route_health, record_range_splitting_success,
     route_health_key,
 };
+#[cfg(test)]
 use super::probe;
 use super::probe::{
     RouteProbeFuture, RouteProbeResult, expected_route_speed,
@@ -19,9 +20,13 @@ use super::probe::{
 use super::record_install_download_progress;
 use super::record_install_download_stage;
 use super::record_install_download_started;
+#[cfg(test)]
 use super::request;
+#[cfg(test)]
 use super::routes;
-use super::routes::{route, sanitize_url_for_log, url_authority};
+#[cfg(test)]
+use super::routes::route;
+use super::routes::{sanitize_url_for_log, url_authority};
 use super::segment::{
     DownloadRange, DownloadRangeGuard, NativeConnectionPermit,
     RangeExpansionBaseline, SegmentCleanupGuard, SegmentDownloadCompletion,
@@ -31,13 +36,16 @@ use super::segment::{
     range_growth_target, range_idle_timeout, requested_range_floor,
     route_segmented_concurrency_cap, try_acquire_native_connection,
 };
+#[cfg(test)]
 use super::tail;
 use super::tail::race_tail_candidates;
 use super::throttle::{
     FetchSemaphore, TAIL_HEDGE_SEMAPHORE, configured_semaphore_limit,
     record_authority_h2_failure_for,
 };
+#[cfg(test)]
 use super::transfer;
+#[cfg(test)]
 use crate::ErrorKind;
 use crate::install::DownloadItemStatus;
 use crate::util::download::constants::{
@@ -62,17 +70,20 @@ use crate::util::download::integrity::{
 use crate::util::download::native_request::send_path_request_with_clients;
 use crate::util::download::route_health::ROUTE_HEALTH;
 use crate::util::download_manager::DownloadSpeedTracker;
-use crate::util::io::{self, IOError};
+#[cfg(test)]
+use crate::util::io;
+use crate::util::io::IOError;
 use futures::StreamExt;
 use parking_lot::Mutex;
-use reqwest::{StatusCode, header};
+use reqwest::StatusCode;
+#[cfg(test)]
 use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{self, Instant};
 use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
 

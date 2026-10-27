@@ -1,4 +1,5 @@
 use super::model::ProxyPolicy;
+#[cfg(test)]
 use crate::ErrorKind;
 use crate::util::download::constants::{
     FILE_VALIDATION_CONCURRENCY, H2_FALLBACK_TTL, H2_SLOW_FALLBACK_TTL,
@@ -6,6 +7,7 @@ use crate::util::download::constants::{
 };
 use crate::util::download_dns::DownloadDnsResolver;
 use parking_lot::Mutex;
+#[cfg(test)]
 use reqwest::header;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};

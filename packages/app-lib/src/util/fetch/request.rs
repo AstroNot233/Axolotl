@@ -1,10 +1,14 @@
+#[cfg(test)]
 use super::client;
 use super::client::{
     DIRECT_REQWEST_CLIENT, DownloadClients, INSECURE_REQWEST_CLIENT,
     NO_REDIRECT_REQWEST_CLIENT, configured_client,
 };
+#[cfg(test)]
 use super::file;
-use super::file::{response_status_error, response_validator, sha1_async};
+#[cfg(test)]
+use super::file::response_validator;
+use super::file::{response_status_error, sha1_async};
 use super::model::{
     DownloadMeta, DownloadRoute, FetchProgressFn, ProxyPolicy, ResourceClass,
 };
@@ -14,10 +18,13 @@ use super::policy::{
     requires_modrinth_auth, retry_after,
 };
 use super::prewarm_download_dns_for;
+#[cfg(test)]
 use super::routes;
+#[cfg(test)]
+use super::routes::route;
 use super::routes::{
     infer_resource_class, is_mrpack_url, is_official_modrinth_download_url,
-    modrinth_request_kind, official_route, resolve_download_routes_for, route,
+    modrinth_request_kind, official_route, resolve_download_routes_for,
     route_host, sanitize_url_for_log, source_mode_for_resource,
 };
 use super::throttle::FetchSemaphore;
@@ -42,9 +49,12 @@ use crate::{ErrorKind, LabrinthError};
 use bytes::Bytes;
 use eyre::{Context, eyre};
 use futures::StreamExt;
-use reqwest::{Method, StatusCode, header};
+#[cfg(test)]
+use reqwest::header;
+use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use std::collections::VecDeque;
+#[cfg(test)]
 use std::error::Error;
 use std::time::{self, Instant};
 

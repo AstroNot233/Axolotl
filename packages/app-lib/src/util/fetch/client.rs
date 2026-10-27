@@ -15,6 +15,7 @@ use crate::util::download::retired_sources;
 use crate::util::download_dns::DownloadDnsResolver;
 use std::error::Error;
 use std::sync::{Arc, LazyLock};
+#[cfg(test)]
 use std::time;
 
 pub(crate) fn is_h2_protocol_failure(error: &reqwest::Error) -> bool {

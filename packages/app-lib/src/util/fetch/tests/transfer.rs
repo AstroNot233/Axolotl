@@ -68,7 +68,7 @@ async fn failed_checkpoint_ranges_restart_full_download_but_io_and_cancel_keep_c
     );
     assert!(part.exists() && journal.exists());
 }
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 #[tokio::test]
