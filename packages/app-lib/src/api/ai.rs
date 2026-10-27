@@ -306,6 +306,14 @@ const PROVIDERS: &[AiProviderDefinition] = &[
         true
     ),
     provider!(
+        "fastai",
+        "FastAI",
+        Openai,
+        "https://api.fastaitoken.com/v1",
+        "gpt-6.1-sol",
+        true
+    ),
+    provider!(
         "cohere",
         "Cohere",
         Openai,
@@ -822,7 +830,7 @@ const PROVIDERS: &[AiProviderDefinition] = &[
 /// Sponsored provider ids. These listings are part of paid partnerships and
 /// must survive LobeHub model syncing; scripts/axolotl/sync-lobehub-models.mjs
 /// refuses to rewrite ai.rs when any of them is missing.
-const SPONSORED_PROVIDERS: &[&str] = &["codeflow"];
+const SPONSORED_PROVIDERS: &[&str] = &["codeflow", "fastai"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiSettings {
@@ -3816,7 +3824,7 @@ mod tests {
 
     #[test]
     fn catalog_matches_lobehub_text_provider_scope() {
-        assert_eq!(PROVIDERS.len(), 80);
+        assert_eq!(PROVIDERS.len(), 81);
         for excluded in ["bfl", "comfyui", "fal", "replicate", "lobehub"] {
             assert!(!PROVIDERS.iter().any(|provider| provider.id == excluded));
         }
@@ -3843,10 +3851,13 @@ mod tests {
                 .filter(|provider| SPONSORED_PROVIDERS.contains(&provider.id))
                 .all(|provider| provider.sponsored)
         );
-        assert!(
+        assert_eq!(
             catalog
                 .iter()
-                .any(|provider| provider.id == "codeflow" && provider.sponsored)
+                .filter(|provider| provider.sponsored)
+                .map(|provider| provider.id)
+                .collect::<Vec<_>>(),
+            ["codeflow", "fastai"]
         );
     }
 

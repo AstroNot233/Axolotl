@@ -15,7 +15,7 @@ const RUST_SOURCE_PATTERN = /const CATALOG_SOURCE: &str = "LobeHub ([0-9a-f]{40}
 // Sponsored providers are paid partner listings that must survive every
 // synchronization, even if a future rewrite of ai.rs drops upstream providers.
 // Keep this list in sync with SPONSORED_PROVIDERS in packages/app-lib/src/api/ai.rs.
-const SPONSORED_PROVIDER_IDS = ['codeflow']
+const SPONSORED_PROVIDER_IDS = ['codeflow', 'fastai']
 
 function assertSponsoredProvidersPreserved(rustSource) {
     for (const providerId of SPONSORED_PROVIDER_IDS) {
