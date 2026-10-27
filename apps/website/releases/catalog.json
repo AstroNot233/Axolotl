@@ -2,6 +2,125 @@
   "updated_at": "2026-10-25T14:00:55.536Z",
   "announcements": [
     {
+      "id": "launcher-1.10.2",
+      "version": "1.10.2",
+      "publishedAt": "2026-10-27",
+      "title": {
+        "en-US": "Axolotl Launcher 1.10.2",
+        "zh-CN": "Axolotl Launcher 1.10.2"
+      },
+      "changes": {
+        "added": [
+          {
+            "en-US": "Added local MCP connections with client setup, token authentication, session approval, and disconnection controls, currently limited to launcher information and session management.",
+            "zh-CN": "新增本地 MCP 连接，支持客户端配置、令牌认证、会话审批与断开连接，当前仅提供启动器信息读取和会话管理。"
+          },
+          {
+            "en-US": "Added FastAI to AI settings with a built-in provider configuration and model catalog.",
+            "zh-CN": "AI 设置新增 FastAI 服务商，提供内置连接配置和模型列表。"
+          },
+          {
+            "en-US": "Added modpack exports from linked Minecraft instances, using their actual game and loader versions.",
+            "zh-CN": "新增关联 Minecraft 实例的整合包导出支持，使用实例实际的游戏与加载器版本。"
+          },
+          {
+            "en-US": "Added an appearance setting to use the interface font for role nametags on the Skins page.",
+            "zh-CN": "外观设置新增皮肤页面角色名牌使用界面字体的选项。"
+          },
+          {
+            "en-US": "Added a 2×3 size option for the Recent Projects home widget.",
+            "zh-CN": "首页“最近的项目”小组件新增 2×3 尺寸。"
+          }
+        ],
+        "changed": [
+          {
+            "en-US": "Improved Java detection by completing a deeper search of likely installation directories before prompting for a runtime download.",
+            "zh-CN": "优化 Java 检测，在提示下载运行环境前，先进一步扫描可能的安装目录。"
+          },
+          {
+            "en-US": "Improved content update checks by scanning the whole instance in the background and continuing past slow individual requests.",
+            "zh-CN": "优化内容更新检查，在后台扫描整个实例，避免单个缓慢请求阻塞其他检查结果。"
+          },
+          {
+            "en-US": "Improved dependency analysis by reusing cached hashes and fingerprints for unchanged local files.",
+            "zh-CN": "优化依赖分析，复用未变更本地文件的哈希与指纹缓存，减少重复读取和计算。"
+          },
+          {
+            "en-US": "Improved content installation feedback with specific conflict details, failure reasons, and recovery suggestions.",
+            "zh-CN": "优化内容安装反馈，提供具体的冲突详情、失败原因和处理建议。"
+          },
+          {
+            "en-US": "Improved download connection pooling and range scheduling to reduce slow completion of Minecraft downloads.",
+            "zh-CN": "优化下载连接池和分段调度，改善 Minecraft 下载收尾阶段缓慢的问题。"
+          },
+          {
+            "en-US": "Simplified native instance imports to copy files, while keeping Minecraft folder linking as a separate choice.",
+            "zh-CN": "简化原生实例导入流程，统一通过复制文件导入，并将 Minecraft 文件夹关联作为独立选项。"
+          },
+          {
+            "en-US": "Temporarily disabled automatic onboarding while retaining manual tour replay.",
+            "zh-CN": "暂时关闭引导教程的自动弹出，保留手动重播入口。"
+          },
+          {
+            "en-US": "Temporarily hid the Mod Translation entry in Lab.",
+            "zh-CN": "暂时隐藏实验室中的模组翻译入口。"
+          }
+        ],
+        "fixed": [
+          {
+            "en-US": "Fixed isolated instance imports copying from the shared Minecraft directory instead of preserving the selected version's mods, configuration, and scripts.",
+            "zh-CN": "修复版本隔离实例导入时错误复制共享 Minecraft 目录，导致所选版本的模组、配置和脚本未被正确保留的问题。"
+          },
+          {
+            "en-US": "Fixed duplicate installation submissions creating repeated tasks and conflicting operations running against the same instance.",
+            "zh-CN": "修复重复提交安装产生重复任务，以及同一实例的冲突操作并行执行的问题。"
+          },
+          {
+            "en-US": "Fixed interrupted content enable, disable, and deletion operations leaving files inconsistent with launcher records, with recovery for unfinished operations.",
+            "zh-CN": "修复内容启用、禁用和删除操作中断后，文件与启动器记录不一致的问题，并支持恢复未完成的操作。"
+          },
+          {
+            "en-US": "Fixed stale content scans overwriting newer file-operation results and refresh events being missed after operations.",
+            "zh-CN": "修复过期内容扫描覆盖较新文件操作结果，以及操作后遗漏刷新事件的问题。"
+          },
+          {
+            "en-US": "Fixed content update checks being blocked by dependency installation planning before newer releases could be listed.",
+            "zh-CN": "修复内容更新检查被依赖安装分析阻塞，导致无法正常列出新版本的问题。"
+          },
+          {
+            "en-US": "Fixed content version queries getting stuck, with timeout recovery, retry support, and protection against repeated submissions.",
+            "zh-CN": "修复内容版本查询卡住的问题，补充超时恢复、重试和防止重复提交的处理。"
+          },
+          {
+            "en-US": "Fixed simultaneous world datapack changes overwriting each other and blocked writes while Minecraft holds the world open.",
+            "zh-CN": "修复同时修改世界数据包时相互覆盖的问题，并在 Minecraft 占用世界期间阻止写入。"
+          },
+          {
+            "en-US": "Fixed unreadable worlds disappearing from datapack lists and unreadable datapack states being treated as known values.",
+            "zh-CN": "修复无法读取的世界从数据包列表中消失，以及读取失败的数据包状态被当作确定值处理的问题。"
+          },
+          {
+            "en-US": "Fixed ZIP datapack enable states being confused with same-named folders.",
+            "zh-CN": "修复 ZIP 数据包的启用状态与同名文件夹混淆的问题。"
+          },
+          {
+            "en-US": "Fixed empty or invalid window dimensions being saved, restoring the stored value while keeping the edited field focused.",
+            "zh-CN": "修复窗口宽高为空或无效时仍被保存的问题，恢复已保存的值并保留输入框焦点。"
+          },
+          {
+            "en-US": "Fixed home widget editing controls shifting on hover or extending beyond their available space.",
+            "zh-CN": "修复首页小组件编辑栏悬停时抖动或超出可用区域的问题。"
+          }
+        ],
+        "security": [
+          {
+            "en-US": "Fixed known security vulnerabilities in zod and basic-ftp dependencies.",
+            "zh-CN": "更新 zod 和 basic-ftp 依赖，修复已知安全漏洞。"
+          }
+        ]
+      }
+    },
+    {
       "id": "launcher-1.10.1",
       "version": "1.10.1",
       "publishedAt": "2026-10-25",

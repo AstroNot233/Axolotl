@@ -346,6 +346,7 @@ it('targets visible block coordinates after chunk translation and ignores hidden
 })
 
 it('loads textured cavity geometry, switches layers, keeps the view on failure and cancels pending generation on exit', async () => {
+    const cameraPosition = vi.spyOn(SchematicPreviewScene.prototype, 'getCameraPosition')
     backend.maxChunks = 2
     const volume = () => {
         const result = new ArrayBuffer(16 + 18 * 18 * 384 + 18 * 18 * 2)
@@ -448,9 +449,13 @@ it('loads textured cavity geometry, switches layers, keeps the view on failure a
         .not.toBe(beforeMove)
     document.exitPointerLock()
     await expect.poll(() => document.pointerLockElement).toBe(null)
-    await new Promise((resolve) => setTimeout(resolve, 180))
+    await expect.poll(() => wrapper?.text()).toContain('Click the view to explore')
+    const samplesBeforeUnlock = cameraPosition.mock.calls.length
+    // The coordinate display samples the camera every 200 ms, independently of unlocking.
+    await expect.poll(() => cameraPosition.mock.calls.length).toBeGreaterThan(samplesBeforeUnlock)
     const afterUnlock = wrapper.text().match(/X -?\d+ · Y -?\d+ · Z -?\d+ · \d+ blocks\/s/)?.[0]
-    await new Promise((resolve) => setTimeout(resolve, 250))
+    const samplesAfterUnlock = cameraPosition.mock.calls.length
+    await expect.poll(() => cameraPosition.mock.calls.length).toBeGreaterThan(samplesAfterUnlock)
     expect(wrapper.text().match(/X -?\d+ · Y -?\d+ · Z -?\d+ · \d+ blocks\/s/)?.[0]).toBe(
         afterUnlock,
     )
