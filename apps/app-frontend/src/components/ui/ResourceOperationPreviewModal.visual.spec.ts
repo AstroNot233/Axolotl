@@ -456,7 +456,7 @@ it('uses a warning tooltip and queues selected content in one click after depend
         expect(button.attributes('disabled')).toBeUndefined()
         expect(button.attributes('color')).toBe('orange')
         expect(button.attributes('type')).toBe('colored')
-        expect(button.attributes('data-tooltip')).toBe('Dependency checks could not be completed.')
+        expect(button.attributes('data-tooltip')).toBe('Could not connect to the content source.')
         expect(wrapper.text()).not.toContain('Force install selected content only')
         await button.trigger('click')
         await flushPromises()

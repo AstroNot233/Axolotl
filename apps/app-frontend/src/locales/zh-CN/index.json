@@ -16939,5 +16939,2768 @@
   },
   "app.lab.command-generator.error.range": {
     "message": "请为{name}输入允许范围内的值。"
+  },
+  "app.lab.command-generator.cmd.advancement.desc": {
+    "message": "给予或移除玩家的进度"
+  },
+  "app.lab.command-generator.cmd.attribute.desc": {
+    "message": "修改或查询实体属性"
+  },
+  "app.lab.command-generator.cmd.ban.desc": {
+    "message": "封禁玩家"
+  },
+  "app.lab.command-generator.cmd.ban-ip.desc": {
+    "message": "封禁 IP 地址"
+  },
+  "app.lab.command-generator.cmd.banlist.desc": {
+    "message": "查看封禁列表"
+  },
+  "app.lab.command-generator.cmd.bossbar.desc": {
+    "message": "创建或修改 Boss 血量条"
+  },
+  "app.lab.command-generator.cmd.clear.desc": {
+    "message": "清除玩家物品栏"
+  },
+  "app.lab.command-generator.cmd.clone.desc": {
+    "message": "复制方块区域"
+  },
+  "app.lab.command-generator.cmd.damage.desc": {
+    "message": "对实体造成伤害"
+  },
+  "app.lab.command-generator.cmd.data.desc": {
+    "message": "读写方块、实体或存储的 NBT 数据"
+  },
+  "app.lab.command-generator.cmd.datapack.desc": {
+    "message": "控制数据包加载"
+  },
+  "app.lab.command-generator.cmd.debug.desc": {
+    "message": "调试命令"
+  },
+  "app.lab.command-generator.cmd.defaultgamemode.desc": {
+    "message": "设置新玩家的默认游戏模式"
+  },
+  "app.lab.command-generator.cmd.deop.desc": {
+    "message": "撤销玩家的 OP 权限"
+  },
+  "app.lab.command-generator.cmd.dialog.desc": {
+    "message": "向客户端显示对话界面（1.21.6+）"
+  },
+  "app.lab.command-generator.cmd.difficulty.desc": {
+    "message": "设置游戏难度"
+  },
+  "app.lab.command-generator.cmd.effect.desc": {
+    "message": "给予或移除状态效果"
+  },
+  "app.lab.command-generator.cmd.enchant.desc": {
+    "message": "附魔手持物品"
+  },
+  "app.lab.command-generator.cmd.execute.desc": {
+    "message": "以特定上下文执行命令"
+  },
+  "app.lab.command-generator.cmd.experience.desc": {
+    "message": "给予或移除玩家经验"
+  },
+  "app.lab.command-generator.cmd.fill.desc": {
+    "message": "填充方块区域"
+  },
+  "app.lab.command-generator.cmd.fillbiome.desc": {
+    "message": "填充生物群系区域（1.19+）"
+  },
+  "app.lab.command-generator.cmd.forceload.desc": {
+    "message": "强制加载或卸载区块"
+  },
+  "app.lab.command-generator.cmd.function.desc": {
+    "message": "运行函数"
+  },
+  "app.lab.command-generator.cmd.gamemode.desc": {
+    "message": "设置玩家游戏模式"
+  },
+  "app.lab.command-generator.cmd.gamerule.desc": {
+    "message": "设置游戏规则"
+  },
+  "app.lab.command-generator.cmd.give.desc": {
+    "message": "给予玩家物品"
+  },
+  "app.lab.command-generator.cmd.help.desc": {
+    "message": "显示命令帮助"
+  },
+  "app.lab.command-generator.cmd.item.desc": {
+    "message": "修改方块中的物品"
+  },
+  "app.lab.command-generator.cmd.jfr.desc": {
+    "message": "Java Flight Recorder 性能分析"
+  },
+  "app.lab.command-generator.cmd.kick.desc": {
+    "message": "踢出玩家"
+  },
+  "app.lab.command-generator.cmd.kill.desc": {
+    "message": "清除实体"
+  },
+  "app.lab.command-generator.cmd.list.desc": {
+    "message": "列出在线玩家"
+  },
+  "app.lab.command-generator.cmd.locate.desc": {
+    "message": "定位最近的建筑或生物群系"
+  },
+  "app.lab.command-generator.cmd.loot.desc": {
+    "message": "掉落战利品"
+  },
+  "app.lab.command-generator.cmd.me.desc": {
+    "message": "发送第三人称消息"
+  },
+  "app.lab.command-generator.cmd.msg.desc": {
+    "message": "私聊玩家"
+  },
+  "app.lab.command-generator.cmd.op.desc": {
+    "message": "授予玩家 OP 权限"
+  },
+  "app.lab.command-generator.cmd.pardon.desc": {
+    "message": "解除玩家封禁"
+  },
+  "app.lab.command-generator.cmd.pardon-ip.desc": {
+    "message": "解除 IP 封禁"
+  },
+  "app.lab.command-generator.cmd.particle.desc": {
+    "message": "生成粒子效果"
+  },
+  "app.lab.command-generator.cmd.placefeature.desc": {
+    "message": "放置已配置的地物（1.18.2）"
+  },
+  "app.lab.command-generator.cmd.playsound.desc": {
+    "message": "播放声音"
+  },
+  "app.lab.command-generator.cmd.publish.desc": {
+    "message": "将本地世界发布到局域网"
+  },
+  "app.lab.command-generator.cmd.random.desc": {
+    "message": "抽取随机值（1.20.2+）"
+  },
+  "app.lab.command-generator.cmd.recipe.desc": {
+    "message": "给予或移除合成配方"
+  },
+  "app.lab.command-generator.cmd.reload.desc": {
+    "message": "重新加载数据包"
+  },
+  "app.lab.command-generator.cmd.replaceitem.desc": {
+    "message": "替换物品栏中的物品（1.16 及以前）"
+  },
+  "app.lab.command-generator.cmd.ride.desc": {
+    "message": "使实体骑乘或下马（1.19.4+）"
+  },
+  "app.lab.command-generator.cmd.say.desc": {
+    "message": "向所有玩家广播消息"
+  },
+  "app.lab.command-generator.cmd.schedule.desc": {
+    "message": "调度函数执行"
+  },
+  "app.lab.command-generator.cmd.scoreboard.desc": {
+    "message": "管理计分板"
+  },
+  "app.lab.command-generator.cmd.seed.desc": {
+    "message": "显示世界种子"
+  },
+  "app.lab.command-generator.cmd.setblock.desc": {
+    "message": "放置单个方块"
+  },
+  "app.lab.command-generator.cmd.setidletimeout.desc": {
+    "message": "设置玩家空闲超时时间"
+  },
+  "app.lab.command-generator.cmd.setworldspawn.desc": {
+    "message": "设置世界出生点"
+  },
+  "app.lab.command-generator.cmd.spawnpoint.desc": {
+    "message": "设置玩家的重生点"
+  },
+  "app.lab.command-generator.cmd.spectate.desc": {
+    "message": "使旁观模式玩家旁观某个实体"
+  },
+  "app.lab.command-generator.cmd.spreadplayers.desc": {
+    "message": "将实体随机传送"
+  },
+  "app.lab.command-generator.cmd.stop.desc": {
+    "message": "停止服务器"
+  },
+  "app.lab.command-generator.cmd.stopsound.desc": {
+    "message": "停止声音"
+  },
+  "app.lab.command-generator.cmd.stopwatch.desc": {
+    "message": "创建或修改实时秒表（1.21.11+）"
+  },
+  "app.lab.command-generator.cmd.summon.desc": {
+    "message": "生成实体"
+  },
+  "app.lab.command-generator.cmd.swing.desc": {
+    "message": "挥舞实体的手（1.21.4+）"
+  },
+  "app.lab.command-generator.cmd.tag.desc": {
+    "message": "管理实体的标签"
+  },
+  "app.lab.command-generator.cmd.team.desc": {
+    "message": "管理计分板队伍"
+  },
+  "app.lab.command-generator.cmd.teammsg.desc": {
+    "message": "向队伍发送消息"
+  },
+  "app.lab.command-generator.cmd.teleport.desc": {
+    "message": "传送实体"
+  },
+  "app.lab.command-generator.cmd.tell.desc": {
+    "message": "私聊玩家"
+  },
+  "app.lab.command-generator.cmd.tellraw.desc": {
+    "message": "向玩家发送原始 JSON 消息"
+  },
+  "app.lab.command-generator.cmd.tick.desc": {
+    "message": "控制游戏刻速率（1.20.3+）"
+  },
+  "app.lab.command-generator.cmd.time.desc": {
+    "message": "设置或查询游戏时间"
+  },
+  "app.lab.command-generator.cmd.title.desc": {
+    "message": "管理屏幕标题"
+  },
+  "app.lab.command-generator.cmd.trigger.desc": {
+    "message": "触发计分板触发器"
+  },
+  "app.lab.command-generator.cmd.waypoint.desc": {
+    "message": "管理定位条上的路标（1.21.6+）"
+  },
+  "app.lab.command-generator.cmd.weather.desc": {
+    "message": "设置天气"
+  },
+  "app.lab.command-generator.cmd.whitelist.desc": {
+    "message": "管理服务器白名单"
+  },
+  "app.lab.command-generator.cmd.worldborder.desc": {
+    "message": "管理世界边界"
+  },
+  "app.lab.command-generator.cmd.xp.desc": {
+    "message": "给予或移除玩家经验"
+  },
+  "app.lab.command-generator.execute.category.modifiers": {
+    "message": "修饰子命令 · 改变执行上下文"
+  },
+  "app.lab.command-generator.execute.category.conditions": {
+    "message": "条件子命令 · 判断是否继续"
+  },
+  "app.lab.command-generator.execute.category.store": {
+    "message": "存储子命令 · 保存结果（Java 版）"
+  },
+  "app.lab.command-generator.execute.as.label": {
+    "message": "as · 改变执行者"
+  },
+  "app.lab.command-generator.execute.as.desc": {
+    "message": "以指定实体作为执行者，位置和朝向不变"
+  },
+  "app.lab.command-generator.execute.at.label": {
+    "message": "at · 改变位置和朝向"
+  },
+  "app.lab.command-generator.execute.at.desc": {
+    "message": "使用目标的位置和朝向"
+  },
+  "app.lab.command-generator.execute.positioned.label": {
+    "message": "positioned · 改变位置"
+  },
+  "app.lab.command-generator.execute.positioned.desc": {
+    "message": "改变执行位置，执行者和朝向不变"
+  },
+  "app.lab.command-generator.execute.positioned-as.label": {
+    "message": "positioned as · 以目标为位置"
+  },
+  "app.lab.command-generator.execute.positioned-as.desc": {
+    "message": "把执行位置设为目标的当前位置"
+  },
+  "app.lab.command-generator.execute.rotated.label": {
+    "message": "rotated · 改变朝向"
+  },
+  "app.lab.command-generator.execute.rotated.desc": {
+    "message": "改变执行朝向，位置和执行者不变"
+  },
+  "app.lab.command-generator.execute.rotated-as.label": {
+    "message": "rotated as · 以目标为朝向"
+  },
+  "app.lab.command-generator.execute.rotated-as.desc": {
+    "message": "把执行朝向设为目标当前的朝向"
+  },
+  "app.lab.command-generator.execute.facing.label": {
+    "message": "facing · 面向坐标"
+  },
+  "app.lab.command-generator.execute.facing.desc": {
+    "message": "把执行朝向设为面向某个坐标"
+  },
+  "app.lab.command-generator.execute.facing-entity.label": {
+    "message": "facing entity · 面向实体"
+  },
+  "app.lab.command-generator.execute.facing-entity.desc": {
+    "message": "把执行朝向设为面向某个实体"
+  },
+  "app.lab.command-generator.execute.in.label": {
+    "message": "in · 切换维度"
+  },
+  "app.lab.command-generator.execute.in.desc": {
+    "message": "切换执行维度，位置坐标不变"
+  },
+  "app.lab.command-generator.execute.anchored.label": {
+    "message": "anchored · 改变基准点"
+  },
+  "app.lab.command-generator.execute.anchored.desc": {
+    "message": "改变执行基准点（脚或眼睛），影响 ^ 坐标计算"
+  },
+  "app.lab.command-generator.execute.align.label": {
+    "message": "align · 对齐坐标"
+  },
+  "app.lab.command-generator.execute.align.desc": {
+    "message": "把执行坐标对齐到方块网格"
+  },
+  "app.lab.command-generator.execute.if-entity.label": {
+    "message": "if entity · 检测实体存在"
+  },
+  "app.lab.command-generator.execute.if-entity.desc": {
+    "message": "如果指定实体存在则继续"
+  },
+  "app.lab.command-generator.execute.unless-entity.label": {
+    "message": "unless entity · 检测实体不存在"
+  },
+  "app.lab.command-generator.execute.unless-entity.desc": {
+    "message": "如果指定实体不存在则继续"
+  },
+  "app.lab.command-generator.execute.if-block.label": {
+    "message": "if block · 检测方块"
+  },
+  "app.lab.command-generator.execute.if-block.desc": {
+    "message": "如果指定位置是指定方块则继续"
+  },
+  "app.lab.command-generator.execute.if-blocks.label": {
+    "message": "if blocks · 检测区域"
+  },
+  "app.lab.command-generator.execute.if-blocks.desc": {
+    "message": "如果两个区域的方块匹配则继续"
+  },
+  "app.lab.command-generator.execute.if-score.label": {
+    "message": "if score · 比较分数"
+  },
+  "app.lab.command-generator.execute.if-score.desc": {
+    "message": "如果两个记分比较成立则继续"
+  },
+  "app.lab.command-generator.execute.if-score-matches.label": {
+    "message": "if score matches · 检测分数范围"
+  },
+  "app.lab.command-generator.execute.if-score-matches.desc": {
+    "message": "如果分数在指定范围内则继续"
+  },
+  "app.lab.command-generator.execute.if-biome.label": {
+    "message": "if biome · 检测生物群系"
+  },
+  "app.lab.command-generator.execute.if-biome.desc": {
+    "message": "如果指定位置的生物群系匹配则继续"
+  },
+  "app.lab.command-generator.execute.if-data.label": {
+    "message": "if data · 检测 NBT 数据"
+  },
+  "app.lab.command-generator.execute.if-data.desc": {
+    "message": "如果指定 NBT 路径存在则继续"
+  },
+  "app.lab.command-generator.execute.if-items.label": {
+    "message": "if items · 检测物品（1.21+）"
+  },
+  "app.lab.command-generator.execute.if-items.desc": {
+    "message": "如果指定槽位有指定物品则继续"
+  },
+  "app.lab.command-generator.execute.if-function.label": {
+    "message": "if function · 检测函数返回"
+  },
+  "app.lab.command-generator.execute.if-function.desc": {
+    "message": "如果函数返回成功则继续"
+  },
+  "app.lab.command-generator.execute.unless-block.label": {
+    "message": "unless block · 检测方块（反向）"
+  },
+  "app.lab.command-generator.execute.unless-block.desc": {
+    "message": "如果指定位置不是指定方块则继续"
+  },
+  "app.lab.command-generator.execute.unless-score.label": {
+    "message": "unless score · 比较分数（反向）"
+  },
+  "app.lab.command-generator.execute.unless-score.desc": {
+    "message": "如果两个记分比较不成立则继续"
+  },
+  "app.lab.command-generator.execute.store-result-score.label": {
+    "message": "store result score · 存入记分板"
+  },
+  "app.lab.command-generator.execute.store-result-score.desc": {
+    "message": "把命令的实际结果值存入记分板"
+  },
+  "app.lab.command-generator.execute.store-success-score.label": {
+    "message": "store success score · 存入成功状态"
+  },
+  "app.lab.command-generator.execute.store-success-score.desc": {
+    "message": "把命令是否成功（1 或 0）存入记分板"
+  },
+  "app.lab.command-generator.execute.store-result-bossbar.label": {
+    "message": "store result bossbar · 存入 Boss 栏"
+  },
+  "app.lab.command-generator.execute.store-result-bossbar.desc": {
+    "message": "把结果值存入 Boss 栏的当前值或最大值"
+  },
+  "app.lab.command-generator.preset.common.self": {
+    "message": "自己"
+  },
+  "app.lab.command-generator.preset.common.all-players": {
+    "message": "所有玩家"
+  },
+  "app.lab.command-generator.preset.common.nearest-player": {
+    "message": "最近玩家"
+  },
+  "app.lab.command-generator.preset.common.all-entities": {
+    "message": "所有实体"
+  },
+  "app.lab.command-generator.preset.entity.all-zombies": {
+    "message": "所有僵尸"
+  },
+  "app.lab.command-generator.preset.entity.all-items": {
+    "message": "所有物品实体"
+  },
+  "app.lab.command-generator.preset.entity-type.pig": {
+    "message": "猪"
+  },
+  "app.lab.command-generator.preset.entity-type.boat": {
+    "message": "船"
+  },
+  "app.lab.command-generator.preset.entity-type.minecart": {
+    "message": "矿车"
+  },
+  "app.lab.command-generator.preset.entity-type.horse": {
+    "message": "马"
+  },
+  "app.lab.command-generator.preset.entity-type.axolotl": {
+    "message": "美西螈"
+  },
+  "app.lab.command-generator.preset.entity-type.zombie": {
+    "message": "僵尸"
+  },
+  "app.lab.command-generator.preset.entity-type.creeper": {
+    "message": "苦力怕"
+  },
+  "app.lab.command-generator.preset.entity-type.ender-dragon": {
+    "message": "末影龙"
+  },
+  "app.lab.command-generator.preset.entity-type.wither": {
+    "message": "凋灵"
+  },
+  "app.lab.command-generator.preset.entity-type.lightning": {
+    "message": "闪电"
+  },
+  "app.lab.command-generator.preset.count.1": {
+    "message": "1"
+  },
+  "app.lab.command-generator.preset.count.10": {
+    "message": "10"
+  },
+  "app.lab.command-generator.preset.count.16": {
+    "message": "16"
+  },
+  "app.lab.command-generator.preset.count.64": {
+    "message": "64"
+  },
+  "app.lab.command-generator.preset.count.100": {
+    "message": "100"
+  },
+  "app.lab.command-generator.preset.amount.10": {
+    "message": "10"
+  },
+  "app.lab.command-generator.preset.amount.30": {
+    "message": "30"
+  },
+  "app.lab.command-generator.preset.amount.100": {
+    "message": "100"
+  },
+  "app.lab.command-generator.preset.action.add": {
+    "message": "增加"
+  },
+  "app.lab.command-generator.preset.action.set": {
+    "message": "设置"
+  },
+  "app.lab.command-generator.preset.unit.levels": {
+    "message": "等级"
+  },
+  "app.lab.command-generator.preset.unit.points": {
+    "message": "点数"
+  },
+  "app.lab.command-generator.preset.boolean.true": {
+    "message": "true (真)"
+  },
+  "app.lab.command-generator.preset.boolean.false": {
+    "message": "false (假)"
+  },
+  "app.lab.command-generator.preset.coord.current": {
+    "message": "当前位置"
+  },
+  "app.lab.command-generator.preset.coord.world-center": {
+    "message": "世界中心"
+  },
+  "app.lab.command-generator.preset.coord.below": {
+    "message": "脚下方块"
+  },
+  "app.lab.command-generator.preset.distance.10": {
+    "message": "10"
+  },
+  "app.lab.command-generator.preset.distance.50": {
+    "message": "50"
+  },
+  "app.lab.command-generator.preset.distance.100": {
+    "message": "100"
+  },
+  "app.lab.command-generator.preset.distance.500": {
+    "message": "500"
+  },
+  "app.lab.command-generator.preset.distance.1000": {
+    "message": "1000"
+  },
+  "app.lab.command-generator.preset.minutes.5": {
+    "message": "5 分钟"
+  },
+  "app.lab.command-generator.preset.minutes.15": {
+    "message": "15 分钟"
+  },
+  "app.lab.command-generator.preset.minutes.30": {
+    "message": "30 分钟"
+  },
+  "app.lab.command-generator.preset.port.25565": {
+    "message": "25565"
+  },
+  "app.lab.command-generator.preset.port.25566": {
+    "message": "25566"
+  },
+  "app.lab.command-generator.preset.duration.10s": {
+    "message": "10 秒"
+  },
+  "app.lab.command-generator.preset.duration.30s": {
+    "message": "30 秒"
+  },
+  "app.lab.command-generator.preset.duration.1m": {
+    "message": "1 分钟"
+  },
+  "app.lab.command-generator.preset.duration.5m": {
+    "message": "5 分钟"
+  },
+  "app.lab.command-generator.preset.duration.10m": {
+    "message": "10 分钟"
+  },
+  "app.lab.command-generator.preset.duration.30m": {
+    "message": "30 分钟"
+  },
+  "app.lab.command-generator.preset.time.1s": {
+    "message": "1 秒"
+  },
+  "app.lab.command-generator.preset.time.10s": {
+    "message": "10 秒"
+  },
+  "app.lab.command-generator.preset.time.1m": {
+    "message": "1 分钟"
+  },
+  "app.lab.command-generator.preset.time.1d": {
+    "message": "1 天"
+  },
+  "app.lab.command-generator.preset.range.1-10": {
+    "message": "1 到 10"
+  },
+  "app.lab.command-generator.preset.range.1-100": {
+    "message": "1 到 100"
+  },
+  "app.lab.command-generator.preset.range.1-6": {
+    "message": "1 到 6"
+  },
+  "app.lab.command-generator.preset.range.0-1": {
+    "message": "0 到 1"
+  },
+  "app.lab.command-generator.preset.range.exact-5": {
+    "message": "正好 5"
+  },
+  "app.lab.command-generator.preset.range.min-10": {
+    "message": "至少 10"
+  },
+  "app.lab.command-generator.preset.range.max-5": {
+    "message": "最多 5"
+  },
+  "app.lab.command-generator.preset.gamemode.survival": {
+    "message": "生存模式"
+  },
+  "app.lab.command-generator.preset.gamemode.creative": {
+    "message": "创造模式"
+  },
+  "app.lab.command-generator.preset.gamemode.adventure": {
+    "message": "冒险模式"
+  },
+  "app.lab.command-generator.preset.gamemode.spectator": {
+    "message": "旁观模式"
+  },
+  "app.lab.command-generator.preset.difficulty.peaceful": {
+    "message": "和平"
+  },
+  "app.lab.command-generator.preset.difficulty.easy": {
+    "message": "简单"
+  },
+  "app.lab.command-generator.preset.difficulty.normal": {
+    "message": "普通"
+  },
+  "app.lab.command-generator.preset.difficulty.hard": {
+    "message": "困难"
+  },
+  "app.lab.command-generator.preset.weather.clear": {
+    "message": "晴天"
+  },
+  "app.lab.command-generator.preset.weather.rain": {
+    "message": "雨天"
+  },
+  "app.lab.command-generator.preset.weather.thunder": {
+    "message": "雷暴"
+  },
+  "app.lab.command-generator.preset.time-of-day.day": {
+    "message": "白天"
+  },
+  "app.lab.command-generator.preset.time-of-day.noon": {
+    "message": "正午"
+  },
+  "app.lab.command-generator.preset.time-of-day.night": {
+    "message": "夜晚"
+  },
+  "app.lab.command-generator.preset.time-of-day.midnight": {
+    "message": "午夜"
+  },
+  "app.lab.command-generator.preset.time-action.set": {
+    "message": "设置"
+  },
+  "app.lab.command-generator.preset.time-action.add": {
+    "message": "增加"
+  },
+  "app.lab.command-generator.preset.time-action.query": {
+    "message": "查询"
+  },
+  "app.lab.command-generator.preset.item.diamond": {
+    "message": "钻石"
+  },
+  "app.lab.command-generator.preset.item.netherite-ingot": {
+    "message": "下界合金锭"
+  },
+  "app.lab.command-generator.preset.item.diamond-sword": {
+    "message": "钻石剑"
+  },
+  "app.lab.command-generator.preset.item.golden-apple": {
+    "message": "金苹果"
+  },
+  "app.lab.command-generator.preset.item.enchanted-golden-apple": {
+    "message": "附魔金苹果"
+  },
+  "app.lab.command-generator.preset.item.elytra": {
+    "message": "鞘翅"
+  },
+  "app.lab.command-generator.preset.block.stone": {
+    "message": "石头"
+  },
+  "app.lab.command-generator.preset.block.glass": {
+    "message": "玻璃"
+  },
+  "app.lab.command-generator.preset.block.air": {
+    "message": "空气"
+  },
+  "app.lab.command-generator.preset.block.diamond-block": {
+    "message": "钻石块"
+  },
+  "app.lab.command-generator.preset.block.chest": {
+    "message": "箱子"
+  },
+  "app.lab.command-generator.preset.block.grass": {
+    "message": "草方块"
+  },
+  "app.lab.command-generator.preset.fill-mode.replace": {
+    "message": "替换"
+  },
+  "app.lab.command-generator.preset.fill-mode.keep": {
+    "message": "保留"
+  },
+  "app.lab.command-generator.preset.fill-mode.outline": {
+    "message": "轮廓"
+  },
+  "app.lab.command-generator.preset.fill-mode.hollow": {
+    "message": "空心"
+  },
+  "app.lab.command-generator.preset.fill-mode.destroy": {
+    "message": "破坏"
+  },
+  "app.lab.command-generator.preset.effect.speed": {
+    "message": "速度"
+  },
+  "app.lab.command-generator.preset.effect.strength": {
+    "message": "力量"
+  },
+  "app.lab.command-generator.preset.effect.jump-boost": {
+    "message": "跳跃提升"
+  },
+  "app.lab.command-generator.preset.effect.regeneration": {
+    "message": "生命恢复"
+  },
+  "app.lab.command-generator.preset.effect.night-vision": {
+    "message": "夜视"
+  },
+  "app.lab.command-generator.preset.effect.poison": {
+    "message": "中毒"
+  },
+  "app.lab.command-generator.preset.effect.action.0": {
+    "message": "给予"
+  },
+  "app.lab.command-generator.preset.effect.action.1": {
+    "message": "移除"
+  },
+  "app.lab.command-generator.preset.enchantment.sharpness": {
+    "message": "锋利"
+  },
+  "app.lab.command-generator.preset.enchantment.unbreaking": {
+    "message": "耐久"
+  },
+  "app.lab.command-generator.preset.enchantment.mending": {
+    "message": "经验修补"
+  },
+  "app.lab.command-generator.preset.enchantment.protection": {
+    "message": "保护"
+  },
+  "app.lab.command-generator.preset.enchantment.fortune": {
+    "message": "时运"
+  },
+  "app.lab.command-generator.preset.particle.flame": {
+    "message": "火焰"
+  },
+  "app.lab.command-generator.preset.particle.heart": {
+    "message": "爱心"
+  },
+  "app.lab.command-generator.preset.particle.explosion": {
+    "message": "爆炸"
+  },
+  "app.lab.command-generator.preset.particle.portal": {
+    "message": "末影"
+  },
+  "app.lab.command-generator.preset.biome.plains": {
+    "message": "平原"
+  },
+  "app.lab.command-generator.preset.biome.desert": {
+    "message": "沙漠"
+  },
+  "app.lab.command-generator.preset.biome.forest": {
+    "message": "森林"
+  },
+  "app.lab.command-generator.preset.biome.ocean": {
+    "message": "海洋"
+  },
+  "app.lab.command-generator.preset.biome.snowy-plains": {
+    "message": "雪原"
+  },
+  "app.lab.command-generator.preset.biome.jungle": {
+    "message": "丛林"
+  },
+  "app.lab.command-generator.preset.dimension.overworld": {
+    "message": "主世界"
+  },
+  "app.lab.command-generator.preset.dimension.nether": {
+    "message": "下界"
+  },
+  "app.lab.command-generator.preset.dimension.end": {
+    "message": "末地"
+  },
+  "app.lab.command-generator.preset.feature.oak": {
+    "message": "橡树"
+  },
+  "app.lab.command-generator.preset.feature.spruce": {
+    "message": "云杉"
+  },
+  "app.lab.command-generator.preset.feature.birch": {
+    "message": "白桦"
+  },
+  "app.lab.command-generator.preset.feature.grass": {
+    "message": "草"
+  },
+  "app.lab.command-generator.preset.feature.flower": {
+    "message": "花"
+  },
+  "app.lab.command-generator.preset.color.gold": {
+    "message": "金色"
+  },
+  "app.lab.command-generator.preset.color.red": {
+    "message": "红色"
+  },
+  "app.lab.command-generator.preset.color.green": {
+    "message": "绿色"
+  },
+  "app.lab.command-generator.preset.color.blue": {
+    "message": "蓝色"
+  },
+  "app.lab.command-generator.preset.color.white": {
+    "message": "白色"
+  },
+  "app.lab.command-generator.preset.rotation.north": {
+    "message": "北 0"
+  },
+  "app.lab.command-generator.preset.rotation.east": {
+    "message": "东 90"
+  },
+  "app.lab.command-generator.preset.rotation.south": {
+    "message": "南 180"
+  },
+  "app.lab.command-generator.preset.rotation.west": {
+    "message": "西 -90"
+  },
+  "app.lab.command-generator.preset.pitch.horizontal": {
+    "message": "水平 0"
+  },
+  "app.lab.command-generator.preset.pitch.up": {
+    "message": "朝上 -90"
+  },
+  "app.lab.command-generator.preset.pitch.down": {
+    "message": "朝下 90"
+  },
+  "app.lab.command-generator.preset.anchor.eyes": {
+    "message": "眼睛"
+  },
+  "app.lab.command-generator.preset.anchor.feet": {
+    "message": "脚部"
+  },
+  "app.lab.command-generator.preset.align.xyz": {
+    "message": "全部"
+  },
+  "app.lab.command-generator.preset.align.x": {
+    "message": "仅 X"
+  },
+  "app.lab.command-generator.preset.align.y": {
+    "message": "仅 Y"
+  },
+  "app.lab.command-generator.preset.align.z": {
+    "message": "仅 Z"
+  },
+  "app.lab.command-generator.preset.ride-action.mount": {
+    "message": "骑乘"
+  },
+  "app.lab.command-generator.preset.ride-action.dismount": {
+    "message": "下马"
+  },
+  "app.lab.command-generator.preset.tag-action.add": {
+    "message": "添加"
+  },
+  "app.lab.command-generator.preset.tag-action.remove": {
+    "message": "移除"
+  },
+  "app.lab.command-generator.preset.tag-action.list": {
+    "message": "列出"
+  },
+  "app.lab.command-generator.preset.random-action.value": {
+    "message": "抽值"
+  },
+  "app.lab.command-generator.preset.random-action.roll": {
+    "message": "掷骰"
+  },
+  "app.lab.command-generator.preset.random-action.reset": {
+    "message": "重置"
+  },
+  "app.lab.command-generator.preset.tick-action.freeze": {
+    "message": "冻结"
+  },
+  "app.lab.command-generator.preset.tick-action.unfreeze": {
+    "message": "解冻"
+  },
+  "app.lab.command-generator.preset.tick-action.rate": {
+    "message": "设置速率"
+  },
+  "app.lab.command-generator.preset.tick-action.sprint": {
+    "message": "疾跑"
+  },
+  "app.lab.command-generator.preset.tick-action.step": {
+    "message": "单步"
+  },
+  "app.lab.command-generator.preset.tick-action.query": {
+    "message": "查询"
+  },
+  "app.lab.command-generator.preset.tick-rate.1": {
+    "message": "1"
+  },
+  "app.lab.command-generator.preset.tick-rate.20": {
+    "message": "20"
+  },
+  "app.lab.command-generator.preset.tick-rate.100": {
+    "message": "100"
+  },
+  "app.lab.command-generator.preset.waypoint-action.list": {
+    "message": "列出"
+  },
+  "app.lab.command-generator.preset.waypoint-action.add": {
+    "message": "添加"
+  },
+  "app.lab.command-generator.preset.waypoint-action.remove": {
+    "message": "移除"
+  },
+  "app.lab.command-generator.preset.waypoint-action.modify": {
+    "message": "修改"
+  },
+  "app.lab.command-generator.preset.stopwatch-action.create": {
+    "message": "创建"
+  },
+  "app.lab.command-generator.preset.stopwatch-action.query": {
+    "message": "查询"
+  },
+  "app.lab.command-generator.preset.stopwatch-action.restart": {
+    "message": "重启"
+  },
+  "app.lab.command-generator.preset.stopwatch-action.remove": {
+    "message": "移除"
+  },
+  "app.lab.command-generator.preset.scale.1": {
+    "message": "1"
+  },
+  "app.lab.command-generator.preset.scale.0-05": {
+    "message": "0.05"
+  },
+  "app.lab.command-generator.preset.scale.20": {
+    "message": "20"
+  },
+  "app.lab.command-generator.preset.hand.mainhand": {
+    "message": "主手"
+  },
+  "app.lab.command-generator.preset.hand.offhand": {
+    "message": "副手"
+  },
+  "app.lab.command-generator.preset.damage-amount.1": {
+    "message": "1"
+  },
+  "app.lab.command-generator.preset.damage-amount.5": {
+    "message": "5"
+  },
+  "app.lab.command-generator.preset.damage-amount.10": {
+    "message": "10"
+  },
+  "app.lab.command-generator.preset.damage-amount.fatal": {
+    "message": "致死"
+  },
+  "app.lab.command-generator.preset.damage-type.generic": {
+    "message": "通用"
+  },
+  "app.lab.command-generator.preset.damage-type.fire": {
+    "message": "火焰"
+  },
+  "app.lab.command-generator.preset.damage-type.fall": {
+    "message": "摔落"
+  },
+  "app.lab.command-generator.preset.damage-type.void": {
+    "message": "虚空"
+  },
+  "app.lab.command-generator.preset.damage-type.drowning": {
+    "message": "溺水"
+  },
+  "app.lab.command-generator.preset.blocks-mode.all": {
+    "message": "完全匹配"
+  },
+  "app.lab.command-generator.preset.blocks-mode.masked": {
+    "message": "忽略空气"
+  },
+  "app.lab.command-generator.preset.data-target.block": {
+    "message": "方块"
+  },
+  "app.lab.command-generator.preset.data-target.entity": {
+    "message": "实体"
+  },
+  "app.lab.command-generator.preset.data-target.storage": {
+    "message": "存储"
+  },
+  "app.lab.command-generator.preset.slot.mainhand": {
+    "message": "主手"
+  },
+  "app.lab.command-generator.preset.slot.container-all": {
+    "message": "所有容器"
+  },
+  "app.lab.command-generator.preset.slot.all": {
+    "message": "全部槽位"
+  },
+  "app.lab.command-generator.preset.bossbar-value.value": {
+    "message": "当前值"
+  },
+  "app.lab.command-generator.preset.bossbar-value.max": {
+    "message": "最大值"
+  },
+  "app.lab.command-generator.preset.attribute.max-health": {
+    "message": "最大生命"
+  },
+  "app.lab.command-generator.preset.attribute.movement-speed": {
+    "message": "移动速度"
+  },
+  "app.lab.command-generator.preset.attribute.attack-damage": {
+    "message": "攻击伤害"
+  },
+  "app.lab.command-generator.preset.attribute.action.get": {
+    "message": "查询"
+  },
+  "app.lab.command-generator.preset.attribute.action.base": {
+    "message": "基础值"
+  },
+  "app.lab.command-generator.preset.attribute.action.value": {
+    "message": "设置值"
+  },
+  "app.lab.command-generator.preset.scoreboard.category.objectives": {
+    "message": "计分项"
+  },
+  "app.lab.command-generator.preset.scoreboard.category.players": {
+    "message": "玩家"
+  },
+  "app.lab.command-generator.preset.banlist.type.0": {
+    "message": "玩家"
+  },
+  "app.lab.command-generator.preset.banlist.type.1": {
+    "message": "IP"
+  },
+  "app.lab.command-generator.preset.advancement.action.0": {
+    "message": "给予"
+  },
+  "app.lab.command-generator.preset.advancement.action.1": {
+    "message": "移除"
+  },
+  "app.lab.command-generator.arg.advancement.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.advancement.action.desc": {
+    "message": "grant 给予 / revoke 移除"
+  },
+  "app.lab.command-generator.arg.advancement.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.advancement.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.advancement.advancement.display": {
+    "message": "进度"
+  },
+  "app.lab.command-generator.arg.advancement.advancement.desc": {
+    "message": "进度标识符"
+  },
+  "app.lab.command-generator.arg.advancement.criterion.display": {
+    "message": "准则"
+  },
+  "app.lab.command-generator.arg.advancement.criterion.desc": {
+    "message": "进度准则，留空表示全部"
+  },
+  "app.lab.command-generator.arg.attribute.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.attribute.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.attribute.attribute.display": {
+    "message": "属性"
+  },
+  "app.lab.command-generator.arg.attribute.attribute.desc": {
+    "message": "属性 ID"
+  },
+  "app.lab.command-generator.arg.attribute.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.attribute.action.desc": {
+    "message": "get / base / value (获取 / 基础值 / 当前值)"
+  },
+  "app.lab.command-generator.arg.attribute.value.display": {
+    "message": "值"
+  },
+  "app.lab.command-generator.arg.attribute.value.desc": {
+    "message": "属性值"
+  },
+  "app.lab.command-generator.arg.ban.target.display": {
+    "message": "玩家名"
+  },
+  "app.lab.command-generator.arg.ban.target.desc": {
+    "message": "要封禁的玩家名称"
+  },
+  "app.lab.command-generator.arg.ban.reason.display": {
+    "message": "原因"
+  },
+  "app.lab.command-generator.arg.ban.reason.desc": {
+    "message": "封禁原因"
+  },
+  "app.lab.command-generator.arg.ban-ip.target.display": {
+    "message": "IP 地址"
+  },
+  "app.lab.command-generator.arg.ban-ip.target.desc": {
+    "message": "要封禁的 IP 地址"
+  },
+  "app.lab.command-generator.arg.ban-ip.reason.display": {
+    "message": "原因"
+  },
+  "app.lab.command-generator.arg.ban-ip.reason.desc": {
+    "message": "封禁原因"
+  },
+  "app.lab.command-generator.arg.banlist.type.display": {
+    "message": "类型"
+  },
+  "app.lab.command-generator.arg.banlist.type.desc": {
+    "message": "players 或 ips"
+  },
+  "app.lab.command-generator.arg.bossbar.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.bossbar.action.desc": {
+    "message": "add / remove / get / set / list (添加 / 移除 / 获取 / 设置 / 列出)"
+  },
+  "app.lab.command-generator.arg.bossbar.id.display": {
+    "message": "ID (标识符)"
+  },
+  "app.lab.command-generator.arg.bossbar.id.desc": {
+    "message": "Boss 栏标识符"
+  },
+  "app.lab.command-generator.arg.bossbar.property.display": {
+    "message": "属性"
+  },
+  "app.lab.command-generator.arg.bossbar.property.desc": {
+    "message": "name / color / style / value / max / visible / players (名称 / 颜色 / 样式 / 值 / 最大值 / 可见性 / 玩家)"
+  },
+  "app.lab.command-generator.arg.bossbar.value.display": {
+    "message": "值"
+  },
+  "app.lab.command-generator.arg.bossbar.value.desc": {
+    "message": "属性值"
+  },
+  "app.lab.command-generator.arg.clear.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.clear.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.clear.item.display": {
+    "message": "物品"
+  },
+  "app.lab.command-generator.arg.clear.item.desc": {
+    "message": "要清除的物品 ID"
+  },
+  "app.lab.command-generator.arg.clear.maxCount.display": {
+    "message": "最大数量"
+  },
+  "app.lab.command-generator.arg.clear.maxCount.desc": {
+    "message": "最多清除的数量"
+  },
+  "app.lab.command-generator.arg.clone.begin.display": {
+    "message": "起始坐标"
+  },
+  "app.lab.command-generator.arg.clone.begin.desc": {
+    "message": "起始坐标"
+  },
+  "app.lab.command-generator.arg.clone.end.display": {
+    "message": "结束坐标"
+  },
+  "app.lab.command-generator.arg.clone.end.desc": {
+    "message": "结束坐标"
+  },
+  "app.lab.command-generator.arg.clone.destination.display": {
+    "message": "目标坐标"
+  },
+  "app.lab.command-generator.arg.clone.destination.desc": {
+    "message": "目标坐标"
+  },
+  "app.lab.command-generator.arg.clone.maskMode.display": {
+    "message": "遮罩模式"
+  },
+  "app.lab.command-generator.arg.clone.maskMode.desc": {
+    "message": "filtered / replace / masked (过滤 / 替换 / 遮罩)"
+  },
+  "app.lab.command-generator.arg.damage.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.damage.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.damage.amount.display": {
+    "message": "伤害量"
+  },
+  "app.lab.command-generator.arg.damage.amount.desc": {
+    "message": "造成的伤害值"
+  },
+  "app.lab.command-generator.arg.damage.damageType.display": {
+    "message": "伤害类型"
+  },
+  "app.lab.command-generator.arg.damage.damageType.desc": {
+    "message": "伤害类型 ID"
+  },
+  "app.lab.command-generator.arg.damage.source.display": {
+    "message": "伤害来源"
+  },
+  "app.lab.command-generator.arg.damage.source.desc": {
+    "message": "来源实体选择器"
+  },
+  "app.lab.command-generator.arg.data.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.data.action.desc": {
+    "message": "get / merge / modify / remove (获取 / 合并 / 修改 / 移除)"
+  },
+  "app.lab.command-generator.arg.data.targetType.display": {
+    "message": "目标类型"
+  },
+  "app.lab.command-generator.arg.data.targetType.desc": {
+    "message": "block / entity / storage (方块 / 实体 / 存储)"
+  },
+  "app.lab.command-generator.arg.data.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.data.target.desc": {
+    "message": "方块坐标、实体选择器或存储 ID"
+  },
+  "app.lab.command-generator.arg.data.path.display": {
+    "message": "NBT 路径"
+  },
+  "app.lab.command-generator.arg.data.path.desc": {
+    "message": "要操作的 NBT 路径"
+  },
+  "app.lab.command-generator.arg.data.value.display": {
+    "message": "值"
+  },
+  "app.lab.command-generator.arg.data.value.desc": {
+    "message": "要写入的 NBT 值"
+  },
+  "app.lab.command-generator.arg.datapack.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.datapack.action.desc": {
+    "message": "enable / disable / list (启用 / 禁用 / 列出)"
+  },
+  "app.lab.command-generator.arg.datapack.name.display": {
+    "message": "数据包名"
+  },
+  "app.lab.command-generator.arg.datapack.name.desc": {
+    "message": "数据包标识符"
+  },
+  "app.lab.command-generator.arg.debug.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.debug.action.desc": {
+    "message": "start / stop / function (开始 / 停止 / 函数)"
+  },
+  "app.lab.command-generator.arg.defaultgamemode.mode.display": {
+    "message": "模式"
+  },
+  "app.lab.command-generator.arg.defaultgamemode.mode.desc": {
+    "message": "survival / creative / adventure / spectator (生存 / 创造 / 冒险 / 旁观)"
+  },
+  "app.lab.command-generator.arg.deop.target.display": {
+    "message": "玩家名"
+  },
+  "app.lab.command-generator.arg.deop.target.desc": {
+    "message": "要撤销 OP 的玩家名称"
+  },
+  "app.lab.command-generator.arg.dialog.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.dialog.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.dialog.dialog.display": {
+    "message": "对话 ID"
+  },
+  "app.lab.command-generator.arg.dialog.dialog.desc": {
+    "message": "对话标识符"
+  },
+  "app.lab.command-generator.arg.difficulty.difficulty.display": {
+    "message": "难度"
+  },
+  "app.lab.command-generator.arg.difficulty.difficulty.desc": {
+    "message": "peaceful / easy / normal / hard (和平 / 简单 / 普通 / 困难)"
+  },
+  "app.lab.command-generator.arg.effect.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.effect.action.desc": {
+    "message": "give 给予 / clear 移除"
+  },
+  "app.lab.command-generator.arg.effect.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.effect.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.effect.effect.display": {
+    "message": "效果"
+  },
+  "app.lab.command-generator.arg.effect.effect.desc": {
+    "message": "状态效果 ID"
+  },
+  "app.lab.command-generator.arg.effect.duration.display": {
+    "message": "持续时间"
+  },
+  "app.lab.command-generator.arg.effect.duration.desc": {
+    "message": "效果持续时间（秒）"
+  },
+  "app.lab.command-generator.arg.effect.amplifier.display": {
+    "message": "等级"
+  },
+  "app.lab.command-generator.arg.effect.amplifier.desc": {
+    "message": "效果等级（0 为 I 级）"
+  },
+  "app.lab.command-generator.arg.effect.hideParticles.display": {
+    "message": "隐藏粒子"
+  },
+  "app.lab.command-generator.arg.effect.hideParticles.desc": {
+    "message": "是否隐藏粒子效果"
+  },
+  "app.lab.command-generator.arg.enchant.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.enchant.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.enchant.enchantment.display": {
+    "message": "附魔"
+  },
+  "app.lab.command-generator.arg.enchant.enchantment.desc": {
+    "message": "附魔 ID"
+  },
+  "app.lab.command-generator.arg.enchant.level.display": {
+    "message": "等级"
+  },
+  "app.lab.command-generator.arg.enchant.level.desc": {
+    "message": "附魔等级"
+  },
+  "app.lab.command-generator.arg.experience.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.experience.action.desc": {
+    "message": "add 增加 / set 设置"
+  },
+  "app.lab.command-generator.arg.experience.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.experience.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.experience.amount.display": {
+    "message": "数量"
+  },
+  "app.lab.command-generator.arg.experience.amount.desc": {
+    "message": "经验数量"
+  },
+  "app.lab.command-generator.arg.experience.unit.display": {
+    "message": "单位"
+  },
+  "app.lab.command-generator.arg.experience.unit.desc": {
+    "message": "points 点数 / levels 等级"
+  },
+  "app.lab.command-generator.arg.fill.from.display": {
+    "message": "起始坐标"
+  },
+  "app.lab.command-generator.arg.fill.from.desc": {
+    "message": "起始坐标"
+  },
+  "app.lab.command-generator.arg.fill.to.display": {
+    "message": "结束坐标"
+  },
+  "app.lab.command-generator.arg.fill.to.desc": {
+    "message": "结束坐标"
+  },
+  "app.lab.command-generator.arg.fill.block.display": {
+    "message": "方块"
+  },
+  "app.lab.command-generator.arg.fill.block.desc": {
+    "message": "要填充的方块 ID"
+  },
+  "app.lab.command-generator.arg.fill.mode.display": {
+    "message": "模式"
+  },
+  "app.lab.command-generator.arg.fill.mode.desc": {
+    "message": "replace / keep / outline / hollow / destroy (替换 / 保留 / 轮廓 / 中空 / 摧毁)"
+  },
+  "app.lab.command-generator.arg.fillbiome.from.display": {
+    "message": "起始坐标"
+  },
+  "app.lab.command-generator.arg.fillbiome.from.desc": {
+    "message": "起始坐标"
+  },
+  "app.lab.command-generator.arg.fillbiome.to.display": {
+    "message": "结束坐标"
+  },
+  "app.lab.command-generator.arg.fillbiome.to.desc": {
+    "message": "结束坐标"
+  },
+  "app.lab.command-generator.arg.fillbiome.biome.display": {
+    "message": "生物群系"
+  },
+  "app.lab.command-generator.arg.fillbiome.biome.desc": {
+    "message": "生物群系 ID"
+  },
+  "app.lab.command-generator.arg.forceload.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.forceload.action.desc": {
+    "message": "add / remove / query (添加 / 移除 / 查询)"
+  },
+  "app.lab.command-generator.arg.forceload.from.display": {
+    "message": "起始坐标"
+  },
+  "app.lab.command-generator.arg.forceload.from.desc": {
+    "message": "起始坐标"
+  },
+  "app.lab.command-generator.arg.forceload.to.display": {
+    "message": "结束坐标"
+  },
+  "app.lab.command-generator.arg.forceload.to.desc": {
+    "message": "结束坐标"
+  },
+  "app.lab.command-generator.arg.function.name.display": {
+    "message": "函数名"
+  },
+  "app.lab.command-generator.arg.function.name.desc": {
+    "message": "函数标识符"
+  },
+  "app.lab.command-generator.arg.gamemode.mode.display": {
+    "message": "模式"
+  },
+  "app.lab.command-generator.arg.gamemode.mode.desc": {
+    "message": "survival / creative / adventure / spectator (生存 / 创造 / 冒险 / 旁观)"
+  },
+  "app.lab.command-generator.arg.gamemode.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.gamemode.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.gamerule.rule.display": {
+    "message": "规则名"
+  },
+  "app.lab.command-generator.arg.gamerule.rule.desc": {
+    "message": "游戏规则名称"
+  },
+  "app.lab.command-generator.arg.gamerule.value.display": {
+    "message": "值"
+  },
+  "app.lab.command-generator.arg.gamerule.value.desc": {
+    "message": "游戏规则值（true/false 或数字）"
+  },
+  "app.lab.command-generator.arg.give.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.give.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.give.item.display": {
+    "message": "物品"
+  },
+  "app.lab.command-generator.arg.give.item.desc": {
+    "message": "物品 ID"
+  },
+  "app.lab.command-generator.arg.give.count.display": {
+    "message": "数量"
+  },
+  "app.lab.command-generator.arg.give.count.desc": {
+    "message": "物品数量"
+  },
+  "app.lab.command-generator.arg.give.nbt.display": {
+    "message": "NBT (NBT 数据)"
+  },
+  "app.lab.command-generator.arg.give.nbt.desc": {
+    "message": "物品 NBT 数据"
+  },
+  "app.lab.command-generator.arg.help.command.display": {
+    "message": "命令名"
+  },
+  "app.lab.command-generator.arg.help.command.desc": {
+    "message": "要查询的命令名称"
+  },
+  "app.lab.command-generator.arg.item.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.item.action.desc": {
+    "message": "replace / modify / block (替换 / 修改 / 方块)"
+  },
+  "app.lab.command-generator.arg.item.pos.display": {
+    "message": "容器坐标"
+  },
+  "app.lab.command-generator.arg.item.pos.desc": {
+    "message": "容器坐标"
+  },
+  "app.lab.command-generator.arg.item.slot.display": {
+    "message": "槽位"
+  },
+  "app.lab.command-generator.arg.item.slot.desc": {
+    "message": "槽位名称，如 container.0"
+  },
+  "app.lab.command-generator.arg.item.item.display": {
+    "message": "物品"
+  },
+  "app.lab.command-generator.arg.item.item.desc": {
+    "message": "物品 ID"
+  },
+  "app.lab.command-generator.arg.item.count.display": {
+    "message": "数量"
+  },
+  "app.lab.command-generator.arg.item.count.desc": {
+    "message": "物品数量"
+  },
+  "app.lab.command-generator.arg.item.nbt.display": {
+    "message": "NBT (NBT 数据)"
+  },
+  "app.lab.command-generator.arg.item.nbt.desc": {
+    "message": "物品 NBT 数据"
+  },
+  "app.lab.command-generator.arg.jfr.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.jfr.action.desc": {
+    "message": "start / stop"
+  },
+  "app.lab.command-generator.arg.kick.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.kick.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.kick.reason.display": {
+    "message": "原因"
+  },
+  "app.lab.command-generator.arg.kick.reason.desc": {
+    "message": "踢出原因"
+  },
+  "app.lab.command-generator.arg.kill.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.kill.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.list.uuids.display": {
+    "message": "显示 UUID"
+  },
+  "app.lab.command-generator.arg.list.uuids.desc": {
+    "message": "是否显示 UUID"
+  },
+  "app.lab.command-generator.arg.locate.type.display": {
+    "message": "类型"
+  },
+  "app.lab.command-generator.arg.locate.type.desc": {
+    "message": "structure / biome / poi (结构 / 生物群系 / 标记点)"
+  },
+  "app.lab.command-generator.arg.locate.id.display": {
+    "message": "标识符"
+  },
+  "app.lab.command-generator.arg.locate.id.desc": {
+    "message": "要定位的目标 ID"
+  },
+  "app.lab.command-generator.arg.loot.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.loot.action.desc": {
+    "message": "give / insert / spawn (给予 / 插入 / 生成)"
+  },
+  "app.lab.command-generator.arg.loot.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.loot.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.loot.source.display": {
+    "message": "来源"
+  },
+  "app.lab.command-generator.arg.loot.source.desc": {
+    "message": "战利品来源"
+  },
+  "app.lab.command-generator.arg.me.message.display": {
+    "message": "消息"
+  },
+  "app.lab.command-generator.arg.me.message.desc": {
+    "message": "消息内容"
+  },
+  "app.lab.command-generator.arg.msg.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.msg.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.msg.message.display": {
+    "message": "消息"
+  },
+  "app.lab.command-generator.arg.msg.message.desc": {
+    "message": "私聊内容"
+  },
+  "app.lab.command-generator.arg.op.target.display": {
+    "message": "玩家名"
+  },
+  "app.lab.command-generator.arg.op.target.desc": {
+    "message": "要授予 OP 的玩家名称"
+  },
+  "app.lab.command-generator.arg.pardon.target.display": {
+    "message": "玩家名"
+  },
+  "app.lab.command-generator.arg.pardon.target.desc": {
+    "message": "要解除封禁的玩家名称"
+  },
+  "app.lab.command-generator.arg.pardon-ip.target.display": {
+    "message": "IP 地址"
+  },
+  "app.lab.command-generator.arg.pardon-ip.target.desc": {
+    "message": "要解除封禁的 IP 地址"
+  },
+  "app.lab.command-generator.arg.particle.name.display": {
+    "message": "粒子"
+  },
+  "app.lab.command-generator.arg.particle.name.desc": {
+    "message": "粒子 ID"
+  },
+  "app.lab.command-generator.arg.particle.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.particle.pos.desc": {
+    "message": "生成坐标"
+  },
+  "app.lab.command-generator.arg.particle.delta.display": {
+    "message": "扩散"
+  },
+  "app.lab.command-generator.arg.particle.delta.desc": {
+    "message": "扩散范围"
+  },
+  "app.lab.command-generator.arg.particle.speed.display": {
+    "message": "速度"
+  },
+  "app.lab.command-generator.arg.particle.speed.desc": {
+    "message": "粒子速度"
+  },
+  "app.lab.command-generator.arg.particle.count.display": {
+    "message": "数量"
+  },
+  "app.lab.command-generator.arg.particle.count.desc": {
+    "message": "粒子数量"
+  },
+  "app.lab.command-generator.arg.particle.mode.display": {
+    "message": "模式"
+  },
+  "app.lab.command-generator.arg.particle.mode.desc": {
+    "message": "normal 或 force"
+  },
+  "app.lab.command-generator.arg.placefeature.id.display": {
+    "message": "地物 ID"
+  },
+  "app.lab.command-generator.arg.placefeature.id.desc": {
+    "message": "地物标识符"
+  },
+  "app.lab.command-generator.arg.placefeature.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.placefeature.pos.desc": {
+    "message": "放置坐标"
+  },
+  "app.lab.command-generator.arg.playsound.sound.display": {
+    "message": "声音"
+  },
+  "app.lab.command-generator.arg.playsound.sound.desc": {
+    "message": "声音 ID"
+  },
+  "app.lab.command-generator.arg.playsound.source.display": {
+    "message": "来源"
+  },
+  "app.lab.command-generator.arg.playsound.source.desc": {
+    "message": "声音来源类别"
+  },
+  "app.lab.command-generator.arg.playsound.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.playsound.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.playsound.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.playsound.pos.desc": {
+    "message": "播放坐标"
+  },
+  "app.lab.command-generator.arg.playsound.volume.display": {
+    "message": "音量"
+  },
+  "app.lab.command-generator.arg.playsound.volume.desc": {
+    "message": "音量"
+  },
+  "app.lab.command-generator.arg.playsound.pitch.display": {
+    "message": "音调"
+  },
+  "app.lab.command-generator.arg.playsound.pitch.desc": {
+    "message": "音调"
+  },
+  "app.lab.command-generator.arg.playsound.minVolume.display": {
+    "message": "最小音量"
+  },
+  "app.lab.command-generator.arg.playsound.minVolume.desc": {
+    "message": "最小音量"
+  },
+  "app.lab.command-generator.arg.publish.port.display": {
+    "message": "端口"
+  },
+  "app.lab.command-generator.arg.publish.port.desc": {
+    "message": "局域网端口"
+  },
+  "app.lab.command-generator.arg.publish.allowCheats.display": {
+    "message": "允许作弊"
+  },
+  "app.lab.command-generator.arg.publish.allowCheats.desc": {
+    "message": "是否允许作弊"
+  },
+  "app.lab.command-generator.arg.publish.gamemode.display": {
+    "message": "游戏模式"
+  },
+  "app.lab.command-generator.arg.publish.gamemode.desc": {
+    "message": "默认游戏模式"
+  },
+  "app.lab.command-generator.arg.random.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.random.action.desc": {
+    "message": "value / roll / reset (值 / 掷骰 / 重置)"
+  },
+  "app.lab.command-generator.arg.random.range.display": {
+    "message": "范围"
+  },
+  "app.lab.command-generator.arg.random.range.desc": {
+    "message": "取值范围，如 1..100"
+  },
+  "app.lab.command-generator.arg.random.sequence.display": {
+    "message": "序列"
+  },
+  "app.lab.command-generator.arg.random.sequence.desc": {
+    "message": "随机序列 ID"
+  },
+  "app.lab.command-generator.arg.recipe.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.recipe.action.desc": {
+    "message": "give 给予 / take 移除"
+  },
+  "app.lab.command-generator.arg.recipe.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.recipe.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.recipe.recipe.display": {
+    "message": "配方"
+  },
+  "app.lab.command-generator.arg.recipe.recipe.desc": {
+    "message": "配方 ID，留空表示全部"
+  },
+  "app.lab.command-generator.arg.replaceitem.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.replaceitem.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.replaceitem.slot.display": {
+    "message": "槽位"
+  },
+  "app.lab.command-generator.arg.replaceitem.slot.desc": {
+    "message": "槽位名称，如 container.0"
+  },
+  "app.lab.command-generator.arg.replaceitem.item.display": {
+    "message": "物品"
+  },
+  "app.lab.command-generator.arg.replaceitem.item.desc": {
+    "message": "物品 ID"
+  },
+  "app.lab.command-generator.arg.replaceitem.count.display": {
+    "message": "数量"
+  },
+  "app.lab.command-generator.arg.replaceitem.count.desc": {
+    "message": "物品数量"
+  },
+  "app.lab.command-generator.arg.replaceitem.nbt.display": {
+    "message": "NBT (NBT 数据)"
+  },
+  "app.lab.command-generator.arg.replaceitem.nbt.desc": {
+    "message": "物品 NBT 数据"
+  },
+  "app.lab.command-generator.arg.ride.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.ride.target.desc": {
+    "message": "骑乘的实体"
+  },
+  "app.lab.command-generator.arg.ride.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.ride.action.desc": {
+    "message": "mount 骑乘 / dismount 下马"
+  },
+  "app.lab.command-generator.arg.ride.vehicle.display": {
+    "message": "载体"
+  },
+  "app.lab.command-generator.arg.ride.vehicle.desc": {
+    "message": "被骑乘的实体"
+  },
+  "app.lab.command-generator.arg.say.message.display": {
+    "message": "消息"
+  },
+  "app.lab.command-generator.arg.say.message.desc": {
+    "message": "要广播的消息"
+  },
+  "app.lab.command-generator.arg.schedule.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.schedule.action.desc": {
+    "message": "clear / function"
+  },
+  "app.lab.command-generator.arg.schedule.name.display": {
+    "message": "名称"
+  },
+  "app.lab.command-generator.arg.schedule.name.desc": {
+    "message": "调度名称或函数 ID"
+  },
+  "app.lab.command-generator.arg.schedule.time.display": {
+    "message": "时间"
+  },
+  "app.lab.command-generator.arg.schedule.time.desc": {
+    "message": "延迟时间，如 10s、1d"
+  },
+  "app.lab.command-generator.arg.scoreboard.category.display": {
+    "message": "类别"
+  },
+  "app.lab.command-generator.arg.scoreboard.category.desc": {
+    "message": "objectives / players"
+  },
+  "app.lab.command-generator.arg.scoreboard.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.scoreboard.action.desc": {
+    "message": "add / remove / list / set / get / reset / operation (添加 / 移除 / 列出 / 设置 / 获取 / 重置 / 运算)"
+  },
+  "app.lab.command-generator.arg.scoreboard.objective.display": {
+    "message": "计分项"
+  },
+  "app.lab.command-generator.arg.scoreboard.objective.desc": {
+    "message": "计分项名称"
+  },
+  "app.lab.command-generator.arg.setblock.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.setblock.pos.desc": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.setblock.block.display": {
+    "message": "方块"
+  },
+  "app.lab.command-generator.arg.setblock.block.desc": {
+    "message": "方块 ID"
+  },
+  "app.lab.command-generator.arg.setblock.mode.display": {
+    "message": "模式"
+  },
+  "app.lab.command-generator.arg.setblock.mode.desc": {
+    "message": "replace / keep / destroy (替换 / 保留 / 摧毁)"
+  },
+  "app.lab.command-generator.arg.setidletimeout.minutes.display": {
+    "message": "分钟"
+  },
+  "app.lab.command-generator.arg.setidletimeout.minutes.desc": {
+    "message": "空闲超时时间（分钟）"
+  },
+  "app.lab.command-generator.arg.setworldspawn.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.setworldspawn.pos.desc": {
+    "message": "出生点坐标"
+  },
+  "app.lab.command-generator.arg.setworldspawn.angle.display": {
+    "message": "角度"
+  },
+  "app.lab.command-generator.arg.setworldspawn.angle.desc": {
+    "message": "出生视角角度"
+  },
+  "app.lab.command-generator.arg.spawnpoint.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.spawnpoint.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.spawnpoint.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.spawnpoint.pos.desc": {
+    "message": "重生点坐标"
+  },
+  "app.lab.command-generator.arg.spawnpoint.angle.display": {
+    "message": "角度"
+  },
+  "app.lab.command-generator.arg.spawnpoint.angle.desc": {
+    "message": "重生视角角度"
+  },
+  "app.lab.command-generator.arg.spectate.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.spectate.target.desc": {
+    "message": "要旁观的目标实体"
+  },
+  "app.lab.command-generator.arg.spectate.player.display": {
+    "message": "旁观者"
+  },
+  "app.lab.command-generator.arg.spectate.player.desc": {
+    "message": "旁观模式的玩家"
+  },
+  "app.lab.command-generator.arg.spreadplayers.center.display": {
+    "message": "中心坐标"
+  },
+  "app.lab.command-generator.arg.spreadplayers.center.desc": {
+    "message": "传送中心点"
+  },
+  "app.lab.command-generator.arg.spreadplayers.spreadDistance.display": {
+    "message": "扩散距离"
+  },
+  "app.lab.command-generator.arg.spreadplayers.spreadDistance.desc": {
+    "message": "最小扩散距离"
+  },
+  "app.lab.command-generator.arg.spreadplayers.maxRange.display": {
+    "message": "最大范围"
+  },
+  "app.lab.command-generator.arg.spreadplayers.maxRange.desc": {
+    "message": "最大范围"
+  },
+  "app.lab.command-generator.arg.spreadplayers.respectTeams.display": {
+    "message": "尊重队伍"
+  },
+  "app.lab.command-generator.arg.spreadplayers.respectTeams.desc": {
+    "message": "是否以队伍为单位传送"
+  },
+  "app.lab.command-generator.arg.spreadplayers.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.spreadplayers.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.stopsound.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.stopsound.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.stopsound.source.display": {
+    "message": "来源"
+  },
+  "app.lab.command-generator.arg.stopsound.source.desc": {
+    "message": "声音来源类别"
+  },
+  "app.lab.command-generator.arg.stopsound.sound.display": {
+    "message": "声音"
+  },
+  "app.lab.command-generator.arg.stopsound.sound.desc": {
+    "message": "声音 ID"
+  },
+  "app.lab.command-generator.arg.stopwatch.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.stopwatch.action.desc": {
+    "message": "create / query / restart / remove (创建 / 查询 / 重启 / 移除)"
+  },
+  "app.lab.command-generator.arg.stopwatch.id.display": {
+    "message": "ID (标识符)"
+  },
+  "app.lab.command-generator.arg.stopwatch.id.desc": {
+    "message": "秒表标识符"
+  },
+  "app.lab.command-generator.arg.stopwatch.scale.display": {
+    "message": "缩放"
+  },
+  "app.lab.command-generator.arg.stopwatch.scale.desc": {
+    "message": "缩放因子，如 0.05 将刻转换为秒"
+  },
+  "app.lab.command-generator.arg.summon.entity.display": {
+    "message": "实体类型"
+  },
+  "app.lab.command-generator.arg.summon.entity.desc": {
+    "message": "实体 ID"
+  },
+  "app.lab.command-generator.arg.summon.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.summon.pos.desc": {
+    "message": "生成坐标"
+  },
+  "app.lab.command-generator.arg.summon.nbt.display": {
+    "message": "NBT (NBT 数据)"
+  },
+  "app.lab.command-generator.arg.summon.nbt.desc": {
+    "message": "实体 NBT 数据"
+  },
+  "app.lab.command-generator.arg.swing.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.swing.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.swing.hand.display": {
+    "message": "手"
+  },
+  "app.lab.command-generator.arg.swing.hand.desc": {
+    "message": "mainhand 主手 / offhand 副手"
+  },
+  "app.lab.command-generator.arg.tag.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.tag.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.tag.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.tag.action.desc": {
+    "message": "add / remove / list (添加 / 移除 / 列出)"
+  },
+  "app.lab.command-generator.arg.tag.name.display": {
+    "message": "标签名"
+  },
+  "app.lab.command-generator.arg.tag.name.desc": {
+    "message": "标签名称"
+  },
+  "app.lab.command-generator.arg.team.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.team.action.desc": {
+    "message": "add / remove / empty / join / leave / list / modify (添加 / 移除 / 清空 / 加入 / 离开 / 列出 / 修改)"
+  },
+  "app.lab.command-generator.arg.team.team.display": {
+    "message": "队伍名"
+  },
+  "app.lab.command-generator.arg.team.team.desc": {
+    "message": "队伍名称"
+  },
+  "app.lab.command-generator.arg.team.members.display": {
+    "message": "成员"
+  },
+  "app.lab.command-generator.arg.team.members.desc": {
+    "message": "队员选择器"
+  },
+  "app.lab.command-generator.arg.teammsg.message.display": {
+    "message": "消息"
+  },
+  "app.lab.command-generator.arg.teammsg.message.desc": {
+    "message": "要发送给队伍的消息"
+  },
+  "app.lab.command-generator.arg.teleport.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.teleport.target.desc": {
+    "message": "要传送的实体"
+  },
+  "app.lab.command-generator.arg.teleport.destination.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.teleport.destination.desc": {
+    "message": "目标坐标或实体选择器"
+  },
+  "app.lab.command-generator.arg.teleport.rotation.display": {
+    "message": "朝向"
+  },
+  "app.lab.command-generator.arg.teleport.rotation.desc": {
+    "message": "水平 / 垂直朝向"
+  },
+  "app.lab.command-generator.arg.tell.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.tell.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.tell.message.display": {
+    "message": "消息"
+  },
+  "app.lab.command-generator.arg.tell.message.desc": {
+    "message": "私聊内容"
+  },
+  "app.lab.command-generator.arg.tellraw.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.tellraw.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.tellraw.message.display": {
+    "message": "JSON 消息"
+  },
+  "app.lab.command-generator.arg.tellraw.message.desc": {
+    "message": "JSON 格式的消息内容"
+  },
+  "app.lab.command-generator.arg.tick.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.tick.action.desc": {
+    "message": "freeze / unfreeze / rate / sprint / step / query (冻结 / 解冻 / 速率 / 疾跑 / 单步 / 查询)"
+  },
+  "app.lab.command-generator.arg.tick.value.display": {
+    "message": "值"
+  },
+  "app.lab.command-generator.arg.tick.value.desc": {
+    "message": "具体参数值"
+  },
+  "app.lab.command-generator.arg.time.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.time.action.desc": {
+    "message": "set 设置 / add 增加 / query 查询"
+  },
+  "app.lab.command-generator.arg.time.value.display": {
+    "message": "值"
+  },
+  "app.lab.command-generator.arg.time.value.desc": {
+    "message": "时间值（day/noon/night/midnight 或数字）"
+  },
+  "app.lab.command-generator.arg.title.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.title.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.title.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.title.action.desc": {
+    "message": "title / subtitle / actionbar / times / reset (标题 / 副标题 / 动作栏 / 次数 / 重置)"
+  },
+  "app.lab.command-generator.arg.title.value.display": {
+    "message": "内容"
+  },
+  "app.lab.command-generator.arg.title.value.desc": {
+    "message": "标题内容或时间值（JSON 文本）"
+  },
+  "app.lab.command-generator.arg.trigger.objective.display": {
+    "message": "触发器"
+  },
+  "app.lab.command-generator.arg.trigger.objective.desc": {
+    "message": "触发器目标名称"
+  },
+  "app.lab.command-generator.arg.trigger.value.display": {
+    "message": "值"
+  },
+  "app.lab.command-generator.arg.trigger.value.desc": {
+    "message": "要设置的值"
+  },
+  "app.lab.command-generator.arg.waypoint.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.waypoint.action.desc": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.waypoint.name.display": {
+    "message": "名称"
+  },
+  "app.lab.command-generator.arg.waypoint.name.desc": {
+    "message": "路标名称"
+  },
+  "app.lab.command-generator.arg.waypoint.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.waypoint.pos.desc": {
+    "message": "路标坐标"
+  },
+  "app.lab.command-generator.arg.waypoint.color.display": {
+    "message": "颜色"
+  },
+  "app.lab.command-generator.arg.waypoint.color.desc": {
+    "message": "颜色值（命名颜色或 #RRGGBB）"
+  },
+  "app.lab.command-generator.arg.weather.type.display": {
+    "message": "天气"
+  },
+  "app.lab.command-generator.arg.weather.type.desc": {
+    "message": "clear / rain / thunder (晴天 / 雨天 / 雷暴)"
+  },
+  "app.lab.command-generator.arg.weather.duration.display": {
+    "message": "持续时间"
+  },
+  "app.lab.command-generator.arg.weather.duration.desc": {
+    "message": "天气持续时间（秒）"
+  },
+  "app.lab.command-generator.arg.whitelist.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.whitelist.action.desc": {
+    "message": "add / remove / list / on / off / reload (添加 / 移除 / 列出 / 开启 / 关闭 / 重新加载)"
+  },
+  "app.lab.command-generator.arg.whitelist.target.display": {
+    "message": "玩家名"
+  },
+  "app.lab.command-generator.arg.whitelist.target.desc": {
+    "message": "要添加或移除的玩家名称"
+  },
+  "app.lab.command-generator.arg.worldborder.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.worldborder.action.desc": {
+    "message": "add / set / center / damage / get / warning (添加 / 设置 / 居中 / 伤害 / 获取 / 警告)"
+  },
+  "app.lab.command-generator.arg.worldborder.value.display": {
+    "message": "值"
+  },
+  "app.lab.command-generator.arg.worldborder.value.desc": {
+    "message": "具体参数值"
+  },
+  "app.lab.command-generator.arg.xp.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.xp.action.desc": {
+    "message": "add 增加 / set 设置"
+  },
+  "app.lab.command-generator.arg.xp.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.xp.target.desc": {
+    "message": "目标选择器"
+  },
+  "app.lab.command-generator.arg.xp.amount.display": {
+    "message": "数量"
+  },
+  "app.lab.command-generator.arg.xp.amount.desc": {
+    "message": "经验数量"
+  },
+  "app.lab.command-generator.arg.xp.unit.display": {
+    "message": "单位"
+  },
+  "app.lab.command-generator.arg.xp.unit.desc": {
+    "message": "points 点数 / levels 等级"
+  },
+  "app.lab.command-generator.arg.execute.as.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.as.target.desc": {
+    "message": "新的执行者"
+  },
+  "app.lab.command-generator.arg.execute.at.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.at.target.desc": {
+    "message": "位置参照实体"
+  },
+  "app.lab.command-generator.arg.execute.positioned.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.execute.positioned.pos.desc": {
+    "message": "新的执行位置"
+  },
+  "app.lab.command-generator.arg.execute.positioned-as.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.positioned-as.target.desc": {
+    "message": "位置参照实体"
+  },
+  "app.lab.command-generator.arg.execute.rotated.yaw.display": {
+    "message": "水平角（yaw）"
+  },
+  "app.lab.command-generator.arg.execute.rotated.yaw.desc": {
+    "message": "水平旋转角度"
+  },
+  "app.lab.command-generator.arg.execute.rotated.pitch.display": {
+    "message": "垂直角（pitch）"
+  },
+  "app.lab.command-generator.arg.execute.rotated.pitch.desc": {
+    "message": "垂直旋转角度"
+  },
+  "app.lab.command-generator.arg.execute.rotated-as.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.rotated-as.target.desc": {
+    "message": "朝向参照实体"
+  },
+  "app.lab.command-generator.arg.execute.facing.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.execute.facing.pos.desc": {
+    "message": "要面向的坐标"
+  },
+  "app.lab.command-generator.arg.execute.facing-entity.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.facing-entity.target.desc": {
+    "message": "要面向的实体"
+  },
+  "app.lab.command-generator.arg.execute.facing-entity.anchor.display": {
+    "message": "基准点"
+  },
+  "app.lab.command-generator.arg.execute.facing-entity.anchor.desc": {
+    "message": "eyes 眼睛 / feet 脚"
+  },
+  "app.lab.command-generator.arg.execute.in.dimension.display": {
+    "message": "维度"
+  },
+  "app.lab.command-generator.arg.execute.in.dimension.desc": {
+    "message": "目标维度"
+  },
+  "app.lab.command-generator.arg.execute.anchored.anchor.display": {
+    "message": "基准点"
+  },
+  "app.lab.command-generator.arg.execute.anchored.anchor.desc": {
+    "message": "eyes 眼睛 / feet 脚"
+  },
+  "app.lab.command-generator.arg.execute.align.axes.display": {
+    "message": "对齐轴"
+  },
+  "app.lab.command-generator.arg.execute.align.axes.desc": {
+    "message": "要对齐的坐标轴"
+  },
+  "app.lab.command-generator.arg.execute.if-entity.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.if-entity.target.desc": {
+    "message": "要检测存在的实体"
+  },
+  "app.lab.command-generator.arg.execute.unless-entity.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.unless-entity.target.desc": {
+    "message": "要检测不存在的实体"
+  },
+  "app.lab.command-generator.arg.execute.if-block.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.execute.if-block.pos.desc": {
+    "message": "要检测的位置"
+  },
+  "app.lab.command-generator.arg.execute.if-block.block.display": {
+    "message": "方块"
+  },
+  "app.lab.command-generator.arg.execute.if-block.block.desc": {
+    "message": "方块 ID"
+  },
+  "app.lab.command-generator.arg.execute.if-blocks.begin.display": {
+    "message": "起始坐标"
+  },
+  "app.lab.command-generator.arg.execute.if-blocks.begin.desc": {
+    "message": "源区域起始坐标"
+  },
+  "app.lab.command-generator.arg.execute.if-blocks.end.display": {
+    "message": "结束坐标"
+  },
+  "app.lab.command-generator.arg.execute.if-blocks.end.desc": {
+    "message": "源区域结束坐标"
+  },
+  "app.lab.command-generator.arg.execute.if-blocks.destination.display": {
+    "message": "目标坐标"
+  },
+  "app.lab.command-generator.arg.execute.if-blocks.destination.desc": {
+    "message": "目标区域起始坐标"
+  },
+  "app.lab.command-generator.arg.execute.if-blocks.mode.display": {
+    "message": "匹配模式"
+  },
+  "app.lab.command-generator.arg.execute.if-blocks.mode.desc": {
+    "message": "all 完全匹配 / masked 忽略空气"
+  },
+  "app.lab.command-generator.arg.execute.if-score.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.if-score.target.desc": {
+    "message": "左侧记分持有者"
+  },
+  "app.lab.command-generator.arg.execute.if-score.objective.display": {
+    "message": "记分项"
+  },
+  "app.lab.command-generator.arg.execute.if-score.objective.desc": {
+    "message": "左侧记分项"
+  },
+  "app.lab.command-generator.arg.execute.if-score.operator.display": {
+    "message": "运算符"
+  },
+  "app.lab.command-generator.arg.execute.if-score.operator.desc": {
+    "message": "比较运算符"
+  },
+  "app.lab.command-generator.arg.execute.if-score.source.display": {
+    "message": "源目标"
+  },
+  "app.lab.command-generator.arg.execute.if-score.source.desc": {
+    "message": "右侧记分持有者"
+  },
+  "app.lab.command-generator.arg.execute.if-score.sourceObjective.display": {
+    "message": "源记分项"
+  },
+  "app.lab.command-generator.arg.execute.if-score.sourceObjective.desc": {
+    "message": "右侧记分项"
+  },
+  "app.lab.command-generator.arg.execute.if-score-matches.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.if-score-matches.target.desc": {
+    "message": "记分持有者"
+  },
+  "app.lab.command-generator.arg.execute.if-score-matches.objective.display": {
+    "message": "记分项"
+  },
+  "app.lab.command-generator.arg.execute.if-score-matches.objective.desc": {
+    "message": "记分项名称"
+  },
+  "app.lab.command-generator.arg.execute.if-score-matches.range.display": {
+    "message": "范围"
+  },
+  "app.lab.command-generator.arg.execute.if-score-matches.range.desc": {
+    "message": "数值范围，如 1..10"
+  },
+  "app.lab.command-generator.arg.execute.if-biome.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.execute.if-biome.pos.desc": {
+    "message": "要检测的位置"
+  },
+  "app.lab.command-generator.arg.execute.if-biome.biome.display": {
+    "message": "生物群系"
+  },
+  "app.lab.command-generator.arg.execute.if-biome.biome.desc": {
+    "message": "生物群系 ID"
+  },
+  "app.lab.command-generator.arg.execute.if-data.targetType.display": {
+    "message": "目标类型"
+  },
+  "app.lab.command-generator.arg.execute.if-data.targetType.desc": {
+    "message": "block / entity / storage (方块 / 实体 / 存储)"
+  },
+  "app.lab.command-generator.arg.execute.if-data.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.if-data.target.desc": {
+    "message": "方块坐标、实体选择器或存储 ID"
+  },
+  "app.lab.command-generator.arg.execute.if-data.path.display": {
+    "message": "NBT 路径"
+  },
+  "app.lab.command-generator.arg.execute.if-data.path.desc": {
+    "message": "要检测的 NBT 路径"
+  },
+  "app.lab.command-generator.arg.execute.if-items.source.display": {
+    "message": "来源"
+  },
+  "app.lab.command-generator.arg.execute.if-items.source.desc": {
+    "message": "block 方块 / entity 实体"
+  },
+  "app.lab.command-generator.arg.execute.if-items.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.if-items.target.desc": {
+    "message": "方块坐标或实体选择器"
+  },
+  "app.lab.command-generator.arg.execute.if-items.slot.display": {
+    "message": "槽位"
+  },
+  "app.lab.command-generator.arg.execute.if-items.slot.desc": {
+    "message": "槽位名称"
+  },
+  "app.lab.command-generator.arg.execute.if-items.item.display": {
+    "message": "物品"
+  },
+  "app.lab.command-generator.arg.execute.if-items.item.desc": {
+    "message": "物品 ID"
+  },
+  "app.lab.command-generator.arg.execute.if-function.name.display": {
+    "message": "函数名"
+  },
+  "app.lab.command-generator.arg.execute.if-function.name.desc": {
+    "message": "函数标识符"
+  },
+  "app.lab.command-generator.arg.execute.unless-block.pos.display": {
+    "message": "坐标"
+  },
+  "app.lab.command-generator.arg.execute.unless-block.pos.desc": {
+    "message": "要检测的位置"
+  },
+  "app.lab.command-generator.arg.execute.unless-block.block.display": {
+    "message": "方块"
+  },
+  "app.lab.command-generator.arg.execute.unless-block.block.desc": {
+    "message": "方块 ID"
+  },
+  "app.lab.command-generator.arg.execute.unless-score.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.unless-score.target.desc": {
+    "message": "左侧记分持有者"
+  },
+  "app.lab.command-generator.arg.execute.unless-score.objective.display": {
+    "message": "记分项"
+  },
+  "app.lab.command-generator.arg.execute.unless-score.objective.desc": {
+    "message": "左侧记分项"
+  },
+  "app.lab.command-generator.arg.execute.unless-score.operator.display": {
+    "message": "运算符"
+  },
+  "app.lab.command-generator.arg.execute.unless-score.operator.desc": {
+    "message": "比较运算符"
+  },
+  "app.lab.command-generator.arg.execute.unless-score.source.display": {
+    "message": "源目标"
+  },
+  "app.lab.command-generator.arg.execute.unless-score.source.desc": {
+    "message": "右侧记分持有者"
+  },
+  "app.lab.command-generator.arg.execute.unless-score.sourceObjective.display": {
+    "message": "源记分项"
+  },
+  "app.lab.command-generator.arg.execute.unless-score.sourceObjective.desc": {
+    "message": "右侧记分项"
+  },
+  "app.lab.command-generator.arg.execute.store-result-score.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.store-result-score.target.desc": {
+    "message": "记分持有者"
+  },
+  "app.lab.command-generator.arg.execute.store-result-score.objective.display": {
+    "message": "记分项"
+  },
+  "app.lab.command-generator.arg.execute.store-result-score.objective.desc": {
+    "message": "记分项名称"
+  },
+  "app.lab.command-generator.arg.execute.store-success-score.target.display": {
+    "message": "目标"
+  },
+  "app.lab.command-generator.arg.execute.store-success-score.target.desc": {
+    "message": "记分持有者"
+  },
+  "app.lab.command-generator.arg.execute.store-success-score.objective.display": {
+    "message": "记分项"
+  },
+  "app.lab.command-generator.arg.execute.store-success-score.objective.desc": {
+    "message": "记分项名称"
+  },
+  "app.lab.command-generator.arg.execute.store-result-bossbar.id.display": {
+    "message": "Boss 栏 ID"
+  },
+  "app.lab.command-generator.arg.execute.store-result-bossbar.id.desc": {
+    "message": "Boss 栏标识符"
+  },
+  "app.lab.command-generator.arg.execute.store-result-bossbar.valueOrMax.display": {
+    "message": "存储位置"
+  },
+  "app.lab.command-generator.arg.execute.store-result-bossbar.valueOrMax.desc": {
+    "message": "value 当前值 / max 最大值"
+  },
+  "app.lab.command-generator.arg.item.targetType.display": {
+    "message": "目标类型"
+  },
+  "app.lab.command-generator.arg.item.targetType.desc": {
+    "message": "选择方块或实体。"
+  },
+  "app.lab.command-generator.arg.item.target.display": {
+    "message": "目标实体"
+  },
+  "app.lab.command-generator.arg.item.target.desc": {
+    "message": "要修改物品的实体。"
+  },
+  "app.lab.command-generator.arg.item.source.display": {
+    "message": "替换来源"
+  },
+  "app.lab.command-generator.arg.item.source.desc": {
+    "message": "用所选物品替换槽位。"
+  },
+  "app.lab.command-generator.arg.item.modifier.display": {
+    "message": "物品修饰器"
+  },
+  "app.lab.command-generator.arg.item.modifier.desc": {
+    "message": "物品修饰器的资源 ID。"
+  },
+  "app.lab.command-generator.arg.advancement.mode.display": {
+    "message": "选择模式"
+  },
+  "app.lab.command-generator.arg.advancement.mode.desc": {
+    "message": "选择单个进度、进度树或全部进度。"
+  },
+  "app.lab.command-generator.cmd.locatebiome.desc": {
+    "message": "定位最近的生物群系。"
+  },
+  "app.lab.command-generator.arg.time.clock.display": {
+    "message": "世界时钟"
+  },
+  "app.lab.command-generator.arg.time.clock.desc": {
+    "message": "留空使用当前维度的默认时钟。"
+  },
+  "app.lab.command-generator.arg.time.rate.display": {
+    "message": "时钟速率"
+  },
+  "app.lab.command-generator.arg.time.rate.desc": {
+    "message": "大于 0 且不超过 1000 的时间流逝倍率。"
+  },
+  "app.lab.command-generator.preset.time.clock-time": {
+    "message": "时钟刻数"
+  },
+  "app.lab.command-generator.preset.time.game-time": {
+    "message": "游戏刻数"
+  },
+  "app.lab.command-generator.preset.time.day-cycles": {
+    "message": "昼夜循环次数"
+  },
+  "app.lab.command-generator.arg.time.query.display": {
+    "message": "查询内容"
+  },
+  "app.lab.command-generator.arg.time.query.desc": {
+    "message": "填写 time、gametime 或时间线 ID；追加 repetition 查询循环次数。"
+  },
+  "app.lab.command-generator.preset.gamerule.fire-radius": {
+    "message": "火焰蔓延半径"
+  },
+  "app.lab.command-generator.arg.gamerule.value.desc.26": {
+    "message": "根据游戏规则填写布尔值或整数；火焰蔓延半径为 0 时停止蔓延。"
+  },
+  "app.lab.command-generator.arg.dialog.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.dialog.action.desc": {
+    "message": "显示或清除对话框。"
+  },
+  "app.lab.command-generator.arg.fetchprofile.source.display": {
+    "message": "档案来源"
+  },
+  "app.lab.command-generator.arg.fetchprofile.source.desc": {
+    "message": "按玩家名、UUID 或实体获取档案。"
+  },
+  "app.lab.command-generator.arg.fetchprofile.profile.display": {
+    "message": "名称、UUID 或选择器"
+  },
+  "app.lab.command-generator.arg.fetchprofile.profile.desc": {
+    "message": "输入玩家名、UUID 或单个实体选择器。"
+  },
+  "app.lab.command-generator.cmd.fetchprofile.desc": {
+    "message": "获取玩家档案。"
+  },
+  "app.lab.command-generator.cmd.unpublish.desc": {
+    "message": "停止共享单人世界。"
+  },
+  "app.lab.command-generator.arg.compute.context.display": {
+    "message": "上下文"
+  },
+  "app.lab.command-generator.arg.compute.context.desc": {
+    "message": "选择求值使用的上下文。"
+  },
+  "app.lab.command-generator.arg.compute.pos.display": {
+    "message": "方块坐标"
+  },
+  "app.lab.command-generator.arg.compute.pos.desc": {
+    "message": "方块坐标"
+  },
+  "app.lab.command-generator.arg.compute.target.display": {
+    "message": "实体"
+  },
+  "app.lab.command-generator.arg.compute.target.desc": {
+    "message": "选择单个实体。"
+  },
+  "app.lab.command-generator.arg.compute.type.display": {
+    "message": "结果类型"
+  },
+  "app.lab.command-generator.arg.compute.type.desc": {
+    "message": "结果类型"
+  },
+  "app.lab.command-generator.arg.compute.provider.display": {
+    "message": "数值提供器"
+  },
+  "app.lab.command-generator.arg.compute.provider.desc": {
+    "message": "输入内联数值提供器或命名空间注册表 ID。"
+  },
+  "app.lab.command-generator.arg.compute.scale.display": {
+    "message": "缩放倍率"
+  },
+  "app.lab.command-generator.arg.compute.scale.desc": {
+    "message": "将浮点结果缩放后作为整数返回。"
+  },
+  "app.lab.command-generator.cmd.compute.desc": {
+    "message": "对数值提供器求值。"
+  },
+  "app.lab.command-generator.arg.posteffect.action.display": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.posteffect.action.desc": {
+    "message": "操作"
+  },
+  "app.lab.command-generator.arg.posteffect.target.display": {
+    "message": "玩家"
+  },
+  "app.lab.command-generator.arg.posteffect.target.desc": {
+    "message": "玩家"
+  },
+  "app.lab.command-generator.arg.posteffect.effect.display": {
+    "message": "后处理效果"
+  },
+  "app.lab.command-generator.arg.posteffect.effect.desc": {
+    "message": "客户端后处理效果的资源 ID。"
+  },
+  "app.lab.command-generator.cmd.posteffect.desc": {
+    "message": "管理屏幕后处理效果。"
+  },
+  "app.lab.command-generator.arg.swing.animation.display": {
+    "message": "动画"
+  },
+  "app.lab.command-generator.arg.swing.animation.desc": {
+    "message": "动画"
+  },
+  "app.lab.command-generator.arg.swing.duration.display": {
+    "message": "动画时长"
+  },
+  "app.lab.command-generator.arg.swing.duration.desc": {
+    "message": "正数时长，可使用刻、秒（s）或天（d）。"
+  },
+  "app.lab.command-generator.arg.item.slot.desc.26": {
+    "message": "槽位范围、内联槽位来源或命名空间槽位来源 ID。"
+  },
+  "app.lab.command-generator.arg.data.method.display": {
+    "message": "修改方式"
+  },
+  "app.lab.command-generator.arg.data.method.desc": {
+    "message": "修改方式"
+  },
+  "app.lab.command-generator.arg.data.source.display": {
+    "message": "数值来源"
+  },
+  "app.lab.command-generator.arg.data.source.desc": {
+    "message": "数值来源"
+  },
+  "app.lab.command-generator.arg.data.index.display": {
+    "message": "插入索引"
+  },
+  "app.lab.command-generator.arg.data.index.desc": {
+    "message": "插入索引"
+  },
+  "app.lab.command-generator.arg.data.literalValue.display": {
+    "message": "SNBT 值"
+  },
+  "app.lab.command-generator.arg.data.literalValue.desc": {
+    "message": "SNBT 值"
+  },
+  "app.lab.command-generator.execute.if-slots.label": {
+    "message": "if slots · 检查槽位"
+  },
+  "app.lab.command-generator.execute.if-slots.desc": {
+    "message": "使用槽位来源检查方块或实体的槽位。"
+  },
+  "app.lab.command-generator.arg.execute.source.display": {
+    "message": "来源类型"
+  },
+  "app.lab.command-generator.arg.execute.source.desc": {
+    "message": "来源类型"
+  },
+  "app.lab.command-generator.arg.execute.target.display": {
+    "message": "实体或坐标"
+  },
+  "app.lab.command-generator.arg.execute.target.desc": {
+    "message": "实体或坐标"
+  },
+  "app.lab.command-generator.arg.execute.slots.display": {
+    "message": "槽位来源"
+  },
+  "app.lab.command-generator.arg.execute.slots.desc": {
+    "message": "槽位范围、内联槽位来源或命名空间 ID。"
+  },
+  "app.lab.command-generator.execute.unless-slots.label": {
+    "message": "unless slots · 检查槽位"
+  },
+  "app.lab.command-generator.execute.unless-slots.desc": {
+    "message": "使用槽位来源检查方块或实体的槽位。"
+  },
+  "app.lab.command-generator.arg.execute.slot.desc.26": {
+    "message": "槽位范围或槽位来源。"
+  },
+  "app.lab.command-generator.arg.waypoint.waypoint.display": {
+    "message": "路径点实体"
+  },
+  "app.lab.command-generator.arg.waypoint.waypoint.desc": {
+    "message": "路径点实体"
+  },
+  "app.lab.command-generator.arg.waypoint.property.display": {
+    "message": "属性"
+  },
+  "app.lab.command-generator.arg.waypoint.property.desc": {
+    "message": "属性"
+  },
+  "app.lab.command-generator.arg.waypoint.value.display": {
+    "message": "颜色或样式"
+  },
+  "app.lab.command-generator.arg.waypoint.value.desc": {
+    "message": "颜色或样式"
   }
 }
