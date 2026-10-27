@@ -203,7 +203,9 @@ provideConsoleManager({
     onDelete: deleteSelectedLog,
     deleteDisabled,
     deleteDisabledTooltip: computed(() => formatMessage(messages.cannotDeleteLatest)),
-    shareDisabled: computed(() => props.offline),
+    // The previous log stays on screen while the next one loads; sharing it
+    // then would upload a log other than the one selected.
+    shareDisabled: computed(() => props.offline || (!isLive.value && historicalLoading.value)),
     emptyStateType: 'instance',
     localCrashAnalysis,
     crashAnalysisLoading,

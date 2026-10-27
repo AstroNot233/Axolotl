@@ -4,7 +4,11 @@ import { type ComputedRef, defineComponent, h, type Ref, Suspense } from 'vue'
 
 import Logs from './Logs.vue'
 
-type Manager = { loading: ComputedRef<boolean>; activeLogSourceIndex: Ref<number> }
+type Manager = {
+    loading: ComputedRef<boolean>
+    shareDisabled: ComputedRef<boolean>
+    activeLogSourceIndex: Ref<number>
+}
 const mocks = vi.hoisted(() => ({
     manager: null as Manager | null,
     getHistoricalLogs: vi.fn(),
@@ -137,6 +141,29 @@ it('ends the pending log request when switching back to the live log', async () 
         expect(mocks.append).not.toHaveBeenCalled()
         expect(mocks.clear).not.toHaveBeenCalled()
         expect(manager.loading.value).toBe(false)
+    } finally {
+        wrapper.unmount()
+    }
+})
+
+it('does not offer to share the previous log while the selected one is loading', async () => {
+    vi.clearAllMocks()
+    mocks.getHistoricalLogs.mockResolvedValueOnce([log('a.log'), log('b.log')])
+    const wrapper = await mountLogs()
+    try {
+        const manager = mocks.manager!
+        mocks.getOutput.mockResolvedValueOnce('first log')
+        manager.activeLogSourceIndex.value = 1
+        await flushPromises()
+        expect(manager.shareDisabled.value).toBe(false)
+        const text = deferred<string>()
+        mocks.getOutput.mockReturnValueOnce(text.promise)
+        manager.activeLogSourceIndex.value = 2
+        await flushPromises()
+        expect(manager.shareDisabled.value).toBe(true)
+        text.resolve('second log')
+        await flushPromises()
+        expect(manager.shareDisabled.value).toBe(false)
     } finally {
         wrapper.unmount()
     }
