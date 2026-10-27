@@ -1,6 +1,7 @@
 //! Functions for fetching information from the Internet
 mod client;
 mod model;
+mod policy;
 mod routes;
 mod throttle;
 pub(crate) use self::client::*;
@@ -13,6 +14,7 @@ pub use self::model::{
     DownloadResult, DownloadRoute, DownloadRouteSource, FetchProgressFn,
     Integrity, ProxyPolicy, ResourceClass,
 };
+pub(crate) use self::policy::*;
 pub use self::routes::resolve_download_routes_for;
 pub(crate) use self::routes::*;
 pub(crate) use self::throttle::*;
@@ -34,42 +36,38 @@ use crate::event::LoadingBarId;
 use crate::event::emit::emit_loading;
 use crate::install::DownloadItemStatus;
 use crate::util::download::constants::DOWNLOAD_PROGRESS_LOG_INTERVAL;
-use crate::util::download::constants::FETCH_RETRY_DELAYS;
 use crate::util::download::constants::MODRINTH_CDN_ATTEMPT_TIMEOUT;
 use crate::util::download::constants::MODRINTH_CDN_ATTEMPTS;
-use crate::util::download::constants::RANGE_SPLITTING_DISABLE_THRESHOLD;
 use crate::util::download::constants::STALE_PARTIAL_DOWNLOAD_MAX_AGE;
 use crate::util::download::constants::{
-    ADAPTIVE_RANGE_BYTES, API_KEY_HEADER, AUTHORIZATION_HEADER,
+    ADAPTIVE_RANGE_BYTES, AUTHORIZATION_HEADER,
     COLD_START_ROUTE_HEALTH_SAMPLE_THRESHOLD, DIAGNOSTICS_NETWORK,
     DIAGNOSTICS_RANGE, DOWNLOAD_BUFFER_BYTES, DOWNLOAD_FAIR_SHARE_DIVISOR,
     DOWNLOAD_PROGRESS_INTERVAL, DOWNLOAD_PROGRESS_MIN_BYTES,
     DOWNLOAD_SCHEDULER_INTERVAL, DOWNLOAD_SCHEDULING_GRACE, FETCH_ABORT,
-    FETCH_ACTIVE_SEGMENT_BODY, FETCH_AUTHORIZATION, FETCH_BYTES, FETCH_CDN,
+    FETCH_ACTIVE_SEGMENT_BODY, FETCH_BYTES, FETCH_CDN,
     FETCH_CHECKPOINT_RESUME_FAILED_DUE_TO_LOCAL_I_O, FETCH_CLEAN_RETRY,
     FETCH_CLEAR_PARTIAL_AND_RETRY, FETCH_CLEAR_PARTIAL_AND_SWITCH,
-    FETCH_CONFIGURED_CONNECTION_LIMIT_IS_ONE, FETCH_COOKIE,
-    FETCH_COOLDOWN_AND_SWITCH, FETCH_COOLDOWN_THEN_RETRY,
-    FETCH_CREATING_DOWNLOAD_FILE, FETCH_DISABLE_RANGE_AND_RETRY_SINGLE,
-    FETCH_DISABLE_RANGE_AND_SWITCH, FETCH_DOWNLOAD_CANCELED, FETCH_DROP_ROUTE,
+    FETCH_CONFIGURED_CONNECTION_LIMIT_IS_ONE, FETCH_COOLDOWN_AND_SWITCH,
+    FETCH_COOLDOWN_THEN_RETRY, FETCH_CREATING_DOWNLOAD_FILE,
+    FETCH_DISABLE_RANGE_AND_RETRY_SINGLE, FETCH_DISABLE_RANGE_AND_SWITCH,
+    FETCH_DOWNLOAD_CANCELED, FETCH_DROP_ROUTE,
     FETCH_DROP_ROUTE_AFTER_CLEAN_RETRY,
     FETCH_EFFECTIVE_CONCURRENCY_CAP_REACHED, FETCH_EO_CACHE_STATUS,
     FETCH_EXPANSION_COOLDOWN_ACTIVE, FETCH_FALLBACK_OFFICIAL,
     FETCH_FALLBACK_SINGLE, FETCH_FETCH_PERMIT_BATCH_HAS_ENOUGH_PERMITS,
-    FETCH_FINALIZING_DOWNLOAD, FETCH_GITHUB_COM, FETCH_HEDGE_FAILED,
-    FETCH_HTTP, FETCH_ICONS, FETCH_INSUFFICIENT_AGGREGATE_SPEED_SAMPLES,
-    FETCH_INVALID_CONTENT_RANGE, FETCH_INVALID_HEDGED_CONTENT_RANGE,
-    FETCH_MELOONG_COM, FETCH_MIRROR, FETCH_MISSING, FETCH_MOMOT_RS,
+    FETCH_FINALIZING_DOWNLOAD, FETCH_HEDGE_FAILED, FETCH_HTTP, FETCH_ICONS,
+    FETCH_INSUFFICIENT_AGGREGATE_SPEED_SAMPLES, FETCH_INVALID_CONTENT_RANGE,
+    FETCH_INVALID_HEDGED_CONTENT_RANGE, FETCH_MIRROR, FETCH_MISSING,
     FETCH_NCAUSED_BY, FETCH_NO_GLOBAL_PERMIT_AVAILABLE, FETCH_OFFICIAL,
-    FETCH_OPENING_DOWNLOAD_FILE, FETCH_OPTIFINE_NET, FETCH_PART_RANGES_JSON,
-    FETCH_PART_RANGES_JSON_2, FETCH_PROXY_AUTHORIZATION,
-    FETCH_RANGE_BYTE_COUNT_MISMATCH, FETCH_RANGE_END_OVERFLOW,
+    FETCH_OPENING_DOWNLOAD_FILE, FETCH_PART_RANGES_JSON,
+    FETCH_PART_RANGES_JSON_2, FETCH_RANGE_BYTE_COUNT_MISMATCH,
+    FETCH_RANGE_END_OVERFLOW,
     FETCH_RANGE_RESPONSE_ENDED_BEFORE_EXPECTED_BOUNDARY, FETCH_REMOVING,
     FETCH_RESOURCE_VALIDATOR_CHANGED_BETWEEN_RANGES,
     FETCH_RESOURCE_VALIDATOR_CHANGED_DURING_TAIL_HEDGE,
     FETCH_RESUMABLE_PARTIAL_USES_A_SINGLE_STREAM, FETCH_RESUME_OR_SWITCH,
-    FETCH_RETRY_JITTER_MAX, FETCH_RETRY_JITTER_MIN, FETCH_RETRY_NEXT_ROUND,
-    FETCH_RETRY_SAME_ROUTE, FETCH_SEGMENT,
+    FETCH_RETRY_NEXT_ROUND, FETCH_RETRY_SAME_ROUTE, FETCH_SEGMENT,
     FETCH_SEGMENTED_CONTENT_VALIDATION_FAILED, FETCH_SELECTED_ENDPOINT_CHANGED,
     FETCH_SERVER_IGNORED_RANGE_AND_RETURNED_200,
     FETCH_SERVER_RETURNED_HTTP_416_FOR_RANGE_REQUEST, FETCH_STOP,
@@ -77,14 +75,12 @@ use crate::util::download::constants::{
     FETCH_TIMED_OUT_WAITING_FOR_CDN_CONNECTION_RESOURCES,
     FETCH_TIMED_OUT_WAITING_FOR_DESTINATION_DOWNLOAD_LOCK,
     FETCH_TIMED_OUT_WAITING_FOR_NATIVE_DOWNLOAD_RESOURCES,
-    FETCH_TOO_LITTLE_DATA_REMAINS, FETCH_UNKNOWN, FETCH_V2_SESSION,
-    FETCH_V2_USER, FETCH_V3_FRIEND, FETCH_V3_FRIENDS, FETCH_V3_NOTIFICATION,
-    FILE_TCP_KEEPALIVE, FILE_TRANSFER_FIRST_BYTE_TIMEOUT, H2_FALLBACK_TTL,
-    HTTPS_SCHEME, INITIAL_SEGMENT_CONCURRENCY, JOB_PROBE_WINDOW,
-    MAX_FAILURE_COOLDOWN, MAX_SEGMENT_CONCURRENCY, MAX_TAIL_HEDGES_PER_FILE,
-    MAX_TASK_PROBE_STATES, METADATA_ATTEMPT_BUDGET, METADATA_HEDGE_DELAY,
-    METADATA_REQUEST_TIMEOUT, MIN_SEGMENT_SIZE, MODRINTH_DATA_PREFIX,
-    PARTIAL_FILE_SUFFIX, RANGE_IDLE_RECONNECT_TIMEOUT,
+    FETCH_TOO_LITTLE_DATA_REMAINS, FETCH_UNKNOWN, FILE_TCP_KEEPALIVE,
+    FILE_TRANSFER_FIRST_BYTE_TIMEOUT, H2_FALLBACK_TTL, HTTPS_SCHEME,
+    INITIAL_SEGMENT_CONCURRENCY, JOB_PROBE_WINDOW, MAX_SEGMENT_CONCURRENCY,
+    MAX_TAIL_HEDGES_PER_FILE, MAX_TASK_PROBE_STATES, METADATA_ATTEMPT_BUDGET,
+    METADATA_HEDGE_DELAY, METADATA_REQUEST_TIMEOUT, MIN_SEGMENT_SIZE,
+    MODRINTH_DATA_PREFIX, PARTIAL_FILE_SUFFIX, RANGE_IDLE_RECONNECT_TIMEOUT,
     REASSIGNABLE_FIRST_BYTE_TIMEOUT, RESOURCE_WAIT_TIMEOUT, RETRY_AFTER_CAP,
     ROUTE_PROBE_BYTES, ROUTE_PROBE_MIN_IMPROVEMENT_PERCENT,
     ROUTE_PROBE_TIMEOUT, SEGMENT_EXPANSION_INTERVAL,
@@ -113,16 +109,14 @@ use crate::util::download::constants::{
 };
 use crate::{ErrorKind, LabrinthError};
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
 use eyre::{Context, eyre};
 use futures::StreamExt;
 use parking_lot::Mutex;
-use rand::Rng;
 use reqwest::{Method, StatusCode, header};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256, Sha512};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::error::Error;
 use std::ffi::OsStr;
 use std::future::Future;
@@ -158,321 +152,9 @@ use super::download::native_request::{
 #[cfg(test)]
 use super::download::route_health::resource_family;
 use super::download::route_health::{
-    ROUTE_HEALTH, ResourceFamily, RouteHealth, RouteHealthKey,
-    TASK_PROBE_STATES, TaskProbeGuard, TaskProbeKey,
+    ROUTE_HEALTH, ResourceFamily, RouteHealth, TASK_PROBE_STATES,
+    TaskProbeGuard, TaskProbeKey,
 };
-
-fn route_health_key(
-    route: &DownloadRoute,
-    resource: ResourceClass,
-) -> Option<RouteHealthKey> {
-    super::download::route_health::route_health_key(route, resource)
-}
-
-fn update_ewma(current: &mut Option<f64>, sample: f64) {
-    super::download::route_health::update_ewma(current, sample);
-}
-
-fn persisted_route_health(
-    key: &RouteHealthKey,
-    proxy: ProxyPolicy,
-) -> RouteHealth {
-    super::download::route_health::persisted_route_health(key, proxy)
-}
-
-fn fetch_retry_delay(attempt: usize) -> time::Duration {
-    let base = FETCH_RETRY_DELAYS
-        .get(attempt.saturating_sub(1))
-        .copied()
-        .unwrap_or(*FETCH_RETRY_DELAYS.last().unwrap());
-    let jitter = rand::thread_rng()
-        .gen_range(FETCH_RETRY_JITTER_MIN..=FETCH_RETRY_JITTER_MAX);
-    time::Duration::from_secs_f64(base.as_secs_f64() * jitter)
-}
-
-pub(crate) fn retry_after(
-    response: &reqwest::Response,
-) -> Option<time::Duration> {
-    retry_after_headers(response.headers())
-}
-
-pub(crate) fn retry_after_headers(
-    headers: &header::HeaderMap,
-) -> Option<time::Duration> {
-    let value = headers.get(header::RETRY_AFTER)?.to_str().ok()?;
-    if let Ok(seconds) = value.parse::<u64>() {
-        return Some(clamp_failure_cooldown(time::Duration::from_secs(
-            seconds,
-        )));
-    }
-
-    let retry_at = DateTime::parse_from_rfc2822(value)
-        .ok()?
-        .with_timezone(&Utc);
-    let seconds = retry_at.signed_duration_since(Utc::now()).num_seconds();
-    Some(clamp_failure_cooldown(time::Duration::from_secs(
-        seconds.max(0) as u64,
-    )))
-}
-
-fn clamp_failure_cooldown(cooldown: time::Duration) -> time::Duration {
-    cooldown.min(RETRY_AFTER_CAP)
-}
-
-pub(crate) fn is_sensitive_header(name: &str) -> bool {
-    name.eq_ignore_ascii_case(FETCH_AUTHORIZATION)
-        || name.eq_ignore_ascii_case(FETCH_PROXY_AUTHORIZATION)
-        || name.eq_ignore_ascii_case(FETCH_COOKIE)
-        || name.eq_ignore_ascii_case(API_KEY_HEADER)
-}
-
-fn header_requires_official_only(name: &str) -> bool {
-    name.eq_ignore_ascii_case(FETCH_AUTHORIZATION)
-        || name.eq_ignore_ascii_case(FETCH_PROXY_AUTHORIZATION)
-        || name.eq_ignore_ascii_case(FETCH_COOKIE)
-}
-
-fn requires_modrinth_auth(
-    method: &Method,
-    header: Option<(&str, &str)>,
-    uri_path: Option<&str>,
-) -> bool {
-    if method != Method::GET
-        || header.is_some_and(|(name, _)| is_sensitive_header(name))
-    {
-        return true;
-    }
-
-    uri_path.is_some_and(|path| {
-        matches!(path, FETCH_V2_USER | FETCH_V3_FRIENDS)
-            || path.starts_with(FETCH_V2_SESSION)
-            || path.starts_with(FETCH_V3_FRIEND)
-            || path.starts_with(FETCH_V3_NOTIFICATION)
-    })
-}
-
-fn record_route_success(
-    route: &DownloadRoute,
-    resource: ResourceClass,
-    ttfb: time::Duration,
-    bytes: u64,
-    transfer_elapsed: time::Duration,
-    remote_addr: Option<std::net::SocketAddr>,
-) {
-    if let (Some(host), Some(remote_addr)) = (route_host(route), remote_addr) {
-        super::download::proxy_context::resolver(route.proxy)
-            .record_host_success(&host, remote_addr.ip());
-    }
-    if let Some(key) = route_health_key(route, resource) {
-        let baseline = persisted_route_health(&key, route.proxy);
-        let throughput_bps = (!transfer_elapsed.is_zero())
-            .then(|| bytes as f64 / transfer_elapsed.as_secs_f64());
-        crate::util::download::native_breaker::record_success(route);
-        crate::util::download::native_reputation::record_success(
-            key.family.as_str(),
-            &key.authority,
-            route.proxy,
-            ttfb.as_secs_f64() * 1000.0,
-            throughput_bps,
-        );
-        let mut health = ROUTE_HEALTH.lock();
-        let entry = health.entry(key).or_insert(baseline);
-        entry.success_samples = entry.success_samples.saturating_add(1);
-        entry.consecutive_failures = 0;
-        entry.cooldown_until = None;
-        update_ewma(&mut entry.ttfb_ms, ttfb.as_secs_f64() * 1000.0);
-        if !transfer_elapsed.is_zero() {
-            update_ewma(
-                &mut entry.throughput_bps,
-                bytes as f64 / transfer_elapsed.as_secs_f64(),
-            );
-        }
-    }
-}
-
-pub(crate) fn record_route_transfer_success(
-    route: &DownloadRoute,
-    resource: ResourceClass,
-    bytes: u64,
-    transfer_elapsed: time::Duration,
-) {
-    if transfer_elapsed.is_zero() {
-        return;
-    }
-    let Some(key) = route_health_key(route, resource) else {
-        return;
-    };
-    let baseline = persisted_route_health(&key, route.proxy);
-    let throughput_bps = bytes as f64 / transfer_elapsed.as_secs_f64();
-    crate::util::download::native_breaker::record_success(route);
-    crate::util::download::native_reputation::record_transfer_success(
-        key.family.as_str(),
-        &key.authority,
-        route.proxy,
-        throughput_bps,
-    );
-    let mut health = ROUTE_HEALTH.lock();
-    let entry = health.entry(key).or_insert(baseline);
-    entry.success_samples = entry.success_samples.saturating_add(1);
-    entry.consecutive_failures = 0;
-    entry.cooldown_until = None;
-    update_ewma(&mut entry.throughput_bps, throughput_bps);
-}
-
-fn record_route_failure(
-    route: &DownloadRoute,
-    resource: ResourceClass,
-    cooldown: Option<time::Duration>,
-) {
-    if cooldown.is_some()
-        && let Some(state) = crate::State::get_if_initialized()
-    {
-        state.record_download_throttle();
-    }
-    record_route_health_failure(route, resource, cooldown);
-}
-
-pub(crate) fn record_dns_connection_failure(
-    route: &DownloadRoute,
-    error: &reqwest::Error,
-) -> Option<String> {
-    if !error.is_connect() && !error.is_timeout() {
-        return None;
-    }
-    let host = error
-        .url()
-        .and_then(Url::host_str)
-        .map(str::to_owned)
-        .or_else(|| route_host(route))?;
-    super::download::proxy_context::resolver(route.proxy)
-        .record_connection_failure(&host)
-        .then_some(host)
-}
-
-fn record_native_transfer_failure(
-    route: &DownloadRoute,
-    cooldown: Option<time::Duration>,
-) {
-    crate::util::download::native_breaker::record_failure_with_cooldown(
-        route, cooldown,
-    );
-}
-
-/// Records an HTTP status that asks the client to slow down. `429` and `503`
-/// cool down their own bucket, so their pause is not reset by unrelated
-/// connection failures on the same route.
-fn record_native_status_failure(
-    route: &DownloadRoute,
-    status: reqwest::StatusCode,
-    retry_after: Option<time::Duration>,
-) {
-    if !crate::util::download::native_breaker::record_response_status_failure(
-        route,
-        status.as_u16(),
-        retry_after,
-    ) {
-        crate::util::download::native_breaker::record_failure_with_cooldown(
-            route,
-            retry_after,
-        );
-    }
-}
-
-pub(crate) fn record_route_health_failure(
-    route: &DownloadRoute,
-    resource: ResourceClass,
-    cooldown: Option<time::Duration>,
-) {
-    if let Some(key) = route_health_key(route, resource) {
-        let baseline = persisted_route_health(&key, route.proxy);
-        crate::util::download::native_reputation::record_failure(
-            key.family.as_str(),
-            &key.authority,
-            route.proxy,
-        );
-        let mut health = ROUTE_HEALTH.lock();
-        let entry = health.entry(key).or_insert(baseline);
-        entry.consecutive_failures =
-            entry.consecutive_failures.saturating_add(1);
-        if let Some(cooldown) = cooldown {
-            entry.cooldown_until =
-                Some(Instant::now() + cooldown.min(MAX_FAILURE_COOLDOWN));
-        }
-    }
-}
-
-static RANGE_SPLITTING_PROTOCOL_FAILURES: LazyLock<
-    Mutex<HashMap<String, u32>>,
-> = LazyLock::new(|| Mutex::new(HashMap::new()));
-static RANGE_SPLITTING_SUPPORTED: LazyLock<Mutex<HashSet<String>>> =
-    LazyLock::new(|| Mutex::new(HashSet::new()));
-
-pub(crate) fn range_splitting_authority(
-    route: &DownloadRoute,
-) -> Option<String> {
-    effective_route_authority(route)
-}
-
-pub(crate) fn range_splitting_allowed(route: &DownloadRoute) -> bool {
-    let host = route_host(route).unwrap_or_default();
-    if [
-        FETCH_GITHUB_COM,
-        FETCH_OPTIFINE_NET,
-        FETCH_MOMOT_RS,
-        FETCH_MELOONG_COM,
-    ]
-    .iter()
-    .any(|blocked| host.contains(blocked))
-    {
-        return false;
-    }
-
-    range_splitting_authority(route).is_none_or(|authority| {
-        let authority = super::download::proxy_context::authority_key(
-            &authority,
-            route.proxy,
-        );
-        RANGE_SPLITTING_PROTOCOL_FAILURES
-            .lock()
-            .get(&authority)
-            .copied()
-            .unwrap_or(0)
-            < RANGE_SPLITTING_DISABLE_THRESHOLD
-    })
-}
-
-/// Records a range protocol failure for the route's server. A single failure
-/// is treated as a transient blip, but once a server repeatedly mishandles
-/// range requests, range splitting is disabled for it for this session so
-/// later downloads skip the doomed segmented probe.
-fn disable_range_splitting(route: &DownloadRoute) {
-    let Some(authority) = range_splitting_authority(route) else {
-        return;
-    };
-    let authority =
-        super::download::proxy_context::authority_key(&authority, route.proxy);
-    let mut failures = RANGE_SPLITTING_PROTOCOL_FAILURES.lock();
-    let count = failures.entry(authority.clone()).or_insert(0);
-    *count += 1;
-    if *count == RANGE_SPLITTING_DISABLE_THRESHOLD {
-        RANGE_SPLITTING_SUPPORTED.lock().remove(&authority);
-        tracing::info!(
-            authority,
-            "Disabling range splitting for a server after repeated range protocol failures"
-        );
-    }
-}
-
-fn record_range_splitting_success(route: &DownloadRoute) {
-    if let Some(authority) = range_splitting_authority(route) {
-        RANGE_SPLITTING_SUPPORTED.lock().insert(
-            super::download::proxy_context::authority_key(
-                &authority,
-                route.proxy,
-            ),
-        );
-    }
-}
 
 async fn fetch_validated_metadata_route(
     route: &DownloadRoute,
