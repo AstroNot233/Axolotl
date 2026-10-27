@@ -701,16 +701,11 @@ pub(crate) async fn censor_credentials(
 }
 
 async fn minecraft_tokens(handle: &Handle) -> crate::Result<Vec<String>> {
-    let mut tokens = Vec::new();
-
-    for (access_token, refresh_token) in
-        minecraft_users::token_pairs(handle).await?
-    {
-        tokens.push(access_token);
-        tokens.push(refresh_token);
-    }
-
-    Ok(tokens)
+    Ok(minecraft_users::token_pairs(handle)
+        .await?
+        .into_iter()
+        .flat_map(|(access_token, refresh_token)| [access_token, refresh_token])
+        .collect())
 }
 
 fn replace_nonempty(text: &mut String, value: &str, replacement: &str) {

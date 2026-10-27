@@ -139,12 +139,56 @@ impl Collection for ModrinthUsers {
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
         ensure_one_active(records)?;
+        ensure_records_are_in_scope(scope, records)?;
+        ensure_keys_belong_to_scope(conn, scope, records).await?;
         delete_omitted(conn, Some(*scope), records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
         }
         Ok(())
     }
+}
+
+/// A session written into a scope is in the state that scope names: writing a
+/// signed-in session into the idle group would clear the others and then take
+/// the session away from where it belongs.
+fn ensure_records_are_in_scope(
+    scope: &ModrinthUserScope,
+    records: &[(ModrinthUserKey, ModrinthUserRecord)],
+) -> crate::Result<()> {
+    for (key, record) in records {
+        if record.active != *scope {
+            return Err(crate::ErrorKind::InputError(format!(
+                "Session {key} was written into a state it is not in"
+            ))
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
+/// A replacement writes by account, so a session stored in the other state
+/// would be moved rather than replaced: its row is deleted here and rewritten
+/// there, taking the signed-in session with it.
+async fn ensure_keys_belong_to_scope(
+    conn: &mut SqliteConnection,
+    scope: &ModrinthUserScope,
+    records: &[(ModrinthUserKey, ModrinthUserRecord)],
+) -> crate::Result<()> {
+    for (key, _) in records {
+        let Some(existing) = ModrinthUsers::read(conn, key).await? else {
+            continue;
+        };
+        if existing.active != *scope {
+            return Err(crate::ErrorKind::InputError(format!(
+                "Session {key} belongs to the other state"
+            ))
+            .into());
+        }
+    }
+
+    Ok(())
 }
 
 /// The table carries one active session; it no longer has an index that says so,

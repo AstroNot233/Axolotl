@@ -184,3 +184,84 @@ async fn the_active_session_reads_on_its_own() {
     assert_eq!(idle.len(), 1);
     assert_eq!(idle[0].0, "first");
 }
+
+#[tokio::test]
+async fn a_session_cannot_be_written_into_a_state_it_is_not_in() {
+    let handle = support::handle().await;
+    ModrinthUsers::set(&handle, &"idle".to_string(), Some(&session(false, 5)))
+        .await
+        .unwrap();
+    ModrinthUsers::set(
+        &handle,
+        &"signed-in".to_string(),
+        Some(&session(true, 10)),
+    )
+    .await
+    .unwrap();
+
+    let refused = ModrinthUsers::set_scoped(
+        &handle,
+        &false,
+        &[("intruder".to_string(), session(true, 20))],
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(
+        refused.raw.as_ref(),
+        crate::ErrorKind::InputError(_)
+    ));
+    assert_eq!(
+        ModrinthUsers::get(&handle, &"signed-in".to_string())
+            .await
+            .unwrap()
+            .map(|record| record.active),
+        Some(true)
+    );
+    assert_eq!(
+        ModrinthUsers::get(&handle, &"idle".to_string())
+            .await
+            .unwrap(),
+        Some(session(false, 5))
+    );
+}
+
+#[tokio::test]
+async fn a_session_cannot_be_moved_between_states() {
+    let handle = support::handle().await;
+    ModrinthUsers::set(&handle, &"idle".to_string(), Some(&session(false, 5)))
+        .await
+        .unwrap();
+    ModrinthUsers::set(
+        &handle,
+        &"signed-in".to_string(),
+        Some(&session(true, 10)),
+    )
+    .await
+    .unwrap();
+
+    let refused = ModrinthUsers::set_scoped(
+        &handle,
+        &true,
+        &[("idle".to_string(), session(true, 7))],
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(
+        refused.raw.as_ref(),
+        crate::ErrorKind::InputError(_)
+    ));
+    assert_eq!(
+        ModrinthUsers::get(&handle, &"signed-in".to_string())
+            .await
+            .unwrap(),
+        Some(session(true, 10))
+    );
+    assert_eq!(
+        ModrinthUsers::get(&handle, &"idle".to_string())
+            .await
+            .unwrap(),
+        Some(session(false, 5))
+    );
+}
