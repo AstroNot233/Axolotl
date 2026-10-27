@@ -4100,6 +4100,9 @@
   "app.java.none-found": {
     "message": "No Java installations found!"
   },
+  "app.java.searching": {
+    "message": "Looking for Java installations…"
+  },
   "app.java.select": {
     "message": "Select"
   },

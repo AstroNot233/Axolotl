@@ -24,7 +24,15 @@
                     </div>
                 </template>
                 <template #empty-state>
-                    <div class="p-4 text-[var(--color-text-tertiary)]">
+                    <div
+                        v-if="loading"
+                        class="flex items-center gap-2 p-4 text-[var(--color-text-tertiary)]"
+                        role="status"
+                    >
+                        <SpinnerIcon class="size-4 animate-spin" />
+                        {{ formatMessage(messages.searching) }}
+                    </div>
+                    <div v-else class="p-4 text-[var(--color-text-tertiary)]">
                         {{ formatMessage(messages.noneFound) }}
                     </div>
                 </template>
@@ -42,7 +50,7 @@
     </NewModal>
 </template>
 <script setup>
-import { CheckIcon, PlusIcon, XIcon } from '@modrinth/assets'
+import { CheckIcon, PlusIcon, SpinnerIcon, XIcon } from '@modrinth/assets'
 import {
     Button,
     commonMessages,
@@ -70,6 +78,10 @@ const messages = defineMessages({
         id: 'app.java.none-found',
         defaultMessage: 'No Java installations found!',
     },
+    searching: {
+        id: 'app.java.searching',
+        defaultMessage: 'Looking for Java installations…',
+    },
     version: { id: 'app.java.table.version', defaultMessage: 'Version' },
     path: { id: 'app.java.table.path', defaultMessage: 'Path' },
     actions: { id: 'app.java.table.actions', defaultMessage: 'Actions' },
@@ -85,38 +97,47 @@ const javaInstallColumns = [
 ]
 
 const lastRequestedVersion = ref(null)
+const loading = ref(false)
 let unlistenJavaDiscovery = null
+let listening = null
+let disposed = false
+// Each opening owns its results; a slower lookup for an earlier version must not replace them.
+let generation = 0
 
 defineExpose({
     show: async (version, currentSelectedJava) => {
+        const request = ++generation
         lastRequestedVersion.value = version ?? null
-        chosenInstallOptions.value = await find_filtered_jres(version, false, false).catch(
-            handleError,
-        )
-
-        currentSelected.value = currentSelectedJava
-        if (!currentSelected.value) {
-            currentSelected.value = { path: '', version: '' }
-        }
-
-        if (!unlistenJavaDiscovery) {
-            unlistenJavaDiscovery = await java_discovery_listener(refreshInstallOptions)
-        }
-
+        currentSelected.value = currentSelectedJava || { path: '', version: '' }
+        chosenInstallOptions.value = []
+        loading.value = true
         detectJavaModal.value.show()
+        listening ??= java_discovery_listener(refreshInstallOptions).then((unlisten) => {
+            if (disposed) unlisten()
+            else unlistenJavaDiscovery = unlisten
+        })
+        await loadInstallOptions(request)
     },
 })
 
-async function refreshInstallOptions() {
-    const updated = await find_filtered_jres(lastRequestedVersion.value, false, false).catch(
-        () => null,
-    )
-    if (updated) {
-        chosenInstallOptions.value = updated
+async function loadInstallOptions(request, quiet = false) {
+    try {
+        const found = await find_filtered_jres(lastRequestedVersion.value, false, false)
+        if (request === generation && found) chosenInstallOptions.value = found
+    } catch (error) {
+        if (request === generation && !quiet) handleError(error)
+    } finally {
+        if (request === generation) loading.value = false
     }
 }
 
+function refreshInstallOptions() {
+    return loadInstallOptions(generation, true)
+}
+
 onUnmounted(() => {
+    disposed = true
+    generation++
     if (unlistenJavaDiscovery) {
         unlistenJavaDiscovery()
         unlistenJavaDiscovery = null
