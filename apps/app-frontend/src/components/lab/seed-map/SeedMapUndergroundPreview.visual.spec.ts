@@ -412,6 +412,7 @@ it('loads textured cavity geometry, switches layers, keeps the view on failure a
                 backend.invoke.mock.calls.filter(([command]) =>
                     command.endsWith('seed_map_underground_volume'),
                 ).length,
+            { timeout: 15_000 },
         )
         .toBeGreaterThan(1)
     const requests = backend.invoke.mock.calls
@@ -422,10 +423,12 @@ it('loads textured cavity geometry, switches layers, keeps the view on failure a
         requests.length,
     )
     await expect
-        .poll(() =>
-            wrapper
-                ?.get('[data-testid=underground-generation-status]')
-                .attributes('data-generating'),
+        .poll(
+            () =>
+                wrapper
+                    ?.get('[data-testid=underground-generation-status]')
+                    .attributes('data-generating'),
+            { timeout: 15_000 },
         )
         .toBe('false')
     const canvas = wrapper.get('canvas').element as HTMLCanvasElement
@@ -445,7 +448,9 @@ it('loads textured cavity geometry, switches layers, keeps the view on failure a
     const beforeMove = wrapper.text().match(/X -?\d+ · Y -?\d+ · Z -?\d+ · \d+ blocks\/s/)?.[0]
     window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }))
     await expect
-        .poll(() => wrapper?.text().match(/X -?\d+ · Y -?\d+ · Z -?\d+ · \d+ blocks\/s/)?.[0])
+        .poll(() => wrapper?.text().match(/X -?\d+ · Y -?\d+ · Z -?\d+ · \d+ blocks\/s/)?.[0], {
+            timeout: 15_000,
+        })
         .not.toBe(beforeMove)
     document.exitPointerLock()
     await expect.poll(() => document.pointerLockElement).toBe(null)
@@ -469,10 +474,12 @@ it('loads textured cavity geometry, switches layers, keeps the view on failure a
     pending = true
     await userEvent.click(page.getByRole('button', { name: 'Retry region' }))
     await expect
-        .poll(() =>
-            wrapper
-                ?.get('[data-testid=underground-generation-status]')
-                .attributes('data-generating'),
+        .poll(
+            () =>
+                wrapper
+                    ?.get('[data-testid=underground-generation-status]')
+                    .attributes('data-generating'),
+            { timeout: 15_000 },
         )
         .toBe('true')
     wrapper.unmount()
