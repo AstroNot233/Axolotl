@@ -1,8 +1,10 @@
 mod backups;
 mod instances;
 mod jobs;
+mod launch;
 mod lifecycle;
 mod logs;
+mod metadata;
 mod queries;
 mod resources;
 
@@ -27,6 +29,36 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                Command::MetadataListGameVersions {
+                    release_type,
+                    search,
+                    offset,
+                    limit,
+                } => metadata::games(release_type, search, offset, limit).await,
+                Command::MetadataListLoaderVersions {
+                    loader,
+                    game_version,
+                    stable_only,
+                    offset,
+                    limit,
+                } => {
+                    metadata::loaders(
+                        loader,
+                        game_version,
+                        stable_only,
+                        offset,
+                        limit,
+                    )
+                    .await
+                }
+                command @ (Command::LaunchConfigGet { .. }
+                | Command::LaunchSetMemory { .. }
+                | Command::LaunchSetWindowOptions { .. }
+                | Command::LaunchSetJava { .. }
+                | Command::LaunchResetOverrides { .. }
+                | Command::LaunchGetMemoryStatus { .. }) => {
+                    launch::execute(command).await
+                }
                 command @ (Command::BackupRepositoryStatus {}
                 | Command::BackupGetConfig { .. }
                 | Command::BackupEnable { .. }

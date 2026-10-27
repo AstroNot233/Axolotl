@@ -42,6 +42,53 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    MetadataListGameVersions {
+        #[serde(default)]
+        release_type: Option<GameReleaseType>,
+        #[serde(default)]
+        search: Option<String>,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    MetadataListLoaderVersions {
+        loader: MetadataLoader,
+        game_version: String,
+        #[serde(default)]
+        stable_only: bool,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    LaunchConfigGet {
+        instance_id: String,
+    },
+    LaunchSetMemory {
+        instance_id: String,
+        automatic: bool,
+        maximum_mib: u32,
+        optimize_before_launch: bool,
+    },
+    LaunchSetWindowOptions {
+        instance_id: String,
+        fullscreen: bool,
+        maximized: bool,
+        width: u16,
+        height: u16,
+    },
+    LaunchSetJava {
+        instance_id: String,
+        registered_path: String,
+    },
+    LaunchResetOverrides {
+        instance_id: String,
+        fields: Vec<LaunchField>,
+    },
+    LaunchGetMemoryStatus {
+        instance_id: String,
+    },
     BackupRepositoryStatus {},
     BackupGetConfig {
         instance_id: String,
@@ -270,6 +317,36 @@ pub enum Command {
     InstallJobGet {
         job_id: uuid::Uuid,
     },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GameReleaseType {
+    Release,
+    Snapshot,
+    OldAlpha,
+    OldBeta,
+}
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataLoader {
+    Fabric,
+    Forge,
+    Quilt,
+    #[serde(rename = "neoforge")]
+    NeoForge,
+    Optifine,
+    Cleanroom,
+    LiteLoader,
+    LegacyFabric,
+    Babric,
+}
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchField {
+    Memory,
+    Window,
+    Java,
 }
 
 impl Command {

@@ -4,6 +4,7 @@ use rmcp::{
 };
 use serde_json::{Map, Value, json};
 mod backups;
+mod launch;
 mod resources;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -67,7 +68,7 @@ fn text(max: u64) -> Value {
     json!({"type":"string","minLength":1,"maxLength":max})
 }
 fn version() -> Value {
-    json!({"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._+\\-]*$"})
+    json!({"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9](?:[A-Za-z0-9._+ -]*[A-Za-z0-9_+-])?$"})
 }
 fn page() -> Value {
     json!({"offset":{"type":"integer","minimum":0,"maximum":4294967295_u64},"limit":{"type":"integer","minimum":1,"maximum":100}})
@@ -377,6 +378,7 @@ pub(crate) fn entries() -> Vec<Entry> {
     ];
     entries.extend(resources::entries());
     entries.extend(backups::entries());
+    entries.extend(launch::entries());
     entries
 }
 
@@ -427,14 +429,16 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
                     .as_array()
                     .is_none_or(|choices| choices.contains(value))
                 && rule["pattern"].as_str().is_none_or(|pattern| {
-                    pattern == "^[A-Za-z0-9][A-Za-z0-9._+\\-]*$"
+                    pattern
+                        == "^[A-Za-z0-9](?:[A-Za-z0-9._+ -]*[A-Za-z0-9_+-])?$"
                         && s.as_bytes()
                             .first()
                             .is_some_and(u8::is_ascii_alphanumeric)
                         && s.bytes().all(|c| {
                             c.is_ascii_alphanumeric()
-                                || matches!(c, b'.' | b'_' | b'+' | b'-')
+                                || matches!(c, b'.' | b'_' | b'+' | b'-' | b' ')
                         })
+                        && !s.ends_with([' ', '.'])
                 })
                 && (rule["format"] != "uuid"
                     || uuid::Uuid::parse_str(s).is_ok())
@@ -448,9 +452,12 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
         }),
         Some("boolean") => value.is_boolean(),
         Some("array") => value.as_array().is_some_and(|items| {
-            rule["maxItems"]
+            rule["minItems"]
                 .as_u64()
-                .is_none_or(|max| items.len() as u64 <= max)
+                .is_none_or(|min| items.len() as u64 >= min)
+                && rule["maxItems"]
+                    .as_u64()
+                    .is_none_or(|max| items.len() as u64 <= max)
                 && items.iter().all(|item| valid_value(item, &rule["items"]))
         }),
         _ => false,

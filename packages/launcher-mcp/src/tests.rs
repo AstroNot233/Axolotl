@@ -701,6 +701,35 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             json!({"source":"mcarchive","project_id":"project","release_id":"release"}),
         ),
         ("content_list", json!({"instance_id":"instance"})),
+        (
+            "metadata_list_game_versions",
+            json!({"release_type":"release","search":"1.21","offset":0,"limit":10}),
+        ),
+        (
+            "metadata_list_loader_versions",
+            json!({"loader":"neoforge","game_version":"1.21.1","stable_only":true}),
+        ),
+        ("launch_config_get", json!({"instance_id":"instance"})),
+        (
+            "launch_set_memory",
+            json!({"instance_id":"instance","automatic":false,"maximum_mib":4096,"optimize_before_launch":false}),
+        ),
+        (
+            "launch_set_window_options",
+            json!({"instance_id":"instance","fullscreen":false,"maximized":false,"width":1280,"height":720}),
+        ),
+        (
+            "launch_set_java",
+            json!({"instance_id":"instance","registered_path":"C:\\Java\\bin\\javaw.exe"}),
+        ),
+        (
+            "launch_reset_overrides",
+            json!({"instance_id":"instance","fields":["memory","window","java"]}),
+        ),
+        (
+            "launch_get_memory_status",
+            json!({"instance_id":"instance"}),
+        ),
         ("backup_repository_status", json!({})),
         ("backup_get_config", json!({"instance_id":"instance"})),
         (
@@ -744,7 +773,7 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             "{name}: {result}"
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 35);
+    assert_eq!(backend.calls.lock().unwrap().len(), 43);
     assert!(
         backend
             .scopes
@@ -777,6 +806,47 @@ async fn invalid_arguments_are_rejected_before_backend_execution() {
     let client = connect(&server, false, "Validation").await;
     let control = control_id(&client.tool("start_session", json!({})).await);
     let cases = [
+        ("metadata_list_game_versions", json!({"release_type":"any"})),
+        (
+            "metadata_list_loader_versions",
+            json!({"loader":"unknown","game_version":"1.21"}),
+        ),
+        (
+            "metadata_list_loader_versions",
+            json!({"loader":"fabric","game_version":"../file"}),
+        ),
+        (
+            "launch_set_memory",
+            json!({"instance_id":"id","automatic":false,"maximum_mib":0,"optimize_before_launch":false}),
+        ),
+        (
+            "launch_set_memory",
+            json!({"instance_id":"id","automatic":true,"maximum_mib":1.5,"optimize_before_launch":false}),
+        ),
+        (
+            "launch_set_window_options",
+            json!({"instance_id":"id","fullscreen":false,"maximized":true,"width":16385,"height":720}),
+        ),
+        (
+            "launch_reset_overrides",
+            json!({"instance_id":"id","fields":[]}),
+        ),
+        (
+            "launch_reset_overrides",
+            json!({"instance_id":"id","fields":["hooks"]}),
+        ),
+        (
+            "launch_reset_overrides",
+            json!({"instance_id":"id","fields":["memory","java","window","memory"]}),
+        ),
+        (
+            "launch_set_java",
+            json!({"instance_id":"id","registered_path":""}),
+        ),
+        (
+            "launch_set_memory",
+            json!({"instance_id":"id","automatic":false,"maximum_mib":4096,"optimize_before_launch":false,"hooks":{"wrapper":"command"}}),
+        ),
         (
             "backup_restore",
             json!({"preview_id":uuid::Uuid::new_v4(),"plan_token":"native-secret"}),
@@ -955,6 +1025,43 @@ async fn invalid_arguments_are_rejected_before_backend_execution() {
     );
     assert!(backend.calls.lock().unwrap().is_empty());
     server.stop().await;
+}
+
+#[test]
+fn historical_game_ids_are_accepted_without_allowing_paths() {
+    let tool = crate::catalog::entries()
+        .into_iter()
+        .find(|entry| entry.tool.name == "metadata_list_loader_versions")
+        .unwrap();
+    for id in [
+        "1.21.1",
+        "24w14potato",
+        "3D Shareware v1.34",
+        "inf-20100618",
+        "b1.9-pre1",
+    ] {
+        let args =
+            json!({"session_id":"session","loader":"fabric","game_version":id});
+        assert!(
+            crate::catalog::validate(&tool, args.as_object().unwrap()).is_ok(),
+            "{id}"
+        );
+    }
+    for id in [
+        "../file",
+        "C:\\file",
+        "1.21/../../outside",
+        " version",
+        "version.",
+        "version ",
+    ] {
+        let args =
+            json!({"session_id":"session","loader":"fabric","game_version":id});
+        assert!(
+            crate::catalog::validate(&tool, args.as_object().unwrap()).is_err(),
+            "{id}"
+        );
+    }
 }
 
 #[tokio::test]

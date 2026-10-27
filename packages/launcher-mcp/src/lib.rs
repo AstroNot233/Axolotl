@@ -16,6 +16,7 @@ pub use backend::{
     Backend, BackendContext, Command, InstallKind, Loader, LogKind,
     ResourceKind, Source, ToolError,
 };
+pub use backend::{GameReleaseType, LaunchField, MetadataLoader};
 pub use info::LauncherInfo;
 pub use scoped::ScopedRegistry;
 pub use server::Server;
