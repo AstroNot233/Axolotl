@@ -22,15 +22,15 @@ fn joins(instance_id: &str) -> InstanceJoins {
     }
 }
 
-fn entry(at: u32) -> JoinLogEntry {
+fn entry(at: i64) -> JoinLogEntry {
     JoinLogEntry {
-        join_time: Utc.timestamp_opt(i64::from(at), 0).unwrap(),
+        join_time: Utc.timestamp_opt(at, 0).unwrap(),
     }
 }
 
 #[tokio::test]
 async fn an_uncommitted_unit_writes_nothing_into_the_handle() {
-    let handle = support::handle().await;
+    let handle = support::handle_with_instances(&["instance"]).await;
     JoinLog::set(&handle, &key("kept"), Some(&entry(1)))
         .await
         .unwrap();
@@ -40,6 +40,10 @@ async fn an_uncommitted_unit_writes_nothing_into_the_handle() {
         JoinLog::atom_set(&mut unit, &key("dropped"), Some(&entry(2)))
             .await
             .unwrap();
+        assert_eq!(
+            JoinLog::atom_get(&mut unit, &key("dropped")).await.unwrap(),
+            Some(entry(2))
+        );
     }
 
     assert_eq!(
@@ -56,7 +60,7 @@ async fn an_uncommitted_unit_writes_nothing_into_the_handle() {
 
 #[tokio::test]
 async fn an_atomic_replace_enforces_the_same_checks_as_a_plain_one() {
-    let handle = support::handle().await;
+    let handle = support::handle_with_instances(&["instance"]).await;
     JoinLog::set(&handle, &key("first"), Some(&entry(1)))
         .await
         .unwrap();

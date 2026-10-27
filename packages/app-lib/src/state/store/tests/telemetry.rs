@@ -351,7 +351,10 @@ async fn a_due_replacement_keeps_the_events_that_are_not_due_yet() {
     .await
     .unwrap();
 
-    let remaining = TelemetryOutbox::get_all(&handle).await.unwrap();
-    assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining[0].0, "later");
+    let mut later = event(20);
+    later.next_attempt_at = 100;
+    assert_eq!(
+        TelemetryOutbox::get_all(&handle).await.unwrap(),
+        vec![(key("later"), later)]
+    );
 }
