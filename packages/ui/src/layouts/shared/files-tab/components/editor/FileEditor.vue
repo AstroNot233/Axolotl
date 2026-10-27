@@ -135,6 +135,9 @@ const originalContent = ref('')
 const isEditingImage = ref(false)
 const imagePreview = ref<Blob | null>(null)
 const isLoading = ref(false)
+// Only the latest load may fill the editor or end its loading state; an
+// earlier read finishing first must not expose the editor for the new file.
+let loadRequest = 0
 const saving = ref(false)
 const editorInstance = ref<Ace.Editor | null>(null)
 const editorContainer = ref<HTMLElement | null>(null)
@@ -186,6 +189,7 @@ watch(
 )
 
 async function loadFileContent(file: { name: string; path: string }) {
+    const request = ++loadRequest
     isLoading.value = true
     try {
         window.scrollTo(0, 0)
@@ -194,19 +198,18 @@ async function loadFileContent(file: { name: string; path: string }) {
 
         if (isImageFile(extension)) {
             const content = await ctx.readFileAsBlob(normalizedPath)
-            if (props.file?.path !== file.path) return
+            if (request !== loadRequest) return
             isEditingImage.value = true
             imagePreview.value = content
         } else {
             isEditingImage.value = false
             const content = await ctx.readFile(normalizedPath)
-            // A file opened while this one was still loading owns the editor now.
-            if (props.file?.path !== file.path) return
+            if (request !== loadRequest) return
             fileContent.value = content
             originalContent.value = content
         }
     } catch (error) {
-        if (props.file?.path !== file.path) return
+        if (request !== loadRequest) return
         console.error('Error fetching file content:', error)
         addNotification({
             title: formatMessage(messages.failedToOpenTitle),
@@ -215,7 +218,7 @@ async function loadFileContent(file: { name: string; path: string }) {
         })
         emit('close')
     } finally {
-        isLoading.value = false
+        if (request === loadRequest) isLoading.value = false
     }
 }
 

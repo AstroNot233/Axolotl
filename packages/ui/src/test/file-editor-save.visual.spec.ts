@@ -120,3 +120,20 @@ it('does not let a slow load of the previous file replace the file opened after 
     expect(wrapper.vm.fileContent).toBe('servers')
     expect(wrapper.vm.hasUnsavedChanges).toBe(false)
 })
+
+it('keeps loading while a newer file is still being read after an earlier read finishes', async () => {
+    const first = deferred<string>()
+    const second = deferred<string>()
+    const reads: Record<string, Promise<string>> = {
+        '/options.txt': first.promise,
+        '/servers.txt': second.promise,
+    }
+    const { wrapper } = await mountEditor((path) => reads[path])
+    await wrapper.setProps({ file: { name: 'servers.txt', path: 'servers.txt' } })
+    first.resolve('options')
+    await flushPromises()
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    second.resolve('servers')
+    await flushPromises()
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('servers')
+})
