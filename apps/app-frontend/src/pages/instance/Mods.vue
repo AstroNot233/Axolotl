@@ -406,6 +406,7 @@ import {
     loadInstanceContentInStages,
     localContentIconUrl,
     preserveContentUpdateState,
+    updateCheckEntryIds,
 } from '@/helpers/instance-content'
 import { postUpgradeWarningForContent } from '@/helpers/post-upgrade-notice'
 import {
@@ -1189,14 +1190,36 @@ const isPackUnlinkDisabled = computed(
 let contentEnrichmentController: AbortController | undefined
 let contentRequestGeneration = 0
 let activeBypassRefresh: Promise<void> | null = null
-const contentUpdateScanner = createContentUpdateScanner((updated) => {
-    if (
-        isUnmounted ||
-        props.instance.id !== updated.path ||
-        props.instance.install_stage !== 'installed' ||
-        contentSnapshot.value?.revision !== updated.snapshot.revision
+const updateCheckProgress = ref<{ checked: number; total: number } | null>(null)
+let bulkUpdateCheck: AbortController | undefined
+function isShownSnapshot(instanceId: string, revision: number) {
+    return (
+        !isUnmounted &&
+        props.instance.id === instanceId &&
+        props.instance.install_stage === 'installed' &&
+        contentSnapshot.value?.revision === revision
     )
-        return
+}
+const contentUpdateScanner = createContentUpdateScanner(
+    (updated) => {
+        if (!isShownSnapshot(updated.path, updated.snapshot.revision)) return
+        updateCheckProgress.value = null
+        commitContentUpdates(updated)
+    },
+    (entry) => {
+        // Each entry shows its update as soon as it is checked; failures are
+        // reported once the whole scan has finished.
+        if (!isShownSnapshot(entry.instanceId, entry.revision)) return
+        updateCheckProgress.value =
+            entry.checked < entry.total ? { checked: entry.checked, total: entry.total } : null
+        const { entryId, release, failed, unresolved } = entry.progress
+        const current = contentItemsByEntryId.value.get(entryId)
+        if (current && !failed && !unresolved)
+            mergeContentUpdate({ ...current, resourceUpdate: release ?? null })
+    },
+)
+function commitContentUpdates(updated: InstanceContentData) {
+    if (!contentSnapshot.value) return
     const failed = new Set(updated.updateCheckFailedEntries)
     for (const item of [...updated.contentItems, ...updated.linkedContentItems]) {
         if (item.instanceEntryId && !failed.has(item.instanceEntryId)) mergeContentUpdate(item)
@@ -1212,7 +1235,7 @@ const contentUpdateScanner = createContentUpdateScanner((updated) => {
             ),
         ],
     }
-})
+}
 
 function isCurrentContentRequest(instanceId: string, generation: number) {
     return (
@@ -1226,6 +1249,7 @@ function isCurrentContentRequest(instanceId: string, generation: number) {
 function invalidateContentRequests(clearState = false) {
     contentEventRefresh.clear()
     contentUpdateScanner.cancel()
+    updateCheckProgress.value = null
     contentEnrichmentController?.abort()
     contentRequestGeneration += 1
     if (!clearState) return
@@ -2177,19 +2201,40 @@ async function bulkUpdateAllProjects() {
     if (pendingContentChanges.value.length > 0 || activeContentChangeJobs.value.length > 0)
         return false
     localBulkOperating.value = true
+    const instanceId = props.instance.id
+    const snapshot = contentSnapshot.value
+    bulkUpdateCheck?.abort()
+    const controller = new AbortController()
+    bulkUpdateCheck = controller
     try {
-        const result = await resourceCheckUpdates(props.instance.id)
-        if (result.failures.length) handleError(new Error(result.failures.join('\n')))
-        const ids = result.entries.filter((id) =>
+        // The batch covers the finished scan of the snapshot on screen; a scan
+        // still running is awaited instead of starting a second full check.
+        const scanned = snapshot
+            ? await contentUpdateScanner.settled({ path: instanceId, snapshot })
+            : undefined
+        if (controller.signal.aborted || props.instance.id !== instanceId) return false
+        let entries: string[]
+        if (scanned) {
+            entries = [...scanned.contentItems, ...scanned.linkedContentItems]
+                .filter((item) => item.resourceUpdate && item.instanceEntryId)
+                .map((item) => item.instanceEntryId!)
+        } else {
+            const result = await resourceCheckUpdates(instanceId, controller.signal)
+            if (result.failures.length) handleError(new Error(result.failures.join('\n')))
+            entries = result.entries
+        }
+        if (controller.signal.aborted || props.instance.id !== instanceId) return false
+        const ids = entries.filter((id) =>
             contentSnapshot.value?.items.some(
                 (item) => item.entryId === id && item.ownershipKind === 'user_added',
             ),
         )
         return ids.length ? await reviewResourceChanges(ids) : false
     } catch (err) {
-        handleError(err as Error)
+        if (!controller.signal.aborted) handleError(err as Error)
         return false
     } finally {
+        if (bulkUpdateCheck === controller) bulkUpdateCheck = undefined
         localBulkOperating.value = false
     }
 }
@@ -2792,13 +2837,14 @@ function applyContentData(contentData: InstanceContentData) {
         linkedModpackUpdateVersionId.value = null
     }
 
-    void contentUpdateScanner
-        .scan({
-            ...contentData,
-            contentItems: projects.value,
-            linkedContentItems: linkedModpackContentItems.value,
-        })
-        .catch(handleError)
+    const scanData = {
+        ...contentData,
+        contentItems: projects.value,
+        linkedContentItems: linkedModpackContentItems.value,
+    }
+    const scanTotal = updateCheckEntryIds(scanData).length
+    updateCheckProgress.value = scanTotal ? { checked: 0, total: scanTotal } : null
+    void contentUpdateScanner.scan(scanData).catch(handleError)
     loading.value = false
 
     const hasContent = contentItems.length > 0 || linkedContentItems.length > 0
@@ -2967,6 +3013,7 @@ provideContentManager({
     updateItem: handleUpdate,
     rollbackItem: handleRollbackContent,
     bulkUpdateAll: bulkUpdateAllProjects,
+    updateCheckProgress,
     bulkUpdateAllLabel: formatMessage(messages.updateAddedContent),
     bulkUpdateAllDescription: formatMessage(messages.updateAddedContentDescription),
     bulkUpdateIncludesModpack: false,
@@ -3293,6 +3340,7 @@ watch(
 
 onUnmounted(() => {
     isUnmounted = true
+    bulkUpdateCheck?.abort()
     contentVersions.reset()
     contentEventRefresh.clear()
     invalidateContentRequests()

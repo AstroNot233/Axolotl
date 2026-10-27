@@ -79,6 +79,8 @@ export interface ContentManagerContext {
     rollbackItem?: (item: ContentItem) => Promise<void>
     /** Submit a platform-owned update-all operation. Resolves once the operation is observable. */
     bulkUpdateAll?: () => Promise<void | boolean>
+    /** Entries checked so far while an update check runs; null when none is running. */
+    updateCheckProgress?: Ref<{ checked: number; total: number } | null>
     bulkUpdateAllLabel?: string
     bulkUpdateAllDescription?: string
     bulkUpdateIncludesModpack?: boolean

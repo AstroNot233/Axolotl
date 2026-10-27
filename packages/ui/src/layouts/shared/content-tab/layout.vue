@@ -1242,6 +1242,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
                                 formatMessage(messages.updateAll)
                             "
                             :is-bulk-operating="isBulkOperating"
+                            :update-check-progress="ctx.updateCheckProgress?.value ?? null"
                             @select-sort="(mode) => (sortMode = mode)"
                             @toggle-pin="togglePinnedView"
                             @reset-view="resetView"

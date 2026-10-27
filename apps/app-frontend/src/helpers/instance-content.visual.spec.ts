@@ -333,7 +333,9 @@ it('discards update responses after the instance request is canceled', async () 
         failedEntries: [],
     })
     expect(await pending).toBe(data)
-    expect(resourceCheckUpdates).toHaveBeenCalledWith('instance', controller.signal, undefined)
+    expect(resourceCheckUpdates).toHaveBeenCalledWith('instance', controller.signal, {
+        entryIds: ['entry'],
+    })
 })
 
 it('checks 70 entries without viewport input and publishes once when complete', async () => {
@@ -356,11 +358,10 @@ it('checks 70 entries without viewport input and publishes once when complete', 
     const pending = scanner.scan(data)
     expect(scanner.scan(data)).toBe(pending)
     expect(resourceCheckUpdates).toHaveBeenCalledOnce()
-    expect(resourceCheckUpdates).toHaveBeenCalledWith(
-        'instance',
-        expect.any(AbortSignal),
-        undefined,
-    )
+    expect(resourceCheckUpdates).toHaveBeenCalledWith('instance', expect.any(AbortSignal), {
+        entryIds: Array.from({ length: 70 }, (_, index) => `entry-${index}`),
+        onProgress: expect.any(Function),
+    })
     expect(commit).not.toHaveBeenCalled()
     const release = { project: { source: 'modrinth', projectId: 'project' }, releaseId: 'latest' }
     complete({

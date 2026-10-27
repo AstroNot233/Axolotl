@@ -215,6 +215,14 @@ export async function loadInstanceContentData(
 }
 
 /** Discover updates for the supplied batch, after displaying local content. */
+/** Entries an update check covers: present content with an installed entry. */
+export function updateCheckEntryIds(data: InstanceContentData): string[] {
+    return [...data.contentItems, ...data.linkedContentItems]
+        .filter((item) => item.instanceMaterializationState === 'present')
+        .map((item) => item.instanceEntryId)
+        .filter((id): id is string => !!id)
+}
+
 export async function refreshInstanceContentUpdates(
     data: InstanceContentData,
     signal?: AbortSignal,
@@ -234,16 +242,11 @@ export async function refreshInstanceContentUpdates(
         ),
     }
     const updateCheckFailedEntries = new Set<string>()
-    const entryIds =
-        options?.entryIds ??
-        items
-            .filter((item) => item.instanceMaterializationState === 'present')
-            .map((item) => item.instanceEntryId)
-            .filter((id): id is string => !!id)
+    const entryIds = options?.entryIds ?? updateCheckEntryIds(data)
     const selected = new Set(entryIds)
     if (entryIds.length) {
         try {
-            const updates = await resourceCheckUpdates(data.path, signal, options)
+            const updates = await resourceCheckUpdates(data.path, signal, { ...options, entryIds })
             if (signal?.aborted) return data
             for (const item of items) {
                 if (!item.instanceEntryId || !selected.has(item.instanceEntryId)) continue

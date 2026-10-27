@@ -1,4 +1,7 @@
 {
+  "content.actions.checking-updates": {
+    "message": "Checking for updates {checked}/{total}"
+  },
   "drop.instance-import.title": {
     "defaultMessage": "Import instances"
   },
