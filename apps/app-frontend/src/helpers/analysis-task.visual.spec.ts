@@ -173,3 +173,50 @@ it('reset abandons the current run and returns to idle without results', async (
     await tick()
     expect(run).toHaveBeenCalledTimes(2)
 })
+
+it('waits for the stop the run registered and reports a failed stop as an error', async () => {
+    let acknowledge!: () => void
+    let refuse!: (error: Error) => void
+    const run = vi.fn(
+        (_input: string, context: Context) =>
+            new Promise<string[]>(() => {
+                context.signal.addEventListener('abort', () =>
+                    context.stopping(
+                        new Promise<void>((resolve, reject) => {
+                            acknowledge = resolve
+                            refuse = reject
+                        }),
+                    ),
+                )
+            }),
+    )
+    const task = createAnalysisTask({ label: 'test', run, schedule: immediate })
+    void task.start('first')
+    await tick()
+    const canceled = task.cancel()
+    await tick()
+    expect(task.status.value).toBe('canceling')
+    acknowledge()
+    await canceled
+    expect(task.status.value).toBe('canceled')
+
+    void task.start('second')
+    await tick()
+    const failed = task.cancel()
+    refuse(new Error('planner did not stop'))
+    await failed
+    expect(task.status.value).toBe('error')
+    expect(task.running.value).toBe(false)
+})
+
+it('keeps the results queued for the next frame when the run is canceled', async () => {
+    const { run, runs } = controlledRun()
+    const task = createAnalysisTask({ label: 'test', run, schedule: () => {} })
+    void task.start('instance')
+    await tick()
+    runs[0].context.partial(['published just before the cancel'])
+    expect(task.partial.value).toBeNull()
+    await task.cancel()
+    expect(task.partial.value).toEqual(['published just before the cancel'])
+    expect(task.status.value).toBe('canceled')
+})

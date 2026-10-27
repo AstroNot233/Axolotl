@@ -35,11 +35,13 @@ it('asks the native mod analysis to stop when its caller aborts', async () => {
             : Promise.resolve(undefined),
     )
     const controller = new AbortController()
-    const analysis = analyzeMod('C:/mods/a.jar', controller.signal)
+    const onStop = vi.fn()
+    const analysis = analyzeMod('C:/mods/a.jar', controller.signal, onStop)
     controller.abort()
     await expect(analysis).rejects.toMatchObject({ name: 'AbortError' })
     const { requestId } = vi.mocked(invoke).mock.calls[0][1] as { requestId: string }
     expect(invoke).toHaveBeenCalledWith('plugin:mod-translation|mod_translation_cancel_analysis', {
         requestId,
     })
+    expect(onStop).toHaveBeenCalledExactlyOnceWith(expect.any(Promise))
 })

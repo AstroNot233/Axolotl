@@ -15,6 +15,7 @@ it('stops waiting at once on abort, cancels the planner and discards a plan that
             : Promise.resolve(undefined),
     )
     const controller = new AbortController()
+    const onStop = vi.fn()
     const planned = plan_instance_upgrade(
         'instance',
         {
@@ -23,7 +24,7 @@ it('stops waiting at once on abort, cancels the planner and discards a plan that
             modLoaderVersion: null,
             shaderRuntime: 'none',
         },
-        { signal: controller.signal },
+        { signal: controller.signal, onStop },
     )
     controller.abort()
     await expect(planned).rejects.toMatchObject({ name: 'AbortError' })
@@ -31,6 +32,7 @@ it('stops waiting at once on abort, cancels the planner and discards a plan that
     expect(invoke).toHaveBeenCalledWith('plugin:instance|instance_cancel_upgrade_planning', {
         requestId,
     })
+    expect(onStop).toHaveBeenCalledExactlyOnceWith(expect.any(Promise))
     finish({ id: 'late-plan' })
     await vi.waitFor(() =>
         expect(invoke).toHaveBeenCalledWith('plugin:instance|instance_discard_upgrade_plan', {

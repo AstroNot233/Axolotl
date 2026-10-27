@@ -13,6 +13,12 @@ export interface AnalysisRunContext<P, R> {
     progress: (value: P) => void
     /** Publishes results found so far; ignored once this run is no longer current. */
     partial: (value: R) => void
+    /**
+     * Registers the native side's acknowledgement of a stop request made when
+     * this run's signal aborted. `cancel()` reports canceled only once every
+     * registered acknowledgement has resolved, and an error if one rejects.
+     */
+    stopping: (confirmation: Promise<unknown>) => void
 }
 
 export interface AnalysisTaskOptions<I, P, R> {
@@ -70,7 +76,13 @@ export function createAnalysisTask<I, P, R>(
     const result = shallowRef<R | null>(null)
     const error = shallowRef<unknown>(null)
     const input = shallowRef<I | null>(null)
-    let current: { id: number; controller: AbortController; startedAt: number } | null = null
+    let current: {
+        id: number
+        controller: AbortController
+        startedAt: number
+        flush: () => void
+        stops: Promise<unknown>[]
+    } | null = null
     let runs = 0
     let disposed = false
 
@@ -82,7 +94,13 @@ export function createAnalysisTask<I, P, R>(
     async function start(value: I): Promise<R | undefined> {
         if (disposed) return undefined
         if (current) abandon(current)
-        const run = { id: ++runs, controller: new AbortController(), startedAt: performance.now() }
+        const run: NonNullable<typeof current> = {
+            id: ++runs,
+            controller: new AbortController(),
+            startedAt: performance.now(),
+            flush: () => {},
+            stops: [],
+        }
         current = run
         input.value = value
         progress.value = null
@@ -100,6 +118,7 @@ export function createAnalysisTask<I, P, R>(
             if ('progress' in batch) progress.value = batch.progress!
             if ('partial' in batch) partial.value = batch.partial!
         }
+        run.flush = commitPending
         const queue = (update: { progress?: P; partial?: R }) => {
             if (!isCurrent()) return
             firstResultAt ??= performance.now()
@@ -115,6 +134,12 @@ export function createAnalysisTask<I, P, R>(
                 signal: run.controller.signal,
                 progress: (next) => queue({ progress: next }),
                 partial: (next) => queue({ partial: next }),
+                stopping: (confirmation) => {
+                    const acknowledged = Promise.resolve(confirmation)
+                    // Abandoned runs never await it, so a rejection must not go unhandled.
+                    acknowledged.catch(() => {})
+                    run.stops.push(acknowledged)
+                },
             })
             if (!isCurrent()) return undefined
             pending = null
@@ -153,10 +178,15 @@ export function createAnalysisTask<I, P, R>(
         if (!run || !running.value) return
         const stopped = input.value
         const requestedAt = performance.now()
+        // Results published just before the cancel stay visible.
+        run.flush()
         run.controller.abort()
         settle('canceling')
         try {
-            if (options.stop && stopped !== null) await options.stop(stopped)
+            await Promise.all([
+                options.stop && stopped !== null ? options.stop(stopped) : undefined,
+                ...run.stops,
+            ])
             if (current !== run) return
             settle('canceled')
         } catch (failure) {

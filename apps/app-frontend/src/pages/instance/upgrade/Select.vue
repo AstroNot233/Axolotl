@@ -481,7 +481,7 @@ const planning = createAnalysisTask<
     { plan: InstanceUpgradePlan; reused: boolean }
 >({
     label: 'instance-upgrade-planning',
-    async run({ instanceId, target }, { signal, progress }) {
+    async run({ instanceId, target }, { signal, progress, stopping }) {
         if (flow.plan.value) {
             try {
                 flow.setPlan(await get_instance_upgrade_plan(flow.plan.value.id))
@@ -494,6 +494,7 @@ const planning = createAnalysisTask<
         return await resolveUpgradePlanSelection(instanceId, flow.plan.value, target, (id, next) =>
             plan_instance_upgrade(id, next, {
                 signal,
+                onStop: stopping,
                 onProgress: (event) => {
                     view = nextPlanningView(view, event)
                     progress(view)

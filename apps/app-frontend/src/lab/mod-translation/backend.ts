@@ -12,10 +12,14 @@ export { modTranslationPercent } from './job-state.ts'
 
 const TASK_EVENT = 'mod-translation-task-event'
 
-/** Analyzes a mod JAR. Aborting stops the native analysis at its next checkpoint. */
+/**
+ * Analyzes a mod JAR. Aborting stops the native analysis at its next
+ * checkpoint; `onStop` receives the acknowledgement of that stop request.
+ */
 export async function analyzeMod(
     inputPath: string,
     signal?: AbortSignal,
+    onStop?: (confirmation: Promise<unknown>) => void,
 ): Promise<ModTranslationAnalysis> {
     signal?.throwIfAborted()
     const requestId = crypto.randomUUID()
@@ -24,9 +28,11 @@ export async function analyzeMod(
         { inputPath, requestId },
     )
     return await abortable(request, signal, () => {
-        void invoke('plugin:mod-translation|mod_translation_cancel_analysis', { requestId }).catch(
-            () => {},
-        )
+        const stopped = invoke('plugin:mod-translation|mod_translation_cancel_analysis', {
+            requestId,
+        })
+        onStop?.(stopped)
+        void stopped.catch(() => {})
     })
 }
 

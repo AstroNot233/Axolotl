@@ -331,9 +331,11 @@ export async function plan_instance_upgrade(
     options: {
         signal?: AbortSignal
         onProgress?: (progress: InstanceUpgradePlanningProgress) => void
+        /** Receives the planner's acknowledgement of the stop sent on abort. */
+        onStop?: (confirmation: Promise<unknown>) => void
     } = {},
 ): Promise<InstanceUpgradePlan> {
-    const { signal, onProgress } = options
+    const { signal, onProgress, onStop } = options
     signal?.throwIfAborted()
     const requestId = crypto.randomUUID()
     let channel: Channel<InstanceUpgradePlanningProgress> | null = null
@@ -351,9 +353,11 @@ export async function plan_instance_upgrade(
     })
     return await benchmark_upgrade_plan('plan', () =>
         abortable(request, signal, (late) => {
-            void invoke('plugin:instance|instance_cancel_upgrade_planning', { requestId }).catch(
-                () => {},
-            )
+            const stopped = invoke('plugin:instance|instance_cancel_upgrade_planning', {
+                requestId,
+            })
+            onStop?.(stopped)
+            void stopped.catch(() => {})
             void late.then(
                 (plan) => discard_instance_upgrade_plan(plan.id).catch(() => {}),
                 () => {},
