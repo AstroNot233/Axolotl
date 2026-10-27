@@ -116,3 +116,13 @@ it('keeps waiting for the requested version after a later page fails', async () 
     })
     expect(wrapper.emitted('versionSelect')?.at(-1)?.[0]).toMatchObject({ id: 'wanted' })
 })
+
+it('opened while pages still arrive, waits for the requested version instead of the first listed', async () => {
+    const wrapper = await modal({ versions: [version('first')], loading: true })
+    const before = wrapper.emitted('versionSelect')?.length ?? 0
+    ;(wrapper.vm as unknown as { show: (id?: string) => void }).show('wanted')
+    await nextTick()
+    expect(wrapper.emitted('versionSelect')?.length ?? 0).toBe(before)
+    await wrapper.setProps({ versions: [version('first'), version('wanted')], loading: false })
+    expect(wrapper.emitted('versionSelect')?.at(-1)?.[0]).toMatchObject({ id: 'wanted' })
+})

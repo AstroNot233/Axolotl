@@ -69,8 +69,11 @@ export function useContentUpdaterSelection({
 
     function resetInitialSelection(initialVersionId?: string) {
         pinnedInitialVersionId.value = initialVersionId
+        const incomplete = (loading?.value ?? false) || !!loadingError?.value
+        const requestedListed =
+            !initialVersionId || versions.value.some((v) => v.id === initialVersionId)
 
-        if (versions.value.length > 0) {
+        if (versions.value.length > 0 && (requestedListed || !incomplete)) {
             selectedVersion.value = initialVersionId
                 ? (versions.value.find((v) => v.id === initialVersionId) ?? versions.value[0])
                 : versions.value[0]
@@ -79,9 +82,10 @@ export function useContentUpdaterSelection({
                 onVersionSelect(selectedVersion.value)
             }
         } else {
+            // The requested version may still be on a page that has not arrived.
             selectedVersion.value = null
             pendingInitialVersionId.value = initialVersionId
-            debug('show(): no versions yet, deferring selection', {
+            debug('show(): requested version not listed yet, deferring selection', {
                 pendingInitialVersionId: initialVersionId,
             })
         }
