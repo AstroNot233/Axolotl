@@ -1,6 +1,11 @@
 //! Functions for fetching information from the Internet
+mod client;
 mod model;
 mod throttle;
+pub(crate) use self::client::*;
+pub use self::client::{
+    INSECURE_REQWEST_CLIENT, build_proxied_client, configured_client,
+};
 pub(crate) use self::model::*;
 pub use self::model::{
     ContentValidation, DownloadMeta, DownloadReason, DownloadRequest,
@@ -21,7 +26,6 @@ use super::download::modrinth_redirect::is_official_redirect as is_official_modr
 use super::download::modrinth_redirect::repair_official_redirect as repair_official_cdn_redirect;
 use super::download::retired_sources;
 use super::download::route_policy;
-use super::download_dns::DownloadDnsResolver;
 use super::download_manager::{DownloadSpeedTracker, SpeedSnapshot};
 use super::io::{self, IOError};
 use crate::event::LoadingBarId;
@@ -45,7 +49,6 @@ use crate::util::download::constants::{
     FETCH_AXOLOTL_RETRY, FETCH_BMCLAPI2_BANGBANG93_COM, FETCH_BYTES, FETCH_CDN,
     FETCH_CHECKPOINT_RESUME_FAILED_DUE_TO_LOCAL_I_O, FETCH_CLEAN_RETRY,
     FETCH_CLEAR_PARTIAL_AND_RETRY, FETCH_CLEAR_PARTIAL_AND_SWITCH,
-    FETCH_CLIENT_CONFIGURATION_SHOULD_BE_VALID,
     FETCH_CONFIGURED_CONNECTION_LIMIT_IS_ONE, FETCH_COOKIE,
     FETCH_COOLDOWN_AND_SWITCH, FETCH_COOLDOWN_THEN_RETRY,
     FETCH_CREATING_DOWNLOAD_FILE, FETCH_DISABLE_RANGE_AND_RETRY_SINGLE,
@@ -55,8 +58,7 @@ use crate::util::download::constants::{
     FETCH_EXPANSION_COOLDOWN_ACTIVE, FETCH_FALLBACK_OFFICIAL,
     FETCH_FALLBACK_SINGLE, FETCH_FETCH_PERMIT_BATCH_HAS_ENOUGH_PERMITS,
     FETCH_FILES_MINECRAFTFORGE_NET, FETCH_FINALIZING_DOWNLOAD,
-    FETCH_GITHUB_COM, FETCH_GOAWAY, FETCH_HEDGE_FAILED, FETCH_HTTP,
-    FETCH_HTTP_2, FETCH_HTTP2, FETCH_ICONS,
+    FETCH_GITHUB_COM, FETCH_HEDGE_FAILED, FETCH_HTTP, FETCH_ICONS,
     FETCH_INSUFFICIENT_AGGREGATE_SPEED_SAMPLES, FETCH_INVALID_CONTENT_RANGE,
     FETCH_INVALID_HEDGED_CONTENT_RANGE, FETCH_JAVA_RUNTIME,
     FETCH_LAUNCHER_MOJANG_COM, FETCH_LIBRARIES_MINECRAFT_NET, FETCH_MAVEN,
@@ -66,12 +68,11 @@ use crate::util::download::constants::{
     FETCH_NO_GLOBAL_PERMIT_AVAILABLE, FETCH_OFFICIAL,
     FETCH_OPENING_DOWNLOAD_FILE, FETCH_OPTIFINE_NET, FETCH_PART_RANGES_JSON,
     FETCH_PART_RANGES_JSON_2, FETCH_PISTON_DATA_MOJANG_COM,
-    FETCH_PROTOCOL_ERROR, FETCH_PROXIED_CLIENT_CONFIGURATION_SHOULD_BE_VALID,
-    FETCH_PROXY_AUTHORIZATION, FETCH_PROXY_CONFIGURATION_SHOULD_BE_VALID,
-    FETCH_RANGE_BYTE_COUNT_MISMATCH, FETCH_RANGE_END_OVERFLOW,
-    FETCH_RANGE_RESPONSE_ENDED_BEFORE_EXPECTED_BOUNDARY, FETCH_REFUSED_STREAM,
-    FETCH_RELEASES, FETCH_REMOVING, FETCH_REPO_MAVEN_APACHE_ORG,
-    FETCH_REPO1_MAVEN_ORG, FETCH_RESOURCE_VALIDATOR_CHANGED_BETWEEN_RANGES,
+    FETCH_PROXY_AUTHORIZATION, FETCH_RANGE_BYTE_COUNT_MISMATCH,
+    FETCH_RANGE_END_OVERFLOW,
+    FETCH_RANGE_RESPONSE_ENDED_BEFORE_EXPECTED_BOUNDARY, FETCH_RELEASES,
+    FETCH_REMOVING, FETCH_REPO_MAVEN_APACHE_ORG, FETCH_REPO1_MAVEN_ORG,
+    FETCH_RESOURCE_VALIDATOR_CHANGED_BETWEEN_RANGES,
     FETCH_RESOURCE_VALIDATOR_CHANGED_DURING_TAIL_HEDGE,
     FETCH_RESOURCES_DOWNLOAD_MINECRAFT_NET,
     FETCH_RESUMABLE_PARTIAL_USES_A_SINGLE_STREAM, FETCH_RESUME_OR_SWITCH,
@@ -80,21 +81,18 @@ use crate::util::download::constants::{
     FETCH_SEGMENTED_CONTENT_VALIDATION_FAILED, FETCH_SELECTED_ENDPOINT_CHANGED,
     FETCH_SERVER_IGNORED_RANGE_AND_RETURNED_200,
     FETCH_SERVER_RETURNED_HTTP_416_FOR_RANGE_REQUEST, FETCH_STOP,
-    FETCH_STREAM_ERROR, FETCH_SWITCH_ROUTE, FETCH_SWITCH_ROUTE_OR_RETRY_ROUND,
+    FETCH_SWITCH_ROUTE, FETCH_SWITCH_ROUTE_OR_RETRY_ROUND,
     FETCH_TIMED_OUT_WAITING_FOR_CDN_CONNECTION_RESOURCES,
     FETCH_TIMED_OUT_WAITING_FOR_DESTINATION_DOWNLOAD_LOCK,
     FETCH_TIMED_OUT_WAITING_FOR_NATIVE_DOWNLOAD_RESOURCES,
-    FETCH_TOO_LITTLE_DATA_REMAINS, FETCH_TOO_MANY_REDIRECTS,
-    FETCH_UNCONFIGURED, FETCH_UNKNOWN, FETCH_V2_SESSION, FETCH_V2_USER,
-    FETCH_V3_FRIEND, FETCH_V3_FRIENDS, FETCH_V3_NOTIFICATION,
-    FILE_H2_KEEPALIVE, FILE_TCP_KEEPALIVE, FILE_TRANSFER_CONNECT_TIMEOUT,
-    FILE_TRANSFER_FIRST_BYTE_TIMEOUT, FILE_TRANSFER_READ_TIMEOUT,
-    H2_FALLBACK_TTL, HTTPS_SCHEME, INITIAL_SEGMENT_CONCURRENCY,
-    JOB_PROBE_WINDOW, MAX_FAILURE_COOLDOWN, MAX_SEGMENT_CONCURRENCY,
-    MAX_TAIL_HEDGES_PER_FILE, MAX_TASK_PROBE_STATES, MCIM_BASE_URL,
-    METADATA_ATTEMPT_BUDGET, METADATA_HEDGE_DELAY, METADATA_REQUEST_TIMEOUT,
-    MIN_SEGMENT_SIZE, MODRINTH_API_HOST, MODRINTH_DATA_PREFIX,
-    NATIVE_DOWNLOAD_SOURCE_HAS_BEEN_RETIRED, PARTIAL_FILE_SUFFIX,
+    FETCH_TOO_LITTLE_DATA_REMAINS, FETCH_UNKNOWN, FETCH_V2_SESSION,
+    FETCH_V2_USER, FETCH_V3_FRIEND, FETCH_V3_FRIENDS, FETCH_V3_NOTIFICATION,
+    FILE_TCP_KEEPALIVE, FILE_TRANSFER_FIRST_BYTE_TIMEOUT, H2_FALLBACK_TTL,
+    HTTPS_SCHEME, INITIAL_SEGMENT_CONCURRENCY, JOB_PROBE_WINDOW,
+    MAX_FAILURE_COOLDOWN, MAX_SEGMENT_CONCURRENCY, MAX_TAIL_HEDGES_PER_FILE,
+    MAX_TASK_PROBE_STATES, MCIM_BASE_URL, METADATA_ATTEMPT_BUDGET,
+    METADATA_HEDGE_DELAY, METADATA_REQUEST_TIMEOUT, MIN_SEGMENT_SIZE,
+    MODRINTH_API_HOST, MODRINTH_DATA_PREFIX, PARTIAL_FILE_SUFFIX,
     RANGE_IDLE_RECONNECT_TIMEOUT, REASSIGNABLE_FIRST_BYTE_TIMEOUT,
     RESOURCE_WAIT_TIMEOUT, RETIRED_SOURCES_MEDIA_FORGECDN_NET, RETRY_AFTER_CAP,
     ROUTE_POLICY_LAUNCHERMETA_MOJANG_COM, ROUTE_POLICY_MAVEN_FABRICMC_NET,
@@ -115,11 +113,10 @@ use crate::util::download::constants::{
 };
 use crate::util::download::constants::{
     DOWNLOAD_DNS_PREWARM_CONCURRENCY, DOWNLOAD_FAILURE_DIAGNOSTIC_ATTEMPTS,
-    DOWNLOAD_PERCENT_BASE, FILE_POOL_MAX_IDLE_PER_HOST,
-    FILE_RETRY_SINGLE_STREAM_ROUNDS, FILE_VALIDATION_CONCURRENCY,
-    MIN_PARALLEL_RANGES, RANGE_FULL_FAILURE_LIMIT, RANGE_REDUCED_CONCURRENCY,
-    RANGE_REDUCED_FAILURE_LIMIT, ROUTE_PROBE_CONCURRENCY,
-    ROUTE_PROBE_TIMEOUT_FACTOR, TAIL_SPLIT_PERCENT,
+    DOWNLOAD_PERCENT_BASE, FILE_RETRY_SINGLE_STREAM_ROUNDS,
+    FILE_VALIDATION_CONCURRENCY, MIN_PARALLEL_RANGES, RANGE_FULL_FAILURE_LIMIT,
+    RANGE_REDUCED_CONCURRENCY, RANGE_REDUCED_FAILURE_LIMIT,
+    ROUTE_PROBE_CONCURRENCY, ROUTE_PROBE_TIMEOUT_FACTOR, TAIL_SPLIT_PERCENT,
 };
 #[cfg(test)]
 use crate::util::download::constants::{
@@ -676,312 +673,6 @@ fn infer_resource_class(url: &str) -> ResourceClass {
         _ => ResourceClass::Other,
     }
 }
-
-pub(crate) fn is_h2_protocol_failure(error: &reqwest::Error) -> bool {
-    let mut chain = String::new();
-    let mut source = error.source();
-    while let Some(next) = source {
-        if !chain.is_empty() {
-            chain.push(' ');
-        }
-        chain.push_str(&next.to_string());
-        source = next.source();
-    }
-    let chain = chain.to_ascii_lowercase();
-    [
-        FETCH_HTTP2,
-        FETCH_HTTP_2,
-        FETCH_GOAWAY,
-        FETCH_STREAM_ERROR,
-        FETCH_PROTOCOL_ERROR,
-        FETCH_REFUSED_STREAM,
-    ]
-    .iter()
-    .any(|marker| chain.contains(marker))
-}
-
-fn reqwest_client_builder() -> reqwest::ClientBuilder {
-    #[cfg(test)]
-    let read_timeout = if BENCHMARK_TIMING.try_with(|_| ()).is_ok() {
-        time::Duration::from_secs(60)
-    } else {
-        FILE_TRANSFER_READ_TIMEOUT
-    };
-    #[cfg(not(test))]
-    let read_timeout = FILE_TRANSFER_READ_TIMEOUT;
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if retired_sources::is_retired(attempt.url()) {
-                attempt.error(NATIVE_DOWNLOAD_SOURCE_HAS_BEEN_RETIRED)
-            } else if attempt.previous().len() >= 10 {
-                attempt.error(FETCH_TOO_MANY_REDIRECTS)
-            } else {
-                attempt.follow()
-            }
-        }))
-        .connect_timeout(FILE_TRANSFER_CONNECT_TIMEOUT)
-        .read_timeout(read_timeout)
-        .tcp_keepalive(Some(FILE_TCP_KEEPALIVE))
-        .tcp_nodelay(true)
-        .pool_max_idle_per_host(FILE_POOL_MAX_IDLE_PER_HOST)
-        .dns_resolver(Arc::clone(&DOWNLOAD_DNS_RESOLVER))
-        .user_agent(crate::launcher_user_agent())
-}
-
-pub(crate) fn file_reqwest_client_builder() -> reqwest::ClientBuilder {
-    reqwest_client_builder()
-        .http2_adaptive_window(true)
-        .http2_keep_alive_interval(Some(FILE_H2_KEEPALIVE))
-}
-
-pub fn build_proxied_client(
-    proxy: &crate::util::proxy::ProxyConfig,
-) -> reqwest::Client {
-    proxy
-        .apply(reqwest_client_builder())
-        .expect(FETCH_PROXY_CONFIGURATION_SHOULD_BE_VALID)
-        .build()
-        .expect(FETCH_PROXIED_CLIENT_CONFIGURATION_SHOULD_BE_VALID)
-}
-
-/// Authentication and reachability probes share the current proxy, DNS and TLS
-/// settings. The fallback is only for callers before application initialization.
-pub(crate) fn authentication_client() -> reqwest::Client {
-    if let Some(clients) = super::download::proxy_context::explicit_clients() {
-        return clients.metadata;
-    }
-    if let Some(state) = crate::State::get_if_initialized() {
-        return state.configured_http_client();
-    }
-    static SYSTEM_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-        build_proxied_client(&crate::util::proxy::ProxyConfig::default())
-    });
-    SYSTEM_CLIENT.clone()
-}
-
-pub async fn configured_client() -> crate::Result<reqwest::Client> {
-    if let Some(clients) = super::download::proxy_context::explicit_clients() {
-        return Ok(clients.metadata);
-    }
-    Ok(crate::State::get().await?.configured_http_client())
-}
-
-#[derive(Clone)]
-pub(crate) struct DownloadClients {
-    pub(crate) system_proxy_fingerprint: String,
-    pub(crate) metadata: reqwest::Client,
-    pub(crate) system: reqwest::Client,
-    pub(crate) direct: reqwest::Client,
-    pub(crate) http1_system: reqwest::Client,
-    pub(crate) http1_direct: reqwest::Client,
-    pub(crate) proxy: crate::util::proxy::ProxyConfig,
-    pub(crate) ignore_ssl_errors: bool,
-    pub(crate) scope: String,
-    pub(crate) system_dns: Arc<DownloadDnsResolver>,
-    pub(crate) direct_dns: Arc<DownloadDnsResolver>,
-    pub(crate) doh_enabled: bool,
-    pub(crate) force_http1: bool,
-    pub(crate) endpoints:
-        Arc<super::download::endpoint_selection::EndpointSelector>,
-}
-
-impl DownloadClients {
-    pub(crate) fn refresh_system_proxy(&self) -> crate::Result<Option<Self>> {
-        if self.proxy.mode != crate::util::proxy::ProxyMode::System
-            || self.system_proxy_fingerprint
-                == crate::util::proxy::system_proxy_fingerprint()
-        {
-            return Ok(None);
-        }
-        Self::build(&self.proxy, self.ignore_ssl_errors, self.doh_enabled)
-            .map(Some)
-    }
-
-    pub(crate) fn build(
-        proxy: &crate::util::proxy::ProxyConfig,
-        ignore_ssl_errors: bool,
-        doh_enabled: bool,
-    ) -> crate::Result<Self> {
-        let system_proxy_fingerprint =
-            crate::util::proxy::system_proxy_fingerprint();
-        let system_dns = Arc::new(DownloadDnsResolver::with_doh_and_proxy(
-            doh_enabled,
-            Some(proxy),
-        )?);
-        let direct_dns = Arc::new(DownloadDnsResolver::with_doh_and_proxy(
-            doh_enabled,
-            None,
-        )?);
-        let build = |direct: bool, http1: bool| {
-            let builder = file_reqwest_client_builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .danger_accept_invalid_certs(ignore_ssl_errors);
-            // Reqwest does not expose a socket-lifetime admission hook. In
-            // automatic mode its idle sockets would outlive request permits
-            // and accumulate alongside probes and new endpoint generations.
-            // Native H2 retains its separately budgeted multiplexed pool.
-            let builder = if super::download::endpoint_selection::SelectionMode::configured()
-                == super::download::endpoint_selection::SelectionMode::Auto
-            {
-                builder.pool_max_idle_per_host(0)
-            } else {
-                builder
-            };
-            let builder = builder.dns_resolver(if direct {
-                Arc::clone(&direct_dns)
-            } else {
-                Arc::clone(&system_dns)
-            });
-            let builder = if http1
-                || !direct
-                    && proxy.mode == crate::util::proxy::ProxyMode::Custom
-            {
-                builder.http1_only()
-            } else {
-                builder
-            };
-            let builder = if direct {
-                builder.no_proxy()
-            } else {
-                proxy.apply(builder)?
-            };
-            #[cfg(not(test))]
-            let builder = builder.https_only(true);
-            builder.build().map_err(crate::Error::from)
-        };
-        Ok(Self {
-            system_proxy_fingerprint,
-            endpoints:
-                super::download::endpoint_selection::EndpointSelector::new(
-                    super::download::proxy_context::fingerprint_with_doh(
-                        proxy,
-                        ignore_ssl_errors,
-                        doh_enabled,
-                    ),
-                ),
-            metadata: proxy
-                .apply(
-                    reqwest_client_builder()
-                        .dns_resolver(Arc::clone(&system_dns))
-                        .danger_accept_invalid_certs(ignore_ssl_errors),
-                )?
-                .build()?,
-            system: build(false, false)?,
-            direct: build(true, false)?,
-            http1_system: build(false, true)?,
-            http1_direct: build(true, true)?,
-            proxy: proxy.clone(),
-            ignore_ssl_errors,
-            scope: super::download::proxy_context::fingerprint_with_doh(
-                proxy,
-                ignore_ssl_errors,
-                doh_enabled,
-            ),
-            system_dns,
-            direct_dns,
-            doh_enabled,
-            force_http1: false,
-        })
-    }
-
-    pub(crate) fn for_request(
-        system: &reqwest::Client,
-        direct: &reqwest::Client,
-    ) -> Self {
-        if let Some(mut clients) = super::download::proxy_context::clients() {
-            if std::ptr::eq(
-                system,
-                &raw const *HTTP1_NO_REDIRECT_REQWEST_CLIENT,
-            ) {
-                clients.system = clients.http1_system.clone();
-                clients.direct = clients.http1_direct.clone();
-                clients.force_http1 = true;
-            }
-            return clients;
-        }
-        Self {
-            system_proxy_fingerprint:
-                crate::util::proxy::system_proxy_fingerprint(),
-            metadata: system.clone(),
-            system: system.clone(),
-            direct: direct.clone(),
-            http1_system: HTTP1_NO_REDIRECT_REQWEST_CLIENT.clone(),
-            http1_direct: HTTP1_DIRECT_REQWEST_CLIENT.clone(),
-            proxy: Default::default(),
-            ignore_ssl_errors: false,
-            scope: FETCH_UNCONFIGURED.into(),
-            system_dns: Arc::clone(&DOWNLOAD_DNS_RESOLVER),
-            direct_dns: Arc::clone(&DOWNLOAD_DNS_RESOLVER),
-            doh_enabled: false,
-            force_http1: std::ptr::eq(
-                system,
-                &raw const *HTTP1_NO_REDIRECT_REQWEST_CLIENT,
-            ),
-            endpoints:
-                super::download::endpoint_selection::EndpointSelector::new(
-                    FETCH_UNCONFIGURED,
-                ),
-        }
-    }
-}
-
-fn http1_file_reqwest_client_builder() -> reqwest::ClientBuilder {
-    reqwest_client_builder().http1_only()
-}
-
-pub static INSECURE_REQWEST_CLIENT: LazyLock<reqwest::Client> =
-    LazyLock::new(|| {
-        reqwest_client_builder()
-            .no_proxy()
-            .build()
-            .expect(FETCH_CLIENT_CONFIGURATION_SHOULD_BE_VALID)
-    });
-
-pub(crate) static NO_REDIRECT_REQWEST_CLIENT: LazyLock<reqwest::Client> =
-    LazyLock::new(|| {
-        let builder = file_reqwest_client_builder()
-            .redirect(reqwest::redirect::Policy::none());
-        #[cfg(not(test))]
-        let builder = builder.https_only(true);
-        builder
-            .build()
-            .expect(FETCH_CLIENT_CONFIGURATION_SHOULD_BE_VALID)
-    });
-
-pub(crate) static DIRECT_REQWEST_CLIENT: LazyLock<reqwest::Client> =
-    LazyLock::new(|| {
-        let builder = file_reqwest_client_builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none());
-        #[cfg(not(test))]
-        let builder = builder.https_only(true);
-        builder
-            .build()
-            .expect(FETCH_CLIENT_CONFIGURATION_SHOULD_BE_VALID)
-    });
-
-pub(crate) static HTTP1_NO_REDIRECT_REQWEST_CLIENT: LazyLock<reqwest::Client> =
-    LazyLock::new(|| {
-        let builder = http1_file_reqwest_client_builder()
-            .redirect(reqwest::redirect::Policy::none());
-        #[cfg(not(test))]
-        let builder = builder.https_only(true);
-        builder
-            .build()
-            .expect(FETCH_CLIENT_CONFIGURATION_SHOULD_BE_VALID)
-    });
-
-pub(crate) static HTTP1_DIRECT_REQWEST_CLIENT: LazyLock<reqwest::Client> =
-    LazyLock::new(|| {
-        let builder = http1_file_reqwest_client_builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none());
-        #[cfg(not(test))]
-        let builder = builder.https_only(true);
-        builder
-            .build()
-            .expect(FETCH_CLIENT_CONFIGURATION_SHOULD_BE_VALID)
-    });
 
 fn fetch_retry_delay(attempt: usize) -> time::Duration {
     let base = FETCH_RETRY_DELAYS
