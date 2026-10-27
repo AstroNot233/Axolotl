@@ -63,7 +63,9 @@ vi.mock('@modrinth/ui', () => ({
     provideConsoleManager: (manager: Manager) => {
         mocks.manager = manager
     },
-    useVIntl: () => ({ formatMessage: (message: { defaultMessage: string }) => message.defaultMessage }),
+    useVIntl: () => ({
+        formatMessage: (message: { defaultMessage: string }) => message.defaultMessage,
+    }),
 }))
 
 function deferred<T>() {
