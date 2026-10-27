@@ -11,7 +11,7 @@ use crate::state::{
     FileType, Hooks, InstanceInstallStage, LauncherFeatureVersion,
     MemorySettings, MinecraftAccountType, ModrinthCredentials,
     ModrinthHashMatch, ReleaseChannel, TeamMember, Theme, VersionFile,
-    WindowSize,
+    WindowSize, local_id,
 };
 use crate::util::fetch::{IoSemaphore, read_json};
 use chrono::{DateTime, Utc};
@@ -450,7 +450,8 @@ async fn upsert_legacy_instance<'a, E>(
 where
     E: sqlx::Executor<'a, Database = sqlx::Sqlite> + Copy,
 {
-    let instance_id = format!("local:{}", Uuid::new_v4());
+    // An instance id, unrelated to how content projects are identified.
+    let instance_id = local_id(Uuid::new_v4());
     let content_set_id = format!("content-set:{}", Uuid::new_v4());
     let instance_id_str = instance_id.as_str();
     let content_set_id_str = content_set_id.as_str();

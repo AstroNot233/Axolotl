@@ -18,7 +18,7 @@ use crate::state::{
     ContentItemVersion, ContentProvider, ContentProviderRef, Dependency,
     LinkedModpackInfo, ModLoader, ModrinthFileMatch, ModrinthProjectId,
     ModrinthVersionId, Organization, OwnerType, Project, ProjectType,
-    ReleaseChannel, TeamMember, Version, VersionV3,
+    ReleaseChannel, TeamMember, Version, VersionV3, local_id,
 };
 use crate::util::fetch::{
     ContentValidation, DownloadMeta, DownloadReason, DownloadRequest,
@@ -2103,7 +2103,7 @@ async fn content_files_to_content_items(
                     })
                     .or_else(|| {
                         local_mod.as_ref().map(|meta| ContentItemProject {
-                            id: format!("local:{}", meta.mod_id),
+                            id: local_id(&meta.mod_id),
                             slug: Some(meta.mod_id.clone()),
                             title: meta
                                 .name
@@ -2119,7 +2119,10 @@ async fn content_files_to_content_items(
                         // cached icon extracted from the archive.
                         (!file.file_name.is_empty()).then(|| {
                             ContentItemProject {
-                                id: format!("local:file:{}", file.hash),
+                                id: local_id(format_args!(
+                                    "file:{}",
+                                    file.hash
+                                )),
                                 slug: None,
                                 title: Path::new(&file.file_name)
                                     .file_stem()
@@ -2152,7 +2155,7 @@ async fn content_files_to_content_items(
                     .or_else(|| {
                         local_mod.as_ref().and_then(|meta| {
                             meta.version.clone().map(|v| ContentItemVersion {
-                                id: format!("local:{}", meta.mod_id),
+                                id: local_id(&meta.mod_id),
                                 version_number: v,
                                 file_name: file.file_name.clone(),
                                 date_published: None,
@@ -2174,7 +2177,11 @@ async fn content_files_to_content_items(
                         local_mod.as_ref().and_then(|meta| {
                             meta.authors.first().map(|author| {
                                 ContentItemOwner {
-                                    id: format!("local:{author}"),
+                                    // The author comes from the local mod file's
+                                    // own manifest, not from a resolved project:
+                                    // the prefix here marks a self-declared
+                                    // author, not an unresolved project.
+                                    id: local_id(author),
                                     name: author.clone(),
                                     avatar_url: None,
                                     owner_type: OwnerType::User,

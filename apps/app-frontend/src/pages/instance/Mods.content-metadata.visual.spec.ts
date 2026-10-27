@@ -1,10 +1,8 @@
 import type { ContentItem } from '@modrinth/ui'
 import { expect, it, vi } from 'vitest'
 
-import {
-    drainContentMetadata,
-    isUnresolvedContentProject,
-} from '@/helpers/content-metadata-refresh'
+import { isUnresolvedContentProject } from '@/helpers/content-identity'
+import { drainContentMetadata } from '@/helpers/content-metadata-refresh'
 
 import modsSource from './Mods.vue?raw'
 
