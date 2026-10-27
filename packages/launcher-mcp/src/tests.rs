@@ -10,6 +10,9 @@ use std::{
     time::Duration,
 };
 
+#[path = "operation_tests.rs"]
+mod operation_tests;
+
 #[derive(Clone)]
 struct Client {
     http: reqwest::Client,
@@ -652,6 +655,21 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
         ("system_get_memory", json!({})),
         ("install_job_list", json!({"include_finished":true})),
         ("install_job_get", json!({"job_id":uuid::Uuid::new_v4()})),
+        ("process_get", json!({"process_id":uuid::Uuid::new_v4()})),
+        (
+            "process_wait",
+            json!({"process_id":uuid::Uuid::new_v4(),"timeout_seconds":2}),
+        ),
+        ("process_kill", json!({"process_id":uuid::Uuid::new_v4()})),
+        ("logs_list", json!({"instance_id":"instance"})),
+        (
+            "logs_read",
+            json!({"instance_id":"instance","log_type":"info","filename":"latest.log"}),
+        ),
+        (
+            "logs_search",
+            json!({"instance_id":"instance","log_type":"crash","filename":"crash.txt","query":"error"}),
+        ),
     ];
     for (name, mut arguments) in cases {
         arguments["session_id"] = json!(control);
@@ -661,7 +679,7 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             "{name}: {result}"
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 15);
+    assert_eq!(backend.calls.lock().unwrap().len(), 21);
     for name in [
         "instance_create",
         "instance_group_create",
@@ -686,6 +704,39 @@ async fn invalid_arguments_are_rejected_before_backend_execution() {
     let client = connect(&server, false, "Validation").await;
     let control = control_id(&client.tool("start_session", json!({})).await);
     let cases = [
+        ("process_get", json!({"process_id":123})),
+        (
+            "process_wait",
+            json!({"process_id":uuid::Uuid::new_v4(),"timeout_seconds":21}),
+        ),
+        (
+            "instance_launch",
+            json!({"instance_id":"instance","extra_launch_args":["-javaagent:arbitrary"]}),
+        ),
+        (
+            "logs_read",
+            json!({"instance_id":"id","log_type":"info","filename":"../secret.txt"}),
+        ),
+        (
+            "logs_read",
+            json!({"instance_id":"id","log_type":"info","filename":"..\\secret.txt"}),
+        ),
+        (
+            "logs_read",
+            json!({"instance_id":"id","log_type":"info","filename":"latest.log:secret"}),
+        ),
+        (
+            "logs_read",
+            json!({"instance_id":"id","log_type":"info","filename":"latest.log","max_bytes":32769}),
+        ),
+        (
+            "logs_search",
+            json!({"instance_id":"id","log_type":"info","filename":"latest.log","query":""}),
+        ),
+        (
+            "logs_search",
+            json!({"instance_id":"id","log_type":"other","filename":"latest.log","query":"text"}),
+        ),
         ("instance_list", json!({"limit":0})),
         ("instance_list", json!({"limit":101})),
         ("instance_list", json!({"offset":-1})),

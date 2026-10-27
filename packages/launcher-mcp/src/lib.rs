@@ -4,12 +4,14 @@ mod catalog;
 mod control;
 mod http;
 mod info;
+pub mod log_text;
+mod operations;
 mod protocol;
 mod server;
 mod session;
 mod tools;
 
-pub use backend::{Backend, Command, Loader, ToolError};
+pub use backend::{Backend, Command, Loader, LogKind, ToolError};
 pub use info::LauncherInfo;
 pub use server::Server;
 pub use session::{Connection, Snapshot};

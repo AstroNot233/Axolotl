@@ -80,6 +80,57 @@ pub enum Command {
         #[serde(default)]
         instance_id: Option<String>,
     },
+    InstanceLaunch {
+        instance_id: String,
+        #[serde(default)]
+        offline_mode: bool,
+    },
+    ProcessGet {
+        process_id: uuid::Uuid,
+    },
+    ProcessWait {
+        process_id: uuid::Uuid,
+        #[serde(default = "wait_seconds")]
+        timeout_seconds: u64,
+    },
+    ProcessKill {
+        process_id: uuid::Uuid,
+    },
+    InstallJobRetry {
+        job_id: uuid::Uuid,
+    },
+    InstallJobResume {
+        job_id: uuid::Uuid,
+    },
+    InstallJobCancel {
+        job_id: uuid::Uuid,
+    },
+    LogsList {
+        instance_id: String,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    LogsRead {
+        instance_id: String,
+        log_type: LogKind,
+        filename: String,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "text_bytes")]
+        max_bytes: usize,
+    },
+    LogsSearch {
+        instance_id: String,
+        log_type: LogKind,
+        filename: String,
+        query: String,
+        #[serde(default)]
+        start_line: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
     JavaList {},
     SystemGetMemory {},
     InstallJobList {
@@ -93,6 +144,34 @@ pub enum Command {
     InstallJobGet {
         job_id: uuid::Uuid,
     },
+}
+
+impl Command {
+    pub(crate) fn deferred(&self) -> bool {
+        matches!(
+            self,
+            Self::InstanceLaunch { .. }
+                | Self::InstallJobRetry { .. }
+                | Self::InstallJobResume { .. }
+                | Self::InstallJobCancel { .. }
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogKind {
+    Info,
+    Crash,
+    Jvm,
+    Launcher,
+}
+
+fn wait_seconds() -> u64 {
+    10
+}
+fn text_bytes() -> usize {
+    16 * 1024
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]

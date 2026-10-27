@@ -1,5 +1,7 @@
 mod instances;
 mod jobs;
+mod lifecycle;
+mod logs;
 mod queries;
 
 use futures::future::BoxFuture;
@@ -16,6 +18,74 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                Command::InstanceLaunch {
+                    instance_id,
+                    offline_mode,
+                } => lifecycle::launch(instance_id, offline_mode).await,
+                Command::ProcessGet { process_id } => {
+                    lifecycle::get(process_id).await
+                }
+                Command::ProcessWait {
+                    process_id,
+                    timeout_seconds,
+                } => lifecycle::wait(process_id, timeout_seconds).await,
+                Command::ProcessKill { process_id } => {
+                    lifecycle::kill(process_id).await
+                }
+                Command::InstallJobRetry { job_id } => Ok(jobs::summary(
+                    theseus::install::retry_job(job_id)
+                        .await
+                        .map_err(business_error)?,
+                )),
+                Command::InstallJobResume { job_id } => Ok(jobs::summary(
+                    theseus::install::resume_job(job_id)
+                        .await
+                        .map_err(business_error)?,
+                )),
+                Command::InstallJobCancel { job_id } => Ok(jobs::summary(
+                    theseus::install::cancel_job(job_id)
+                        .await
+                        .map_err(business_error)?,
+                )),
+                Command::LogsList {
+                    instance_id,
+                    offset,
+                    limit,
+                } => logs::list(instance_id, offset, limit).await,
+                Command::LogsRead {
+                    instance_id,
+                    log_type,
+                    filename,
+                    offset,
+                    max_bytes,
+                } => {
+                    logs::read(
+                        instance_id,
+                        log_type,
+                        filename,
+                        offset,
+                        max_bytes,
+                    )
+                    .await
+                }
+                Command::LogsSearch {
+                    instance_id,
+                    log_type,
+                    filename,
+                    query,
+                    start_line,
+                    limit,
+                } => {
+                    logs::search(
+                        instance_id,
+                        log_type,
+                        filename,
+                        query,
+                        start_line,
+                        limit,
+                    )
+                    .await
+                }
                 Command::InstallJobList {
                     include_finished,
                     offset,

@@ -35,6 +35,7 @@ pub(crate) async fn call(
                 "requires_session": entry.access != Access::Public,
                 "requires_full_access": entry.access == Access::FullAccess,
                 "read_only": entry.read_only,
+                "returns_operation_id": matches!(entry.tool.name.as_ref(), "instance_launch" | "install_job_retry" | "install_job_resume" | "install_job_cancel"),
             })).collect::<Vec<_>>(),
             "restrictions": {
                 "ordinary_mode": {"manual_control_approval": true, "deletion": false, "direct_interface_control": false},
@@ -42,6 +43,8 @@ pub(crate) async fn call(
                 "max_page_size": 100,
                 "in_flight_mutations_finish_on_disconnect": true,
                 "created_installation_jobs_continue_after_session_end": true,
+                "running_games_continue_after_session_end": true,
+                "retained_operation_limit": 64,
             }
         })),
         "start_session" => shared
@@ -55,6 +58,15 @@ pub(crate) async fn call(
             )
             .map(|()| json!({"ended":true}))
             .map_err(|error| ToolError::new("invalid_session", error)),
+        "operations_get" => shared.operation_get(
+            transport,
+            arguments["session_id"].as_str().unwrap(),
+            arguments["operation_id"].as_str().unwrap(),
+        ),
+        "operations_list" => shared.operation_list(
+            transport,
+            arguments["session_id"].as_str().unwrap(),
+        ),
         _ => {
             let control = arguments
                 .remove("session_id")
@@ -68,7 +80,18 @@ pub(crate) async fn call(
             .map_err(|error| {
                 ErrorData::invalid_params(error.to_string(), None)
             })?;
-            execute(shared, transport, &control, &entry, command, context).await
+            if command.deferred() {
+                shared.enqueue(
+                    transport,
+                    &control,
+                    &entry,
+                    command,
+                    context.ct.clone(),
+                )
+            } else {
+                execute(shared, transport, &control, &entry, command, context)
+                    .await
+            }
         }
     };
     Ok(match result {

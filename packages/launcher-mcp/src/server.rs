@@ -40,6 +40,7 @@ impl Server {
         sessions.session_config.init_timeout = Some(Duration::from_secs(60));
         sessions.session_config.keep_alive = Some(Duration::from_secs(90));
         let shared = Arc::new(Shared {
+            operations: Mutex::new(Default::default()),
             backend,
             mutations: Arc::new(tokio::sync::Mutex::new(())),
             inner: Mutex::new(Inner {
