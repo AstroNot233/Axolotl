@@ -3078,6 +3078,8 @@ fn search_solutions(
         return;
     }
     state.visited += 1;
+    #[cfg(test)]
+    tests::cancel_on_visit(state);
     let Some(mut requirement) = requirements.pop() else {
         solutions.push(SolverResult {
             assignments,
@@ -4165,6 +4167,21 @@ fn deduplicate_issues(issues: &mut Vec<InstanceUpgradeIssue>) {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    thread_local! {
+        /// Cancels the solver's token once it reaches this search state, so a
+        /// test can cancel a search that is already under way.
+        static CANCEL_ON_VISIT: std::cell::Cell<Option<usize>> =
+            const { std::cell::Cell::new(None) };
+    }
+
+    pub(super) fn cancel_on_visit(state: &SearchState) {
+        if CANCEL_ON_VISIT.with(std::cell::Cell::get) == Some(state.visited)
+            && let Some(cancel) = &state.cancel
+        {
+            cancel.cancel();
+        }
+    }
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use std::path::Path;
 
@@ -4341,6 +4358,51 @@ mod tests {
         assert!(outcome.solutions.is_empty());
         assert!(outcome.issues.is_empty());
         assert!(!solve(&roots, &catalog).canceled);
+    }
+
+    #[test]
+    fn solver_canceled_during_a_search_stops_before_finding_a_solution() {
+        let mut roots = Vec::new();
+        let mut catalog = UpgradeCatalog::new();
+        for index in 0..20 {
+            let project_id = format!("root-{index}");
+            let current = format!("{project_id}-current");
+            roots.push(root(&project_id, &current, true));
+            catalog.insert(
+                key(&project_id),
+                CandidatePool {
+                    candidates: vec![
+                        candidate(&project_id, &format!("{project_id}-new"), 2),
+                        candidate(&project_id, &current, 1),
+                    ],
+                    exploration_limited: false,
+                    has_target_game_version_release: true,
+                },
+            );
+        }
+        let solve = |cancel: &CancellationToken| {
+            solve_upgrade_with_fixed_roots_cancellable(
+                &roots,
+                &[],
+                &catalog,
+                &FixedRootConstraints::default(),
+                &HashSet::new(),
+                Some(cancel),
+            )
+        };
+        let finished = solve(&CancellationToken::new());
+        assert!(!finished.canceled);
+        assert!(!finished.solutions.is_empty());
+
+        // Twenty roots need at least twenty search states; cancel at the fifth.
+        CANCEL_ON_VISIT.with(|visit| visit.set(Some(5)));
+        let cancel = CancellationToken::new();
+        let outcome = solve(&cancel);
+        CANCEL_ON_VISIT.with(|visit| visit.set(None));
+        assert!(cancel.is_cancelled());
+        assert!(outcome.canceled);
+        assert!(outcome.solutions.is_empty());
+        assert!(outcome.issues.is_empty());
     }
 
     #[test]
@@ -7204,6 +7266,36 @@ mod tests {
 
         let before =
             planner_state_digest(&pool, &instance_dir, &instance.id).await;
+        // Cancel once the planner reports that it has started reading files.
+        let started = CancellationToken::new();
+        let stop_on_start = {
+            let started = started.clone();
+            Arc::new(move |progress| {
+                if matches!(
+                    progress,
+                    InstanceUpgradePlanningProgress::Phase {
+                        phase: InstanceUpgradePlanningPhase::ReadingContent,
+                        ..
+                    }
+                ) {
+                    started.cancel();
+                }
+            }) as UpgradePlanningReporter
+        };
+        let stopped_while_reading = create_instance_upgrade_plan_with_source(
+            &instance.id,
+            target.clone(),
+            &state,
+            &UpgradePlanningObserver::new(started.clone(), Some(stop_on_start)),
+        )
+        .await;
+        assert!(started.is_cancelled());
+        assert!(stopped_while_reading.is_err());
+        assert_eq!(
+            planner_state_digest(&pool, &instance_dir, &instance.id).await,
+            before
+        );
+
         let cancel = CancellationToken::new();
         cancel.cancel();
         let canceled = create_instance_upgrade_plan_with_source(
