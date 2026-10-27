@@ -6,6 +6,8 @@ type UseContentUpdaterSelectionOptions = {
     versions: Readonly<Ref<Labrinth.Versions.v2.Version[]>>
     /** True while more versions may still arrive. */
     loading?: Readonly<Ref<boolean>>
+    /** Set when loading stopped early, so the list may be missing versions. */
+    loadingError?: Readonly<Ref<string | undefined>>
     currentVersionId: Readonly<Ref<string>>
     onVersionSelect: (version: Labrinth.Versions.v2.Version) => void
     debug: (message: string, data?: Record<string, unknown>) => void
@@ -14,6 +16,7 @@ type UseContentUpdaterSelectionOptions = {
 export function useContentUpdaterSelection({
     versions,
     loading,
+    loadingError,
     currentVersionId,
     onVersionSelect,
     debug,
@@ -23,8 +26,8 @@ export function useContentUpdaterSelection({
     const pinnedInitialVersionId = ref<string | undefined>(undefined)
 
     watch(
-        [versions, () => loading?.value ?? false],
-        ([newVersions, stillLoading]) => {
+        [versions, () => (loading?.value ?? false) || !!loadingError?.value],
+        ([newVersions, incomplete]) => {
             if (selectedVersion.value) {
                 const updatedVersion = newVersions.find((v) => v.id === selectedVersion.value?.id)
                 if (updatedVersion && updatedVersion !== selectedVersion.value) {
@@ -45,8 +48,9 @@ export function useContentUpdaterSelection({
                         ...new Set(newVersions.flatMap((v) => v.game_versions)),
                     ].slice(0, 10),
                 })
-                // The requested version may be on a page that has not arrived yet.
-                if (!pendingFound && stillLoading) return
+                // The requested version may be on a page that has not arrived yet,
+                // or on one that failed and will arrive after a retry.
+                if (!pendingFound && incomplete) return
                 const version = pendingFound ?? newVersions[0]
                 selectedVersion.value = version
                 if (version) {

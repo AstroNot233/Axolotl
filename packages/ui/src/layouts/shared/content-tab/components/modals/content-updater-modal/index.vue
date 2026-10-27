@@ -622,6 +622,7 @@ const { selectedVersion, pinnedInitialVersionId, selectVersion, resetInitialSele
     useContentUpdaterSelection({
         versions: toRef(props, 'versions'),
         loading: toRef(props, 'loading'),
+        loadingError: toRef(props, 'loadingError'),
         currentVersionId: toRef(props, 'currentVersionId'),
         onVersionSelect: (version) => emit('versionSelect', version),
         debug,

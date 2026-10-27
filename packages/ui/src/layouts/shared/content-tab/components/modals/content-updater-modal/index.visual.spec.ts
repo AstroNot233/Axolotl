@@ -104,3 +104,15 @@ it('waits for a requested version on a later page instead of selecting the first
     await wrapper.setProps({ versions: [version('first'), version('wanted')], loading: false })
     expect(wrapper.emitted('versionSelect')?.at(-1)?.[0]).toMatchObject({ id: 'wanted' })
 })
+
+it('keeps waiting for the requested version after a later page fails', async () => {
+    const wrapper = await modal({ versions: [], loading: true })
+    ;(wrapper.vm as unknown as { show: (id?: string) => void }).show('wanted')
+    await wrapper.setProps({ versions: [version('first')], loading: false, loadingError: 'Failed' })
+    expect(wrapper.emitted('versionSelect')).toBeUndefined()
+    await wrapper.setProps({
+        versions: [version('first'), version('wanted')],
+        loadingError: undefined,
+    })
+    expect(wrapper.emitted('versionSelect')?.at(-1)?.[0]).toMatchObject({ id: 'wanted' })
+})
