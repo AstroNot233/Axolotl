@@ -221,7 +221,6 @@ pub async fn fetch(
     download_meta: Option<&DownloadMeta>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
 ) -> crate::Result<Bytes> {
     fetch_advanced(
         Method::GET,
@@ -233,7 +232,6 @@ pub async fn fetch(
         None,
         uri_path,
         semaphore,
-        exec,
     )
     .await
 }
@@ -247,7 +245,6 @@ pub async fn fetch_official(
     download_meta: Option<&DownloadMeta>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
 ) -> crate::Result<Bytes> {
     let client = configured_client().await?;
     fetch_advanced_with_client_and_progress(
@@ -260,7 +257,6 @@ pub async fn fetch_official(
         None,
         uri_path,
         semaphore,
-        exec,
         &client,
         Some(crate::state::DownloadSourceMode::OfficialOnly),
         None,
@@ -275,7 +271,6 @@ pub(crate) async fn fetch_metadata<T>(
     url: &str,
     parse: impl Fn(&Bytes) -> crate::Result<T> + Send + Sync,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
 ) -> crate::Result<T> {
     let validate = |bytes: &Bytes| parse(bytes).map(|_| ());
     let client = configured_client().await?;
@@ -291,7 +286,6 @@ pub(crate) async fn fetch_metadata<T>(
             None,
             None,
             semaphore,
-            exec,
             &client,
             None,
             None,
@@ -318,7 +312,6 @@ pub async fn fetch_json<T>(
     json_body: Option<serde_json::Value>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
 ) -> crate::Result<T>
 where
     T: DeserializeOwned,
@@ -339,7 +332,6 @@ where
         None,
         uri_path,
         semaphore,
-        exec,
         &client,
         None,
         None,
@@ -365,7 +357,6 @@ pub async fn fetch_json_nonempty<T>(
     json_body: Option<serde_json::Value>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
 ) -> crate::Result<T>
 where
     T: DeserializeOwned,
@@ -393,7 +384,6 @@ where
         None,
         uri_path,
         semaphore,
-        exec,
         &client,
         None,
         None,
@@ -419,7 +409,6 @@ pub async fn fetch_advanced(
     loading_bar: Option<(&LoadingBarId, f64)>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
 ) -> crate::Result<Bytes> {
     fetch_advanced_with_client(
         method,
@@ -431,7 +420,6 @@ pub async fn fetch_advanced(
         loading_bar,
         uri_path,
         semaphore,
-        exec,
         &INSECURE_REQWEST_CLIENT,
     )
     .await
@@ -451,7 +439,6 @@ pub async fn fetch_advanced_with_client(
     loading_bar: Option<(&LoadingBarId, f64)>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     client: &reqwest::Client,
 ) -> crate::Result<Bytes> {
     fetch_advanced_with_client_and_progress(
@@ -464,7 +451,6 @@ pub async fn fetch_advanced_with_client(
         loading_bar,
         uri_path,
         semaphore,
-        exec,
         client,
         None,
         None,
@@ -486,7 +472,6 @@ async fn fetch_advanced_with_client_and_progress(
     loading_bar: Option<(&LoadingBarId, f64)>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     client: &reqwest::Client,
     source_mode: Option<crate::state::DownloadSourceMode>,
     progress: Option<&mut FetchProgressFn<'_>>,
@@ -505,7 +490,6 @@ async fn fetch_advanced_with_client_and_progress(
         loading_bar,
         uri_path,
         semaphore,
-        exec,
         client,
         source_mode,
         progress,
@@ -526,7 +510,6 @@ async fn fetch_advanced_inner(
     loading_bar: Option<(&LoadingBarId, f64)>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    _exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     client: &reqwest::Client,
     source_mode: Option<crate::state::DownloadSourceMode>,
     mut progress: Option<&mut FetchProgressFn<'_>>,
@@ -1344,7 +1327,6 @@ pub async fn post_json(
     url: &str,
     json_body: serde_json::Value,
     semaphore: &FetchSemaphore,
-    _exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
 ) -> crate::Result<()> {
     let _permit = semaphore.0.acquire().await?;
 

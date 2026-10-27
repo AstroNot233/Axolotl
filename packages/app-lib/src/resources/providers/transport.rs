@@ -92,7 +92,6 @@ impl ProtocolTransport for LauncherTransport {
                 request.body,
                 None,
                 &state.api_semaphore,
-                &state.pool,
             )
             .await
             .map_err(Into::into);

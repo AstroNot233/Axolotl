@@ -1700,7 +1700,6 @@ pub(crate) async fn install_zipped_mrpack_files_with_reporter(
                         ),
                     &download_path,
                     &state.download_semaphore,
-                    &state.pool,
                     None,
                 )
                 .await

@@ -2666,12 +2666,11 @@ fn error_chain(error: &crate::Error) -> String {
 
 /// Streams a download to a sibling `.part` file, verifies it, then atomically
 /// moves it into place.
-#[tracing::instrument(skip(semaphore, _exec, progress, request, destination))]
+#[tracing::instrument(skip(semaphore, progress, request, destination))]
 pub async fn download_to_path(
     mut request: DownloadRequest,
     destination: impl AsRef<Path>,
     semaphore: &FetchSemaphore,
-    _exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     progress: Option<&mut FetchProgressFn<'_>>,
 ) -> crate::Result<DownloadResult> {
     let tracking = request.install_tracking.clone();
@@ -5180,15 +5179,11 @@ mod tests {
         destination: &Path,
         expected_size: u64,
     ) -> crate::Result<DownloadResult> {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
         download_to_path(
             DownloadRequest::new(url, ResourceClass::Other)
                 .with_integrity(Integrity::default().with_size(expected_size)),
             destination,
             &FetchSemaphore(Semaphore::new(ROUTE_PROBE_CONCURRENCY)),
-            &pool,
             None,
         )
         .await
@@ -5697,9 +5692,6 @@ mod tests {
             spawn_range_server(data, RangeServerBehavior::default()).await;
         let directory = tempfile::tempdir().unwrap();
         let destination = directory.path().join("batch.bin");
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
 
         let result = download_to_path(
             DownloadRequest::new(&url, ResourceClass::Other)
@@ -5707,7 +5699,6 @@ mod tests {
                 .with_integrity(Integrity::default().with_size(size as u64)),
             &destination,
             &FetchSemaphore(Semaphore::new(ROUTE_PROBE_CONCURRENCY)),
-            &pool,
             None,
         )
         .await
@@ -5728,9 +5719,6 @@ mod tests {
             spawn_http_fixture(HttpFixture::new("200 OK", b"done")).await;
         let directory = tempfile::tempdir().unwrap();
         let destination = directory.path().join("fallback.bin");
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
 
         let result = download_to_path(
             DownloadRequest::new(&missing_url, ResourceClass::Other)
@@ -5738,7 +5726,6 @@ mod tests {
                 .with_integrity(Integrity::default().with_size(4)),
             &destination,
             &FetchSemaphore(Semaphore::new(ROUTE_PROBE_CONCURRENCY)),
-            &pool,
             None,
         )
         .await
@@ -5789,9 +5776,6 @@ mod tests {
             spawn_http_fixture(HttpFixture::new("200 OK", b"done")).await;
         let directory = tempfile::tempdir().unwrap();
         let destination = directory.path().join("rate-limit-fallback.bin");
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
         let started = Instant::now();
 
         let result = download_to_path(
@@ -5800,7 +5784,6 @@ mod tests {
                 .with_integrity(Integrity::default().with_size(4)),
             &destination,
             &FetchSemaphore(Semaphore::new(ROUTE_PROBE_CONCURRENCY)),
-            &pool,
             None,
         )
         .await
@@ -6027,9 +6010,6 @@ mod tests {
             false,
         )
         .unwrap();
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
         let parsed = super::super::download::proxy_context::with_snapshot(
             clients,
             fetch_metadata(
@@ -6041,7 +6021,6 @@ mod tests {
                         })
                 },
                 &FetchSemaphore(Semaphore::new(2)),
-                &pool,
             ),
         )
         .await
@@ -6212,9 +6191,6 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("saved.bin");
         tokio::fs::write(&path, b"existing").await.unwrap();
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
         let error = download_to_path(
             DownloadRequest::new(
                 "https://mod.tianpao.top/unknown",
@@ -6222,7 +6198,6 @@ mod tests {
             ),
             &path,
             &FetchSemaphore(Semaphore::new(1)),
-            &pool,
             None,
         )
         .await
@@ -8121,15 +8096,11 @@ mod tests {
         .await;
         let directory = tempfile::tempdir().unwrap();
         let destination = directory.path().join("ignored-range.bin");
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
         let result = download_to_path(
             DownloadRequest::new(&url, ResourceClass::Other)
                 .with_integrity(Integrity::default().with_size(size as u64)),
             &destination,
             &FetchSemaphore(Semaphore::new(8)),
-            &pool,
             None,
         )
         .await
@@ -8168,16 +8139,12 @@ mod tests {
         let semaphore = Arc::new(FetchSemaphore(Semaphore::new(8)));
         let semaphore_for_task = Arc::clone(&semaphore);
         let task = tokio::spawn(async move {
-            let pool = sqlx::sqlite::SqlitePoolOptions::new()
-                .connect_lazy("sqlite::memory:")
-                .unwrap();
             download_to_path(
                 DownloadRequest::new(url, ResourceClass::Other).with_integrity(
                     Integrity::default().with_size(size as u64),
                 ),
                 destination_for_task,
                 &semaphore_for_task,
-                &pool,
                 None,
             )
             .await
@@ -8207,9 +8174,6 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let destination = directory.path().join("existing.bin");
         tokio::fs::write(&destination, &data[..]).await.unwrap();
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
 
         let result = download_to_path(
             DownloadRequest::new(&url, ResourceClass::Other).with_integrity(
@@ -8217,7 +8181,6 @@ mod tests {
             ),
             &destination,
             &FetchSemaphore(Semaphore::new(ROUTE_PROBE_CONCURRENCY)),
-            &pool,
             None,
         )
         .await
@@ -8241,9 +8204,6 @@ mod tests {
         tokio::fs::write(&destination, b"wrong content")
             .await
             .unwrap();
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
 
         download_to_path(
             DownloadRequest::new(&url, ResourceClass::Other).with_integrity(
@@ -8251,7 +8211,6 @@ mod tests {
             ),
             &destination,
             &FetchSemaphore(Semaphore::new(ROUTE_PROBE_CONCURRENCY)),
-            &pool,
             None,
         )
         .await
@@ -8278,15 +8237,11 @@ mod tests {
             .await;
             let directory = tempfile::tempdir().unwrap();
             let destination = directory.path().join("single.bin");
-            let pool = sqlx::sqlite::SqlitePoolOptions::new()
-                .connect_lazy("sqlite::memory:")
-                .unwrap();
             let result = download_to_path(
                 DownloadRequest::new(&url, ResourceClass::Other)
                     .with_integrity(integrity),
                 &destination,
                 &FetchSemaphore(Semaphore::new(8)),
-                &pool,
                 None,
             )
             .await
@@ -8318,15 +8273,11 @@ mod tests {
         tokio::fs::write(&part_path, &data[..size / 2])
             .await
             .unwrap();
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
         let result = download_to_path(
             DownloadRequest::new(&url, ResourceClass::Other)
                 .with_integrity(Integrity::sha1(hash).with_size(size as u64)),
             &destination,
             &FetchSemaphore(Semaphore::new(ROUTE_PROBE_CONCURRENCY)),
-            &pool,
             None,
         )
         .await
@@ -8368,15 +8319,11 @@ mod tests {
         tokio::fs::write(&part_path, vec![0xAB_u8; size / 2])
             .await
             .unwrap();
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
         let result = download_to_path(
             DownloadRequest::new(&url, ResourceClass::Other)
                 .with_integrity(Integrity::sha1(hash).with_size(size as u64)),
             &destination,
             &FetchSemaphore(Semaphore::new(ROUTE_PROBE_CONCURRENCY)),
-            &pool,
             None,
         )
         .await
@@ -8413,9 +8360,6 @@ mod tests {
         .await;
         let directory = tempfile::tempdir().unwrap();
         let destination = directory.path().join("source-isolated.bin");
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
 
         let result = download_to_path(
             DownloadRequest::new(&stale_url, ResourceClass::Other)
@@ -8423,7 +8367,6 @@ mod tests {
                 .with_integrity(Integrity::sha1(hash).with_size(size as u64)),
             &destination,
             &FetchSemaphore(Semaphore::new(ROUTE_PROBE_CONCURRENCY)),
-            &pool,
             None,
         )
         .await
@@ -8463,9 +8406,6 @@ mod tests {
         tokio::fs::write(&part_path, &data[..size / 4])
             .await
             .unwrap();
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .connect_lazy("sqlite::memory:")
-            .unwrap();
         // A single global permit forces the segmented attempt to fall back
         // before transferring anything; the preserved partial data must
         // survive that fallback and drive a resumed single connection.
@@ -8474,7 +8414,6 @@ mod tests {
                 .with_integrity(Integrity::sha1(hash).with_size(size as u64)),
             &destination,
             &FetchSemaphore(Semaphore::new(1)),
-            &pool,
             None,
         )
         .await
@@ -8507,9 +8446,6 @@ mod tests {
         )
         .unwrap();
         super::super::download::proxy_context::with_snapshot(clients, async {
-            let pool = sqlx::sqlite::SqlitePoolOptions::new()
-                .connect_lazy("sqlite::memory:")
-                .unwrap();
             let semaphore =
                 FetchSemaphore(Semaphore::new(FILE_VALIDATION_CONCURRENCY));
 
@@ -8522,7 +8458,6 @@ mod tests {
                 None,
                 None,
                 &semaphore,
-                &pool,
             )
             .await;
             assert!(
@@ -8541,7 +8476,6 @@ mod tests {
                 None,
                 None,
                 &semaphore,
-                &pool,
             )
             .await;
             let values =
@@ -8565,9 +8499,6 @@ mod tests {
         )
         .unwrap();
         super::super::download::proxy_context::with_snapshot(clients, async {
-            let pool = sqlx::sqlite::SqlitePoolOptions::new()
-                .connect_lazy("sqlite::memory:")
-                .unwrap();
             let semaphore =
                 FetchSemaphore(Semaphore::new(FILE_VALIDATION_CONCURRENCY));
 
@@ -8580,7 +8511,6 @@ mod tests {
                 None,
                 None,
                 &semaphore,
-                &pool,
             )
             .await;
             let values = result

@@ -165,7 +165,6 @@ pub(super) async fn reconstruct_modpack_servers(
         Some(&download_meta),
         None,
         &state.api_semaphore,
-        &state.pool,
     )
     .await?;
     let mut archive = ZipFileReader::with_tokio(Cursor::new(&mrpack)).await?;

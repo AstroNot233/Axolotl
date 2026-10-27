@@ -187,7 +187,6 @@ impl Artifact {
                     request,
                     &destination,
                     &state.download_semaphore,
-                    &state.pool,
                     None,
                 )
                 .await;

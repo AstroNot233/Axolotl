@@ -455,14 +455,7 @@ async fn download_minecraft_file_with_candidates(
         );
     }
     let Some(progress) = progress else {
-        return download_to_path(
-            request,
-            destination,
-            semaphore,
-            &st.pool,
-            None,
-        )
-        .await;
+        return download_to_path(request, destination, semaphore, None).await;
     };
 
     let last_downloaded = Arc::new(AtomicU64::new(0));
@@ -491,7 +484,6 @@ async fn download_minecraft_file_with_candidates(
         request,
         destination,
         semaphore,
-        &st.pool,
         Some(&mut progress_fn as &mut FetchProgressFn<'_>),
     )
     .await
@@ -1193,7 +1185,6 @@ pub async fn download_version_info(
             None,
             None,
             &st.api_semaphore,
-            &st.pool,
         )
         .await
         {
@@ -1212,7 +1203,6 @@ pub async fn download_version_info(
                     None,
                     None,
                     &st.api_semaphore,
-                    &st.pool,
                 )
                 .await
                 {
@@ -1259,7 +1249,6 @@ pub async fn download_version_info(
                     None,
                     None,
                     &st.api_semaphore,
-                    &st.pool,
                 )
                 .await?
             }

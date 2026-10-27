@@ -436,7 +436,6 @@ async fn download_mojmaps_for_processor(
         None,
         None,
         &state.download_semaphore,
-        &state.pool,
     )
     .await?;
     if bytes.len() as u64 != u64::from(*download_size) {
