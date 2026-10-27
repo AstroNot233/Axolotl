@@ -124,7 +124,7 @@ where
                 user_id: creds.user.id,
                 active: true,
             }
-            .upsert(exec)
+            .upsert(handle)
             .await?;
         }
 

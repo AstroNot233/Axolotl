@@ -2193,7 +2193,7 @@ async fn fetch_advanced_inner(
     loading_bar: Option<(&LoadingBarId, f64)>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    _exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     client: &reqwest::Client,
     source_mode: Option<crate::state::DownloadSourceMode>,
     mut progress: Option<&mut FetchProgressFn<'_>>,
@@ -2218,7 +2218,10 @@ async fn fetch_advanced_inner(
     let creds = if requires_auth
         && header.as_ref().is_none_or(|x| !is_sensitive_header(x.0))
     {
-        crate::state::ModrinthCredentials::get_active(exec).await?
+        // The session is a stored record, so it is read through the store and
+        // not through the connection the caller handed on.
+        let state = crate::State::get().await?;
+        crate::state::ModrinthCredentials::get_active(&state.data).await?
     } else {
         None
     };
@@ -6973,14 +6976,15 @@ pub async fn post_json(
     url: &str,
     json_body: serde_json::Value,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    _exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
 ) -> crate::Result<()> {
     let _permit = semaphore.0.acquire().await?;
 
     let mut req = INSECURE_REQWEST_CLIENT.post(url).json(&json_body);
 
+    let state = crate::State::get().await?;
     if let Some(creds) =
-        crate::state::ModrinthCredentials::get_active(exec).await?
+        crate::state::ModrinthCredentials::get_active(&state.data).await?
     {
         req = req.header(AUTHORIZATION_HEADER, &creds.session);
     }

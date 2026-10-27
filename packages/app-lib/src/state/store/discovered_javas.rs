@@ -19,6 +19,7 @@ pub(crate) struct DiscoveredJavaRecord {
     pub major_version: u32,
     pub full_version: String,
     pub architecture: String,
+    pub distribution: Option<String>,
     pub file_size: i64,
     pub file_mtime_ms: i64,
 }
@@ -38,24 +39,33 @@ impl Collection for DiscoveredJavas {
         conn: &mut SqliteConnection,
         key: &Self::Key,
     ) -> crate::Result<Option<Self::Record>> {
-        let row: Option<(i64, String, String, i64, i64)> = sqlx::query_as(
-            "
-            SELECT major_version, full_version, architecture, file_size,
-                file_mtime_ms
-            FROM discovered_javas
-            WHERE path = ?
-            ",
-        )
-        .bind(key)
-        .fetch_optional(&mut *conn)
-        .await?;
+        let row: Option<(i64, String, String, Option<String>, i64, i64)> =
+            sqlx::query_as(
+                "
+                SELECT major_version, full_version, architecture, distribution,
+                    file_size, file_mtime_ms
+                FROM discovered_javas
+                WHERE path = ?
+                ",
+            )
+            .bind(key)
+            .fetch_optional(&mut *conn)
+            .await?;
 
         Ok(row.and_then(
-            |(major_version, full_version, architecture, file_size, mtime)| {
+            |(
+                major_version,
+                full_version,
+                architecture,
+                distribution,
+                file_size,
+                mtime,
+            )| {
                 Some(Self::Record {
                     major_version: u32::try_from(major_version).ok()?,
                     full_version,
                     architecture,
+                    distribution,
                     file_size,
                     file_mtime_ms: mtime,
                 })
@@ -83,11 +93,11 @@ impl Collection for DiscoveredJavas {
     async fn read_all(
         conn: &mut SqliteConnection,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let rows: Vec<(String, i64, String, String, i64, i64)> =
+        let rows: Vec<(String, i64, String, String, Option<String>, i64, i64)> =
             sqlx::query_as(
                 "
                 SELECT path, major_version, full_version, architecture,
-                    file_size, file_mtime_ms
+                    distribution, file_size, file_mtime_ms
                 FROM discovered_javas
                 ",
             )
@@ -97,13 +107,22 @@ impl Collection for DiscoveredJavas {
         Ok(rows
             .into_iter()
             .filter_map(
-                |(path, major_version, full_version, architecture, size, m)| {
+                |(
+                    path,
+                    major_version,
+                    full_version,
+                    architecture,
+                    distribution,
+                    size,
+                    m,
+                )| {
                     Some((
                         path,
                         Self::Record {
                             major_version: u32::try_from(major_version).ok()?,
                             full_version,
                             architecture,
+                            distribution,
                             file_size: size,
                             file_mtime_ms: m,
                         },
@@ -130,11 +149,11 @@ impl Collection for DiscoveredJavas {
         conn: &mut SqliteConnection,
         scope: &Self::Scope,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let rows: Vec<(String, i64, String, String, i64, i64)> =
+        let rows: Vec<(String, i64, String, String, Option<String>, i64, i64)> =
             sqlx::query_as(
                 "
                 SELECT path, major_version, full_version, architecture,
-                    file_size, file_mtime_ms
+                    distribution, file_size, file_mtime_ms
                 FROM discovered_javas
                 WHERE major_version = ?
                 ",
@@ -227,14 +246,15 @@ async fn write_row(
     sqlx::query(
         "
         INSERT INTO discovered_javas (
-            path, major_version, full_version, architecture, file_size,
-            file_mtime_ms
+            path, major_version, full_version, architecture, distribution,
+            file_size, file_mtime_ms
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (path) DO UPDATE SET
             major_version = excluded.major_version,
             full_version = excluded.full_version,
             architecture = excluded.architecture,
+            distribution = excluded.distribution,
             file_size = excluded.file_size,
             file_mtime_ms = excluded.file_mtime_ms
         ",
@@ -243,6 +263,7 @@ async fn write_row(
     .bind(i64::from(record.major_version))
     .bind(&record.full_version)
     .bind(&record.architecture)
+    .bind(&record.distribution)
     .bind(record.file_size)
     .bind(record.file_mtime_ms)
     .execute(&mut *conn)
