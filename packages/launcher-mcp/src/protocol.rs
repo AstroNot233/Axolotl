@@ -53,12 +53,12 @@ impl ServerHandler for Handler {
         );
         info.capabilities =
             ServerCapabilities::builder().enable_tools().build();
-        info.instructions = Some("Discovery and get_launcher_info do not grant control. Call start_session only when the user wants to operate the launcher, then call end_session with the returned session_id when finished. Control sessions are scoped to this MCP connection; never reuse a previous session_id. Launcher control tools are not available yet.".into());
+        info.instructions = Some("Discovery, get_launcher_info and get_launcher_capabilities do not grant control. Call start_session only for the user's launcher task, pass its session_id to every business tool, and call end_session when finished. Sessions belong to this MCP connection; never reuse old IDs. Ordinary mode requires manual approval and prohibits deletion and direct interface control. Already admitted mutations finish after cancellation; created installation jobs continue independently. Check state before retrying mutations that are not idempotent.".into());
         info
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
-        crate::tools::definitions()
+        crate::catalog::definitions()
             .into_iter()
             .find(|tool| tool.name == name)
     }
@@ -69,7 +69,7 @@ impl ServerHandler for Handler {
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         let mut result = ListToolsResult::default();
-        result.tools = crate::tools::definitions();
+        result.tools = crate::catalog::definitions();
         Ok(result)
     }
 

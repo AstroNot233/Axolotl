@@ -30,6 +30,7 @@ impl Server {
         full_access: bool,
         require_auth: bool,
         info: LauncherInfo,
+        backend: Arc<dyn crate::Backend>,
         changed: impl Fn(Snapshot) + Send + Sync + 'static,
     ) -> std::io::Result<Self> {
         let listener =
@@ -39,6 +40,8 @@ impl Server {
         sessions.session_config.init_timeout = Some(Duration::from_secs(60));
         sessions.session_config.keep_alive = Some(Duration::from_secs(90));
         let shared = Arc::new(Shared {
+            backend,
+            mutations: Arc::new(tokio::sync::Mutex::new(())),
             inner: Mutex::new(Inner {
                 snapshot: Snapshot {
                     running: true,

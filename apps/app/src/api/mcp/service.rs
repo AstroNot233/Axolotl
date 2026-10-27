@@ -86,6 +86,7 @@ impl Controller {
                     self.preferences.full_access,
                     self.preferences.require_auth,
                     LauncherInfo::new(env!("CARGO_PKG_VERSION")),
+                    std::sync::Arc::new(super::backend::LauncherBackend),
                     move |mut runtime| {
                         runtime.revision += revision_base;
                         if runtime.connection.as_ref().is_some_and(

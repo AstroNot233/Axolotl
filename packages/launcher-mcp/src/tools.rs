@@ -1,22 +1,15 @@
-use crate::session::Shared;
+use crate::{
+    Command, ToolError,
+    catalog::{self, Access},
+    session::Shared,
+};
 use rmcp::{
     ErrorData, RoleServer,
-    model::{CallToolRequestParams, CallToolResult, Tool, ToolAnnotations},
+    model::{CallToolRequestParams, CallToolResult},
     service::RequestContext,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use std::sync::Arc;
-
-pub(crate) fn definitions() -> Vec<Tool> {
-    [
-        ("get_launcher_info", "Read the launcher name, actual application version, and platform. Does not request control or require start_session.", true, json!({"type":"object","properties":{},"additionalProperties":false})),
-        ("start_session", "Request permission to control the launcher for the user's task. May show a confirmation dialog; do not call during startup or tool discovery. Returns a session_id. Call end_session when finished. Does not provide screenshot, input, or other control tools yet.", false, json!({"type":"object","properties":{},"additionalProperties":false})),
-        ("end_session", "Release the control session and remove the AI indicator. Keeps the MCP transport available for discovery or a future start_session.", false, json!({"type":"object","properties":{"session_id":{"type":"string"}},"required":["session_id"],"additionalProperties":false})),
-    ].into_iter().map(|(name, description, read_only, schema)| {
-        Tool::new(name, description, schema.as_object().unwrap().clone())
-            .with_annotations(ToolAnnotations::new().read_only(read_only).destructive(false).idempotent(true).open_world(false))
-    }).collect()
-}
 
 pub(crate) async fn call(
     shared: &Arc<Shared>,
@@ -24,41 +17,101 @@ pub(crate) async fn call(
     request: CallToolRequestParams,
     context: RequestContext<RoleServer>,
 ) -> Result<CallToolResult, ErrorData> {
-    let arguments = request.arguments.unwrap_or_default();
+    let mut arguments = request.arguments.unwrap_or_default();
+    let entry = catalog::entries()
+        .into_iter()
+        .find(|entry| entry.tool.name == request.name)
+        .ok_or_else(|| {
+            ErrorData::invalid_params("Unknown launcher tool", None)
+        })?;
+    catalog::validate(&entry, &arguments)?;
     let result = match request.name.as_ref() {
-        "get_launcher_info" if arguments.is_empty() => {
+        "get_launcher_info" => {
             Ok(serde_json::to_value(&shared.info).expect("launcher metadata"))
         }
-        "start_session" if arguments.is_empty() => {
-            shared.start_control(transport, context).await
-        }
-        "end_session" if arguments.len() == 1 => {
-            let control = arguments
-                .get("session_id")
-                .and_then(|id| id.as_str())
-                .filter(|id| !id.is_empty())
-                .ok_or_else(|| {
-                    ErrorData::invalid_params("session_id is required", None)
-                })?;
-            shared
-                .release_control(transport, control)
-                .map(|()| json!({"ended":true}))
-        }
-        "get_launcher_info" | "start_session" | "end_session" => {
-            return Err(ErrorData::invalid_params(
-                "Invalid tool arguments",
-                None,
-            ));
-        }
+        "get_launcher_capabilities" => Ok(json!({
+            "tools": catalog::entries().into_iter().map(|entry| json!({
+                "name": entry.tool.name,
+                "requires_session": entry.access != Access::Public,
+                "requires_full_access": entry.access == Access::FullAccess,
+                "read_only": entry.read_only,
+            })).collect::<Vec<_>>(),
+            "restrictions": {
+                "ordinary_mode": {"manual_control_approval": true, "deletion": false, "direct_interface_control": false},
+                "session_scoped_to_transport": true,
+                "max_page_size": 100,
+                "in_flight_mutations_finish_on_disconnect": true,
+                "created_installation_jobs_continue_after_session_end": true,
+            }
+        })),
+        "start_session" => shared
+            .start_control(transport, context)
+            .await
+            .map_err(|error| ToolError::new("control_not_granted", error)),
+        "end_session" => shared
+            .release_control(
+                transport,
+                arguments["session_id"].as_str().unwrap(),
+            )
+            .map(|()| json!({"ended":true}))
+            .map_err(|error| ToolError::new("invalid_session", error)),
         _ => {
-            return Err(ErrorData::invalid_params(
-                "Unknown launcher tool",
-                None,
-            ));
+            let control = arguments
+                .remove("session_id")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let command = serde_json::from_value::<Command>(
+                json!({"name":request.name,"arguments":arguments}),
+            )
+            .map_err(|error| {
+                ErrorData::invalid_params(error.to_string(), None)
+            })?;
+            execute(shared, transport, &control, &entry, command, context).await
         }
     };
     Ok(match result {
         Ok(value) => CallToolResult::structured(value),
         Err(error) => CallToolResult::structured_error(json!({"error":error})),
     })
+}
+
+async fn execute(
+    shared: &Arc<Shared>,
+    transport: &str,
+    control: &str,
+    entry: &catalog::Entry,
+    command: Command,
+    context: RequestContext<RoleServer>,
+) -> Result<Value, ToolError> {
+    let full = entry.access == Access::FullAccess;
+    let cancel = shared.authorize(transport, control, full)?;
+    if entry.read_only {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(ToolError::new("session_revoked", "Control session ended")),
+            _ = context.ct.cancelled() => Err(ToolError::new("cancelled", "Request cancelled")),
+            result = shared.backend.execute(command) => result,
+        }
+    } else {
+        let shared = shared.clone();
+        let transport = transport.to_owned();
+        let control = control.to_owned();
+        // Drain admitted writes if rmcp drops the handler on cancellation. Never
+        // drop business futures halfway through a filesystem/database mutation.
+        tokio::spawn(async move {
+            let _permit = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Err(ToolError::new("session_revoked", "Control session ended before execution")),
+                _ = context.ct.cancelled() => return Err(ToolError::new("cancelled", "Request cancelled before execution")),
+                permit = shared.mutations.lock() => permit,
+            };
+            shared.authorize(&transport, &control, full)?;
+            if context.ct.is_cancelled() {
+                return Err(ToolError::new("cancelled", "Request cancelled before execution"));
+            }
+            shared.backend.execute(command).await
+        }).await.map_err(|_| ToolError::new("execution_failed", "Launcher operation task failed; inspect current state before retrying"))?
+    }
 }

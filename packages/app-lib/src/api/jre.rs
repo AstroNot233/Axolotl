@@ -32,6 +32,22 @@ use crate::{
 };
 use xz2::read::XzDecoder;
 
+#[derive(Debug, Serialize)]
+pub struct RegisteredJavaVersions {
+    pub runtimes: Vec<JavaVersion>,
+    pub defaults: Vec<JavaVersion>,
+}
+
+/// Read stored Java registrations without discovery, execution or registration.
+pub async fn get_registered_java_versions()
+-> crate::Result<RegisteredJavaVersions> {
+    let state = State::get().await?;
+    Ok(RegisteredJavaVersions {
+        runtimes: JavaVersion::get_all(&state.data).await?,
+        defaults: JavaVersion::get_all_defaults(&state.data).await?,
+    })
+}
+
 pub async fn get_java_versions() -> crate::Result<Vec<JavaVersion>> {
     let state = State::get().await?;
     register_managed_java_versions(&state).await?;
