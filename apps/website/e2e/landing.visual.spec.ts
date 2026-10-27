@@ -169,6 +169,23 @@ async function openLandingPage(page: Page, theme: Theme) {
         null,
         { polling: 500, timeout: 30_000 },
     )
+    // `complete` only reports that the bytes arrived. The showcase screenshots are
+    // large and decode asynchronously, so the page can still be painting them when
+    // the capture starts; two consecutive captures then disagree and
+    // `toHaveScreenshot` fails with "two consecutive stable screenshots" rather
+    // than a real difference. Waiting on the decoders closes that window.
+    await page.evaluate(async () => {
+        await Promise.all(
+            Array.from(document.images).map(async (image) => {
+                try {
+                    await image.decode()
+                } catch {
+                    // A broken image must not wedge the wait; missing images are
+                    // reported by the assertions above instead.
+                }
+            }),
+        )
+    })
 
     await page.evaluate(() => window.scrollTo(0, 0))
 }
