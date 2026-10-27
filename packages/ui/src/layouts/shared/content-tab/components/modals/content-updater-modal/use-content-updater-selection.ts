@@ -4,6 +4,8 @@ import { ref, watch } from 'vue'
 
 type UseContentUpdaterSelectionOptions = {
     versions: Readonly<Ref<Labrinth.Versions.v2.Version[]>>
+    /** True while more versions may still arrive. */
+    loading?: Readonly<Ref<boolean>>
     currentVersionId: Readonly<Ref<string>>
     onVersionSelect: (version: Labrinth.Versions.v2.Version) => void
     debug: (message: string, data?: Record<string, unknown>) => void
@@ -11,6 +13,7 @@ type UseContentUpdaterSelectionOptions = {
 
 export function useContentUpdaterSelection({
     versions,
+    loading,
     currentVersionId,
     onVersionSelect,
     debug,
@@ -20,8 +23,8 @@ export function useContentUpdaterSelection({
     const pinnedInitialVersionId = ref<string | undefined>(undefined)
 
     watch(
-        versions,
-        (newVersions) => {
+        [versions, () => loading?.value ?? false],
+        ([newVersions, stillLoading]) => {
             if (selectedVersion.value) {
                 const updatedVersion = newVersions.find((v) => v.id === selectedVersion.value?.id)
                 if (updatedVersion && updatedVersion !== selectedVersion.value) {
@@ -42,6 +45,8 @@ export function useContentUpdaterSelection({
                         ...new Set(newVersions.flatMap((v) => v.game_versions)),
                     ].slice(0, 10),
                 })
+                // The requested version may be on a page that has not arrived yet.
+                if (!pendingFound && stillLoading) return
                 const version = pendingFound ?? newVersions[0]
                 selectedVersion.value = version
                 if (version) {
