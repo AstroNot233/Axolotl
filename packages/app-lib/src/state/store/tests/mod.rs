@@ -16,6 +16,7 @@ mod instance_sync_checkpoints;
 mod instance_sync_preferences;
 mod java_globals;
 mod join_log;
+mod modrinth_sessions;
 mod official_login_proof;
 mod resource_cache;
 mod resource_source_projects;

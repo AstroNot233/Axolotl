@@ -98,10 +98,10 @@ async fn register_managed_java_versions(state: &State) -> crate::Result<()> {
                 )
                 .await?;
             }
-            unit.commit().await?;
             if let Some(discovered) = DiscoveredJava::from_java(java) {
-                discovered.upsert(&state.pool).await?;
+                discovered.upsert_in(&mut unit).await?;
             }
+            unit.commit().await?;
             break;
         }
     }
@@ -299,7 +299,7 @@ pub async fn get_available_jres(
 async fn validate_cached_javas(
     state: &State,
 ) -> crate::Result<Vec<JavaVersion>> {
-    let entries = DiscoveredJava::get_all(&state.pool).await?;
+    let entries = DiscoveredJava::get_all(&state.data).await?;
     let mut valid = Vec::new();
 
     for entry in entries {
@@ -315,15 +315,15 @@ async fn validate_cached_javas(
                     && let Some(refreshed) =
                         DiscoveredJava::from_java(java.clone())
                 {
-                    refreshed.upsert(&state.pool).await?;
+                    refreshed.upsert(&state.data).await?;
                     valid.push(java);
                 } else {
-                    DiscoveredJava::remove(&entry.java.path, &state.pool)
+                    DiscoveredJava::remove(&entry.java.path, &state.data)
                         .await?;
                 }
             }
             None => {
-                DiscoveredJava::remove(&entry.java.path, &state.pool).await?;
+                DiscoveredJava::remove(&entry.java.path, &state.data).await?;
             }
         }
     }
@@ -342,7 +342,7 @@ async fn refresh_discovered_javas(
     let jres = jre::get_all_jre(full_scan, exhaustive).await?;
 
     let previous: HashSet<(String, String)> =
-        DiscoveredJava::get_all(&state.pool)
+        DiscoveredJava::get_all(&state.data)
             .await?
             .into_iter()
             .map(|entry| (entry.java.path, entry.java.version))
@@ -352,7 +352,7 @@ async fn refresh_discovered_javas(
         .iter()
         .filter_map(|java| DiscoveredJava::from_java(java.clone()))
         .collect();
-    DiscoveredJava::replace_all(&state.pool, &entries).await?;
+    DiscoveredJava::replace_all(&state.data, &entries).await?;
 
     // Also upsert into java_versions so they appear in the settings list
     for java in &jres {
@@ -403,7 +403,7 @@ pub async fn find_cached_java(
 ) -> crate::Result<Option<JavaVersion>> {
     let state = State::get().await?;
 
-    for entry in DiscoveredJava::get_all(&state.pool).await? {
+    for entry in DiscoveredJava::get_all(&state.data).await? {
         if entry.java.parsed_version != major_version {
             continue;
         }
@@ -1918,10 +1918,10 @@ async fn download_java_from_feed_inner(
     result.upsert_in(&mut unit).await?;
     JavaVersion::set_default_in(&mut unit, result.parsed_version, &result.path)
         .await?;
-    unit.commit().await?;
     if let Some(discovered) = DiscoveredJava::from_java(result.clone()) {
-        discovered.upsert(&state.pool).await?;
+        discovered.upsert_in(&mut unit).await?;
     }
+    unit.commit().await?;
 
     // Complete the remaining 10 % of the bar
     if let Some(loading_bar) = &loading_bar {

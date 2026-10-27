@@ -4,10 +4,11 @@ use super::model::{
     InstallPhaseDetails, InstallPhaseId, InstallProgress,
 };
 use super::store;
+use crate::state::State;
 use crate::state::store::Collection as _;
 use crate::state::store::Handle;
 use crate::state::store::minecraft_users;
-use crate::state::{ModrinthCredentials, State};
+use crate::state::store::modrinth_users::ModrinthUsers;
 use regex::{Captures, Regex};
 use std::fmt::Write as _;
 use std::io::{Read, Seek, SeekFrom};
@@ -51,7 +52,7 @@ pub async fn build_job_support_details(
     write_raw_snapshot(&mut details, &snapshot);
     write_latest_log(&mut details, state).await;
 
-    censor_support_text(details, &state.pool, &state.data).await
+    censor_support_text(details, &state.data).await
 }
 
 fn result_summary(
@@ -673,31 +674,21 @@ fn read_file_tail(path: &Path, max_bytes: u64) -> crate::Result<String> {
     Ok(output)
 }
 
-/// The Modrinth credentials are not a collection yet, so they are still read
-/// from `pool`.
 pub(crate) async fn censor_support_text(
     text: String,
-    pool: &sqlx::SqlitePool,
     handle: &Handle,
 ) -> crate::Result<String> {
-    Ok(censor_ip_addresses(
-        censor_credentials(text, pool, handle).await?,
-    ))
+    Ok(censor_ip_addresses(censor_credentials(text, handle).await?))
 }
 
 pub(crate) async fn censor_credentials(
     mut text: String,
-    pool: &sqlx::SqlitePool,
     handle: &Handle,
 ) -> crate::Result<String> {
-    for credentials in ModrinthCredentials::get_all(pool)
-        .await?
-        .into_iter()
-        .map(|credentials| credentials.1)
-    {
+    for (_, credentials) in ModrinthUsers::get_all(handle).await? {
         replace_nonempty(
             &mut text,
-            &credentials.session,
+            &credentials.session_id,
             "{MODRINTH_ACCESS_TOKEN}",
         );
     }
@@ -763,6 +754,7 @@ fn censor_ip_addresses(text: String) -> String {
 mod tests {
     use super::*;
     use crate::state::Credentials;
+    use crate::state::ModrinthCredentials;
     use crate::state::store::Collection as _;
     use crate::state::store::minecraft_users::{
         AccountType as StoredAccountType, MinecraftUserRecord, MinecraftUsers,
@@ -820,9 +812,8 @@ mod tests {
             .unwrap();
         let log = "2026-10-19 10:00:00 INFO Minecraft 1.20.1 loaded 100 mods; exit code 0";
 
-        let censored = censor_support_text(log.to_string(), &pool, &handle)
-            .await
-            .unwrap();
+        let censored =
+            censor_support_text(log.to_string(), &handle).await.unwrap();
 
         assert_eq!(censored, log);
     }
@@ -852,9 +843,8 @@ mod tests {
         .await;
         let log = "Minecraft 1.20.1; exit code 0; ms-access ms-refresh ygg-access ygg-refresh";
 
-        let censored = censor_support_text(log.to_string(), &pool, &handle)
-            .await
-            .unwrap();
+        let censored =
+            censor_support_text(log.to_string(), &handle).await.unwrap();
 
         assert_eq!(
             censored,
@@ -869,9 +859,8 @@ mod tests {
         add_online_account(&handle, StoredAccountType::Microsoft, "", "").await;
         let log = "Minecraft 1.20.1; exit code 0";
 
-        let censored = censor_support_text(log.to_string(), &pool, &handle)
-            .await
-            .unwrap();
+        let censored =
+            censor_support_text(log.to_string(), &handle).await.unwrap();
 
         assert_eq!(censored, log);
     }
@@ -900,7 +889,7 @@ mod tests {
             user_id: "test-user".to_string(),
             active: true,
         }
-        .upsert(&pool)
+        .upsert(&handle)
         .await
         .unwrap();
         let report = serde_json::json!({
@@ -909,7 +898,7 @@ mod tests {
             "details": "ms-access ms-refresh ygg-access ygg-refresh modrinth-session",
         });
 
-        let censored = censor_credentials(report.to_string(), &pool, &handle)
+        let censored = censor_credentials(report.to_string(), &handle)
             .await
             .unwrap();
         let censored: serde_json::Value =
@@ -922,12 +911,13 @@ mod tests {
             "{MINECRAFT_TOKEN} {MINECRAFT_TOKEN} {MINECRAFT_TOKEN} {MINECRAFT_TOKEN} {MODRINTH_ACCESS_TOKEN}"
         );
 
-        let log = censor_support_text(report.to_string(), &pool, &handle)
+        let log = censor_support_text(report.to_string(), &handle)
             .await
             .unwrap();
         assert!(!log.contains("192.0.2.1"));
         assert!(!log.contains("2001:db8::1"));
         assert!(!log.contains("2001:db8::2"));
         assert!(!log.contains("ms-access"));
+        assert!(!log.contains("modrinth-session"));
     }
 }
