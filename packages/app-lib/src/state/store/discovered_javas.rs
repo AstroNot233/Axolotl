@@ -165,13 +165,22 @@ impl Collection for DiscoveredJavas {
         Ok(rows
             .into_iter()
             .filter_map(
-                |(path, major_version, full_version, architecture, size, m)| {
+                |(
+                    path,
+                    major_version,
+                    full_version,
+                    architecture,
+                    distribution,
+                    size,
+                    m,
+                )| {
                     Some((
                         path,
                         Self::Record {
                             major_version: u32::try_from(major_version).ok()?,
                             full_version,
                             architecture,
+                            distribution,
                             file_size: size,
                             file_mtime_ms: m,
                         },

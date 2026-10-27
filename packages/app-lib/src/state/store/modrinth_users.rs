@@ -10,8 +10,8 @@ pub(crate) struct ModrinthUsers;
 /// A session is identified by the account it belongs to.
 pub(crate) type ModrinthUserKey = String;
 
-/// A session is only ever wanted on its own, so the scope is its own key.
-pub(crate) type ModrinthUserScope = String;
+/// Which sessions a read wants: the active one, or the ones that are not.
+pub(crate) type ModrinthUserScope = bool;
 
 /// What a session carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,8 +26,10 @@ impl Collection for ModrinthUsers {
     type Scope = ModrinthUserScope;
     type Record = ModrinthUserRecord;
 
-    fn in_scope(scope: &Self::Scope, key: &Self::Key) -> bool {
-        scope == key
+    /// The state a session is in lives in the record, so the collection cannot
+    /// tell from the account id alone whether it is the active one.
+    fn in_scope(_scope: &Self::Scope, _key: &Self::Key) -> bool {
+        true
     }
 
     async fn read(
@@ -107,10 +109,28 @@ impl Collection for ModrinthUsers {
         conn: &mut SqliteConnection,
         scope: &Self::Scope,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        Ok(Self::read(conn, scope)
-            .await?
-            .map(|record| vec![(scope.clone(), record)])
-            .unwrap_or_default())
+        let rows: Vec<(String, bool, String, i64)> = sqlx::query_as(
+            "SELECT id, active, session_id, expires
+             FROM modrinth_users
+             WHERE active = ?",
+        )
+        .bind(*scope)
+        .fetch_all(&mut *conn)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, active, session_id, expires)| {
+                (
+                    id,
+                    Self::Record {
+                        active,
+                        session_id,
+                        expires,
+                    },
+                )
+            })
+            .collect())
     }
 
     async fn replace_scoped(
@@ -119,8 +139,11 @@ impl Collection for ModrinthUsers {
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
         ensure_one_active(records)?;
-        Self::write(conn, scope, records.first().map(|(_, record)| record))
-            .await
+        delete_omitted(conn, Some(*scope), records).await?;
+        for (key, record) in records {
+            write_row(conn, key, record).await?;
+        }
+        Ok(())
     }
 }
 
@@ -186,13 +209,13 @@ async fn write_row(
 /// Removes the sessions a replacement leaves out, and only those.
 async fn delete_omitted(
     conn: &mut SqliteConnection,
-    scope: Option<&ModrinthUserScope>,
+    scope: Option<ModrinthUserScope>,
     records: &[(ModrinthUserKey, ModrinthUserRecord)],
 ) -> crate::Result<()> {
     let existing: Vec<String> = match scope {
-        Some(id) => {
-            sqlx::query_scalar("SELECT id FROM modrinth_users WHERE id = ?")
-                .bind(id)
+        Some(active) => {
+            sqlx::query_scalar("SELECT id FROM modrinth_users WHERE active = ?")
+                .bind(active)
                 .fetch_all(&mut *conn)
                 .await?
         }

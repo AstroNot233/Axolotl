@@ -157,3 +157,30 @@ async fn a_runtime_of_another_version_cannot_be_written_into_a_group() {
         Some(17)
     );
 }
+
+#[tokio::test]
+async fn the_active_session_reads_on_its_own() {
+    let handle = support::handle().await;
+    ModrinthUsers::set(
+        &handle,
+        &"first".to_string(),
+        Some(&session(false, 10)),
+    )
+    .await
+    .unwrap();
+    ModrinthUsers::set(
+        &handle,
+        &"second".to_string(),
+        Some(&session(true, 20)),
+    )
+    .await
+    .unwrap();
+
+    let active = ModrinthUsers::get_scoped(&handle, &true).await.unwrap();
+    let idle = ModrinthUsers::get_scoped(&handle, &false).await.unwrap();
+
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].0, "second");
+    assert_eq!(idle.len(), 1);
+    assert_eq!(idle[0].0, "first");
+}

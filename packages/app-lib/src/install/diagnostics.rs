@@ -918,5 +918,6 @@ mod tests {
         assert!(!log.contains("2001:db8::1"));
         assert!(!log.contains("2001:db8::2"));
         assert!(!log.contains("ms-access"));
+        assert!(!log.contains("modrinth-session"));
     }
 }

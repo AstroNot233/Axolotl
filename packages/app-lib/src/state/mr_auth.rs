@@ -36,7 +36,7 @@ impl ModrinthCredentials {
         }
     }
 
-    pub async fn get_and_refresh(
+    pub(crate) async fn get_and_refresh(
         handle: &Handle,
         semaphore: &FetchSemaphore,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
@@ -85,21 +85,25 @@ impl ModrinthCredentials {
         }
     }
 
-    /// The session the launcher signed in with. A session is only ever wanted
-    /// on its own, so the active one is found by reading the collection.
-    pub async fn get_active(handle: &Handle) -> crate::Result<Option<Self>> {
-        Ok(ModrinthUsers::get_all(handle)
+    /// The session the launcher signed in with.
+    pub(crate) async fn get_active(
+        handle: &Handle,
+    ) -> crate::Result<Option<Self>> {
+        Ok(ModrinthUsers::get_scoped(handle, &true)
             .await?
             .into_iter()
-            .find(|(_, record)| record.active)
+            .next()
             .map(|(user_id, record)| Self::from_record(user_id, record)))
     }
 
-    pub async fn upsert(&self, handle: &Handle) -> crate::Result<()> {
+    pub(crate) async fn upsert(&self, handle: &Handle) -> crate::Result<()> {
         ModrinthUsers::set(handle, &self.user_id, Some(&self.to_record())).await
     }
 
-    pub async fn remove(user_id: &str, handle: &Handle) -> crate::Result<()> {
+    pub(crate) async fn remove(
+        user_id: &str,
+        handle: &Handle,
+    ) -> crate::Result<()> {
         ModrinthUsers::set(handle, &user_id.to_string(), None).await
     }
 
