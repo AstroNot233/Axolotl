@@ -1,18 +1,24 @@
 mod accounts;
 mod backups;
 mod downloads;
+mod imports;
 mod instance_maintenance;
 mod instances;
+mod interface;
 mod java;
 mod jobs;
 mod launch;
 mod lifecycle;
 mod logs;
 mod metadata;
+mod modpacks;
 mod queries;
 mod resource_history;
+mod resource_updates;
 mod resources;
+mod reviewed;
 mod servers;
+mod upgrades;
 mod worlds;
 
 use futures::future::BoxFuture;
@@ -24,11 +30,25 @@ use serde_json::{Value, json};
 
 #[derive(Default)]
 pub(super) struct LauncherBackend {
+    app: Option<tauri::AppHandle>,
     plans: ScopedRegistry<theseus::resources::ResourceOperationPlan>,
     restores: ScopedRegistry<backups::RestorePreview>,
     deletions: ScopedRegistry<instance_maintenance::DeletePreview>,
     resource_cleanups:
         ScopedRegistry<theseus::resources::ResourceHistoryCleanupPlan>,
+    modpacks: ScopedRegistry<modpacks::PackPlan>,
+    import_sources: ScopedRegistry<imports::ImportSource>,
+    import_plans: ScopedRegistry<imports::ImportSource>,
+    upgrades: ScopedRegistry<upgrades::UpgradePlan>,
+}
+
+impl LauncherBackend {
+    pub(super) fn new(app: tauri::AppHandle) -> Self {
+        Self {
+            app: Some(app),
+            ..Default::default()
+        }
+    }
 }
 
 impl Backend for LauncherBackend {
@@ -39,6 +59,39 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::UiGetContext {}
+                | Command::UiScreenshot {}
+                | Command::UiNavigate { .. }
+                | Command::UiClick { .. }
+                | Command::UiType { .. }
+                | Command::UiKey { .. }
+                | Command::UiScroll { .. }) => {
+                    interface::execute(self, command, context).await
+                }
+                command @ (Command::InstanceScanImports { .. }
+                | Command::InstancePrepareImport { .. }
+                | Command::InstanceExecuteImport { .. }) => {
+                    imports::execute(self, command, context).await
+                }
+                command @ (Command::InstancePlanUpgrade { .. }
+                | Command::InstanceGetUpgradePlan { .. }
+                | Command::InstanceReviseUpgrade { .. }
+                | Command::InstanceSelectUpgradeSolution {
+                    ..
+                }
+                | Command::InstanceExecuteUpgrade { .. }) => {
+                    upgrades::execute(self, command, context).await
+                }
+                command @ (Command::ModpackPrepareInstall { .. }
+                | Command::ModpackPrepareLocal { .. }
+                | Command::ModpackExecuteInstall { .. }) => {
+                    modpacks::execute(self, command, context).await
+                }
+                command @ (Command::ResourceCheckUpdates { .. }
+                | Command::ResourcePrepareUpdate { .. }
+                | Command::ResourcePrepareSwitch { .. }) => {
+                    resource_updates::execute(self, command, context).await
+                }
                 command @ (Command::ResourceFavoritesList { .. }
                 | Command::ResourceFavoriteAdd { .. }
                 | Command::ResourceFavoriteRemove { .. }
@@ -177,6 +230,7 @@ impl Backend for LauncherBackend {
                 | Command::ResourceGetRelease { .. }
                 | Command::ResourcePrepareInstall { .. }
                 | Command::ResourceExecutePlan { .. }
+                | Command::ResourceExecuteChanges { .. }
                 | Command::ResourceRevisePlan { .. }
                 | Command::ContentRemove { .. }
                 | Command::ContentList { .. }

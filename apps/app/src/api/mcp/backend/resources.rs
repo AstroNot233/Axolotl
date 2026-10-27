@@ -74,7 +74,8 @@ pub(super) fn error(error: ResourceError) -> ToolError {
     };
     ToolError::new(code, message)
 }
-async fn service() -> Result<std::sync::Arc<ResourceService>, ToolError> {
+pub(super) async fn service()
+-> Result<std::sync::Arc<ResourceService>, ToolError> {
     Ok(theseus::State::get()
         .await
         .map_err(business_error)?
@@ -128,7 +129,7 @@ fn executable(plan: &ResourceOperationPlan) -> bool {
         && plan.nodes.len() <= 100
 }
 
-fn review(
+pub(super) fn review(
     backend: &LauncherBackend,
     session: &str,
     plan: ResourceOperationPlan,
@@ -136,7 +137,7 @@ fn review(
     let executable = executable(&plan);
     let handle = backend.plans.insert(session, plan.revision, plan.clone())?;
     Ok(
-        json!({"plan_id":handle,"revision":plan.revision,"instance_id":plan.instance_id,"executable":executable,
+        json!({"plan_id":handle,"revision":plan.revision,"instance_id":plan.instance_id,"intent":plan.intent,"executable":executable,
             "actions_truncated":plan.actions.len()>100,"issues_truncated":plan.issues.len()>100,"nodes_truncated":plan.nodes.len()>100,
             "actions":plan.actions.into_iter().take(100).map(|a|json!({"kind":a.kind,"entry_id":a.entry_id,"current_path":a.current.map(|c|c.relative_path),"target_path":a.target_relative_path,"release":a.target.reference.release})).collect::<Vec<_>>(),
             "nodes":plan.nodes.into_iter().take(100).map(|node|json!({"node_id":node.id,"state":node.state,"release":node.artifact.map(|a|a.reference.release),"compatibility":node.compatibility})).collect::<Vec<_>>(),
@@ -414,7 +415,24 @@ pub(super) async fn execute(
             .map_err(error)?;
             review(backend, &context.session_id, plan)
         }
-        Command::ResourceExecutePlan { plan_id, revision } => {
+        command @ (Command::ResourceExecutePlan { .. }
+        | Command::ResourceExecuteChanges { .. }) => {
+            let changes =
+                matches!(command, Command::ResourceExecuteChanges { .. });
+            let (Command::ResourceExecutePlan { plan_id, revision }
+            | Command::ResourceExecuteChanges { plan_id, revision }) = command
+            else {
+                unreachable!()
+            };
+            let checked =
+                backend.plans.get(&context.session_id, plan_id, revision)?;
+            if (checked.intent != ResourceOperationIntent::Install) != changes {
+                return Err(ToolError::new(
+                    "wrong_plan_intent",
+                    "Use resource_execute_changes for updates/version switches and resource_execute_plan for new installations",
+                ));
+            }
+            super::resource_history::idle(&checked.instance_id).await?;
             let plan =
                 backend.plans.take(&context.session_id, plan_id, revision)?;
             if !executable(&plan) {

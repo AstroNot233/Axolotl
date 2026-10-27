@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::sync::{Arc, atomic::Ordering};
 use std::time::Duration;
 
-async fn poll(
+pub(super) async fn poll(
     client: &Client,
     session: &str,
     operation: &str,

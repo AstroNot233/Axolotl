@@ -35,7 +35,7 @@ pub(crate) async fn call(
                 "requires_session": entry.access != Access::Public,
                 "requires_full_access": entry.access == Access::FullAccess,
                 "read_only": entry.read_only,
-                "returns_operation_id": matches!(entry.tool.name.as_ref(), "instance_launch" | "install_job_retry" | "install_job_resume" | "install_job_cancel" | "resource_prepare_install" | "resource_execute_plan" | "resource_revise_plan" | "content_remove" | "backup_enable" | "backup_disable" | "backup_set_exclusions" | "backup_create" | "backup_preview_restore" | "backup_restore" | "backup_delete_snapshot" | "world_backup" | "world_delete" | "instance_launch_world" | "instance_join_server" | "java_install" | "java_test" | "java_set_default" | "download_job_retry" | "download_job_resume" | "download_job_cancel" | "download_job_delete" | "download_history_clear" | "install_job_scan_missing_files" | "install_job_skip_missing" | "install_job_repair_and_retry" | "account_set_default" | "account_remove" | "account_add_offline" | "server_create" | "server_start" | "server_delete" | "server_console_send" | "server_install_forge" | "server_install_neoforge" | "server_install_modpack" | "instance_duplicate" | "instance_reinstall" | "instance_delete" | "resource_favorite_add" | "resource_favorite_remove" | "resource_history_rollback" | "resource_scan_backups" | "resource_prepare_history_cleanup" | "resource_execute_history_cleanup"),
+                "returns_operation_id": matches!(entry.tool.name.as_ref(), "resource_check_updates" | "resource_prepare_update" | "resource_prepare_switch" | "resource_execute_changes" | "modpack_prepare_install" | "modpack_prepare_local" | "modpack_execute_install" | "instance_scan_imports" | "instance_prepare_import" | "instance_execute_import" | "instance_plan_upgrade" | "instance_get_upgrade_plan" | "instance_revise_upgrade" | "instance_select_upgrade_solution" | "instance_execute_upgrade" | "instance_launch" | "install_job_retry" | "install_job_resume" | "install_job_cancel" | "resource_prepare_install" | "resource_execute_plan" | "resource_revise_plan" | "content_remove" | "backup_enable" | "backup_disable" | "backup_set_exclusions" | "backup_create" | "backup_preview_restore" | "backup_restore" | "backup_delete_snapshot" | "world_backup" | "world_delete" | "instance_launch_world" | "instance_join_server" | "java_install" | "java_test" | "java_set_default" | "download_job_retry" | "download_job_resume" | "download_job_cancel" | "download_job_delete" | "download_history_clear" | "install_job_scan_missing_files" | "install_job_skip_missing" | "install_job_repair_and_retry" | "account_set_default" | "account_remove" | "account_add_offline" | "server_create" | "server_start" | "server_delete" | "server_console_send" | "server_install_forge" | "server_install_neoforge" | "server_install_modpack" | "instance_duplicate" | "instance_reinstall" | "instance_delete" | "resource_favorite_add" | "resource_favorite_remove" | "resource_history_rollback" | "resource_scan_backups" | "resource_prepare_history_cleanup" | "resource_execute_history_cleanup"),
             })).collect::<Vec<_>>(),
             "restrictions": {
                 "ordinary_mode": {"manual_control_approval": true, "deletion": false, "direct_interface_control": false},
@@ -96,10 +96,57 @@ pub(crate) async fn call(
             }
         }
     };
+    let result = if request.name == "ui_screenshot" {
+        result.and_then(screenshot)
+    } else {
+        result.map(CallToolResult::structured)
+    };
     Ok(match result {
-        Ok(value) => CallToolResult::structured(value),
+        Ok(value) => value,
         Err(error) => CallToolResult::structured_error(json!({"error":error})),
     })
+}
+
+fn screenshot(mut value: Value) -> Result<CallToolResult, ToolError> {
+    let image = value.get_mut("image").map(Value::take).ok_or_else(|| {
+        ToolError::new(
+            "invalid_screenshot",
+            "Launcher did not return a screenshot",
+        )
+    })?;
+    let data = image["data"]
+        .as_str()
+        .filter(|data| {
+            data.starts_with("iVBORw0KGgo") && data.len() <= 7 * 1024 * 1024
+        })
+        .filter(|_| image["mime_type"] == "image/png")
+        .ok_or_else(|| {
+            ToolError::new(
+                "invalid_screenshot",
+                "Invalid or oversized launcher PNG",
+            )
+        })?;
+    let mut result = CallToolResult::success(vec![
+        rmcp::model::ContentBlock::image(data, "image/png"),
+        rmcp::model::ContentBlock::text(value["context"].to_string()),
+    ]);
+    result.structured_content = Some(json!({"context":value["context"]}));
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn screenshots_are_image_content_without_duplicate_base64_metadata() {
+        let result = screenshot(json!({"image":{"data":"iVBORw0KGgoAAA","mime_type":"image/png"},"context":{"view_id":"view"}})).unwrap();
+        let value = serde_json::to_value(result).unwrap();
+        assert_eq!(value["content"][0]["type"], "image");
+        assert_eq!(value["content"][0]["mimeType"], "image/png");
+        assert_eq!(value["structuredContent"]["context"]["view_id"], "view");
+        assert!(!value["structuredContent"].to_string().contains("iVBOR"));
+        assert!(screenshot(json!({"image":{"data":"javascript:bad","mime_type":"image/png"}})).is_err());
+    }
 }
 
 async fn execute(

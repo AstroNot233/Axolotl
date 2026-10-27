@@ -23,7 +23,7 @@ where
         )
     })
 }
-async fn idle(id: &str) -> Result<(), ToolError> {
+pub(super) async fn idle(id: &str) -> Result<(), ToolError> {
     if theseus::instance::get(id)
         .await
         .map_err(business_error)?
@@ -38,7 +38,7 @@ async fn idle(id: &str) -> Result<(), ToolError> {
     {
         return Err(ToolError::new(
             "instance_busy",
-            "Stop the game before rolling back or cleaning resource backups",
+            "Stop the game before changing instance content",
         ));
     }
     if theseus::install::list_jobs(false)

@@ -103,6 +103,32 @@ impl Server {
             .clone()
     }
 
+    /// Revalidate a backend's pending UI request immediately before dispatch.
+    pub fn control_is_active(
+        &self,
+        control_id: &str,
+        full_access: bool,
+    ) -> bool {
+        let inner = self.shared.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner
+            .active
+            .as_ref()
+            .and_then(|id| inner.slots.get(id))
+            .is_some_and(|slot| {
+                inner.snapshot.running
+                    && (!full_access || inner.snapshot.full_access)
+                    && slot.initialized
+                    && slot.connection.connected
+                    && !slot.connection.awaiting_approval
+                    && !slot.cancel.is_cancelled()
+                    && slot.control_id.as_deref() == Some(control_id)
+                    && slot
+                        .control_cancel
+                        .as_ref()
+                        .is_some_and(|cancel| !cancel.is_cancelled())
+            })
+    }
+
     pub fn approve(&self, id: &str) -> bool {
         self.shared.update(|inner| {
             inner

@@ -42,6 +42,120 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    UiGetContext {},
+    UiScreenshot {},
+    UiNavigate {
+        path: String,
+    },
+    UiClick {
+        view_id: uuid::Uuid,
+        element_id: String,
+    },
+    UiType {
+        view_id: uuid::Uuid,
+        element_id: String,
+        text: String,
+    },
+    UiKey {
+        view_id: uuid::Uuid,
+        key: String,
+        #[serde(default)]
+        shift: bool,
+        #[serde(default)]
+        control: bool,
+    },
+    UiScroll {
+        view_id: uuid::Uuid,
+        element_id: String,
+        direction: String,
+        pixels: u32,
+    },
+    InstanceScanImports {
+        launcher: String,
+        #[serde(default)]
+        base_path: Option<String>,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    InstancePrepareImport {
+        source_id: uuid::Uuid,
+    },
+    InstanceExecuteImport {
+        plan_id: uuid::Uuid,
+    },
+    InstancePlanUpgrade {
+        instance_id: String,
+        game_version: String,
+        loader: Loader,
+        #[serde(default)]
+        loader_version: Option<String>,
+        shader_runtime: String,
+    },
+    InstanceGetUpgradePlan {
+        plan_id: uuid::Uuid,
+        revision: u32,
+        section: String,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    InstanceReviseUpgrade {
+        plan_id: uuid::Uuid,
+        revision: u32,
+        content_id: String,
+        action: String,
+        #[serde(default)]
+        allow_prerelease: bool,
+    },
+    InstanceSelectUpgradeSolution {
+        plan_id: uuid::Uuid,
+        revision: u32,
+        solution: String,
+    },
+    InstanceExecuteUpgrade {
+        plan_id: uuid::Uuid,
+        revision: u32,
+        create_full_backup: bool,
+    },
+    ModpackPrepareInstall {
+        source: Source,
+        project_id: String,
+        release_id: String,
+        name: String,
+        #[serde(default)]
+        instance_id: Option<String>,
+    },
+    ModpackPrepareLocal {
+        path: String,
+        name: String,
+        #[serde(default)]
+        instance_id: Option<String>,
+    },
+    ModpackExecuteInstall {
+        plan_id: uuid::Uuid,
+    },
+    ResourceCheckUpdates {
+        instance_id: String,
+        entry_ids: Vec<String>,
+    },
+    ResourcePrepareUpdate {
+        instance_id: String,
+        entry_ids: Vec<String>,
+    },
+    ResourcePrepareSwitch {
+        instance_id: String,
+        entry_id: String,
+        source: Source,
+        project_id: String,
+        release_id: String,
+    },
+    ResourceExecuteChanges {
+        plan_id: uuid::Uuid,
+        revision: u32,
+    },
     ResourceFavoritesList {
         #[serde(default)]
         offset: usize,
@@ -697,6 +811,21 @@ impl Command {
                 | Self::InstallJobResume { .. }
                 | Self::InstallJobCancel { .. }
                 | Self::ResourcePrepareInstall { .. }
+                | Self::InstanceScanImports { .. }
+                | Self::InstancePrepareImport { .. }
+                | Self::InstanceExecuteImport { .. }
+                | Self::InstancePlanUpgrade { .. }
+                | Self::InstanceGetUpgradePlan { .. }
+                | Self::InstanceReviseUpgrade { .. }
+                | Self::InstanceSelectUpgradeSolution { .. }
+                | Self::InstanceExecuteUpgrade { .. }
+                | Self::ModpackPrepareInstall { .. }
+                | Self::ModpackPrepareLocal { .. }
+                | Self::ModpackExecuteInstall { .. }
+                | Self::ResourceCheckUpdates { .. }
+                | Self::ResourcePrepareUpdate { .. }
+                | Self::ResourcePrepareSwitch { .. }
+                | Self::ResourceExecuteChanges { .. }
                 | Self::ResourceExecutePlan { .. }
                 | Self::ResourceRevisePlan { .. }
                 | Self::ContentRemove { .. }

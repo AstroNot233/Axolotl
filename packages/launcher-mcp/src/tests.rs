@@ -14,6 +14,8 @@ use std::{
 mod backup_tests;
 #[path = "operation_tests.rs"]
 mod operation_tests;
+#[path = "workflow_tests.rs"]
+mod workflow_tests;
 
 #[derive(Clone)]
 struct Client {

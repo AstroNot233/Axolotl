@@ -7,9 +7,13 @@ mod accounts;
 mod backups;
 mod downloads;
 mod instance_maintenance;
+mod instance_workflows;
+mod interface;
 mod java;
 mod launch;
+mod modpacks;
 mod resource_history;
+mod resource_updates;
 mod resources;
 mod servers;
 mod worlds;
@@ -405,6 +409,8 @@ pub(crate) fn entries() -> Vec<Entry> {
         ),
     ];
     entries.extend(resources::entries());
+    entries.extend(resource_updates::entries());
+    entries.extend(modpacks::entries());
     entries.extend(backups::entries());
     entries.extend(launch::entries());
     entries.extend(worlds::entries());
@@ -413,6 +419,8 @@ pub(crate) fn entries() -> Vec<Entry> {
     entries.extend(accounts::entries());
     entries.extend(servers::entries());
     entries.extend(instance_maintenance::entries());
+    entries.extend(instance_workflows::entries());
+    entries.extend(interface::entries());
     entries.extend(resource_history::entries());
     entries
 }
@@ -455,11 +463,14 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
     match rule["type"].as_str() {
         Some("string") => value.as_str().is_some_and(|s| {
             let len = s.chars().count() as u64;
-            !s.chars().any(char::is_control)
-                && rule["minLength"]
-                    .as_u64()
-                    .is_none_or(|min| len >= min && !s.trim().is_empty())
-                && rule["maxLength"].as_u64().is_none_or(|max| len <= max)
+            !s.chars().any(|c| {
+                c.is_control()
+                    && !(rule["format"] == "ui-text"
+                        && matches!(c, '\n' | '\t'))
+            }) && rule["minLength"].as_u64().is_none_or(|min| {
+                len >= min
+                    && (rule["format"] == "ui-text" || !s.trim().is_empty())
+            }) && rule["maxLength"].as_u64().is_none_or(|max| len <= max)
                 && rule["enum"]
                     .as_array()
                     .is_none_or(|choices| choices.contains(value))
