@@ -52,6 +52,13 @@ const CHANNELS = ['release', 'beta']
 // Only recent migrations are listed. Dropping to a threshold before them is
 // refused rather than guessed at; --allow-unmapped accepts the risk explicitly.
 const REVERTIBLE_SCHEMA = {
+    20261027120000: {
+        tables: ['content_refresh_checks', 'content_file_fingerprints'],
+        objects: [
+            { type: 'index', name: 'instance_content_entries_instance_identity' },
+            { type: 'index', name: 'instance_files_instance_identity' },
+        ],
+    },
     // settings.nametag_uses_app_font
     20261026130000: {
         columns: [{ table: 'settings', column: 'nametag_uses_app_font' }],
