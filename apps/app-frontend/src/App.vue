@@ -1424,6 +1424,7 @@ async function applyThemeFromSettings(s: Awaited<ReturnType<typeof getSettings>>
     themeStore.collapsedNavigation = s.collapsed_navigation
     themeStore.advancedRendering = s.advanced_rendering
     themeStore.hideNametagSkinsPage = s.hide_nametag_skins_page
+    themeStore.nametagUsesAppFont = s.nametag_uses_app_font
     themeStore.toggleSidebar = s.toggle_sidebar
     themeStore.customBackgroundPath = s.custom_background_path
     themeStore.customBackgroundBlur = s.custom_background_blur
@@ -1457,6 +1458,7 @@ async function setupApp() {
         discord_rpc,
         collapsed_navigation,
         hide_nametag_skins_page,
+        nametag_uses_app_font,
         advanced_rendering,
         onboarded,
         default_page,
@@ -1521,6 +1523,7 @@ async function setupApp() {
     themeStore.collapsedNavigation = collapsed_navigation
     themeStore.advancedRendering = advanced_rendering
     themeStore.hideNametagSkinsPage = hide_nametag_skins_page
+    themeStore.nametagUsesAppFont = nametag_uses_app_font
     themeStore.toggleSidebar = toggle_sidebar
     themeStore.customBackgroundPath = custom_background_path
     themeStore.customBackgroundBlur = custom_background_blur

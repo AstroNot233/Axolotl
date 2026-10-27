@@ -2,6 +2,7 @@
 use crate::LoadingBarType;
 use crate::event::emit::{emit_loading, init_loading};
 use crate::state::LAUNCHER_STATE;
+use crate::state::store::{Handle, atom};
 use crate::state::{JavaVersion, Settings};
 use crate::util::fetch::IoSemaphore;
 use dashmap::DashSet;
@@ -316,9 +317,10 @@ impl DirectoryInfo {
         std::env::var_os(name).map(PathBuf::from)
     }
 
-    #[tracing::instrument(skip(settings, exec, io_semaphore))]
+    #[tracing::instrument(skip(settings, handle, exec, io_semaphore))]
     pub async fn move_launcher_directory<'a, E>(
         settings: &mut Settings,
+        handle: &Handle,
         exec: E,
         io_semaphore: &IoSemaphore,
         app_identifier: &str,
@@ -613,7 +615,8 @@ impl DirectoryInfo {
                     .await;
                 }
 
-                let java_versions = JavaVersion::get_all(exec).await?;
+                let mut unit = atom(handle).await?;
+                let java_versions = JavaVersion::get_all_in(&mut unit).await?;
                 for java_version in java_versions {
                     let new_java_path = java_version.path.replace(
                         prev_custom_dir,
@@ -626,18 +629,20 @@ impl DirectoryInfo {
                             java = %new_java_path,
                             "Dropping incomplete Java installation during directory migration"
                         );
-                        JavaVersion::delete(&java_version.path, exec).await?;
+                        JavaVersion::delete_in(&mut unit, &java_version.path)
+                            .await?;
                         continue;
                     }
                     if new_java_path != java_version.path {
-                        JavaVersion::update_path(
+                        JavaVersion::update_path_in(
+                            &mut unit,
                             &java_version.path,
                             &new_java_path,
-                            exec,
                         )
                         .await?;
                     }
                 }
+                unit.commit().await?;
                 sqlx::query(
                     "
                     UPDATE discovered_javas
@@ -706,7 +711,7 @@ impl DirectoryInfo {
             settings.custom_dir = Some(app_dir.to_string_lossy().to_string());
         }
 
-        settings.update(exec).await?;
+        settings.update(handle).await?;
 
         Ok(())
     }

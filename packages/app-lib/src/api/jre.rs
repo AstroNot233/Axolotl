@@ -23,6 +23,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use sysinfo::{MemoryRefreshKind, RefreshKind};
 
+use crate::state::store::atom;
 use crate::util::io;
 use crate::util::jre::extract_java_version;
 use crate::{
@@ -35,7 +36,7 @@ pub async fn get_java_versions() -> crate::Result<Vec<JavaVersion>> {
     let state = State::get().await?;
     register_managed_java_versions(&state).await?;
 
-    JavaVersion::get_all(&state.pool).await
+    JavaVersion::get_all(&state.data).await
 }
 
 async fn register_managed_java_versions(state: &State) -> crate::Result<()> {
@@ -84,23 +85,23 @@ async fn register_managed_java_versions(state: &State) -> crate::Result<()> {
                 .rsplit_once("-jdk-")
                 .and_then(|(_, version)| version.parse::<u32>().ok())
                 == Some(java.parsed_version)
-                && JavaVersion::get(java.parsed_version, &state.pool)
+                && JavaVersion::get(java.parsed_version, &state.data)
                     .await?
                     .is_none();
-            let mut transaction = state.pool.begin().await?;
-            java.upsert(&mut *transaction).await?;
+            let mut unit = atom(&state.data).await?;
+            java.upsert_in(&mut unit).await?;
             if set_default {
-                JavaVersion::set_default(
+                JavaVersion::set_default_in(
+                    &mut unit,
                     java.parsed_version,
                     &java.path,
-                    &mut *transaction,
                 )
                 .await?;
             }
+            unit.commit().await?;
             if let Some(discovered) = DiscoveredJava::from_java(java) {
-                discovered.upsert(&mut *transaction).await?;
+                discovered.upsert(&state.pool).await?;
             }
-            transaction.commit().await?;
             break;
         }
     }
@@ -112,7 +113,7 @@ pub async fn get_java_default_versions() -> crate::Result<Vec<JavaVersion>> {
     let state = State::get().await?;
     register_managed_java_versions(&state).await?;
 
-    JavaVersion::get_all_defaults(&state.pool).await
+    JavaVersion::get_all_defaults(&state.data).await
 }
 
 #[cfg(feature = "tauri")]
@@ -165,7 +166,7 @@ pub async fn list_java_distribution_versions(
 
 pub async fn set_java_version(java_version: JavaVersion) -> crate::Result<()> {
     let state = State::get().await?;
-    java_version.upsert(&state.pool).await?;
+    java_version.upsert(&state.data).await?;
     Ok(())
 }
 
@@ -183,15 +184,11 @@ pub async fn set_java_default_version(
     }
 
     let state = State::get().await?;
-    let mut transaction = state.pool.begin().await?;
-    java_version.upsert(&mut *transaction).await?;
-    JavaVersion::set_default(
-        major_version,
-        &java_version.path,
-        &mut *transaction,
-    )
-    .await?;
-    transaction.commit().await?;
+    let mut unit = atom(&state.data).await?;
+    java_version.upsert_in(&mut unit).await?;
+    JavaVersion::set_default_in(&mut unit, major_version, &java_version.path)
+        .await?;
+    unit.commit().await?;
 
     Ok(java_version)
 }
@@ -200,16 +197,16 @@ pub async fn remove_java_default_version(
     major_version: u32,
 ) -> crate::Result<()> {
     let state = State::get().await?;
-    JavaVersion::remove_default(major_version, &state.pool).await
+    JavaVersion::remove_default(major_version, &state.data).await
 }
 
 /// Removes a configured Java version by its executable path.
 pub async fn remove_java_version(path: String) -> crate::Result<()> {
     let state = State::get().await?;
-    let mut transaction = state.pool.begin().await?;
-    JavaVersion::remove_default_for_path(&path, &mut *transaction).await?;
-    JavaVersion::delete(&path, &mut *transaction).await?;
-    transaction.commit().await?;
+    let mut unit = atom(&state.data).await?;
+    JavaVersion::remove_default_for_path_in(&mut unit, &path).await?;
+    JavaVersion::delete_in(&mut unit, &path).await?;
+    unit.commit().await?;
     Ok(())
 }
 
@@ -228,7 +225,7 @@ pub async fn find_filtered_jres(
     get_available_jres(full_scan, force_fresh, exhaustive).await?;
 
     let state = State::get().await?;
-    let jres = JavaVersion::get_all(&state.pool).await?;
+    let jres = JavaVersion::get_all(&state.data).await?;
 
     Ok(if let Some(java_version) = java_version {
         jres.into_iter()
@@ -349,7 +346,7 @@ async fn refresh_discovered_javas(
 
     // Also upsert into java_versions so they appear in the settings list
     for java in &jres {
-        if let Err(e) = java.upsert(&state.pool).await {
+        if let Err(e) = java.upsert(&state.data).await {
             tracing::warn!(
                 "Failed to upsert discovered Java {} into java_versions: {e}",
                 java.parsed_version
@@ -422,13 +419,13 @@ pub async fn find_java_for_version(
 ) -> crate::Result<Option<JavaVersion>> {
     let state = State::get().await?;
     if let Some(configured) =
-        JavaVersion::get(major_version, &state.pool).await?
+        JavaVersion::get(major_version, &state.data).await?
     {
         let path = PathBuf::from(&configured.path);
         if let Ok(java) = jre::check_java_at_filepath(&path).await
             && java.parsed_version == major_version
         {
-            java.upsert(&state.pool).await?;
+            java.upsert(&state.data).await?;
             return Ok(Some(java));
         }
 
@@ -437,7 +434,7 @@ pub async fn find_java_for_version(
             path = %configured.path,
             "Configured Java default is no longer valid"
         );
-        JavaVersion::remove_default(major_version, &state.pool).await?;
+        JavaVersion::remove_default(major_version, &state.data).await?;
     }
 
     if let Some(java) = find_cached_java(major_version).await? {
@@ -463,7 +460,7 @@ pub async fn find_compatible_java_for_version(
 
     let state = State::get().await?;
     let mut jres = get_available_jres(false, false, false).await?;
-    jres.extend(JavaVersion::get_all(&state.pool).await?);
+    jres.extend(JavaVersion::get_all(&state.data).await?);
     Ok(closest_compatible_java(jres.iter(), major_version))
 }
 
@@ -1870,18 +1867,14 @@ async fn download_java_from_feed_inner(
     .await?;
 
     let result = check_jre(executable).await?;
-    let mut transaction = state.pool.begin().await?;
-    result.upsert(&mut *transaction).await?;
-    JavaVersion::set_default(
-        result.parsed_version,
-        &result.path,
-        &mut *transaction,
-    )
-    .await?;
+    let mut unit = atom(&state.data).await?;
+    result.upsert_in(&mut unit).await?;
+    JavaVersion::set_default_in(&mut unit, result.parsed_version, &result.path)
+        .await?;
+    unit.commit().await?;
     if let Some(discovered) = DiscoveredJava::from_java(result.clone()) {
-        discovered.upsert(&mut *transaction).await?;
+        discovered.upsert(&state.pool).await?;
     }
-    transaction.commit().await?;
 
     // Complete the remaining 10 % of the bar
     if let Some(loading_bar) = &loading_bar {

@@ -2,6 +2,12 @@ pub mod analysis;
 pub(crate) mod artifact_metadata;
 pub(crate) mod requirements;
 
+use crate::state::store::Collection as _;
+use crate::state::store::Handle;
+use crate::state::store::atom;
+use crate::state::store::resource_operation_plans::{
+    ResourceOperationPlanRecord, ResourceOperationPlans,
+};
 use futures::StreamExt;
 use requirements::RetainedRequirement;
 
@@ -3022,10 +3028,21 @@ pub(crate) async fn prepare_import_files_with_pool(
         .revision
         .checked_add(1)
         .ok_or_else(|| invalid("plan revision exhausted"))?;
-    let updated = sqlx::query("UPDATE resource_operation_plans SET payload = ?, revision = ? WHERE id = ? AND revision = ? AND job_id IS NULL AND queued = 0").bind(serde_json::to_string(&draft)?).bind(draft.plan.revision).bind(plan.id.as_str()).bind(plan.revision).execute(pool).await.map_err(db)?;
-    if updated.rows_affected() != 1 {
-        return Err(invalid("plan was revised or already queued"));
-    }
+    let key = plan.id.as_str().to_owned();
+    let data = Handle::new(pool.clone());
+    let mut unit = atom(&data).await?;
+    let mut record = ResourceOperationPlans::atom_get(&mut unit, &key)
+        .await?
+        .filter(|record| {
+            record.revision == i64::from(plan.revision)
+                && record.job_id.is_none()
+                && !record.queued
+        })
+        .ok_or_else(|| invalid("plan was revised or already queued"))?;
+    record.revision = i64::from(draft.plan.revision);
+    record.payload = serde_json::to_string(&draft)?;
+    ResourceOperationPlans::atom_set(&mut unit, &key, Some(&record)).await?;
+    unit.commit().await?;
     Ok(draft.plan)
 }
 
@@ -3131,7 +3148,16 @@ pub(crate) async fn prepare_with_installed(
     {
         return Err(invalid("instance changed while preparing the plan"));
     }
-    sqlx::query("INSERT INTO resource_operation_plans(id, instance_id, revision, payload) VALUES (?, ?, ?, ?)").bind(draft.plan.id.as_str()).bind(&draft.plan.instance_id).bind(draft.plan.revision).bind(serde_json::to_string(&draft)?).execute(&state.pool).await.map_err(db)?;
+    let record = ResourceOperationPlanRecord {
+        instance_id: draft.plan.instance_id.clone(),
+        revision: i64::from(draft.plan.revision),
+        payload: serde_json::to_string(&draft)?,
+        job_id: None,
+        queued: false,
+        completed: false,
+    };
+    let key = draft.plan.id.as_str().to_owned();
+    ResourceOperationPlans::set(&state.data, &key, Some(&record)).await?;
     Ok(draft.plan)
 }
 
@@ -3210,7 +3236,7 @@ async fn initialize_operation(
         skip_unwritable_files: false,
         import_files: Default::default(),
         naming: {
-            let settings = crate::state::Settings::get(&state.pool).await?;
+            let settings = crate::state::Settings::get(&state.data).await?;
             super::naming::NamingPreferences {
                 chinese: settings.resource_chinese_filenames,
                 preserve: settings.resource_preserve_filenames,
@@ -3262,12 +3288,17 @@ pub(crate) async fn load(
     id: &PlanId,
     revision: u32,
 ) -> ResourceResult<OperationDraft> {
-    let payload: Option<String> = sqlx::query_scalar("SELECT payload FROM resource_operation_plans WHERE id = ? AND revision = ? AND job_id IS NULL AND queued = 0").bind(id.as_str()).bind(revision).fetch_optional(pool).await.map_err(db)?;
-    serde_json::from_str(
-        &payload
-            .ok_or_else(|| invalid("plan was revised or already queued"))?,
-    )
-    .map_err(Into::into)
+    let handle = Handle::new(pool.clone());
+    let key = id.as_str().to_owned();
+    let record = ResourceOperationPlans::get(&handle, &key)
+        .await?
+        .filter(|record| {
+            record.revision == i64::from(revision)
+                && record.job_id.is_none()
+                && !record.queued
+        })
+        .ok_or_else(|| invalid("plan was revised or already queued"))?;
+    serde_json::from_str(&record.payload).map_err(Into::into)
 }
 
 impl ResourceService {
@@ -3481,10 +3512,20 @@ pub async fn revise_with_progress(
     {
         return Err(invalid("instance changed while revising the plan"));
     }
-    let result = sqlx::query("UPDATE resource_operation_plans SET revision = ?, payload = ? WHERE id = ? AND revision = ? AND job_id IS NULL AND queued = 0").bind(draft.plan.revision).bind(serde_json::to_string(&draft)?).bind(id.as_str()).bind(revision).execute(&state.pool).await.map_err(db)?;
-    if result.rows_affected() != 1 {
-        return Err(invalid("plan changed concurrently"));
-    }
+    let key = id.as_str().to_owned();
+    let mut unit = atom(&state.data).await?;
+    let mut record = ResourceOperationPlans::atom_get(&mut unit, &key)
+        .await?
+        .filter(|record| {
+            record.revision == i64::from(revision)
+                && record.job_id.is_none()
+                && !record.queued
+        })
+        .ok_or_else(|| invalid("plan changed concurrently"))?;
+    record.revision = i64::from(draft.plan.revision);
+    record.payload = serde_json::to_string(&draft)?;
+    ResourceOperationPlans::atom_set(&mut unit, &key, Some(&record)).await?;
+    unit.commit().await?;
     Ok(draft.plan)
 }
 
@@ -3518,15 +3559,19 @@ pub(crate) async fn frozen_request_completed(
     if items.is_empty() {
         return Ok(false);
     }
+    let handle = Handle::new(pool.clone());
     for item in items {
         let crate::install::InstallContentBatchItem::FrozenResource { plan } =
             item
         else {
             return Ok(false);
         };
-        let completed: Option<i64> = sqlx::query_scalar("SELECT completed FROM resource_operation_plans WHERE id = ? AND revision = ?")
-            .bind(plan.id.as_str()).bind(plan.revision).fetch_optional(pool).await?;
-        if completed != Some(1) {
+        let key = plan.id.as_str().to_owned();
+        let completed = ResourceOperationPlans::get(&handle, &key)
+            .await?
+            .filter(|record| record.revision == i64::from(plan.revision))
+            .is_some_and(|record| record.completed);
+        if !completed {
             return Ok(false);
         }
     }

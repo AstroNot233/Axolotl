@@ -1310,6 +1310,8 @@
   "app.appearance-settings.hide-nametag.title": {
     "message": "隐藏名牌"
   },
+  "app.appearance-settings.nametag-uses-app-font.description": {     "message": "让皮肤页上的角色名牌使用你设置的界面字体，而不是 Minecraft 像素字体。"   },
+  "app.appearance-settings.nametag-uses-app-font.title": {     "message": "角色名牌采用 app 字体"   },
   "app.appearance-settings.hidden-nav-items.description": {
     "message": "选择哪些固定导航按钮保持可见。隐藏后仍可通过网址或快捷键访问对应页面。"
   },
@@ -1496,6 +1498,7 @@
   "app.browse.fuzzy-search.suffix": {
     "message": "的相关结果"
   },
+  "app.browse.filter-metadata-failed": {     "message": "无法加载筛选项。"   },
   "app.browse.hide-added-servers": {
     "message": "隐藏已添加的服务器"
   },
@@ -1664,6 +1667,7 @@
   "app.content-favorites.no-matches-title": {
     "message": "没有匹配的收藏"
   },
+  "app.content-favorites.refreshing": {     "message": "正在更新收藏…"   },
   "app.content-favorites.remove": {
     "message": "从收藏夹移除"
   },
@@ -1684,6 +1688,18 @@
   },
   "app.content-favorites.unavailable-title": {
     "message": "{provider} 项目 {projectId}"
+  },
+  "app.instance.content.datapack-state-unavailable": {
+    "message": "数据包状态不可用，请刷新后重试。"
+  },
+  "app.instance.content.world-datapacks-failed": {
+    "message": "部分世界的数据包读取失败"
+  },
+  "console.action.collapse": {
+    "message": "折叠"
+  },
+  "console.action.expand": {
+    "message": "展开"
   },
   "app.content-install.dependencies-installed.notification-body": {
     "message": "已自动安装 {count, plural, other {# 个前置}}：{list}"

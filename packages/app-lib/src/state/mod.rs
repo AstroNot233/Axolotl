@@ -724,7 +724,7 @@ impl State {
                 let res = tokio::try_join!(
                     state.discord_rpc.clear_to_default(true),
                     instances::refresh_all_instances(),
-                    Settings::migrate(&state.pool),
+                    Settings::migrate(&state.data),
                     ModrinthCredentials::refresh_all(),
                 );
 
@@ -836,7 +836,7 @@ impl State {
         config: &crate::util::proxy::ProxyConfig,
     ) -> crate::Result<()> {
         let _update = self.configured_http_client_update.lock().await;
-        let settings = Settings::get(&self.pool).await?;
+        let settings = Settings::get(&self.data).await?;
         let client = crate::util::fetch::DownloadClients::build(
             config,
             settings.ignore_ssl_errors,
@@ -1187,14 +1187,15 @@ impl State {
     ) -> crate::Result<Arc<Self>> {
         tracing::info!("Connecting to app database");
         let pool = db::connect(&app_identifier).await?;
+        let data = store::Handle::new(pool.clone());
 
-        legacy_converter::migrate_legacy_data(&pool).await?;
+        legacy_converter::migrate_legacy_data(&data, &pool).await?;
 
         tracing::info!("Fetching app settings");
-        let mut settings = Settings::get(&pool).await?;
+        let mut settings = Settings::get(&data).await?;
         installer_settings::apply_pending_installer_directory(
             &mut settings,
-            &pool,
+            &data,
             &app_identifier,
         )
         .await?;
@@ -1221,6 +1222,7 @@ impl State {
         tracing::info!("Initializing directories");
         DirectoryInfo::move_launcher_directory(
             &mut settings,
+            &data,
             &pool,
             &io_semaphore,
             &app_identifier,
@@ -1293,7 +1295,7 @@ impl State {
             friends_socket,
             restart_after_pending_update: AtomicBool::new(false),
             instance_locks: Arc::new(InstanceLockManager::default()),
-            data: store::Handle::new(pool.clone()),
+            data,
             pool,
             resource_service: OnceCell::new(),
             curseforge_api_key: RwLock::new(curseforge_api_key),
@@ -1373,7 +1375,7 @@ pub(crate) async fn test_state(
     let file_watcher = instances::watcher::init_watcher().await?;
     let curseforge_api_key = curseforge_settings::get(&pool).await?;
     let proxy_config = proxy_settings::get(&pool).await?;
-    let settings = Settings::get(&pool).await?;
+    let settings = Settings::get(&store::Handle::new(pool.clone())).await?;
     let configured_http_client = crate::util::fetch::DownloadClients::build(
         &proxy_config,
         settings.ignore_ssl_errors,

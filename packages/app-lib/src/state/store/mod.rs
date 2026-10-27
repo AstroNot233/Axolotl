@@ -13,18 +13,37 @@
 //! - `atom_` runs the same verb inside an atomic unit, so a group of writes
 //!   lands together or not at all.
 
+pub(crate) mod cache;
 pub(crate) mod content_favorites;
+pub(crate) mod content_update_jobs;
+pub(crate) mod custom_minecraft_skin_textures;
+pub(crate) mod custom_minecraft_skins;
 pub(crate) mod game_option_locale_origins;
 pub(crate) mod game_option_pack_bases;
 pub(crate) mod game_option_update_state;
+pub(crate) mod install_jobs;
 pub(crate) mod instance_sync_checkpoints;
+pub(crate) mod instance_sync_preferences;
+pub(crate) mod java_default_versions;
+pub(crate) mod java_versions;
 pub(crate) mod join_log;
+pub(crate) mod minecraft_device_tokens;
+pub(crate) mod minecraft_users;
 pub(crate) mod official_login_proof;
+pub(crate) mod offline_minecraft_skins;
+pub(crate) mod resource_artifact_evidence;
+pub(crate) mod resource_cache_entries;
+pub(crate) mod resource_cache_state;
+pub(crate) mod resource_history;
+pub(crate) mod resource_operation_plans;
 pub(crate) mod resource_source_projects;
+pub(crate) mod settings;
 pub(crate) mod sync_feature_settings;
 pub(crate) mod synced_game_option_preferences;
 pub(crate) mod synced_game_option_state;
 pub(crate) mod synced_game_option_values;
+pub(crate) mod telemetry_identity;
+pub(crate) mod telemetry_outbox;
 
 #[cfg(test)]
 mod tests;
@@ -72,10 +91,28 @@ impl Atom {
     }
 }
 
+/// Whether a write was refused because it named a row that is not there.
+///
+/// SQLite reports a foreign key the statement cannot satisfy as
+/// `SQLITE_CONSTRAINT_FOREIGNKEY`, which is the one refusal a caller can answer
+/// by dropping the reference itself.
+pub(crate) fn names_a_missing_row(error: &crate::Error) -> bool {
+    matches!(
+        error.raw.as_ref(),
+        crate::ErrorKind::Sqlx(sqlx::Error::Database(database))
+            if database.code().as_deref() == Some("787")
+    )
+}
+
 /// Opens an atomic unit on `handle`.
+///
+/// The unit takes its write reservation as it opens, the way the callers that
+/// read a record and write it back need: a unit that read first and only then
+/// asked to write could find another writer had committed in between, and be
+/// refused instead of applied.
 pub(crate) async fn atom(handle: &Handle) -> crate::Result<Atom> {
     Ok(Atom {
-        transaction: handle.pool.begin().await?,
+        transaction: handle.pool.begin_with("BEGIN IMMEDIATE").await?,
     })
 }
 
@@ -146,8 +183,9 @@ pub(crate) trait Collection: Sized {
         key: &Self::Key,
         record: Option<&Self::Record>,
     ) -> crate::Result<()> {
-        let mut connection = handle.connection().await?;
-        Self::write(&mut connection, key, record).await
+        let mut unit = atom(handle).await?;
+        Self::write(unit.connection(), key, record).await?;
+        unit.commit().await
     }
 
     /// Every record the collection holds, with the key each is stored under.

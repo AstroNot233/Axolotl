@@ -1198,7 +1198,7 @@ async fn update_restart_cache_clear_unlink_rollback_and_cleanup_keep_business_fa
         serde_json::to_value(&request).unwrap()
     );
     assert_eq!(recovered.status, crate::install::InstallJobStatus::Queued);
-    let settings = crate::state::Settings::get(&state.pool).await.unwrap();
+    let settings = crate::state::Settings::get(&state.data).await.unwrap();
     assert!(
         !settings.resource_chinese_filenames
             && !settings.resource_preserve_filenames
