@@ -35,7 +35,7 @@ pub(crate) async fn call(
                 "requires_session": entry.access != Access::Public,
                 "requires_full_access": entry.access == Access::FullAccess,
                 "read_only": entry.read_only,
-                "returns_operation_id": matches!(entry.tool.name.as_ref(), "instance_launch" | "install_job_retry" | "install_job_resume" | "install_job_cancel"),
+                "returns_operation_id": matches!(entry.tool.name.as_ref(), "instance_launch" | "install_job_retry" | "install_job_resume" | "install_job_cancel" | "resource_prepare_install" | "resource_execute_plan" | "resource_revise_plan" | "content_remove"),
             })).collect::<Vec<_>>(),
             "restrictions": {
                 "ordinary_mode": {"manual_control_approval": true, "deletion": false, "direct_interface_control": false},
@@ -45,6 +45,8 @@ pub(crate) async fn call(
                 "created_installation_jobs_continue_after_session_end": true,
                 "running_games_continue_after_session_end": true,
                 "retained_operation_limit": 64,
+                "prepared_plan_ttl_seconds": 600,
+                "prepared_plan_limit": 64,
             }
         })),
         "start_session" => shared
@@ -110,12 +112,15 @@ async fn execute(
 ) -> Result<Value, ToolError> {
     let full = entry.access == Access::FullAccess;
     let cancel = shared.authorize(transport, control, full)?;
+    let backend_context = crate::BackendContext {
+        session_id: control.into(),
+    };
     if entry.read_only {
         tokio::select! {
             biased;
             _ = cancel.cancelled() => Err(ToolError::new("session_revoked", "Control session ended")),
             _ = context.ct.cancelled() => Err(ToolError::new("cancelled", "Request cancelled")),
-            result = shared.backend.execute(command) => result,
+            result = shared.backend.execute(command, backend_context) => result,
         }
     } else {
         let shared = shared.clone();
@@ -134,7 +139,7 @@ async fn execute(
             if context.ct.is_cancelled() {
                 return Err(ToolError::new("cancelled", "Request cancelled before execution"));
             }
-            shared.backend.execute(command).await
+            shared.backend.execute(command, backend_context).await
         }).await.map_err(|_| ToolError::new("execution_failed", "Launcher operation task failed; inspect current state before retrying"))?
     }
 }

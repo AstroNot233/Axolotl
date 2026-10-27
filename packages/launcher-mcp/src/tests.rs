@@ -63,6 +63,7 @@ async fn server(full: bool, auth: bool) -> Server {
 
 #[derive(Default)]
 struct TestBackend {
+    scopes: std::sync::Mutex<Vec<String>>,
     calls: std::sync::Mutex<Vec<Command>>,
     block: std::sync::atomic::AtomicBool,
     fail: std::sync::atomic::AtomicBool,
@@ -74,8 +75,10 @@ impl Backend for TestBackend {
     fn execute(
         &self,
         command: Command,
+        context: BackendContext,
     ) -> futures::future::BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
+            self.scopes.lock().unwrap().push(context.session_id);
             self.calls.lock().unwrap().push(command);
             if self.block.load(Ordering::SeqCst) {
                 self.resume.notified().await;
@@ -584,6 +587,7 @@ async fn business_tools_require_approved_transport_scoped_sessions() {
         ),
         "full_access_required"
     );
+    assert_eq!(tool_error(&client.tool("content_remove", json!({"session_id":control,"instance_id":"instance","entry_id":"entry"})).await), "full_access_required");
     assert_eq!(backend.calls.lock().unwrap().len(), 1);
     assert_eq!(client.tool("instance_rename", json!({"session_id":control,"instance_id":"instance","name":"Name"})).await["result"]["isError"], false);
     assert_eq!(backend.calls.lock().unwrap().len(), 2);
@@ -662,6 +666,28 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
         ),
         ("process_kill", json!({"process_id":uuid::Uuid::new_v4()})),
         ("logs_list", json!({"instance_id":"instance"})),
+        ("resource_list_sources", json!({})),
+        (
+            "resource_search",
+            json!({"source":"modrinth","query":"Sodium","resource_type":"mod","instance_id":"instance","limit":10}),
+        ),
+        (
+            "resource_get",
+            json!({"source":"curseforge","project_id":"123"}),
+        ),
+        (
+            "resource_list_releases",
+            json!({"source":"modrinth","project_id":"project","instance_id":"instance"}),
+        ),
+        (
+            "resource_get_release",
+            json!({"source":"mcarchive","project_id":"project","release_id":"release"}),
+        ),
+        ("content_list", json!({"instance_id":"instance"})),
+        (
+            "content_set_enabled",
+            json!({"instance_id":"instance","entry_id":"entry","enabled":false}),
+        ),
         (
             "logs_read",
             json!({"instance_id":"instance","log_type":"info","filename":"latest.log"}),
@@ -679,7 +705,15 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             "{name}: {result}"
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 21);
+    assert_eq!(backend.calls.lock().unwrap().len(), 28);
+    assert!(
+        backend
+            .scopes
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|scope| scope == &control)
+    );
     for name in [
         "instance_create",
         "instance_group_create",
@@ -704,6 +738,54 @@ async fn invalid_arguments_are_rejected_before_backend_execution() {
     let client = connect(&server, false, "Validation").await;
     let control = control_id(&client.tool("start_session", json!({})).await);
     let cases = [
+        (
+            "resource_revise_plan",
+            json!({"plan_id":uuid::Uuid::new_v4(),"revision":1,"accept_compatibility_nodes":vec!["node";101]}),
+        ),
+        (
+            "resource_revise_plan",
+            json!({"plan_id":uuid::Uuid::new_v4(),"revision":1,"ignore_dependencies":"true"}),
+        ),
+        (
+            "resource_revise_plan",
+            json!({"plan_id":uuid::Uuid::new_v4(),"revision":1,"native_plan_id":"foreign"}),
+        ),
+        (
+            "content_remove",
+            json!({"instance_id":"instance","entry_id":"entry","path":"../world"}),
+        ),
+        (
+            "resource_search",
+            json!({"source":"unknown","query":"x","resource_type":"mod"}),
+        ),
+        (
+            "resource_search",
+            json!({"source":"modrinth","query":"x","resource_type":"mod","limit":51}),
+        ),
+        (
+            "resource_search",
+            json!({"source":"modrinth","query":"x","resource_type":"mod","cursor":"a".repeat(8193)}),
+        ),
+        (
+            "resource_prepare_install",
+            json!({"instance_id":"id","source":"modrinth","project_id":"project","release_id":"release","resource_type":"world"}),
+        ),
+        (
+            "resource_prepare_install",
+            json!({"instance_id":"id","source":"modrinth","project_id":"project","release_id":"release","resource_type":"mod","ignore_dependencies":true}),
+        ),
+        (
+            "resource_execute_plan",
+            json!({"plan_id":uuid::Uuid::new_v4(),"revision":-1}),
+        ),
+        (
+            "resource_execute_plan",
+            json!({"plan_id":"native-plan","revision":1}),
+        ),
+        (
+            "content_set_enabled",
+            json!({"instance_id":"id","entry_id":"entry","enabled":true,"path":"../secret"}),
+        ),
         ("process_get", json!({"process_id":123})),
         (
             "process_wait",

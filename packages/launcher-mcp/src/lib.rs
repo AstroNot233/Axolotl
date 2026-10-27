@@ -7,12 +7,17 @@ mod info;
 pub mod log_text;
 mod operations;
 mod protocol;
+mod scoped;
 mod server;
 mod session;
 mod tools;
 
-pub use backend::{Backend, Command, Loader, LogKind, ToolError};
+pub use backend::{
+    Backend, BackendContext, Command, InstallKind, Loader, LogKind,
+    ResourceKind, Source, ToolError,
+};
 pub use info::LauncherInfo;
+pub use scoped::ScopedRegistry;
 pub use server::Server;
 pub use session::{Connection, Snapshot};
 

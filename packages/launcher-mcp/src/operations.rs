@@ -118,7 +118,8 @@ impl Shared {
                 // Catch backend panics too: an accepted operation must not remain
                 // permanently running if a business implementation panics.
                 let backend = shared.backend.clone();
-                tokio::spawn(async move { backend.execute(command).await }).await
+                let context = crate::BackendContext { session_id:control.clone() };
+                tokio::spawn(async move { backend.execute(command, context).await }).await
                     .map_err(|_| ToolError::new("execution_failed", "Operation task failed; inspect launcher state before retrying"))?
             }.await;
             match result {

@@ -3,6 +3,7 @@ use rmcp::{
     model::{Tool, ToolAnnotations},
 };
 use serde_json::{Map, Value, json};
+mod resources;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Access {
@@ -45,13 +46,16 @@ fn entry(
                             || name == "install_job_cancel",
                     )
                     .idempotent(idempotent)
-                    .open_world(matches!(
-                        name,
-                        "instance_create"
-                            | "instance_launch"
-                            | "install_job_retry"
-                            | "install_job_resume"
-                    )),
+                    .open_world(
+                        name.starts_with("resource_")
+                            || matches!(
+                                name,
+                                "instance_create"
+                                    | "instance_launch"
+                                    | "install_job_retry"
+                                    | "install_job_resume"
+                            ),
+                    ),
             ),
         access,
         read_only,
@@ -89,7 +93,7 @@ pub(crate) fn entries() -> Vec<Entry> {
     search["start_line"] =
         json!({"type":"integer","minimum":0,"maximum":4194304});
     search["limit"] = json!({"type":"integer","minimum":1,"maximum":100});
-    vec![
+    let mut entries = vec![
         entry(
             "get_launcher_info",
             "Read launcher name, actual version and platform. No control approval needed.",
@@ -369,7 +373,9 @@ pub(crate) fn entries() -> Vec<Entry> {
             search,
             &["instance_id", "log_type", "filename", "query"],
         ),
-    ]
+    ];
+    entries.extend(resources::entries());
+    entries
 }
 
 pub(crate) fn definitions() -> Vec<Tool> {

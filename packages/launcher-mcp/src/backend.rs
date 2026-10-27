@@ -9,7 +9,14 @@ pub trait Backend: Send + Sync + 'static {
     fn execute(
         &self,
         command: Command,
+        context: BackendContext,
     ) -> BoxFuture<'_, Result<Value, ToolError>>;
+}
+
+/// Server-generated scope for prepared business objects, never a tool argument.
+#[derive(Clone)]
+pub struct BackendContext {
+    pub session_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -35,6 +42,69 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    ResourceListSources {},
+    ResourceSearch {
+        source: Source,
+        query: String,
+        resource_type: ResourceKind,
+        #[serde(default)]
+        instance_id: Option<String>,
+        #[serde(default)]
+        cursor: Option<String>,
+        #[serde(default = "search_size")]
+        limit: u32,
+    },
+    ResourceGet {
+        source: Source,
+        project_id: String,
+    },
+    ResourceListReleases {
+        source: Source,
+        project_id: String,
+        instance_id: String,
+        #[serde(default)]
+        cursor: Option<String>,
+    },
+    ResourceGetRelease {
+        source: Source,
+        project_id: String,
+        release_id: String,
+    },
+    ResourcePrepareInstall {
+        instance_id: String,
+        source: Source,
+        project_id: String,
+        release_id: String,
+        resource_type: InstallKind,
+    },
+    ResourceExecutePlan {
+        plan_id: uuid::Uuid,
+        revision: u32,
+    },
+    ResourceRevisePlan {
+        plan_id: uuid::Uuid,
+        revision: u32,
+        #[serde(default)]
+        ignore_dependencies: bool,
+        #[serde(default)]
+        accept_compatibility_nodes: Vec<String>,
+    },
+    ContentRemove {
+        instance_id: String,
+        entry_id: String,
+    },
+    ContentList {
+        instance_id: String,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    ContentSetEnabled {
+        instance_id: String,
+        entry_id: String,
+        enabled: bool,
+    },
     InstanceList {
         #[serde(default)]
         offset: usize,
@@ -154,8 +224,42 @@ impl Command {
                 | Self::InstallJobRetry { .. }
                 | Self::InstallJobResume { .. }
                 | Self::InstallJobCancel { .. }
+                | Self::ResourcePrepareInstall { .. }
+                | Self::ResourceExecutePlan { .. }
+                | Self::ResourceRevisePlan { .. }
+                | Self::ContentRemove { .. }
         )
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    Modrinth,
+    Curseforge,
+    Mcarchive,
+    PlanetMinecraft,
+}
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceKind {
+    Mod,
+    Plugin,
+    DataPack,
+    ResourcePack,
+    Shader,
+    ModPack,
+    World,
+}
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallKind {
+    Mod,
+    ResourcePack,
+    Shader,
+}
+fn search_size() -> u32 {
+    20
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]

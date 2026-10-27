@@ -78,39 +78,40 @@ impl Controller {
             None
         };
         let app_handle = app.clone();
-        self.server =
-            Some(
-                Server::start(
-                    5219,
-                    token.clone().unwrap_or_default(),
-                    self.preferences.full_access,
-                    self.preferences.require_auth,
-                    LauncherInfo::new(env!("CARGO_PKG_VERSION")),
-                    std::sync::Arc::new(super::backend::LauncherBackend),
-                    move |mut runtime| {
-                        runtime.revision += revision_base;
-                        if runtime.connection.as_ref().is_some_and(
-                            |connection| connection.awaiting_approval,
-                        ) {
-                            let _ = app_handle
+        self.server = Some(
+            Server::start(
+                5219,
+                token.clone().unwrap_or_default(),
+                self.preferences.full_access,
+                self.preferences.require_auth,
+                LauncherInfo::new(env!("CARGO_PKG_VERSION")),
+                std::sync::Arc::new(super::backend::LauncherBackend::default()),
+                move |mut runtime| {
+                    runtime.revision += revision_base;
+                    if runtime
+                        .connection
+                        .as_ref()
+                        .is_some_and(|connection| connection.awaiting_approval)
+                    {
+                        let _ = app_handle
                             .state::<crate::lightweight_mode::LightweightMode>()
                             .exit(&app_handle);
-                        }
-                        let _ = app_handle.emit_to(
-                            "main",
-                            EVENT,
-                            McpState {
-                                enabled: runtime.running,
-                                runtime,
-                                token: None,
-                                error: None,
-                            },
-                        );
-                    },
-                )
-                .await
-                .map_err(|error| error.to_string())?,
-            );
+                    }
+                    let _ = app_handle.emit_to(
+                        "main",
+                        EVENT,
+                        McpState {
+                            enabled: runtime.running,
+                            runtime,
+                            token: None,
+                            error: None,
+                        },
+                    );
+                },
+            )
+            .await
+            .map_err(|error| error.to_string())?,
+        );
         self.token = token;
         self.error = None;
         Ok(())

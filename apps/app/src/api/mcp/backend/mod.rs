@@ -3,21 +3,41 @@ mod jobs;
 mod lifecycle;
 mod logs;
 mod queries;
+mod resources;
 
 use futures::future::BoxFuture;
-use launcher_mcp::{Backend, Command, ToolError};
+use launcher_mcp::{
+    Backend, BackendContext, Command, ScopedRegistry, ToolError,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-pub(super) struct LauncherBackend;
+#[derive(Default)]
+pub(super) struct LauncherBackend {
+    plans: ScopedRegistry<theseus::resources::ResourceOperationPlan>,
+}
 
 impl Backend for LauncherBackend {
     fn execute(
         &self,
         command: Command,
+        context: BackendContext,
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::ResourceListSources {}
+                | Command::ResourceSearch { .. }
+                | Command::ResourceGet { .. }
+                | Command::ResourceListReleases { .. }
+                | Command::ResourceGetRelease { .. }
+                | Command::ResourcePrepareInstall { .. }
+                | Command::ResourceExecutePlan { .. }
+                | Command::ResourceRevisePlan { .. }
+                | Command::ContentRemove { .. }
+                | Command::ContentList { .. }
+                | Command::ContentSetEnabled { .. }) => {
+                    resources::execute(self, command, context).await
+                }
                 Command::InstanceLaunch {
                     instance_id,
                     offline_mode,

@@ -138,6 +138,14 @@ async fn deferred_installation_actions_dispatch_and_report_failures() {
         poll(&client, &session, operation, "succeeded").await;
     }
     assert_eq!(backend.calls.lock().unwrap().len(), 3);
+    assert!(
+        backend
+            .scopes
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|scope| scope == &session)
+    );
     backend.fail.store(true, Ordering::SeqCst);
     let response = client
         .tool(
@@ -151,6 +159,61 @@ async fn deferred_installation_actions_dispatch_and_report_failures() {
     assert_eq!(
         poll(&client, &session, operation, "failed").await["result"]["error"]["code"],
         "not_found"
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
+    let backend = Arc::new(TestBackend::default());
+    let server = server_with_backend(true, false, backend.clone()).await;
+    let client = connect(&server, false, "Resource installation").await;
+    let session = control_id(&client.tool("start_session", json!({})).await);
+    let cases = [
+        (
+            "resource_prepare_install",
+            json!({"instance_id":"instance","source":"modrinth","project_id":"project","release_id":"release","resource_type":"mod"}),
+        ),
+        (
+            "resource_execute_plan",
+            json!({"plan_id":uuid::Uuid::new_v4(),"revision":2}),
+        ),
+        (
+            "resource_revise_plan",
+            json!({"plan_id":uuid::Uuid::new_v4(),"revision":2,"ignore_dependencies":true,"accept_compatibility_nodes":["node"]}),
+        ),
+        (
+            "content_remove",
+            json!({"instance_id":"instance","entry_id":"entry"}),
+        ),
+    ];
+    for (name, mut args) in cases {
+        args["session_id"] = json!(session);
+        let response = client.tool(name, args).await;
+        let id = response["result"]["structuredContent"]["operation_id"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            poll(&client, &session, id, "succeeded").await["result"]["executed"],
+            true
+        );
+    }
+    assert_eq!(backend.calls.lock().unwrap().len(), 4);
+    assert!(matches!(
+        &backend.calls.lock().unwrap()[0],
+        Command::ResourcePrepareInstall {
+            source: Source::Modrinth,
+            resource_type: InstallKind::Mod,
+            ..
+        }
+    ));
+    assert!(
+        backend
+            .scopes
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|scope| scope == &session)
     );
     server.stop().await;
 }
