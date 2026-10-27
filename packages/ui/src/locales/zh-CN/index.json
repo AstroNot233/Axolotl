@@ -1,4 +1,7 @@
 {
+  "drop.instance-import.title": {
+    "defaultMessage": "导入实例"
+  },
   "drop.confirm.minecraft-root.title": {
     "defaultMessage": "添加 .minecraft 文件夹"
   },

@@ -1,4 +1,7 @@
 {
+  "drop.instance-import.title": {
+    "defaultMessage": "Import instances"
+  },
   "drop.confirm.minecraft-root.title": {
     "defaultMessage": "Add .minecraft folder"
   },

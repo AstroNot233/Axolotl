@@ -5,6 +5,7 @@ import { syncConfiguredDirectLinks } from '@/helpers/direct-link-sync'
 import { classifyDroppedItem, resolveGamedirs, scanLauncherInstances } from '@/helpers/drop'
 import { import_instance } from '@/helpers/import.js'
 import { wait_for_install_job } from '@/helpers/install'
+import { check_symlink_capability } from '@/helpers/instance'
 
 import { type DropImportOptions, useDropImport } from './useDropImport'
 
@@ -99,6 +100,7 @@ it.each(['D:\\Minecraft\\.minecraft\\versions\\1.21.1', '/games/.minecraft/versi
 
         expect(scanLauncherInstances).toHaveBeenCalledWith('Generic', path)
         expect(resolveGamedirs).not.toHaveBeenCalled()
+        expect(check_symlink_capability).not.toHaveBeenCalled()
         expect(syncConfiguredDirectLinks).not.toHaveBeenCalled()
         expect(showImportMethods).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -148,6 +150,42 @@ it('imports a chosen instance candidate without falling through to content insta
 
     expect(scanLauncherInstances).toHaveBeenCalledWith('Generic', path)
     expect(showImportMethods).toHaveBeenCalledOnce()
+})
+
+it('uses copy for new GUI imports even if an old method choice still carries link settings', async () => {
+    const { flow } = setup()
+    const path = 'D:\\Minecraft\\.minecraft\\versions\\1.21.1'
+    flow.dropFilePath.value = path
+    flow.dropClassification.value = {
+        item_type: 'launcher',
+        launcher_type: 'Generic',
+        base_path: path,
+    }
+    vi.mocked(scanLauncherInstances).mockResolvedValue([
+        {
+            launcherType: 'Generic',
+            launcherName: 'Generic',
+            instances: [{ name: '1.21.1', path, version: '1.21.1', loader: '' }],
+        },
+    ])
+    vi.mocked(import_instance).mockResolvedValue({ job_id: 'copy-job' })
+
+    await flow.handleDropConfirm('instance')
+    await flow.onSymlinkMethodConfirmed([
+        { instanceName: '1.21.1', instancePath: path, symlink: true, gameDirOverride: path },
+    ])
+
+    expect(import_instance).toHaveBeenCalledWith(
+        'Generic',
+        path,
+        '1.21.1',
+        false,
+        path,
+        undefined,
+        undefined,
+        undefined,
+        null,
+    )
 })
 
 it('shows a scan error when the selected version cannot be read', async () => {

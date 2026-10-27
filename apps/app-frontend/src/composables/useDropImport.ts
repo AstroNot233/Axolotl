@@ -11,6 +11,7 @@ import type {
     BatchDropPhase,
     ClassificationResult,
     SymlinkMethodChoice,
+    SymlinkMethodInstance,
 } from '@modrinth/ui'
 import { useDebugLogger, useGlobalDrop, useInstanceContext, useVIntl } from '@modrinth/ui'
 import { join } from '@tauri-apps/api/path'
@@ -38,7 +39,6 @@ import {
 } from '@/helpers/install'
 import {
     add_project_from_path,
-    check_symlink_capability,
     type ExternalMinecraftRoot,
     get as getInstance,
     import_world_save,
@@ -196,7 +196,6 @@ export function useDropImport(options: DropImportOptions) {
                 basePath?: string
                 compatibleMode?: boolean
             }>
-            symlinkCapable: string
         }) => void
         hide: () => void
     } | null>(null)
@@ -642,7 +641,6 @@ export function useDropImport(options: DropImportOptions) {
                     versionPath: single.versionPath,
                 },
             ]
-            const cap = await check_symlink_capability()
             symlinkCardsModal.value?.show({
                 instances: [
                     {
@@ -654,7 +652,6 @@ export function useDropImport(options: DropImportOptions) {
                         versionPath: single.versionPath,
                     },
                 ],
-                symlinkCapable: cap,
             })
         } else if (choice === 'old-way') {
             const single = scanResults![0].instances[0]
@@ -666,7 +663,6 @@ export function useDropImport(options: DropImportOptions) {
                     path: single.path,
                 },
             ]
-            const cap = await check_symlink_capability()
             symlinkCardsModal.value?.show({
                 instances: [
                     {
@@ -676,7 +672,6 @@ export function useDropImport(options: DropImportOptions) {
                         basePath: gameDir,
                     },
                 ],
-                symlinkCapable: cap,
             })
         }
     }
@@ -897,7 +892,6 @@ export function useDropImport(options: DropImportOptions) {
                     await onSymlinkMethodConfirmed(false)
                     return
                 }
-                const cap = await check_symlink_capability()
                 symlinkCardsModal.value?.show({
                     instances: [
                         {
@@ -911,7 +905,6 @@ export function useDropImport(options: DropImportOptions) {
                             versionPath: single.versionPath,
                         },
                     ],
-                    symlinkCapable: cap,
                 })
                 return
             }
@@ -1408,14 +1401,12 @@ export function useDropImport(options: DropImportOptions) {
     }
 
     function chooseImportMethod(options: {
-        instanceNames: string[]
-        symlinkCapable: 'supported' | 'requires_admin' | 'unsupported'
+        instances: SymlinkMethodInstance[]
     }): Promise<SymlinkMethodChoice[]> {
         return new Promise((resolve) => {
             symlinkChoiceResolve = resolve
             symlinkCardsModal.value?.show({
-                instances: options.instanceNames.map((name) => ({ name })),
-                symlinkCapable: options.symlinkCapable,
+                instances: options.instances,
             })
         })
     }
@@ -1455,8 +1446,6 @@ export function useDropImport(options: DropImportOptions) {
             await onSymlinkMethodConfirmed(false)
             return
         }
-
-        const cap = await check_symlink_capability()
         symlinkCardsModal.value?.show({
             instances: allSelected.map((i) => ({
                 name: i.name,
@@ -1466,7 +1455,6 @@ export function useDropImport(options: DropImportOptions) {
                 compatibleMode: i.compatibleMode,
                 versionPath: i.versionPath,
             })),
-            symlinkCapable: cap,
         })
     }
 
@@ -1512,11 +1500,11 @@ export function useDropImport(options: DropImportOptions) {
                             (c.instancePath ?? undefined) === (item.instancePath ?? undefined),
                     )
                     if (choice) {
-                        item.symlink = choice.symlink
+                        item.symlink = false
                         item.gameVersion = choice.gameVersion
                         item.loader = choice.loader
                         item.loaderVersion = choice.loaderVersion
-                        item.gameDirOverride = choice.gameDirOverride
+                        item.gameDirOverride = null
                     }
                 }
             }
@@ -1548,12 +1536,12 @@ export function useDropImport(options: DropImportOptions) {
                     ctx?.launcherType ?? inst.launcherType,
                     inst.compatibleMode ? inst.basePath : (ctx?.basePath ?? inst.path),
                     inst.name,
-                    choice?.symlink ?? (Array.isArray(choices) ? false : choices),
+                    false,
                     resolvedInstancePath(inst),
                     inst.compatibleMode ? undefined : (choice?.gameVersion ?? undefined),
                     inst.compatibleMode ? undefined : (choice?.loader ?? undefined),
                     inst.compatibleMode ? undefined : (choice?.loaderVersion ?? undefined),
-                    choice?.gameDirOverride ?? null,
+                    null,
                 )
                 await wait_for_install_job(job.job_id)
                 addNotification({
@@ -1613,12 +1601,12 @@ export function useDropImport(options: DropImportOptions) {
                     ctx?.launcherType ?? inst.launcherType,
                     inst.compatibleMode ? inst.basePath : (ctx?.basePath ?? inst.path),
                     inst.name,
-                    choice?.symlink ?? (Array.isArray(choices) ? false : choices),
+                    false,
                     resolvedInstancePath(inst),
                     inst.compatibleMode ? undefined : (choice?.gameVersion ?? undefined),
                     inst.compatibleMode ? undefined : (choice?.loader ?? undefined),
                     inst.compatibleMode ? undefined : (choice?.loaderVersion ?? undefined),
-                    choice?.gameDirOverride ?? null,
+                    null,
                 )
                 await wait_for_install_job(job.job_id)
                 completed++
@@ -2043,7 +2031,6 @@ export function useDropImport(options: DropImportOptions) {
                     await showNextBatchGroup()
                     return
                 }
-                const cap = await check_symlink_capability()
                 batchSymlinkMode = true
                 symlinkCardsModal.value?.show({
                     instances: group.items.map((item) => ({
@@ -2052,7 +2039,6 @@ export function useDropImport(options: DropImportOptions) {
                         launcherType: item.launcherType,
                         basePath: item.basePath,
                     })),
-                    symlinkCapable: cap,
                 })
             } else {
                 await showBatchGroupConfirmModal(group)
@@ -2346,12 +2332,12 @@ export function useDropImport(options: DropImportOptions) {
                     item.launcherType,
                     item.basePath,
                     item.instanceFolder,
-                    item.symlink ?? false,
+                    false,
                     item.instancePath,
                     item.gameVersion ?? undefined,
                     item.loader ?? undefined,
                     item.loaderVersion ?? undefined,
-                    item.gameDirOverride ?? null,
+                    null,
                 )
                 batchCurrentInstallJobId = job.job_id
                 try {
