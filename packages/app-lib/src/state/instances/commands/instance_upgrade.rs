@@ -214,6 +214,15 @@ impl UpgradePlanningObserver {
     pub(crate) fn token(&self) -> &CancellationToken {
         &self.cancel
     }
+
+    /// The same cancellation without progress, for work that must not show
+    /// up as a planning phase of its own, such as rereading files to validate.
+    pub(crate) fn silent(&self) -> Self {
+        Self {
+            cancel: self.cancel.clone(),
+            reporter: None,
+        }
+    }
 }
 
 pub(crate) fn upgrade_planning_canceled() -> crate::Error {
@@ -231,6 +240,7 @@ fn item_progress(
             .map(|item| InstanceUpgradeItemProgress {
                 content_id: item.content_id.clone(),
                 relative_path: item.relative_path.clone(),
+                project_type: item.project_type,
                 provider: item.provider,
                 project_id: item.project_id.clone(),
                 status: (checked
@@ -611,12 +621,22 @@ pub(crate) async fn validate_instance_upgrade_plan_source(
     plan: &InstanceUpgradePlan,
     state: &State,
 ) -> crate::Result<ReadOnlyUpgradeSource> {
-    let current = read_only_upgrade_source(
-        &plan.instance_id,
+    validate_instance_upgrade_plan_source_observed(
+        plan,
         state,
         &UpgradePlanningObserver::default(),
     )
-    .await?;
+    .await
+}
+
+async fn validate_instance_upgrade_plan_source_observed(
+    plan: &InstanceUpgradePlan,
+    state: &State,
+    observer: &UpgradePlanningObserver,
+) -> crate::Result<ReadOnlyUpgradeSource> {
+    let current =
+        read_only_upgrade_source(&plan.instance_id, state, &observer.silent())
+            .await?;
     ensure_upgrade_source_files_match(
         &plan.instance_id,
         &plan.source_files,
@@ -681,6 +701,18 @@ impl UpgradePlanRuntimeValidation {
         plan: &InstanceUpgradePlan,
         state: &State,
     ) -> crate::Result<ReadOnlyUpgradeSource> {
+        self.validate_observed(plan, state, &UpgradePlanningObserver::default())
+            .await
+    }
+
+    /// Validates like [`Self::validate`], stopping between hashed files once
+    /// the observer is canceled.
+    pub(crate) async fn validate_observed(
+        &mut self,
+        plan: &InstanceUpgradePlan,
+        state: &State,
+        observer: &UpgradePlanningObserver,
+    ) -> crate::Result<ReadOnlyUpgradeSource> {
         let Some(mut before) = state
             .file_watcher
             .content_watch_snapshot(&plan.instance_id)
@@ -688,25 +720,28 @@ impl UpgradePlanRuntimeValidation {
         else {
             // Unwatched game directories still support metadata and hash
             // validation through the resolved source directory.
-            self.incremental_validate(plan, None, state).await?;
+            self.incremental_validate(plan, None, state, observer)
+                .await?;
             return Ok(self.source.clone());
         };
         if self.watcher_epoch != Some(before.epoch)
             || self.validated_generation.is_none()
             || self.validated_generation > Some(before.generation)
         {
-            return self.authoritative_validate(plan, state).await;
+            return self.authoritative_validate(plan, state, observer).await;
         }
 
         for _ in 0..2 {
-            self.incremental_validate(plan, Some(&before), state)
+            self.incremental_validate(plan, Some(&before), state, observer)
                 .await?;
             let Some(after) = state
                 .file_watcher
                 .content_watch_snapshot(&plan.instance_id)
                 .await
             else {
-                return self.authoritative_validate(plan, state).await;
+                return self
+                    .authoritative_validate(plan, state, observer)
+                    .await;
             };
             if after.epoch == before.epoch
                 && after.generation == before.generation
@@ -718,7 +753,7 @@ impl UpgradePlanRuntimeValidation {
             before = after;
         }
 
-        self.authoritative_validate(plan, state).await
+        self.authoritative_validate(plan, state, observer).await
     }
 
     async fn incremental_validate(
@@ -728,6 +763,7 @@ impl UpgradePlanRuntimeValidation {
             &crate::state::instances::watcher::InstanceContentWatchSnapshot,
         >,
         _state: &State,
+        observer: &UpgradePlanningObserver,
     ) -> crate::Result<()> {
         let scanned = crate::state::instances::adapters::filesystem::scan_content_files_from(
             &self.source.game_dir,
@@ -772,6 +808,7 @@ impl UpgradePlanRuntimeValidation {
                     watch.dirty_paths.contains(&file.relative_path)
                 });
             if metadata_changed || watcher_marked {
+                observer.check()?;
                 let (_, sha1) = crate::util::fetch::sha1_file_async(
                     instance_dir.join(&file.relative_path),
                 )
@@ -801,13 +838,16 @@ impl UpgradePlanRuntimeValidation {
         &mut self,
         plan: &InstanceUpgradePlan,
         state: &State,
+        observer: &UpgradePlanningObserver,
     ) -> crate::Result<ReadOnlyUpgradeSource> {
         #[cfg(test)]
         {
             self.full_hash_validations += 1;
         }
-        let current =
-            validate_instance_upgrade_plan_source(plan, state).await?;
+        let current = validate_instance_upgrade_plan_source_observed(
+            plan, state, observer,
+        )
+        .await?;
         let watch = state
             .file_watcher
             .track_upgrade_source(
@@ -1489,10 +1529,14 @@ async fn load_upgrade_catalog(
                         InstanceUpgradePlanningProgress::Candidates {
                             provider: key.provider,
                             project_id: key.project_id.clone(),
-                            compatible: candidates
+                            stable: candidates
                                 .candidates
                                 .iter()
-                                .filter(|candidate| candidate.compatible)
+                                .filter(|candidate| {
+                                    candidate.compatible
+                                        && candidate.channel
+                                            == CandidateChannel::Release
+                                })
                                 .count(),
                         },
                     );
@@ -7126,6 +7170,37 @@ mod tests {
             completed: 0,
             total: 0,
         }));
+
+        let creation_watch = state
+            .file_watcher
+            .content_watch_snapshot(&instance.id)
+            .await;
+        let (plan, source) = create_instance_upgrade_plan_with_source(
+            &instance.id,
+            target.clone(),
+            &state,
+            &UpgradePlanningObserver::default(),
+        )
+        .await
+        .unwrap();
+        let mut validation = UpgradePlanRuntimeValidation::new(
+            source,
+            &instance.id,
+            creation_watch,
+            &state,
+        )
+        .await;
+        // Forces the full rehash that runs when the watcher cannot vouch for the files.
+        validation.watcher_epoch = Some(u64::MAX);
+        let stopped = UpgradePlanningObserver::default();
+        stopped.token().cancel();
+        assert!(
+            validation
+                .validate_observed(&plan, &state, &stopped)
+                .await
+                .is_err()
+        );
+        validation.validate(&plan, &state).await.unwrap();
 
         let before =
             planner_state_digest(&pool, &instance_dir, &instance.id).await;

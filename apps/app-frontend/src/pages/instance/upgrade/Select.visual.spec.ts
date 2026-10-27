@@ -127,6 +127,7 @@ it('shows each item as the planner checks it and stops the planner from the Stop
                 {
                     contentId: 'a',
                     relativePath: 'mods/alpha.jar',
+                    projectType: 'mod',
                     provider: 'modrinth',
                     projectId: 'alpha',
                     status: null,
@@ -134,8 +135,17 @@ it('shows each item as the planner checks it and stops the planner from the Stop
                 {
                     contentId: 'b',
                     relativePath: 'mods/beta.jar',
+                    projectType: 'mod',
                     provider: 'modrinth',
                     projectId: 'beta',
+                    status: null,
+                },
+                {
+                    contentId: 'c',
+                    relativePath: 'shaderpacks/gamma.zip',
+                    projectType: 'shaderpack',
+                    provider: 'modrinth',
+                    projectId: 'gamma',
                     status: null,
                 },
             ],
@@ -143,14 +153,21 @@ it('shows each item as the planner checks it and stops the planner from the Stop
         options.onProgress!({
             kind: 'candidates',
             provider: 'modrinth',
+            projectId: 'gamma',
+            stable: 1,
+        })
+        options.onProgress!({
+            kind: 'candidates',
+            provider: 'modrinth',
             projectId: 'alpha',
-            compatible: 2,
+            stable: 2,
         })
         await new Promise(requestAnimationFrame)
         await flushPromises()
         const rows = wrapper.findAll('li').map((row) => row.text())
         expect(rows).toEqual([
             expect.stringContaining('Compatible release found'),
+            expect.stringContaining('Checking…'),
             expect.stringContaining('Checking…'),
         ])
         expect(wrapper.text()).toContain('Reading content files (1/2)')

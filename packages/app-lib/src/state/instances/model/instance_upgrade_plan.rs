@@ -239,6 +239,7 @@ pub enum InstanceUpgradePlanningPhase {
 pub struct InstanceUpgradeItemProgress {
     pub content_id: String,
     pub relative_path: String,
+    pub project_type: ProjectType,
     pub provider: Option<ContentProvider>,
     pub project_id: Option<String>,
     pub status: Option<InstanceUpgradeItemStatus>,
@@ -261,11 +262,13 @@ pub enum InstanceUpgradePlanningProgress {
         items: Vec<InstanceUpgradeItemProgress>,
     },
     /// Candidate releases of one project, a root or a dependency, were checked.
+    /// `stable` counts compatible releases on the stable channel; whether a
+    /// prerelease or shader runtime is acceptable is decided per item later.
     #[serde(rename_all = "camelCase")]
     Candidates {
         provider: ContentProvider,
         project_id: String,
-        compatible: usize,
+        stable: usize,
     },
 }
 

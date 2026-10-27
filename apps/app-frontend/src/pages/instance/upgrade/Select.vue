@@ -468,7 +468,7 @@ function nextPlanningView(
         ...view,
         checked: new Map(view.checked).set(
             projectKey(event.provider, event.projectId),
-            event.compatible,
+            event.stable,
         ),
     }
 }
@@ -538,11 +538,12 @@ function itemState(item: InstanceUpgradeItemProgress) {
         default:
             return 'review'
     }
-    const compatible = planning.progress.value?.checked.get(
-        projectKey(item.provider, item.projectId),
-    )
-    if (compatible === undefined) return 'checking'
-    return compatible > 0 ? 'found' : 'missing'
+    // A shader pack also needs a matching shader runtime, which is only known
+    // once every item has been classified.
+    if (item.projectType === 'shaderpack') return 'checking'
+    const stable = planning.progress.value?.checked.get(projectKey(item.provider, item.projectId))
+    if (stable === undefined) return 'checking'
+    return stable > 0 ? 'found' : 'missing'
 }
 
 function fileName(path: string) {

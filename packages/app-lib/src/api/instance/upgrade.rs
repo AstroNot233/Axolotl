@@ -87,7 +87,9 @@ pub async fn plan_instance_upgrade(
             &state,
         )
         .await;
-    validation.validate(&plan, &state).await?;
+    validation
+        .validate_observed(&plan, &state, &observer)
+        .await?;
     observer.check()?;
     start_plan_cleanup();
     INSTANCE_UPGRADE_PLANS.insert(

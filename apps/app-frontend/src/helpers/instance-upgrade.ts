@@ -1,5 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 
+import { abortable } from './abortable'
 import type { InstallJobSnapshot } from './install'
 import type { InstanceLoader } from './types'
 
@@ -175,6 +176,7 @@ export type InstanceUpgradePlanningPhase =
 export interface InstanceUpgradeItemProgress {
     contentId: string
     relativePath: string
+    projectType: InstanceUpgradeProjectType
     provider: ContentProvider | null
     projectId: string | null
     /** Absent until the item has been checked against its candidate releases. */
@@ -190,7 +192,8 @@ export type InstanceUpgradePlanningProgress =
           total: number
       }
     | { kind: 'items'; items: InstanceUpgradeItemProgress[] }
-    | { kind: 'candidates'; provider: ContentProvider; projectId: string; compatible: number }
+    /** `stable` counts compatible releases on the stable channel. */
+    | { kind: 'candidates'; provider: ContentProvider; projectId: string; stable: number }
 
 export interface InstanceUpgradeExternalChange {
     relativePath: string
@@ -346,27 +349,17 @@ export async function plan_instance_upgrade(
         requestId,
         onProgress: channel,
     })
-    if (!signal) return await benchmark_upgrade_plan('plan', () => request)
-    let stop = () => {}
-    const aborted = new Promise<never>((_, reject) => {
-        const cancel = () => {
+    return await benchmark_upgrade_plan('plan', () =>
+        abortable(request, signal, (late) => {
             void invoke('plugin:instance|instance_cancel_upgrade_planning', { requestId }).catch(
                 () => {},
             )
-            void request.then(
+            void late.then(
                 (plan) => discard_instance_upgrade_plan(plan.id).catch(() => {}),
                 () => {},
             )
-            reject(signal.reason)
-        }
-        signal.addEventListener('abort', cancel, { once: true })
-        stop = () => signal.removeEventListener('abort', cancel)
-    })
-    try {
-        return await benchmark_upgrade_plan('plan', () => Promise.race([request, aborted]))
-    } finally {
-        stop()
-    }
+        }),
+    )
 }
 
 export async function select_instance_upgrade_solution(
