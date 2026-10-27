@@ -392,7 +392,7 @@ it('uses the cart analysis and closes its preview when that cart snapshot is inv
         instanceName: 'Instance',
         selections: [],
         installDependencies: true,
-        analysis: { signal: controller.signal, prepare },
+        analysis: { signal: controller.signal, prepare, cancel: vi.fn() },
     })
     try {
         await flushPromises()
@@ -401,6 +401,75 @@ it('uses the cart analysis and closes its preview when that cart snapshot is inv
         controller.abort()
         await expect(result).resolves.toBeNull()
         expect(resourceQueuePlan).not.toHaveBeenCalled()
+    } finally {
+        wrapper.unmount()
+    }
+})
+
+it('cancels a dependency analysis that never finishes from the Cancel button and stops the cart analysis', async () => {
+    ready()
+    const controller = new AbortController()
+    let analysisSignal: AbortSignal | undefined
+    let late!: (value: ResourceOperationPlan) => void
+    const prepare = vi.fn(
+        (signal: AbortSignal) =>
+            new Promise<ResourceOperationPlan>((resolve) => {
+                analysisSignal = signal
+                late = resolve
+            }),
+    )
+    const cancelAnalysis = vi.fn(() => controller.abort())
+    const wrapper = mount(ResourceOperationPreviewModal)
+    const result = wrapper.vm.showInstallSelection({
+        instanceId: 'instance',
+        instanceName: 'Instance',
+        selections: [],
+        installDependencies: true,
+        analysis: { signal: controller.signal, prepare, cancel: cancelAnalysis },
+    })
+    try {
+        await flushPromises()
+        expect(wrapper.find('[data-operation-skeleton]').exists()).toBe(true)
+        const cancel = wrapper.findAll('button').find((button) => button.text() === 'Cancel')!
+        expect(cancel.attributes('disabled')).toBeUndefined()
+        await cancel.trigger('click')
+        await flushPromises()
+        expect(analysisSignal?.aborted).toBe(true)
+        expect(cancelAnalysis).toHaveBeenCalledOnce()
+        expect(await result).toBeNull()
+        expect(wrapper.find('section').exists()).toBe(false)
+        late(plan())
+        await flushPromises()
+        expect(wrapper.find('section').exists()).toBe(false)
+        expect(resourceQueuePlan).not.toHaveBeenCalled()
+    } finally {
+        wrapper.unmount()
+    }
+})
+
+it('keeps a finished cart analysis when its reviewed preview is closed', async () => {
+    ready()
+    const cancelAnalysis = vi.fn()
+    const wrapper = mount(ResourceOperationPreviewModal)
+    const result = wrapper.vm.showInstallSelection({
+        instanceId: 'instance',
+        instanceName: 'Instance',
+        selections: [],
+        installDependencies: true,
+        analysis: {
+            signal: new AbortController().signal,
+            prepare: vi.fn().mockResolvedValue(plan()),
+            cancel: cancelAnalysis,
+        },
+    })
+    try {
+        await flushPromises()
+        await wrapper
+            .findAll('button')
+            .find((button) => button.text() === 'Cancel')!
+            .trigger('click')
+        expect(await result).toBeNull()
+        expect(cancelAnalysis).not.toHaveBeenCalled()
     } finally {
         wrapper.unmount()
     }
@@ -806,7 +875,7 @@ it('accepts the selected release compatibility exceptions and queues it in the s
     }
 })
 
-it('locks the entire one-click fallback against duplicate submission and reopening', async () => {
+it('locks the one-click fallback against duplicate submission and reopening but lets its revision be canceled', async () => {
     ready()
     vi.mocked(resourcePrepareEntryOperation).mockResolvedValue({
         ...plan(),
@@ -821,7 +890,6 @@ it('locks the entire one-click fallback against duplicate submission and reopeni
                 finish = resolve
             }),
     )
-    vi.mocked(resourceQueuePlan).mockResolvedValueOnce({ job_id: 'forced-job' } as never)
     const wrapper = mount(ResourceOperationPreviewModal)
     const result = wrapper.vm.show(input)
     try {
@@ -834,14 +902,16 @@ it('locks the entire one-click fallback against duplicate submission and reopeni
         expect(button.attributes('disabled')).toBeDefined()
         await button.trigger('click')
         expect(await wrapper.vm.show({ ...input, instanceId: 'other' })).toBeNull()
-        await wrapper.vm.cancel()
-        expect(wrapper.find('section').exists()).toBe(true)
         expect(resourceRevisePlan).toHaveBeenCalledOnce()
-        expect(resourceQueuePlan).not.toHaveBeenCalled()
+        const cancel = wrapper.findAll('button').find((button) => button.text() === 'Cancel')!
+        expect(cancel.attributes('disabled')).toBeUndefined()
+        await cancel.trigger('click')
+        await flushPromises()
+        expect(wrapper.find('section').exists()).toBe(false)
+        expect(await result).toBeNull()
         finish(plan(2))
         await flushPromises()
-        expect(resourceQueuePlan).toHaveBeenCalledExactlyOnceWith('plan', 2)
-        expect((await result)?.job_id).toBe('forced-job')
+        expect(resourceQueuePlan).not.toHaveBeenCalled()
     } finally {
         wrapper.unmount()
     }
@@ -969,7 +1039,7 @@ it('keeps compatibility exception controls and an enabled warning install button
     }
 })
 
-it('shows each parsed item while retaining the skeleton and locking every button until the final plan arrives', async () => {
+it('shows each parsed item while retaining the skeleton and locking every button except Cancel until the final plan arrives', async () => {
     ready()
     let progress!: (value: ResourceOperationProgress) => void
     let complete!: (value: ResourceOperationPlan) => void
@@ -1005,7 +1075,11 @@ it('shows each parsed item while retaining the skeleton and locking every button
         expect(
             wrapper
                 .findAll('button')
-                .every((button) => button.attributes('disabled') !== undefined),
+                .every(
+                    (button) =>
+                        (button.attributes('disabled') === undefined) ===
+                        (button.text() === 'Cancel'),
+                ),
         ).toBe(true)
         expect(resourceQueuePlan).not.toHaveBeenCalled()
         complete({ ...plan(), nodes: [root, child] } as ResourceOperationPlan)
@@ -1380,7 +1454,7 @@ it('warns about unaccepted compatibility and binds manual exceptions to exactly 
     }
 })
 
-it('locks preparation controls and cancels an obsolete session without allowing old responses to replace it', async () => {
+it('locks preparation controls except Cancel and cancels an obsolete session without allowing old responses to replace it', async () => {
     ready()
     let signal: AbortSignal | undefined
     let oldProgress: ((value: ResourceOperationProgress) => void) | undefined
@@ -1399,7 +1473,11 @@ it('locks preparation controls and cancels an obsolete session without allowing 
         expect(
             wrapper
                 .findAll('button')
-                .every((button) => button.attributes('disabled') !== undefined),
+                .every(
+                    (button) =>
+                        (button.attributes('disabled') === undefined) ===
+                        (button.text() === 'Cancel'),
+                ),
         ).toBe(true)
         const current = wrapper.vm.show({ ...input, instanceId: 'other' })
         expect(await old).toBeNull()
@@ -1609,7 +1687,11 @@ it('ignores repeated optional activation and late revisions after cancellation',
         expect(
             wrapper
                 .findAll('button')
-                .every((button) => button.attributes('disabled') !== undefined),
+                .every(
+                    (button) =>
+                        (button.attributes('disabled') === undefined) ===
+                        (button.text() === 'Cancel'),
+                ),
         ).toBe(true)
         wrapper.unmount()
         expect(await result).toBeNull()

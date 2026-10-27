@@ -17,6 +17,8 @@ export type ContentAnalysisInput = {
 
 export type ContentAnalysisReview = {
     signal: AbortSignal
+    /** Stops the cart's analysis while it is still running. The selection is kept. */
+    cancel: () => void
     prepare: (
         signal: AbortSignal,
         onProgress: (progress: ResourceOperationProgress) => void,
@@ -24,7 +26,14 @@ export type ContentAnalysisReview = {
     ) => Promise<ResourceOperationPlan>
 }
 
-/** The cart owns background work; a review borrows its current request. */
+const selectionKey = (input: ContentAnalysisInput) =>
+    JSON.stringify([input.instanceId, input.selections, input.installDependencies])
+
+/**
+ * The cart owns background work; a review borrows its current request.
+ * Canceling stops that work and closes its session. The same selection is not
+ * analyzed again until the selection changes or a review asks for it.
+ */
 export function createContentAnalysis() {
     let current: {
         key: string
@@ -32,12 +41,15 @@ export function createContentAnalysis() {
         controller: AbortController
         session: Promise<string>
         pending: Promise<ResourceOperationPlan>
+        settled: boolean
         revision: number
         progress: Map<string, ResourceOperationProgress>
         listeners: Set<(progress: ResourceOperationProgress) => void>
     } | null = null
     let session: { context: string; id: Promise<string> } | null = null
     let revision = 0
+    let latest: ContentAnalysisInput | null = null
+    let canceledSelection: string | null = null
 
     function clear() {
         current?.controller.abort()
@@ -48,10 +60,14 @@ export function createContentAnalysis() {
     }
 
     function update(input: ContentAnalysisInput | null) {
+        latest = input
         if (!input?.selections.length) {
+            canceledSelection = null
             clear()
             return
         }
+        if (canceledSelection === selectionKey(input)) return
+        canceledSelection = null
         const key = JSON.stringify(input)
         if (current?.key === key) return
         current?.controller.abort()
@@ -80,25 +96,46 @@ export function createContentAnalysis() {
                 },
             )
         })
-        // Errors stay with this analysis and are retried by the review action.
-        void pending.catch(() => {})
-        current = {
+        const analysis = {
             key,
             input,
             controller,
             session: id,
             pending,
+            settled: false,
             revision: selectionRevision,
             progress,
             listeners,
         }
+        // Errors stay with this analysis and are retried by the review action.
+        void pending
+            .catch(() => {})
+            .finally(() => {
+                analysis.settled = true
+            })
+        current = analysis
+    }
+
+    /** Stops the running analysis and keeps the selection out of automatic restarts. */
+    function cancel() {
+        if (!current) return
+        canceledSelection = selectionKey(current.input)
+        clear()
     }
 
     function review(): ContentAnalysisReview | undefined {
+        // Opening a review is an explicit retry of a canceled selection.
+        if (canceledSelection !== null && latest) {
+            canceledSelection = null
+            update(latest)
+        }
         const analysis = current
         if (!analysis) return
         return {
             signal: analysis.controller.signal,
+            cancel() {
+                if (current === analysis && !analysis.settled) cancel()
+            },
             async prepare(signal, onProgress, selections) {
                 signal.throwIfAborted()
                 analysis.controller.signal.throwIfAborted()
@@ -162,5 +199,5 @@ export function createContentAnalysis() {
         }
     }
 
-    return { update, review, clear }
+    return { update, review, cancel, clear }
 }

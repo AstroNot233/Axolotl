@@ -137,6 +137,11 @@ export const sourceResource = (source: SourceId, projectId: string): ResourceRef
     project: { source, projectId },
 })
 
+/**
+ * Invokes a cancellable resource command. Aborting rejects at once and asks the
+ * native side to stop; a result that still arrives later only has its session
+ * released, so nothing it opened is left without an owner.
+ */
 export async function resourceRequest<T>(
     command: string,
     args: Record<string, unknown>,
@@ -144,23 +149,35 @@ export async function resourceRequest<T>(
 ): Promise<T> {
     signal?.throwIfAborted()
     const requestId = crypto.randomUUID()
-    const cancel = () => {
-        void invoke('plugin:axolotl-resources|resource_cancel', { requestId }).catch(() => {})
+    const request = invoke<T>(`plugin:axolotl-resources|${command}`, {
+        ...args,
+        requestId,
+    })
+    if (!signal) return await request
+    const releaseLate = (result: T) => {
+        if (command !== 'resource_export_scan') return
+        const sessionId = (result as { sessionId?: string } | null)?.sessionId
+        if (sessionId) void resourceExportClose(sessionId).catch(() => {})
     }
-    signal?.addEventListener('abort', cancel, { once: true })
-    try {
-        const result = await invoke<T>(`plugin:axolotl-resources|${command}`, {
-            ...args,
-            requestId,
-        })
-        if (signal?.aborted && command === 'resource_export_scan') {
-            const sessionId = (result as { sessionId?: string })?.sessionId
-            if (sessionId) await resourceExportClose(sessionId).catch(() => {})
+    let stop = () => {}
+    const aborted = new Promise<never>((_, reject) => {
+        const cancel = () => {
+            void invoke('plugin:axolotl-resources|resource_cancel', { requestId }).catch(() => {})
+            void request.then(releaseLate, () => {})
+            reject(signal.reason)
         }
-        signal?.throwIfAborted()
+        signal.addEventListener('abort', cancel, { once: true })
+        stop = () => signal.removeEventListener('abort', cancel)
+    })
+    try {
+        const result = await Promise.race([request, aborted])
+        if (signal.aborted) {
+            releaseLate(result)
+            signal.throwIfAborted()
+        }
         return result
     } finally {
-        signal?.removeEventListener('abort', cancel)
+        stop()
     }
 }
 export function resourceSearch(

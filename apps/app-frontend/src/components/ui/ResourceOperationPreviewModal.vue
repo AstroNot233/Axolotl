@@ -302,6 +302,8 @@ const needsWorld = computed(
         ) ?? false,
 )
 const queueing = ref(false)
+/** Only the queue request writes; analysis and plan revisions before it stay cancellable. */
+const committing = ref(false)
 const closing = ref(false)
 const queueFailed = ref(false)
 const dependenciesIgnored = ref(false)
@@ -758,7 +760,7 @@ async function revise(decision: ResourcePlanDecision) {
         decision.kind === 'ignoreDependencies' || dependenciesIgnored.value,
     )
 }
-function hide() {
+function release() {
     generation++
     input.value?.analysis?.signal.removeEventListener('abort', invalidateAnalysis)
     controller?.abort()
@@ -766,9 +768,20 @@ function hide() {
     resolveShow = null
     resolve?.(null)
 }
+function hide() {
+    const analysis =
+        !closing.value && busy.value && !committing.value ? input.value?.analysis : null
+    release()
+    // Leaving during analysis stops the cart's analysis too; the selection itself is kept.
+    analysis?.cancel()
+    if (!committing.value) {
+        busy.value = false
+        queueing.value = false
+    }
+}
 function show(value: OperationInput): Promise<InstallJobSnapshot | null> {
     if (queueing.value) return Promise.resolve(null)
-    hide()
+    release()
     input.value = value
     plan.value = null
     progressNodes.value = new Map()
@@ -972,6 +985,7 @@ async function submit(retryStale: boolean) {
             return
         }
         busy.value = true
+        committing.value = true
         const job = await resourceQueuePlan(reviewed.id, reviewed.revision)
         if (generation !== current) return
         const skippedRoots = new Set(
@@ -1017,6 +1031,7 @@ async function submit(retryStale: boolean) {
             queueing.value = false
             closing.value = false
         }
+        committing.value = false
     }
 }
 async function refresh() {
@@ -1087,10 +1102,9 @@ async function showInstallSelection(value: Parameters<typeof showInstall>[0]) {
     return job ? { job, activeRoots: [...submittedRoots.value] } : null
 }
 async function cancel() {
-    if (queueing.value) return
+    if (committing.value || closing.value) return
     hide()
     const current = generation
-    busy.value = false
     plan.value = null
     input.value = null
     progressNodes.value = new Map()
@@ -1106,7 +1120,7 @@ defineExpose({ show, showInstall, showInstallSelection, cancel })
         ref="modal"
         :header="formatMessage(messages.header)"
         :on-hide="hide"
-        :disable-close="(busy || queueing) && !closing"
+        :disable-close="committing && !closing"
         scrollable
         width="min(42rem, 90vw)"
     >
@@ -1355,7 +1369,7 @@ defineExpose({ show, showInstall, showInstallSelection, cancel })
         </div>
         <template #actions>
             <div class="flex items-center justify-end gap-2">
-                <Button :disabled="busy || queueing" @click="modal?.hide()">{{
+                <Button :disabled="committing || closing" @click="cancel">{{
                     formatMessage(messages.cancel)
                 }}</Button>
                 <Button
