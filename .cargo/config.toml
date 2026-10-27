@@ -1,7 +1,3 @@
-# Windows has stack overflows when calling from Tauri, so we increase the default stack size used by the compiler
-[target."cfg(windows)"]
-rustflags = ["-C", "link-args=/STACK:16777220"]
-
 [env]
 # The linker flag above only covers the main thread, and the launcher raises
 # the stack again for its tokio runtime (apps/app/src/main.rs). Test threads
@@ -15,6 +11,10 @@ rustflags = ["-C", "link-args=/STACK:16777220"]
 # from the environment so the fingerprint is identical on every machine; a value
 # that varies would keep build scripts permanently dirty.
 RUST_MIN_STACK = "16777216"
+
+# Windows has stack overflows when calling from Tauri, so we increase the default stack size used by the compiler
+[target."cfg(windows)"]
+rustflags = ["-C", "link-args=/STACK:16777220"]
 
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld"
