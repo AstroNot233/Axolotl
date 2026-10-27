@@ -122,6 +122,8 @@ defineExpose({
     },
 })
 
+let refreshPending = false
+
 /** Discovery refreshes keep the rows already shown and report no errors of their own. */
 async function loadInstallOptions(quiet) {
     const input = { version: lastRequestedVersion.value }
@@ -129,9 +131,21 @@ async function loadInstallOptions(quiet) {
     if (found) chosenInstallOptions.value = found
     else if (!quiet && lookup.input.value === input && lookup.status.value === 'error')
         handleError(lookup.error.value)
+    if (refreshPending && lookup.input.value === input) {
+        refreshPending = false
+        await loadInstallOptions(true)
+    }
 }
 
+/**
+ * A discovery event during a lookup the user started waits for that lookup
+ * instead of replacing it, so its result and error are not lost.
+ */
 function refreshInstallOptions() {
+    if (lookup.running.value) {
+        refreshPending = true
+        return
+    }
     return loadInstallOptions(true)
 }
 

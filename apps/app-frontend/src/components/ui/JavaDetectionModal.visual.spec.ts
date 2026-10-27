@@ -2,12 +2,14 @@ import { config, flushPromises, mount } from '@vue/test-utils'
 import { expect, it, vi } from 'vitest'
 import { defineComponent, h, ref } from 'vue'
 
+import { java_discovery_listener } from '@/helpers/events'
 import { find_filtered_jres } from '@/helpers/jre.js'
 
 import JavaDetectionModal from './JavaDetectionModal.vue'
 
 config.global.directives.tooltip = {}
 
+const handleError = vi.fn()
 vi.mock('@/helpers/jre.js', () => ({ find_filtered_jres: vi.fn() }))
 vi.mock('@/helpers/events', () => ({ java_discovery_listener: vi.fn(async () => () => {}) }))
 vi.mock('@/helpers/analytics', () => ({ trackEvent: vi.fn() }))
@@ -48,7 +50,7 @@ vi.mock('@modrinth/ui', () => ({
         cancelButton: { defaultMessage: 'Cancel' },
     },
     defineMessages: (messages: unknown) => messages,
-    injectNotificationManager: () => ({ handleError: vi.fn() }),
+    injectNotificationManager: () => ({ handleError }),
     useVIntl: () => ({
         formatMessage: (message: { defaultMessage: string }) => message.defaultMessage,
     }),
@@ -98,6 +100,35 @@ it('does not let a slower lookup for an earlier version replace the current one'
         await flushPromises()
         expect(wrapper.text()).toContain('C:/java21/bin/javaw.exe')
         expect(wrapper.text()).not.toContain('C:/java8/bin/javaw.exe')
+    } finally {
+        wrapper.unmount()
+    }
+})
+
+it('lets a discovery event wait for the lookup the user started instead of replacing it', async () => {
+    let discovered!: () => void
+    vi.mocked(java_discovery_listener).mockImplementationOnce(async (listener) => {
+        discovered = listener as () => void
+        return () => {}
+    })
+    const lookup = deferred<{ path: string; version: string }[]>()
+    vi.mocked(find_filtered_jres)
+        .mockReset()
+        .mockReturnValueOnce(lookup.promise.then(() => Promise.reject(new Error('scan failed'))))
+        .mockResolvedValueOnce([{ path: 'C:/java17/bin/javaw.exe', version: '17' }])
+    handleError.mockClear()
+    const wrapper = mount(JavaDetectionModal)
+    try {
+        void wrapper.vm.show(17, null)
+        await flushPromises()
+        discovered()
+        await flushPromises()
+        expect(find_filtered_jres).toHaveBeenCalledOnce()
+        lookup.resolve([])
+        await flushPromises()
+        expect(handleError).toHaveBeenCalledOnce()
+        expect(find_filtered_jres).toHaveBeenCalledTimes(2)
+        expect(wrapper.text()).toContain('C:/java17/bin/javaw.exe')
     } finally {
         wrapper.unmount()
     }
