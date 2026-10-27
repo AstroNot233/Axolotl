@@ -218,3 +218,27 @@ fn curseforge_runtime_handlers_match_the_build_manifest() {
          build-time manifest"
     );
 }
+
+#[test]
+fn mod_translation_runtime_handlers_match_the_build_manifest() {
+    let runtime =
+        runtime_commands(include_str!("../src/api/mod_translation.rs"));
+    let manifest =
+        manifest_commands(include_str!("../build.rs"), "mod-translation");
+    assert_eq!(
+        runtime, manifest,
+        "mod translation commands must be identical in the runtime handler \
+         and the build-time manifest"
+    );
+    assert!(runtime.contains("mod_translation_cancel_analysis"));
+    let capabilities: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/plugins.json"))
+            .unwrap();
+    assert!(
+        capabilities["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|permission| permission == "mod-translation:default")
+    );
+}

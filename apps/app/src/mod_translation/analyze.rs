@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1345,14 +1346,41 @@ pub fn replace_class_utf8(
 
 /// 计算输入 jar 的 sha256（断点匹配用）。
 pub fn input_file_hash(path: &Path) -> Result<String> {
+    input_file_hash_cancellable(path, &AtomicBool::new(false))
+}
+
+/// 同 [`input_file_hash`]，每读完一块数据检查一次 `cancel`。
+pub fn input_file_hash_cancellable(
+    path: &Path,
+    cancel: &AtomicBool,
+) -> Result<String> {
     let mut file = std::fs::File::open(path).map_err(|error| {
         TranslateError::io("unable to open input JAR for hashing", error)
     })?;
     let mut hasher = Sha256::new();
-    std::io::copy(&mut file, &mut hasher).map_err(|error| {
-        TranslateError::io("unable to hash input JAR", error)
-    })?;
+    let mut buffer = vec![0; 1 << 20];
+    loop {
+        check_analysis_cancel(cancel)?;
+        let read =
+            std::io::Read::read(&mut file, &mut buffer).map_err(|error| {
+                TranslateError::io("unable to hash input JAR", error)
+            })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn check_analysis_cancel(cancel: &AtomicBool) -> Result<()> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(TranslateError::new(
+            TranslateErrorCode::Cancelled,
+            "analysis was canceled",
+        ));
+    }
+    Ok(())
 }
 
 /// 完整解包 + 分析，返回 (工作区目录, 分析结果)。
@@ -1360,6 +1388,43 @@ pub fn extract_and_inspect(
     input_path: &Path,
     workspace_root: &Path,
 ) -> Result<(PathBuf, JarInspection)> {
+    extract_and_inspect_cancellable(
+        input_path,
+        workspace_root,
+        &AtomicBool::new(false),
+    )
+}
+
+/// 同 [`extract_and_inspect`]，在各个分析阶段之间检查 `cancel`；
+/// 取消时删除已解包的工作区。
+pub fn extract_and_inspect_cancellable(
+    input_path: &Path,
+    workspace_root: &Path,
+    cancel: &AtomicBool,
+) -> Result<(PathBuf, JarInspection)> {
+    let mut directory = None;
+    let result = extract_and_inspect_inner(
+        input_path,
+        workspace_root,
+        cancel,
+        &mut directory,
+    );
+    if result.is_err()
+        && cancel.load(Ordering::Relaxed)
+        && let Some(directory) = directory
+    {
+        let _ = std::fs::remove_dir_all(directory);
+    }
+    result
+}
+
+fn extract_and_inspect_inner(
+    input_path: &Path,
+    workspace_root: &Path,
+    cancel: &AtomicBool,
+    created: &mut Option<PathBuf>,
+) -> Result<(PathBuf, JarInspection)> {
+    check_analysis_cancel(cancel)?;
     let absolute_input = input_path.canonicalize().map_err(|error| {
         TranslateError::io("unable to resolve input JAR path", error)
     })?;
@@ -1373,15 +1438,18 @@ pub fn extract_and_inspect(
             TranslateError::io("unable to create job workspace", error)
         })?;
     let directory_path = directory.keep();
+    *created = Some(directory_path.clone());
 
     let extraction = jar::extract_archive(
         &absolute_input,
         &directory_path,
         &ExtractionLimits::default(),
     )?;
+    check_analysis_cancel(cancel)?;
 
     let metadata = detect_metadata(&directory_path);
     let standard = find_standard_language_sources(&directory_path)?;
+    check_analysis_cancel(cancel)?;
     let standard_set: HashSet<String> = standard
         .iter()
         .map(|source| source.source_path.to_ascii_lowercase())
@@ -1393,14 +1461,18 @@ pub fn extract_and_inspect(
         .chain(structured.iter())
         .map(|source| source.source_path.to_ascii_lowercase())
         .collect();
+    check_analysis_cancel(cancel)?;
     let localized =
         discover_localized_text_sources(&directory_path, &known_set)?;
+    check_analysis_cancel(cancel)?;
     let mut language_sources = standard;
     language_sources.extend(structured);
     language_sources.extend(localized);
     let resource_coverage =
         build_resource_coverage(&directory_path, &language_sources)?;
+    check_analysis_cancel(cancel)?;
     let class_candidates = discover_class_candidates(&directory_path)?;
+    check_analysis_cancel(cancel)?;
     let inferred_mod_ids = language_sources
         .iter()
         .map(|source| source.namespace.clone())

@@ -1190,6 +1190,7 @@ fn main() {
                         "mod_translation_analyze",
                         "mod_translation_translate",
                         "mod_translation_cancel",
+                        "mod_translation_cancel_analysis",
                         "mod_translation_list_tasks",
                         "mod_translation_get_task",
                         "mod_translation_dismiss_task",

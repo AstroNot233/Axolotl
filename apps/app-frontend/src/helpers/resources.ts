@@ -1,5 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 
+import { abortable } from './abortable'
 import type { InstallJobSnapshot } from './install'
 
 export type SourceId = 'modrinth' | 'curseforge' | 'mcarchive' | 'planet_minecraft'
@@ -153,32 +154,20 @@ export async function resourceRequest<T>(
         ...args,
         requestId,
     })
-    if (!signal) return await request
     const releaseLate = (result: T) => {
         if (command !== 'resource_export_scan') return
         const sessionId = (result as { sessionId?: string } | null)?.sessionId
         if (sessionId) void resourceExportClose(sessionId).catch(() => {})
     }
-    let stop = () => {}
-    const aborted = new Promise<never>((_, reject) => {
-        const cancel = () => {
-            void invoke('plugin:axolotl-resources|resource_cancel', { requestId }).catch(() => {})
-            void request.then(releaseLate, () => {})
-            reject(signal.reason)
-        }
-        signal.addEventListener('abort', cancel, { once: true })
-        stop = () => signal.removeEventListener('abort', cancel)
+    const result = await abortable(request, signal, (late) => {
+        void invoke('plugin:axolotl-resources|resource_cancel', { requestId }).catch(() => {})
+        void late.then(releaseLate, () => {})
     })
-    try {
-        const result = await Promise.race([request, aborted])
-        if (signal.aborted) {
-            releaseLate(result)
-            signal.throwIfAborted()
-        }
-        return result
-    } finally {
-        stop()
+    if (signal?.aborted) {
+        releaseLate(result)
+        signal.throwIfAborted()
     }
+    return result
 }
 export function resourceSearch(
     query: ResourceSearchQuery,

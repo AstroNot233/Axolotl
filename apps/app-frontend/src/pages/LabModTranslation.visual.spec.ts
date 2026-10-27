@@ -83,7 +83,7 @@ it('does not attach the analysis or error of one file to the file picked after i
         const analyze = () =>
             wrapper.findAll('button').find((button) => button.text().includes('Analy'))!
         await analyze().trigger('click')
-        expect(analyzeMod).toHaveBeenLastCalledWith('C:/mods/a.jar')
+        expect(analyzeMod).toHaveBeenLastCalledWith('C:/mods/a.jar', expect.any(AbortSignal))
 
         store.inputPath = 'C:/mods/b.jar'
         await flushPromises()
@@ -92,9 +92,11 @@ it('does not attach the analysis or error of one file to the file picked after i
         expect(store.analysis).toBeNull()
 
         await analyze().trigger('click')
-        expect(analyzeMod).toHaveBeenLastCalledWith('C:/mods/b.jar')
+        expect(analyzeMod).toHaveBeenLastCalledWith('C:/mods/b.jar', expect.any(AbortSignal))
+        const bSignal = vi.mocked(analyzeMod).mock.calls[1][1]!
         store.inputPath = 'C:/mods/c.jar'
         await flushPromises()
+        expect(bSignal.aborted).toBe(true)
         second.reject(new Error('b.jar is broken'))
         await flushPromises()
         expect(handleError).not.toHaveBeenCalled()

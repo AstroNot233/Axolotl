@@ -23,7 +23,7 @@ const { inputPath, analysis, providerId, modelId, options, jobs } = storeToRefs(
 // or leaving the page abandons that analysis, including its error.
 const modAnalysis = createAnalysisTask({
     label: 'mod-translation-analysis',
-    run: ({ path }: { path: string }) => analyzeMod(path),
+    run: ({ path }: { path: string }, { signal }) => analyzeMod(path, signal),
 })
 const analyzing = modAnalysis.running
 const starting = ref(false)
