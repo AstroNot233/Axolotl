@@ -1,4 +1,7 @@
 {
+  "app.drop.minecraft-root-added": {
+    "message": "Minecraft folder added"
+  },
   "app.account.modrinth-account": {
     "message": "Modrinth account"
   },

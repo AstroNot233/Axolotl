@@ -1,4 +1,7 @@
 {
+  "app.drop.minecraft-root-added": {
+    "message": "已添加 Minecraft 文件夹"
+  },
   "app.resources.operation.review-issues": {
     "message": "安装问题详情"
   },

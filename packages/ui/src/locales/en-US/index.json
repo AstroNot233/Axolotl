@@ -1,4 +1,16 @@
 {
+  "drop.confirm.minecraft-root.title": {
+    "defaultMessage": "Add .minecraft folder"
+  },
+  "drop.confirm.minecraft-root.prompt": {
+    "defaultMessage": "This looks like a .minecraft folder. Would you like to add it directly to the launcher?"
+  },
+  "drop.confirm.minecraft-root.add": {
+    "defaultMessage": "Yes, add folder"
+  },
+  "drop.confirm.minecraft-root.import": {
+    "defaultMessage": "No, import instances"
+  },
   "action.no-permission": {
     "defaultMessage": "You do not have permission."
   },
