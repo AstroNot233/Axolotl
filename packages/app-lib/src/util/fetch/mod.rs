@@ -1,10 +1,16 @@
 //! Functions for fetching information from the Internet
 mod model;
+mod throttle;
 pub(crate) use self::model::*;
 pub use self::model::{
     ContentValidation, DownloadMeta, DownloadReason, DownloadRequest,
     DownloadResult, DownloadRoute, DownloadRouteSource, FetchProgressFn,
     Integrity, ProxyPolicy, ResourceClass,
+};
+pub(crate) use self::throttle::*;
+pub use self::throttle::{
+    FetchSemaphore, IoSemaphore, clear_download_dns_host_override,
+    set_download_dns_host_override,
 };
 pub use super::download::constants::DOWNLOAD_META_HEADER;
 #[cfg(test)]
@@ -83,12 +89,11 @@ use crate::util::download::constants::{
     FETCH_V3_FRIEND, FETCH_V3_FRIENDS, FETCH_V3_NOTIFICATION,
     FILE_H2_KEEPALIVE, FILE_TCP_KEEPALIVE, FILE_TRANSFER_CONNECT_TIMEOUT,
     FILE_TRANSFER_FIRST_BYTE_TIMEOUT, FILE_TRANSFER_READ_TIMEOUT,
-    H2_FALLBACK_TTL, H2_SLOW_FALLBACK_TTL, HTTPS_SCHEME,
-    INITIAL_SEGMENT_CONCURRENCY, JOB_PROBE_WINDOW, MAX_FAILURE_COOLDOWN,
-    MAX_GLOBAL_TAIL_HEDGES, MAX_SEGMENT_CONCURRENCY, MAX_TAIL_HEDGES_PER_FILE,
-    MAX_TASK_PROBE_STATES, MCIM_BASE_URL, METADATA_ATTEMPT_BUDGET,
-    METADATA_HEDGE_DELAY, METADATA_REQUEST_TIMEOUT, MIN_SEGMENT_SIZE,
-    MODRINTH_API_HOST, MODRINTH_DATA_PREFIX,
+    H2_FALLBACK_TTL, HTTPS_SCHEME, INITIAL_SEGMENT_CONCURRENCY,
+    JOB_PROBE_WINDOW, MAX_FAILURE_COOLDOWN, MAX_SEGMENT_CONCURRENCY,
+    MAX_TAIL_HEDGES_PER_FILE, MAX_TASK_PROBE_STATES, MCIM_BASE_URL,
+    METADATA_ATTEMPT_BUDGET, METADATA_HEDGE_DELAY, METADATA_REQUEST_TIMEOUT,
+    MIN_SEGMENT_SIZE, MODRINTH_API_HOST, MODRINTH_DATA_PREFIX,
     NATIVE_DOWNLOAD_SOURCE_HAS_BEEN_RETIRED, PARTIAL_FILE_SUFFIX,
     RANGE_IDLE_RECONNECT_TIMEOUT, REASSIGNABLE_FIRST_BYTE_TIMEOUT,
     RESOURCE_WAIT_TIMEOUT, RETIRED_SOURCES_MEDIA_FORGECDN_NET, RETRY_AFTER_CAP,
@@ -670,103 +675,6 @@ fn infer_resource_class(url: &str) -> ResourceClass {
         | FETCH_MEDIAFILEZ_FORGECDN_NET => ResourceClass::CurseForge,
         _ => ResourceClass::Other,
     }
-}
-
-#[derive(Debug)]
-pub struct IoSemaphore(pub Semaphore);
-#[derive(Debug)]
-pub struct FetchSemaphore(pub Semaphore);
-
-pub(crate) static DOWNLOAD_DNS_RESOLVER: LazyLock<Arc<DownloadDnsResolver>> =
-    LazyLock::new(|| Arc::new(DownloadDnsResolver::default()));
-
-/// Forces download requests to resolve `host` through `resolver_host` while
-/// preserving `host` in the URL, HTTP Host header, and TLS SNI.
-#[allow(dead_code)]
-pub fn set_download_dns_host_override(
-    host: &str,
-    resolver_host: &str,
-) -> crate::Result<()> {
-    DOWNLOAD_DNS_RESOLVER
-        .set_host_override(host, resolver_host)
-        .map_err(|error| crate::ErrorKind::InputError(error.to_string()).into())
-}
-
-#[allow(dead_code)]
-pub fn clear_download_dns_host_override(host: &str) -> crate::Result<()> {
-    DOWNLOAD_DNS_RESOLVER
-        .clear_host_override(host)
-        .map_err(|error| crate::ErrorKind::InputError(error.to_string()).into())
-}
-static TAIL_HEDGE_SEMAPHORE: LazyLock<Semaphore> =
-    LazyLock::new(|| Semaphore::new(MAX_GLOBAL_TAIL_HEDGES));
-static FILE_VALIDATION_SEMAPHORE: LazyLock<Semaphore> =
-    LazyLock::new(|| Semaphore::new(FILE_VALIDATION_CONCURRENCY));
-static ROUTE_PROBE_SEMAPHORE: LazyLock<FetchSemaphore> =
-    LazyLock::new(|| FetchSemaphore(Semaphore::new(ROUTE_PROBE_CONCURRENCY)));
-
-pub(crate) async fn acquire_native_validation_permit()
--> crate::Result<Option<SemaphorePermit<'static>>> {
-    Ok(Some(FILE_VALIDATION_SEMAPHORE.acquire().await?))
-}
-
-static H2_FALLBACK_AUTHORITIES: LazyLock<Mutex<HashMap<String, Instant>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-static HTTP1_PREFERENCE_AUTHORITIES: LazyLock<Mutex<HashMap<String, Instant>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-pub(crate) fn authority_uses_http1_fallback(authority: &str) -> bool {
-    authority_uses_http1_fallback_for(authority, ProxyPolicy::System)
-}
-
-pub(crate) fn authority_uses_http1_fallback_for(
-    authority: &str,
-    proxy: ProxyPolicy,
-) -> bool {
-    let authority =
-        super::download::proxy_context::authority_key(authority, proxy);
-    {
-        let mut preferences = HTTP1_PREFERENCE_AUTHORITIES.lock();
-        preferences.retain(|_, until| *until > Instant::now());
-        if preferences.contains_key(&authority) {
-            return true;
-        }
-    }
-    let mut fallbacks = H2_FALLBACK_AUTHORITIES.lock();
-    match fallbacks.get(&authority) {
-        Some(until) if *until > Instant::now() => true,
-        Some(_) => {
-            fallbacks.remove(&authority);
-            false
-        }
-        None => false,
-    }
-}
-
-pub(crate) fn record_authority_h2_failure(authority: &str) {
-    record_authority_h2_failure_for(authority, ProxyPolicy::System);
-}
-
-pub(crate) fn record_authority_h2_failure_for(
-    authority: &str,
-    proxy: ProxyPolicy,
-) {
-    let now = Instant::now();
-    let mut fallbacks = H2_FALLBACK_AUTHORITIES.lock();
-    fallbacks.retain(|_, until| *until > now);
-    fallbacks.insert(
-        super::download::proxy_context::authority_key(authority, proxy),
-        now + H2_FALLBACK_TTL,
-    );
-}
-
-fn prefer_measured_http1(authority: &str, proxy: ProxyPolicy) {
-    let mut preferences = HTTP1_PREFERENCE_AUTHORITIES.lock();
-    preferences.retain(|_, until| *until > Instant::now());
-    preferences.insert(
-        super::download::proxy_context::authority_key(authority, proxy),
-        Instant::now() + H2_SLOW_FALLBACK_TTL,
-    );
 }
 
 pub(crate) fn is_h2_protocol_failure(error: &reqwest::Error) -> bool {
@@ -3309,24 +3217,6 @@ fn route_segmented_concurrency_cap(
     segmented_concurrency_cap(available_permits)
         .min(fair_share)
         .min(crate::util::download::native_budget::capacity(route))
-}
-
-pub(crate) fn configured_semaphore_limit(semaphore: &FetchSemaphore) -> usize {
-    if let Some(state) = crate::State::get_if_initialized()
-        && (std::ptr::eq(
-            &raw const state.fetch_semaphore.0,
-            &raw const semaphore.0,
-        ) || std::ptr::eq(
-            &raw const state.download_semaphore.0,
-            &raw const semaphore.0,
-        ) || std::ptr::eq(
-            &raw const state.api_semaphore.0,
-            &raw const semaphore.0,
-        ))
-    {
-        return state.download_concurrency();
-    }
-    semaphore.0.available_permits().max(1)
 }
 
 async fn acquire_initial_segment_permits<'a>(
