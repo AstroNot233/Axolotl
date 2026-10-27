@@ -54,8 +54,6 @@ pub use self::throttle::{
 pub use self::transfer::download_to_path;
 pub(crate) use self::transfer::*;
 pub use super::download::constants::DOWNLOAD_META_HEADER;
-#[cfg(test)]
-use super::download::constants::MAX_REDIRECT_LOCATION_BYTES;
 use super::download::modrinth_redirect::is_official_redirect as is_official_modrinth_cdn_redirect;
 #[cfg(test)]
 use super::download::modrinth_redirect::repair_official_redirect as repair_official_cdn_redirect;
@@ -86,15 +84,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::{self, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::{Notify, Semaphore};
 use url::Url;
-
-#[cfg(test)]
-fn is_safe_redirect_location(location: &str) -> bool {
-    location.len() <= MAX_REDIRECT_LOCATION_BYTES && location.is_ascii()
-}
 
 pub(crate) use super::download::integrity::{
     compute_file_integrity, is_integrity_error, validate_file_content,
@@ -108,28 +100,7 @@ use super::download::route_health::{
     ROUTE_HEALTH, ResourceFamily, RouteHealth,
 };
 
+/// Set while a benchmark runs, so the client and the segment scheduler skip
+/// deadline enforcement the measured path would never meet.
 #[cfg(test)]
-pub(crate) async fn download_endpoint_fixture(
-    request: DownloadRequest,
-    destination: &Path,
-    semaphore: &FetchSemaphore,
-) -> crate::Result<DownloadResult> {
-    download_to_path_inner(request, destination, semaphore, None).await
-}
-
-#[cfg(test)]
-tokio::task_local! { static BENCHMARK_TIMING: (); }
-
-#[cfg(test)]
-pub(crate) async fn download_benchmark_fixture(
-    request: DownloadRequest,
-    destination: &Path,
-    semaphore: &FetchSemaphore,
-) -> crate::Result<DownloadResult> {
-    BENCHMARK_TIMING
-        .scope(
-            (),
-            download_to_path_inner(request, destination, semaphore, None),
-        )
-        .await
-}
+tokio::task_local! { pub(crate) static BENCHMARK_TIMING: (); }

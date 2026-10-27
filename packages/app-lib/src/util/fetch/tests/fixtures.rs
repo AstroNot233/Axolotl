@@ -1,6 +1,8 @@
 //! Fixtures shared by the fetch tests.
 
+use super::super::super::download::constants::MAX_REDIRECT_LOCATION_BYTES;
 use super::super::*;
+use std::path::Path;
 use std::time::Duration;
 
 pub(super) static RANGE_SPLITTING_TEST_LOCK: LazyLock<AsyncMutex<()>> =
@@ -399,4 +401,31 @@ pub(super) async fn test_download(
         None,
     )
     .await
+}
+
+/// A redirect location the download will not follow: longer than the cap the
+/// client allows, or outside ASCII.
+pub(super) fn is_safe_redirect_location(location: &str) -> bool {
+    location.len() <= MAX_REDIRECT_LOCATION_BYTES && location.is_ascii()
+}
+
+pub(super) async fn download_endpoint_fixture(
+    request: DownloadRequest,
+    destination: &Path,
+    semaphore: &FetchSemaphore,
+) -> crate::Result<DownloadResult> {
+    download_to_path_inner(request, destination, semaphore, None).await
+}
+
+pub(super) async fn download_benchmark_fixture(
+    request: DownloadRequest,
+    destination: &Path,
+    semaphore: &FetchSemaphore,
+) -> crate::Result<DownloadResult> {
+    BENCHMARK_TIMING
+        .scope(
+            (),
+            download_to_path_inner(request, destination, semaphore, None),
+        )
+        .await
 }

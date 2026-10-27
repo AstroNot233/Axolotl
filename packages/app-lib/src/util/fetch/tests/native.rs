@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use super::super::super::download::constants::MAX_REDIRECT_LOCATION_BYTES;
 use super::super::*;
 use super::fixtures::*;
 
