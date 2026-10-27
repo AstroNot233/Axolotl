@@ -168,3 +168,24 @@ it('does not offer to share the previous log while the selected one is loading',
         wrapper.unmount()
     }
 })
+
+it('loads the text of the log that a list refresh puts at the selected position', async () => {
+    vi.clearAllMocks()
+    mocks.getHistoricalLogs.mockResolvedValueOnce([log('a.log'), log('b.log')])
+    const wrapper = await mountLogs()
+    try {
+        const manager = mocks.manager!
+        mocks.getOutput.mockResolvedValueOnce('a text')
+        manager.activeLogSourceIndex.value = 1
+        await flushPromises()
+        expect(mocks.getOutput).toHaveBeenLastCalledWith('instance', 'InfoLog', 'a.log')
+        mocks.getHistoricalLogs.mockResolvedValueOnce([log('b.log')])
+        mocks.getOutput.mockResolvedValueOnce('b text')
+        mocks.processListener?.({ instance_id: 'instance', event: 'finished' })
+        await flushPromises()
+        expect(mocks.getOutput).toHaveBeenLastCalledWith('instance', 'InfoLog', 'b.log')
+        expect(mocks.append).toHaveBeenLastCalledWith('b text')
+    } finally {
+        wrapper.unmount()
+    }
+})

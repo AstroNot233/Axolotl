@@ -212,8 +212,16 @@ provideConsoleManager({
     onExportCrashContext: exportCrashContext,
 })
 
-watch(selectedLogIndex, async (newIndex) => {
-    const log = newIndex === 0 ? undefined : filteredLogs.value[newIndex]
+const selectedLogKey = computed(() => {
+    if (selectedLogIndex.value === 0) return null
+    const log = filteredLogs.value[selectedLogIndex.value]
+    return log ? `${log.log_type}:${log.filename}` : null
+})
+
+// A list refresh can put another log at the selected index, so the text
+// follows the selected log itself rather than its position.
+watch(selectedLogKey, async (key) => {
+    const log = key === null ? undefined : filteredLogs.value[selectedLogIndex.value]
     if (!log) {
         stopContentRequest()
         return
