@@ -6,6 +6,7 @@ use serde_json::{Map, Value, json};
 mod backups;
 mod launch;
 mod resources;
+mod worlds;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Access {
@@ -56,6 +57,9 @@ fn entry(
                                     | "instance_launch"
                                     | "install_job_retry"
                                     | "install_job_resume"
+                                    | "server_ping"
+                                    | "instance_join_server"
+                                    | "instance_launch_world"
                             ),
                     ),
             ),
@@ -379,6 +383,7 @@ pub(crate) fn entries() -> Vec<Entry> {
     entries.extend(resources::entries());
     entries.extend(backups::entries());
     entries.extend(launch::entries());
+    entries.extend(worlds::entries());
     entries
 }
 
@@ -445,6 +450,10 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
                 && (rule["format"] != "log-filename"
                     || crate::log_text::valid_filename(s))
                 && (rule["format"] != "relative-path" || valid_relative_path(s))
+                && (rule["format"] != "world-id"
+                    || crate::world_input::valid_world_id(s))
+                && (rule["format"] != "server-address"
+                    || crate::world_input::valid_address(s))
         }),
         Some("integer") => value.as_u64().is_some_and(|n| {
             rule["minimum"].as_u64().is_none_or(|min| n >= min)

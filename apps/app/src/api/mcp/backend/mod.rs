@@ -7,6 +7,7 @@ mod logs;
 mod metadata;
 mod queries;
 mod resources;
+mod worlds;
 
 use futures::future::BoxFuture;
 use launcher_mcp::{
@@ -29,6 +30,23 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::WorldList { .. }
+                | Command::WorldGet { .. }
+                | Command::WorldRename { .. }
+                | Command::WorldSetDisplayStatus { .. }
+                | Command::WorldUpdateSettings { .. }
+                | Command::WorldBackup { .. }
+                | Command::WorldDelete { .. }
+                | Command::InstanceLaunchWorld { .. }
+                | Command::InstanceJoinServer { .. }
+                | Command::ServerEntryList { .. }
+                | Command::ServerEntryAdd { .. }
+                | Command::ServerEntryUpdate { .. }
+                | Command::ServerEntryRemove { .. }
+                | Command::ServerPing { .. }
+                | Command::InstanceGetProtocolVersion { .. }) => {
+                    worlds::execute(command).await
+                }
                 Command::MetadataListGameVersions {
                     release_type,
                     search,

@@ -186,6 +186,22 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             "content_remove",
             json!({"instance_id":"instance","entry_id":"entry"}),
         ),
+        (
+            "world_backup",
+            json!({"instance_id":"instance","world_id":"save"}),
+        ),
+        (
+            "world_delete",
+            json!({"instance_id":"instance","world_id":"save"}),
+        ),
+        (
+            "instance_launch_world",
+            json!({"instance_id":"instance","world_id":"save","offline_mode":true}),
+        ),
+        (
+            "instance_join_server",
+            json!({"instance_id":"instance","address":"mc.example.com"}),
+        ),
     ];
     for (name, mut args) in cases {
         args["session_id"] = json!(session);
@@ -198,7 +214,7 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             true
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 4);
+    assert_eq!(backend.calls.lock().unwrap().len(), 8);
     assert!(matches!(
         &backend.calls.lock().unwrap()[0],
         Command::ResourcePrepareInstall {

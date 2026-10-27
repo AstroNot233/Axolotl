@@ -42,6 +42,95 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    WorldList {
+        instance_id: String,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    WorldGet {
+        instance_id: String,
+        world_id: String,
+    },
+    WorldRename {
+        instance_id: String,
+        world_id: String,
+        name: String,
+    },
+    WorldSetDisplayStatus {
+        instance_id: String,
+        world_id: String,
+        status: WorldDisplay,
+    },
+    WorldUpdateSettings {
+        instance_id: String,
+        world_id: String,
+        #[serde(default)]
+        game_mode: Option<GameMode>,
+        #[serde(default)]
+        difficulty: Option<Difficulty>,
+        #[serde(default)]
+        allow_commands: Option<bool>,
+    },
+    WorldBackup {
+        instance_id: String,
+        world_id: String,
+    },
+    WorldDelete {
+        instance_id: String,
+        world_id: String,
+    },
+    InstanceLaunchWorld {
+        instance_id: String,
+        world_id: String,
+        #[serde(default)]
+        offline_mode: bool,
+    },
+    InstanceJoinServer {
+        instance_id: String,
+        address: String,
+        #[serde(default)]
+        offline_mode: bool,
+    },
+    ServerEntryList {
+        instance_id: String,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    ServerEntryAdd {
+        instance_id: String,
+        name: String,
+        address: String,
+        pack_status: PackPolicy,
+    },
+    ServerEntryUpdate {
+        instance_id: String,
+        index: usize,
+        expected_name: String,
+        expected_address: String,
+        expected_pack_status: PackPolicy,
+        name: String,
+        address: String,
+        pack_status: PackPolicy,
+    },
+    ServerEntryRemove {
+        instance_id: String,
+        index: usize,
+        expected_name: String,
+        expected_address: String,
+        expected_pack_status: PackPolicy,
+    },
+    ServerPing {
+        address: String,
+        #[serde(default)]
+        instance_id: Option<String>,
+    },
+    InstanceGetProtocolVersion {
+        instance_id: String,
+    },
     MetadataListGameVersions {
         #[serde(default)]
         release_type: Option<GameReleaseType>,
@@ -368,8 +457,43 @@ impl Command {
                 | Self::BackupPreviewRestore { .. }
                 | Self::BackupRestore { .. }
                 | Self::BackupDeleteSnapshot { .. }
+                | Self::WorldBackup { .. }
+                | Self::WorldDelete { .. }
+                | Self::InstanceLaunchWorld { .. }
+                | Self::InstanceJoinServer { .. }
         )
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorldDisplay {
+    Normal,
+    Hidden,
+    Favorite,
+}
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GameMode {
+    Survival,
+    Creative,
+    Adventure,
+    Spectator,
+}
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Difficulty {
+    Peaceful,
+    Easy,
+    Normal,
+    Hard,
+}
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackPolicy {
+    Enabled,
+    Disabled,
+    Prompt,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]

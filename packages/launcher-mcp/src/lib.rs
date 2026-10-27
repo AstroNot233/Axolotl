@@ -11,11 +11,13 @@ mod scoped;
 mod server;
 mod session;
 mod tools;
+pub mod world_input;
 
 pub use backend::{
     Backend, BackendContext, Command, InstallKind, Loader, LogKind,
     ResourceKind, Source, ToolError,
 };
+pub use backend::{Difficulty, GameMode, PackPolicy, WorldDisplay};
 pub use backend::{GameReleaseType, LaunchField, MetadataLoader};
 pub use info::LauncherInfo;
 pub use scoped::ScopedRegistry;

@@ -592,6 +592,14 @@ async fn business_tools_require_approved_transport_scoped_sessions() {
     assert_eq!(tool_error(&client.tool("content_remove", json!({"session_id":control,"instance_id":"instance","entry_id":"entry"})).await), "full_access_required");
     for (name, args) in [
         (
+            "world_delete",
+            json!({"session_id":control,"instance_id":"instance","world_id":"save"}),
+        ),
+        (
+            "server_entry_remove",
+            json!({"session_id":control,"instance_id":"instance","index":0,"expected_name":"Server","expected_address":"localhost","expected_pack_status":"prompt"}),
+        ),
+        (
             "backup_restore",
             json!({"session_id":control,"preview_id":uuid::Uuid::new_v4()}),
         ),
@@ -701,6 +709,44 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             json!({"source":"mcarchive","project_id":"project","release_id":"release"}),
         ),
         ("content_list", json!({"instance_id":"instance"})),
+        ("world_list", json!({"instance_id":"instance"})),
+        (
+            "world_get",
+            json!({"instance_id":"instance","world_id":"My World"}),
+        ),
+        (
+            "world_rename",
+            json!({"instance_id":"instance","world_id":"save","name":"World"}),
+        ),
+        (
+            "world_set_display_status",
+            json!({"instance_id":"instance","world_id":"save","status":"favorite"}),
+        ),
+        (
+            "world_update_settings",
+            json!({"instance_id":"instance","world_id":"save","game_mode":"creative","difficulty":"hard","allow_commands":false}),
+        ),
+        ("server_entry_list", json!({"instance_id":"instance"})),
+        (
+            "server_entry_add",
+            json!({"instance_id":"instance","name":"Server","address":"[::1]:25565","pack_status":"prompt"}),
+        ),
+        (
+            "server_entry_update",
+            json!({"instance_id":"instance","index":0,"expected_name":"Server","expected_address":"localhost","expected_pack_status":"prompt","name":"New","address":"mc.example.com","pack_status":"disabled"}),
+        ),
+        (
+            "server_entry_remove",
+            json!({"instance_id":"instance","index":0,"expected_name":"Server","expected_address":"localhost","expected_pack_status":"prompt"}),
+        ),
+        (
+            "server_ping",
+            json!({"instance_id":"instance","address":"localhost:25565"}),
+        ),
+        (
+            "instance_get_protocol_version",
+            json!({"instance_id":"instance"}),
+        ),
         (
             "metadata_list_game_versions",
             json!({"release_type":"release","search":"1.21","offset":0,"limit":10}),
@@ -773,7 +819,7 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             "{name}: {result}"
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 43);
+    assert_eq!(backend.calls.lock().unwrap().len(), 54);
     assert!(
         backend
             .scopes
@@ -806,6 +852,36 @@ async fn invalid_arguments_are_rejected_before_backend_execution() {
     let client = connect(&server, false, "Validation").await;
     let control = control_id(&client.tool("start_session", json!({})).await);
     let cases = [
+        (
+            "world_get",
+            json!({"instance_id":"id","world_id":"../outside"}),
+        ),
+        (
+            "world_get",
+            json!({"instance_id":"id","world_id":"save:stream"}),
+        ),
+        (
+            "world_update_settings",
+            json!({"instance_id":"id","world_id":"save","game_mode":"invalid"}),
+        ),
+        (
+            "world_update_settings",
+            json!({"instance_id":"id","world_id":"save","seed":"arbitrary"}),
+        ),
+        (
+            "world_set_display_status",
+            json!({"instance_id":"id","world_id":"save","status":"deleted"}),
+        ),
+        ("server_ping", json!({"address":"https://example.com"})),
+        (
+            "server_entry_add",
+            json!({"instance_id":"id","name":"Server","address":"localhost:0","pack_status":"prompt"}),
+        ),
+        ("server_entry_remove", json!({"instance_id":"id","index":0})),
+        (
+            "server_entry_update",
+            json!({"instance_id":"id","index":-1,"expected_name":"Server","expected_address":"localhost","expected_pack_status":"prompt","name":"Server","address":"localhost","pack_status":"prompt"}),
+        ),
         ("metadata_list_game_versions", json!({"release_type":"any"})),
         (
             "metadata_list_loader_versions",
