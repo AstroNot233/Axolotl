@@ -1,3 +1,4 @@
+mod backups;
 mod instances;
 mod jobs;
 mod lifecycle;
@@ -15,6 +16,7 @@ use serde_json::{Value, json};
 #[derive(Default)]
 pub(super) struct LauncherBackend {
     plans: ScopedRegistry<theseus::resources::ResourceOperationPlan>,
+    restores: ScopedRegistry<backups::RestorePreview>,
 }
 
 impl Backend for LauncherBackend {
@@ -25,6 +27,22 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::BackupRepositoryStatus {}
+                | Command::BackupGetConfig { .. }
+                | Command::BackupEnable { .. }
+                | Command::BackupDisable { .. }
+                | Command::BackupSetExclusions { .. }
+                | Command::BackupCreate { .. }
+                | Command::BackupListSnapshots { .. }
+                | Command::BackupListOperations { .. }
+                | Command::BackupGetOperation { .. }
+                | Command::BackupCancel { .. }
+                | Command::BackupPreviewRestore { .. }
+                | Command::BackupGetRestorePreview { .. }
+                | Command::BackupRestore { .. }
+                | Command::BackupDeleteSnapshot { .. }) => {
+                    backups::execute(self, command, context).await
+                }
                 command @ (Command::ResourceListSources {}
                 | Command::ResourceSearch { .. }
                 | Command::ResourceGet { .. }

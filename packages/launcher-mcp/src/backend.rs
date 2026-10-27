@@ -42,6 +42,62 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    BackupRepositoryStatus {},
+    BackupGetConfig {
+        instance_id: String,
+    },
+    BackupEnable {
+        instance_id: String,
+    },
+    BackupDisable {
+        instance_id: String,
+    },
+    BackupSetExclusions {
+        instance_id: String,
+        files: Vec<String>,
+        directories: Vec<String>,
+    },
+    BackupCreate {
+        instance_id: String,
+    },
+    BackupListSnapshots {
+        instance_id: String,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    BackupListOperations {
+        instance_id: String,
+        #[serde(default)]
+        active_only: bool,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    BackupGetOperation {
+        instance_id: String,
+        backup_operation_id: uuid::Uuid,
+    },
+    BackupCancel {
+        instance_id: String,
+        backup_operation_id: uuid::Uuid,
+    },
+    BackupPreviewRestore {
+        instance_id: String,
+        snapshot_id: String,
+    },
+    BackupGetRestorePreview {
+        preview_id: uuid::Uuid,
+    },
+    BackupRestore {
+        preview_id: uuid::Uuid,
+    },
+    BackupDeleteSnapshot {
+        instance_id: String,
+        snapshot_id: String,
+    },
     ResourceListSources {},
     ResourceSearch {
         source: Source,
@@ -228,6 +284,13 @@ impl Command {
                 | Self::ResourceExecutePlan { .. }
                 | Self::ResourceRevisePlan { .. }
                 | Self::ContentRemove { .. }
+                | Self::BackupEnable { .. }
+                | Self::BackupDisable { .. }
+                | Self::BackupSetExclusions { .. }
+                | Self::BackupCreate { .. }
+                | Self::BackupPreviewRestore { .. }
+                | Self::BackupRestore { .. }
+                | Self::BackupDeleteSnapshot { .. }
         )
     }
 }

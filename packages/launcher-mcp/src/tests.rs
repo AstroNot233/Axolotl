@@ -10,6 +10,8 @@ use std::{
     time::Duration,
 };
 
+#[path = "backup_tests.rs"]
+mod backup_tests;
 #[path = "operation_tests.rs"]
 mod operation_tests;
 
@@ -588,6 +590,21 @@ async fn business_tools_require_approved_transport_scoped_sessions() {
         "full_access_required"
     );
     assert_eq!(tool_error(&client.tool("content_remove", json!({"session_id":control,"instance_id":"instance","entry_id":"entry"})).await), "full_access_required");
+    for (name, args) in [
+        (
+            "backup_restore",
+            json!({"session_id":control,"preview_id":uuid::Uuid::new_v4()}),
+        ),
+        (
+            "backup_delete_snapshot",
+            json!({"session_id":control,"instance_id":"instance","snapshot_id":"snapshot"}),
+        ),
+    ] {
+        assert_eq!(
+            tool_error(&client.tool(name, args).await),
+            "full_access_required"
+        );
+    }
     assert_eq!(backend.calls.lock().unwrap().len(), 1);
     assert_eq!(client.tool("instance_rename", json!({"session_id":control,"instance_id":"instance","name":"Name"})).await["result"]["isError"], false);
     assert_eq!(backend.calls.lock().unwrap().len(), 2);
@@ -684,6 +701,28 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             json!({"source":"mcarchive","project_id":"project","release_id":"release"}),
         ),
         ("content_list", json!({"instance_id":"instance"})),
+        ("backup_repository_status", json!({})),
+        ("backup_get_config", json!({"instance_id":"instance"})),
+        (
+            "backup_list_snapshots",
+            json!({"instance_id":"instance","limit":10}),
+        ),
+        (
+            "backup_list_operations",
+            json!({"instance_id":"instance","active_only":true}),
+        ),
+        (
+            "backup_get_operation",
+            json!({"instance_id":"instance","backup_operation_id":uuid::Uuid::new_v4()}),
+        ),
+        (
+            "backup_cancel",
+            json!({"instance_id":"instance","backup_operation_id":uuid::Uuid::new_v4()}),
+        ),
+        (
+            "backup_get_restore_preview",
+            json!({"preview_id":uuid::Uuid::new_v4()}),
+        ),
         (
             "content_set_enabled",
             json!({"instance_id":"instance","entry_id":"entry","enabled":false}),
@@ -705,7 +744,7 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             "{name}: {result}"
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 28);
+    assert_eq!(backend.calls.lock().unwrap().len(), 35);
     assert!(
         backend
             .scopes
@@ -738,6 +777,46 @@ async fn invalid_arguments_are_rejected_before_backend_execution() {
     let client = connect(&server, false, "Validation").await;
     let control = control_id(&client.tool("start_session", json!({})).await);
     let cases = [
+        (
+            "backup_restore",
+            json!({"preview_id":uuid::Uuid::new_v4(),"plan_token":"native-secret"}),
+        ),
+        (
+            "backup_set_exclusions",
+            json!({"instance_id":"id","files":["../outside"],"directories":[]}),
+        ),
+        (
+            "backup_set_exclusions",
+            json!({"instance_id":"id","files":["C:\\secret"],"directories":[]}),
+        ),
+        (
+            "backup_set_exclusions",
+            json!({"instance_id":"id","files":[],"directories":["a//b"]}),
+        ),
+        (
+            "backup_set_exclusions",
+            json!({"instance_id":"id","files":[],"directories":["."]}),
+        ),
+        (
+            "backup_set_exclusions",
+            json!({"instance_id":"id","files":["file:stream"],"directories":[]}),
+        ),
+        (
+            "backup_set_exclusions",
+            json!({"instance_id":"id","files":["a\\b"],"directories":[]}),
+        ),
+        (
+            "backup_set_exclusions",
+            json!({"instance_id":"id","files":vec!["valid";101],"directories":[]}),
+        ),
+        (
+            "backup_set_exclusions",
+            json!({"instance_id":"id","files":[null],"directories":[]}),
+        ),
+        (
+            "backup_cancel",
+            json!({"instance_id":"id","backup_operation_id":"not-uuid"}),
+        ),
         (
             "resource_revise_plan",
             json!({"plan_id":uuid::Uuid::new_v4(),"revision":1,"accept_compatibility_nodes":vec!["node";101]}),

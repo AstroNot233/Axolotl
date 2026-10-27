@@ -3,6 +3,7 @@ use rmcp::{
     model::{Tool, ToolAnnotations},
 };
 use serde_json::{Map, Value, json};
+mod backups;
 mod resources;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -375,6 +376,7 @@ pub(crate) fn entries() -> Vec<Entry> {
         ),
     ];
     entries.extend(resources::entries());
+    entries.extend(backups::entries());
     entries
 }
 
@@ -438,6 +440,7 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
                     || uuid::Uuid::parse_str(s).is_ok())
                 && (rule["format"] != "log-filename"
                     || crate::log_text::valid_filename(s))
+                && (rule["format"] != "relative-path" || valid_relative_path(s))
         }),
         Some("integer") => value.as_u64().is_some_and(|n| {
             rule["minimum"].as_u64().is_none_or(|min| n >= min)
@@ -452,4 +455,14 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
         }),
         _ => false,
     }
+}
+
+fn valid_relative_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.contains(['\\', ':', '*', '?', '"', '<', '>', '|'])
+        && path.split('/').all(|part| {
+            !part.is_empty()
+                && !matches!(part, "." | "..")
+                && !part.ends_with([' ', '.'])
+        })
 }

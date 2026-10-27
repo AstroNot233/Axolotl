@@ -64,10 +64,32 @@ impl<T> ScopedRegistry<T> {
         if entry.revision != revision {
             return Err(ToolError::new(
                 "stale_revision",
-                "Use the revision returned by resource_prepare_install",
+                "Use the revision returned when preparing this plan",
             ));
         }
         Ok(entries.remove(&id).unwrap().value)
+    }
+}
+impl<T: Clone> ScopedRegistry<T> {
+    pub fn get(
+        &self,
+        session: &str,
+        id: Uuid,
+        revision: u32,
+    ) -> Result<T, ToolError> {
+        let mut entries = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        entries.retain(|_, entry| {
+            entry.created.elapsed() < Duration::from_secs(600)
+        });
+        let entry = entries.get(&id).filter(|entry| entry.session == session)
+            .ok_or_else(|| ToolError::new("plan_not_found", "Plan is expired, consumed or belongs to another control session"))?;
+        if entry.revision != revision {
+            return Err(ToolError::new(
+                "stale_revision",
+                "Use the revision returned when preparing this plan",
+            ));
+        }
+        Ok(entry.value.clone())
     }
 }
 #[cfg(test)]
@@ -85,6 +107,12 @@ mod tests {
             registry.take("owner", id, 1).unwrap_err().code,
             "stale_revision"
         );
+        assert_eq!(registry.get("owner", id, 2).unwrap(), "native-secret");
+        assert_eq!(registry.get("owner", id, 2).unwrap(), "native-secret");
+        assert_eq!(
+            registry.get("other", id, 2).unwrap_err().code,
+            "plan_not_found"
+        );
         assert_eq!(registry.take("owner", id, 2).unwrap(), "native-secret");
         assert_eq!(
             registry.take("owner", id, 2).unwrap_err().code,
@@ -97,6 +125,10 @@ mod tests {
         let id = registry.insert("owner", 0, ()).unwrap();
         registry.0.lock().unwrap().get_mut(&id).unwrap().created =
             Instant::now() - Duration::from_secs(601);
+        assert_eq!(
+            registry.get("owner", id, 0).unwrap_err().code,
+            "plan_not_found"
+        );
         assert_eq!(
             registry.take("owner", id, 0).unwrap_err().code,
             "plan_not_found"
