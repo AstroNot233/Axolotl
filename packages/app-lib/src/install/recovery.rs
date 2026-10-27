@@ -25,7 +25,7 @@ pub async fn recover_interrupted_jobs(state: &State) -> crate::Result<()> {
     for mut job in jobs {
         if crate::resources::plans::frozen_request_completed(
             &job.state.request,
-            &state.pool,
+            &state.data,
         )
         .await?
         {

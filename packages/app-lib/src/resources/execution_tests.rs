@@ -924,7 +924,7 @@ async fn replacing_import_files_restores_manual_requirements_and_increments_the_
     let plan = local_plan(&state, original, target, "download.zip", None).await;
     let id = plan.actions[0].node_id.clone();
     let added = plans::prepare_import_files_with_pool(
-        &state.pool,
+        &state.data,
         plan.clone(),
         HashMap::from([(id, source.to_string_lossy().to_string())]),
         &CancellationToken::new(),
@@ -939,7 +939,7 @@ async fn replacing_import_files_restores_manual_requirements_and_increments_the_
     );
     assert!(
         plans::prepare_import_files_with_pool(
-            &state.pool,
+            &state.data,
             plan,
             HashMap::new(),
             &CancellationToken::new()
@@ -950,13 +950,13 @@ async fn replacing_import_files_restores_manual_requirements_and_increments_the_
     let cancel = CancellationToken::new();
     let (first, second) = tokio::join!(
         plans::prepare_import_files_with_pool(
-            &state.pool,
+            &state.data,
             added.clone(),
             HashMap::new(),
             &cancel
         ),
         plans::prepare_import_files_with_pool(
-            &state.pool,
+            &state.data,
             added.clone(),
             HashMap::new(),
             &cancel
@@ -1341,7 +1341,7 @@ async fn update_restart_cache_clear_unlink_rollback_and_cleanup_keep_business_fa
     );
     execute("instance", &plan, None, &state).await.unwrap();
     assert!(
-        plans::frozen_request_completed(&request, &state.pool)
+        plans::frozen_request_completed(&request, &state.data)
             .await
             .unwrap()
     );
@@ -1679,7 +1679,7 @@ async fn forced_writes_skip_readonly_files_without_changing_their_database_or_hi
             None,
         )
         .await;
-        let mut draft = plans::load(&state.pool, &plan.id, plan.revision)
+        let mut draft = plans::load(&state.data, &plan.id, plan.revision)
             .await
             .unwrap();
         let mut added = plan.actions[0].clone();
@@ -1806,7 +1806,7 @@ async fn forced_writes_detect_windows_files_open_without_delete_sharing() {
         artifact(SourceId::modrinth(), "root0000", "new", b"new bytes");
     let plan =
         local_plan(&state, original.clone(), target, "new.zip", None).await;
-    let mut draft = plans::load(&state.pool, &plan.id, plan.revision)
+    let mut draft = plans::load(&state.data, &plan.id, plan.revision)
         .await
         .unwrap();
     let locked = std::fs::OpenOptions::new()
@@ -2010,7 +2010,7 @@ async fn exact_cross_source_replace_and_rollback_preserve_entry_disabled_path_an
         display_icon: None,
     };
     assert!(
-        plans::frozen_request_completed(&request, &state.pool)
+        plans::frozen_request_completed(&request, &state.data)
             .await
             .unwrap()
     );

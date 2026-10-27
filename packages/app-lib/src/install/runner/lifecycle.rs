@@ -159,7 +159,7 @@ async fn run_job(job_id: Uuid) -> crate::Result<()> {
         };
     let committed = crate::resources::plans::frozen_request_completed(
         &job_state.request,
-        &state.pool,
+        &state.data,
     )
     .await;
     let resource_committed = match committed {
