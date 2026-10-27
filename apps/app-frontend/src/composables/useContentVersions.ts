@@ -9,6 +9,23 @@ import {
     type SourceProjectRef,
 } from '@/helpers/resources'
 
+/**
+ * The resource helpers this composable reads versions through.
+ *
+ * Injecting them keeps the composable testable without mocking the module graph:
+ * a spec that mocks `@/helpers/resources` fails with a confusing
+ * `vi.mocked(...) is not a function` whenever the mock does not take effect.
+ */
+export interface ContentVersionSource {
+    readonly resourceReleases: typeof resourceReleases
+    readonly resourceReleaseDocuments: typeof resourceReleaseDocuments
+}
+
+const defaultContentVersionSource: ContentVersionSource = {
+    resourceReleases,
+    resourceReleaseDocuments,
+}
+
 export function contentVersionContext(item: ContentItem, entry?: InstanceContentSnapshotItem) {
     const exact = entry?.artifactRef
     const pinned = exact?.release.releaseId ?? entry?.providerReleaseId ?? item.version?.id
@@ -25,7 +42,7 @@ export function contentVersionContext(item: ContentItem, entry?: InstanceContent
     return pinned && project ? { project, pinned } : null
 }
 
-export function useContentVersions() {
+export function useContentVersions(source: ContentVersionSource = defaultContentVersionSource) {
     const versions = shallowRef<ResourceRelease[]>([])
     const loading = ref(false)
     const error = shallowRef<unknown>(null)
@@ -59,7 +76,7 @@ export function useContentVersions() {
             let cursor: string | null = null
             const cursors = new Set<string>()
             do {
-                const page = await resourceReleases(
+                const page = await source.resourceReleases(
                     { kind: 'source', project },
                     undefined,
                     cursor,
@@ -73,7 +90,7 @@ export function useContentVersions() {
                 if (cursor) cursors.add(cursor)
             } while (cursor)
             if (pinned && !releases.some((release) => release.reference.releaseId === pinned)) {
-                const [document] = await resourceReleaseDocuments(
+                const [document] = await source.resourceReleaseDocuments(
                     project.source,
                     [pinned],
                     project.projectId,
