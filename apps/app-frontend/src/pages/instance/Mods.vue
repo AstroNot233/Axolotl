@@ -192,7 +192,7 @@
                 }}</Button>
             </div>
         </CollapsibleAdmonition>
-        <ContentPageLayout @visible-items="handleVisibleItems">
+        <ContentPageLayout>
             <template #toolbar-actions>
                 <Button
                     v-if="hasPackAssociation"
@@ -369,6 +369,10 @@ import {
 import { createContentEventRefresh } from '@/helpers/content-event-refresh'
 import { mergeContentItemMetadata } from '@/helpers/content-item-metadata'
 import { applyContentItemUpdates, matchesContentItem } from '@/helpers/content-item-state'
+import {
+    drainContentMetadata,
+    isUnresolvedContentProject,
+} from '@/helpers/content-metadata-refresh'
 import { contentProjectUrl } from '@/helpers/content-project-links'
 import { lookupContentWikiIds, translateContentItemTitles } from '@/helpers/content-search'
 import { createContentUpdateScanner } from '@/helpers/content-update-scanner'
@@ -683,10 +687,16 @@ const contentItemsByEntryId = computed(
         ),
 )
 const mcmodUrls = ref(new Map<string, string>())
+/** Paths whose metadata this generation has already requested, so a second pass does not re-ask. */
 const visibleMetadataRequestedPaths = new Set<string>()
-const visibleMetadataPendingPaths = new Set<string>()
+/**
+ * Titles as they arrived from the backend, before any bilingual rewrite. The
+ * wiki dictionary only produces `中文名 (English)`, and the translation helper
+ * returns items untouched outside zh-CN, so switching away from Chinese needs
+ * the pre-translation title to restore. Session-only; never persisted.
+ */
+const originalContentTitles = new Map<string, string>()
 
-let visibleMetadataRefreshRunning = false
 let mcmodLookupVersion = 0
 let isUnmounted = false
 const contentWarnings = computed(() => contentSnapshot.value?.warnings ?? [])
@@ -1221,6 +1231,7 @@ function invalidateContentRequests(clearState = false) {
     if (!clearState) return
     resetUpdateState()
 
+    originalContentTitles.clear()
     contentSnapshot.value = null
     projects.value = []
     linkedModpackContentItems.value = []
@@ -1356,7 +1367,7 @@ function getContentItemId(item: ContentItem | null | undefined) {
     )
 }
 
-function mergeVisibleMetadataItems(
+function mergeRefreshedMetadataItems(
     refreshedItems: ContentItem[],
     originals: Map<string, ContentItem>,
 ) {
@@ -1400,51 +1411,94 @@ function mergeContentUpdate(item: ContentItem) {
     }
 }
 
-async function flushVisibleMetadataRefresh() {
-    if (visibleMetadataRefreshRunning) return
-    visibleMetadataRefreshRunning = true
-    try {
-        while (visibleMetadataPendingPaths.size > 0) {
-            const instanceId = props.instance.id
-            const generation = contentRequestGeneration
-            const paths = [...visibleMetadataPendingPaths]
-            visibleMetadataPendingPaths.clear()
-            const originals = new Map(
-                [...projects.value, ...linkedModpackContentItems.value]
-                    .filter((item) => item.file_path && paths.includes(item.file_path))
-                    .map((item) => [item.file_path!, item]),
-            )
-            try {
-                let items = await get_content_items_by_paths(instanceId, paths)
-                if (!isCurrentContentRequest(instanceId, generation)) continue
-                items = await translateContentItemTitles(items, i18n.global.locale.value).catch(
-                    () => items,
-                )
-                if (isCurrentContentRequest(instanceId, generation))
-                    mergeVisibleMetadataItems(items, originals)
-            } catch (error) {
-                if (!isCurrentContentRequest(instanceId, generation)) continue
-                for (const path of paths) visibleMetadataRequestedPaths.delete(path)
-                debugState('visible metadata refresh failed', { instanceId, paths, error })
-            }
-        }
-    } finally {
-        visibleMetadataRefreshRunning = false
+function allContentItems() {
+    return [...projects.value, ...linkedModpackContentItems.value]
+}
+
+/**
+ * Remembers the pre-translation title so a locale switch away from Chinese can
+ * undo the rewrite. Called on every snapshot, so a title the backend actually
+ * changed replaces the remembered one instead of restoring a stale name.
+ */
+function recordOriginalContentTitles(items: ContentItem[]) {
+    for (const item of items) {
+        const key = item.instanceEntryId ?? item.id
+        if (!key || item.project?.title === undefined) continue
+        originalContentTitles.set(key, item.project.title)
     }
 }
 
-function handleVisibleItems(items: ContentItem[]) {
+function restoreOriginalContentTitles() {
+    const restore = (items: ContentItem[]) =>
+        items.map((item) => {
+            const originalTitle = originalContentTitles.get(item.instanceEntryId ?? item.id)
+            if (
+                originalTitle === undefined ||
+                !item.project ||
+                item.project.title === originalTitle ||
+                hasContentOperation(item)
+            )
+                return item
+            return { ...item, project: { ...item.project, title: originalTitle } }
+        })
+
+    projects.value = restore(projects.value)
+    linkedModpackContentItems.value = restore(linkedModpackContentItems.value)
+}
+
+/** Fetches the backend metadata for one chunk of paths. */
+async function fetchContentMetadataChunk(instanceId: string, paths: string[]) {
+    return await get_content_items_by_paths(instanceId, paths)
+}
+
+/** Rewrites titles through the bundled wiki dictionary for the active locale. */
+async function translateContentMetadataItems(items: ContentItem[]) {
+    return await translateContentItemTitles(items, i18n.global.locale.value).catch(() => items)
+}
+
+/**
+ * Resolves metadata for every item whose project is still the `local:`
+ * placeholder, in the order the list currently shows them.
+ *
+ * This replaces a viewport-scoped refresh: the list sorts on
+ * `project.title`, which this pass rewrites, so completing only the visible
+ * rows made the order depend on the scroll position and re-triggered itself on
+ * every pass. Draining the whole set in bounded chunks lets the order settle
+ * once instead.
+ */
+async function refreshAllContentMetadata(generation: number) {
     if (isUnmounted || props.instance.install_stage !== 'installed') return
-    const knownPaths = new Set(
-        [...projects.value, ...linkedModpackContentItems.value].map((item) => item.file_path),
-    )
-    for (const item of items) {
+
+    const paths: string[] = []
+    for (const item of allContentItems()) {
         const path = item.file_path
-        if (!path || !knownPaths.has(path) || visibleMetadataRequestedPaths.has(path)) continue
+        if (!path || !isUnresolvedContentProject(item)) continue
+        if (visibleMetadataRequestedPaths.has(path)) continue
         visibleMetadataRequestedPaths.add(path)
-        visibleMetadataPendingPaths.add(path)
+        paths.push(path)
     }
-    if (visibleMetadataPendingPaths.size) void flushVisibleMetadataRefresh()
+    if (!paths.length) return
+
+    const instanceId = props.instance.id
+    const isCurrent = () => isCurrentContentRequest(instanceId, generation)
+
+    await drainContentMetadata({
+        paths,
+        fetchChunk: (chunk) => fetchContentMetadataChunk(instanceId, chunk),
+        translate: translateContentMetadataItems,
+        originalsForChunk: (chunk) => {
+            const wanted = new Set(chunk)
+            return allContentItems().filter(
+                (item) => !!item.file_path && wanted.has(item.file_path),
+            )
+        },
+        merge: (items, originals) => mergeRefreshedMetadataItems(items, originals),
+        isCurrent,
+    }).catch((error) => {
+        if (!isCurrent()) return
+        for (const path of paths) visibleMetadataRequestedPaths.delete(path)
+        debugState('content metadata refresh failed', { instanceId, paths, error })
+    })
 }
 
 function getStableContentId(item: ContentItem) {
@@ -2568,7 +2622,6 @@ async function initProjectsInternal(cacheBehaviour?: CacheBehaviour) {
     contentEnrichmentController = new AbortController()
     const generation = ++contentRequestGeneration
     visibleMetadataRequestedPaths.clear()
-    visibleMetadataPendingPaths.clear()
     debugState('initProjects start', { instanceId, cacheBehaviour, generation })
     let contentData: InstanceContentData | null
     try {
@@ -2599,7 +2652,10 @@ async function initProjectsInternal(cacheBehaviour?: CacheBehaviour) {
     if (!isCurrentContentRequest(instanceId, generation)) return
     contentLoadError.value = null
     try {
-        if (applyContentData(contentData)) enrichContentData(contentData, generation)
+        if (applyContentData(contentData)) {
+            enrichContentData(contentData, generation)
+            void refreshAllContentMetadata(generation)
+        }
     } catch (error) {
         if (isCurrentContentRequest(instanceId, generation)) handleError(error as Error)
     } finally {
@@ -2704,6 +2760,7 @@ function applyContentData(contentData: InstanceContentData) {
     }
     projects.value = contentItems
     linkedModpackContentItems.value = linkedContentItems
+    recordOriginalContentTitles([...contentItems, ...linkedContentItems])
     if (updatingProject.value) {
         const entryId = updatingProject.value.instanceEntryId
         const refreshed = [...contentItems, ...linkedContentItems].find((item) =>
@@ -3169,6 +3226,30 @@ onMounted(() => {
         })
         .catch(handleError)
 })
+
+watch(
+    () => i18n.global.locale.value,
+    async (locale) => {
+        if (isUnmounted || props.instance.install_stage !== 'installed') return
+        const instanceId = props.instance.id
+        const generation = contentRequestGeneration
+
+        // Leaving Chinese drops the bilingual prefix; the dictionary only ever
+        // produces `中文名 (English)` and the helper is a no-op elsewhere.
+        if (locale !== 'zh-CN') restoreOriginalContentTitles()
+
+        const originals = new Map(
+            allContentItems()
+                .filter((item) => item.file_path)
+                .map((item) => [item.file_path!, item]),
+        )
+        const translated = await translateContentItemTitles(allContentItems(), locale).catch(
+            () => null,
+        )
+        if (!translated || !isCurrentContentRequest(instanceId, generation)) return
+        mergeRefreshedMetadataItems(translated, originals)
+    },
+)
 
 watch(
     () => props.instance?.install_stage,
