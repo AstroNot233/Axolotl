@@ -10,6 +10,7 @@ mod lifecycle;
 mod logs;
 mod metadata;
 mod queries;
+mod resource_history;
 mod resources;
 mod servers;
 mod worlds;
@@ -26,6 +27,8 @@ pub(super) struct LauncherBackend {
     plans: ScopedRegistry<theseus::resources::ResourceOperationPlan>,
     restores: ScopedRegistry<backups::RestorePreview>,
     deletions: ScopedRegistry<instance_maintenance::DeletePreview>,
+    resource_cleanups:
+        ScopedRegistry<theseus::resources::ResourceHistoryCleanupPlan>,
 }
 
 impl Backend for LauncherBackend {
@@ -36,6 +39,18 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::ResourceFavoritesList { .. }
+                | Command::ResourceFavoriteAdd { .. }
+                | Command::ResourceFavoriteRemove { .. }
+                | Command::ResourceHistoryList { .. }
+                | Command::ResourceHistoryRollback { .. }
+                | Command::ResourceScanBackups { .. }
+                | Command::ResourcePrepareHistoryCleanup {
+                    ..
+                }
+                | Command::ResourceExecuteHistoryCleanup {
+                    ..
+                }) => resource_history::execute(self, command, context).await,
                 command @ (Command::InstanceDuplicate { .. }
                 | Command::InstanceReinstall { .. }
                 | Command::InstanceCheckInstallation { .. }

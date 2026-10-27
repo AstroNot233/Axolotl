@@ -206,6 +206,30 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             "java_install",
             json!({"vendor":"Vendor Name","major_version":21}),
         ),
+        (
+            "resource_favorite_add",
+            json!({"source":"modrinth","project_id":"project","resource_type":"mod"}),
+        ),
+        (
+            "resource_favorite_remove",
+            json!({"source":"modrinth","project_id":"project"}),
+        ),
+        (
+            "resource_history_rollback",
+            json!({"instance_id":"instance","entry_id":"entry","history_id":"history"}),
+        ),
+        (
+            "resource_scan_backups",
+            json!({"instance_id":"instance","limit":10}),
+        ),
+        (
+            "resource_prepare_history_cleanup",
+            json!({"instance_id":"instance","backup_ids":["backup"]}),
+        ),
+        (
+            "resource_execute_history_cleanup",
+            json!({"plan_id":uuid::Uuid::new_v4(),"revision":1}),
+        ),
         ("instance_duplicate", json!({"instance_id":"instance"})),
         (
             "instance_reinstall",
@@ -295,7 +319,7 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             true
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 32);
+    assert_eq!(backend.calls.lock().unwrap().len(), 38);
     assert!(matches!(
         &backend.calls.lock().unwrap()[0],
         Command::ResourcePrepareInstall {

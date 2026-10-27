@@ -18,7 +18,10 @@ fn source(value: Source) -> SourceId {
         Source::PlanetMinecraft => SourceId::planet_minecraft(),
     }
 }
-fn project(src: Source, id: String) -> Result<SourceProjectRef, ToolError> {
+pub(super) fn project(
+    src: Source,
+    id: String,
+) -> Result<SourceProjectRef, ToolError> {
     Ok(SourceProjectRef {
         source: source(src),
         project_id: SourceProjectId::new(id).map_err(|_| {
@@ -37,7 +40,7 @@ fn kind(value: ResourceKind) -> ResourceType {
         ResourceKind::World => ResourceType::World,
     }
 }
-fn error(error: ResourceError) -> ToolError {
+pub(super) fn error(error: ResourceError) -> ToolError {
     tracing::warn!(%error, "MCP resource operation failed");
     let (code, message) = match error {
         ResourceError::CursorExpired => (

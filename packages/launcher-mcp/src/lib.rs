@@ -13,6 +13,7 @@ mod session;
 mod tools;
 pub mod world_input;
 
+pub use backend::FavoriteKind;
 pub use backend::{
     Backend, BackendContext, Command, InstallKind, Loader, LogKind,
     ResourceKind, Source, ToolError,

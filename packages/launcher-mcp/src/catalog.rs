@@ -9,6 +9,7 @@ mod downloads;
 mod instance_maintenance;
 mod java;
 mod launch;
+mod resource_history;
 mod resources;
 mod servers;
 mod worlds;
@@ -412,6 +413,7 @@ pub(crate) fn entries() -> Vec<Entry> {
     entries.extend(accounts::entries());
     entries.extend(servers::entries());
     entries.extend(instance_maintenance::entries());
+    entries.extend(resource_history::entries());
     entries
 }
 

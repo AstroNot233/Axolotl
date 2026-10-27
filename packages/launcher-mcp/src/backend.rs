@@ -42,6 +42,50 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    ResourceFavoritesList {
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    ResourceFavoriteAdd {
+        source: Source,
+        project_id: String,
+        resource_type: FavoriteKind,
+    },
+    ResourceFavoriteRemove {
+        source: Source,
+        project_id: String,
+    },
+    ResourceHistoryList {
+        instance_id: String,
+        #[serde(default)]
+        entry_id: Option<String>,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    ResourceHistoryRollback {
+        instance_id: String,
+        entry_id: String,
+        history_id: String,
+    },
+    ResourceScanBackups {
+        instance_id: String,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    ResourcePrepareHistoryCleanup {
+        instance_id: String,
+        backup_ids: Vec<String>,
+    },
+    ResourceExecuteHistoryCleanup {
+        plan_id: uuid::Uuid,
+        revision: u32,
+    },
     InstanceDuplicate {
         instance_id: String,
     },
@@ -691,12 +735,27 @@ impl Command {
                 | Self::InstanceDuplicate { .. }
                 | Self::InstanceReinstall { .. }
                 | Self::InstanceDelete { .. }
+                | Self::ResourceFavoriteAdd { .. }
+                | Self::ResourceFavoriteRemove { .. }
+                | Self::ResourceHistoryRollback { .. }
+                | Self::ResourceScanBackups { .. }
+                | Self::ResourcePrepareHistoryCleanup { .. }
+                | Self::ResourceExecuteHistoryCleanup { .. }
         )
     }
 
     pub(crate) fn interrupts_mutation(&self) -> bool {
         matches!(self, Self::ServerStop { .. } | Self::ServerKill { .. })
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FavoriteKind {
+    Mod,
+    ResourcePack,
+    DataPack,
+    Shader,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]

@@ -592,6 +592,18 @@ async fn business_tools_require_approved_transport_scoped_sessions() {
     assert_eq!(tool_error(&client.tool("content_remove", json!({"session_id":control,"instance_id":"instance","entry_id":"entry"})).await), "full_access_required");
     for (name, args) in [
         (
+            "resource_favorite_remove",
+            json!({"session_id":control,"source":"modrinth","project_id":"project"}),
+        ),
+        (
+            "resource_history_rollback",
+            json!({"session_id":control,"instance_id":"instance","entry_id":"entry","history_id":"history"}),
+        ),
+        (
+            "resource_execute_history_cleanup",
+            json!({"session_id":control,"plan_id":uuid::Uuid::new_v4(),"revision":1}),
+        ),
+        (
             "instance_delete",
             json!({"session_id":control,"preview_id":uuid::Uuid::new_v4()}),
         ),
@@ -746,6 +758,11 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             json!({"source":"mcarchive","project_id":"project","release_id":"release"}),
         ),
         ("content_list", json!({"instance_id":"instance"})),
+        ("resource_favorites_list", json!({"offset":0,"limit":10})),
+        (
+            "resource_history_list",
+            json!({"instance_id":"instance","entry_id":"entry","limit":10}),
+        ),
         (
             "instance_check_installation",
             json!({"instance_id":"instance"}),
@@ -911,7 +928,7 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             "{name}: {result}"
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 76);
+    assert_eq!(backend.calls.lock().unwrap().len(), 78);
     assert!(
         backend
             .scopes
@@ -944,6 +961,34 @@ async fn invalid_arguments_are_rejected_before_backend_execution() {
     let client = connect(&server, false, "Validation").await;
     let control = control_id(&client.tool("start_session", json!({})).await);
     let cases = [
+        (
+            "resource_favorite_add",
+            json!({"source":"modrinth","project_id":"project","resource_type":"mod_pack"}),
+        ),
+        (
+            "resource_favorite_add",
+            json!({"source":"unknown","project_id":"project","resource_type":"mod"}),
+        ),
+        (
+            "resource_prepare_history_cleanup",
+            json!({"instance_id":"instance","backup_ids":[]}),
+        ),
+        (
+            "resource_prepare_history_cleanup",
+            json!({"instance_id":"instance","backup_ids":vec!["backup";101]}),
+        ),
+        (
+            "resource_prepare_history_cleanup",
+            json!({"instance_id":"instance","backup_ids":["backup"],"path":"C:/arbitrary"}),
+        ),
+        (
+            "resource_execute_history_cleanup",
+            json!({"plan_id":"native-plan","revision":1}),
+        ),
+        (
+            "resource_history_rollback",
+            json!({"instance_id":"instance","entry_id":"entry","history_id":"history","backup_path":"C:/arbitrary"}),
+        ),
         (
             "instance_delete",
             json!({"preview_id":uuid::Uuid::new_v4(),"instance_id":"replacement"}),
