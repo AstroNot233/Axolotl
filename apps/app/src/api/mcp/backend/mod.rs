@@ -1,4 +1,5 @@
 mod backups;
+mod downloads;
 mod instances;
 mod java;
 mod jobs;
@@ -31,6 +32,20 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::DownloadJobList { .. }
+                | Command::DownloadJobGet { .. }
+                | Command::DownloadJobGetItems { .. }
+                | Command::DownloadJobRetry { .. }
+                | Command::DownloadJobResume { .. }
+                | Command::DownloadJobCancel { .. }
+                | Command::DownloadJobDelete { .. }
+                | Command::DownloadHistoryClear {}
+                | Command::InstallJobMissingFiles { .. }
+                | Command::InstallJobScanMissingFiles { .. }
+                | Command::InstallJobSkipMissing { .. }
+                | Command::InstallJobRepairAndRetry { .. }) => {
+                    downloads::execute(command).await
+                }
                 command @ (Command::JavaListVendors {}
                 | Command::JavaListVersions { .. }
                 | Command::JavaInstall { .. }

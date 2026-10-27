@@ -592,6 +592,15 @@ async fn business_tools_require_approved_transport_scoped_sessions() {
     assert_eq!(tool_error(&client.tool("content_remove", json!({"session_id":control,"instance_id":"instance","entry_id":"entry"})).await), "full_access_required");
     for (name, args) in [
         (
+            "download_job_delete",
+            json!({"session_id":control,"job_id":uuid::Uuid::new_v4()}),
+        ),
+        ("download_history_clear", json!({"session_id":control})),
+        (
+            "install_job_repair_and_retry",
+            json!({"session_id":control,"job_id":uuid::Uuid::new_v4()}),
+        ),
+        (
             "java_remove_default",
             json!({"session_id":control,"major_version":21}),
         ),
@@ -717,6 +726,19 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             json!({"source":"mcarchive","project_id":"project","release_id":"release"}),
         ),
         ("content_list", json!({"instance_id":"instance"})),
+        (
+            "download_job_list",
+            json!({"status":"failed","provider":"java","query":"测试","limit":10}),
+        ),
+        ("download_job_get", json!({"job_id":uuid::Uuid::new_v4()})),
+        (
+            "download_job_get_items",
+            json!({"job_id":uuid::Uuid::new_v4(),"offset":1,"limit":10}),
+        ),
+        (
+            "install_job_missing_files",
+            json!({"job_id":uuid::Uuid::new_v4(),"limit":10}),
+        ),
         ("java_list_vendors", json!({})),
         (
             "java_list_versions",
@@ -837,7 +859,7 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             "{name}: {result}"
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 58);
+    assert_eq!(backend.calls.lock().unwrap().len(), 62);
     assert!(
         backend
             .scopes
@@ -870,6 +892,21 @@ async fn invalid_arguments_are_rejected_before_backend_execution() {
     let client = connect(&server, false, "Validation").await;
     let control = control_id(&client.tool("start_session", json!({})).await);
     let cases = [
+        ("download_job_list", json!({"status":"unknown"})),
+        ("download_job_list", json!({"provider":"curseforge"})),
+        (
+            "download_job_get_items",
+            json!({"job_id":uuid::Uuid::new_v4(),"limit":101}),
+        ),
+        ("download_job_retry", json!({"job_id":"invalid"})),
+        (
+            "install_job_scan_missing_files",
+            json!({"job_id":uuid::Uuid::new_v4(),"directory":"C:/private"}),
+        ),
+        (
+            "download_job_delete",
+            json!({"job_id":uuid::Uuid::new_v4(),"delete_files":true}),
+        ),
         ("java_install", json!({"vendor":"Vendor","major_version":0})),
         (
             "java_install",

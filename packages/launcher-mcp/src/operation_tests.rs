@@ -206,6 +206,32 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             "java_install",
             json!({"vendor":"Vendor Name","major_version":21}),
         ),
+        ("download_job_retry", json!({"job_id":uuid::Uuid::new_v4()})),
+        (
+            "download_job_resume",
+            json!({"job_id":uuid::Uuid::new_v4()}),
+        ),
+        (
+            "download_job_cancel",
+            json!({"job_id":uuid::Uuid::new_v4()}),
+        ),
+        (
+            "download_job_delete",
+            json!({"job_id":uuid::Uuid::new_v4()}),
+        ),
+        ("download_history_clear", json!({})),
+        (
+            "install_job_scan_missing_files",
+            json!({"job_id":uuid::Uuid::new_v4()}),
+        ),
+        (
+            "install_job_skip_missing",
+            json!({"job_id":uuid::Uuid::new_v4()}),
+        ),
+        (
+            "install_job_repair_and_retry",
+            json!({"job_id":uuid::Uuid::new_v4()}),
+        ),
         (
             "java_test",
             json!({"registered_path":"C:\\Java\\bin\\javaw.exe","major_version":21}),
@@ -226,7 +252,7 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             true
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 11);
+    assert_eq!(backend.calls.lock().unwrap().len(), 19);
     assert!(matches!(
         &backend.calls.lock().unwrap()[0],
         Command::ResourcePrepareInstall {

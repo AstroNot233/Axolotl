@@ -4,6 +4,7 @@ use rmcp::{
 };
 use serde_json::{Map, Value, json};
 mod backups;
+mod downloads;
 mod java;
 mod launch;
 mod resources;
@@ -47,7 +48,9 @@ fn entry(
                     .destructive(
                         access == Access::FullAccess
                             || name == "process_kill"
-                            || name == "install_job_cancel",
+                            || name == "install_job_cancel"
+                            || name == "download_job_cancel"
+                            || name == "install_job_skip_missing",
                     )
                     .idempotent(idempotent)
                     .open_world(
@@ -64,6 +67,11 @@ fn entry(
                                     | "java_list_vendors"
                                     | "java_list_versions"
                                     | "java_install"
+                                    | "download_job_retry"
+                                    | "download_job_resume"
+                                    | "install_job_scan_missing_files"
+                                    | "install_job_skip_missing"
+                                    | "install_job_repair_and_retry"
                             ),
                     ),
             ),
@@ -389,6 +397,7 @@ pub(crate) fn entries() -> Vec<Entry> {
     entries.extend(launch::entries());
     entries.extend(worlds::entries());
     entries.extend(java::entries());
+    entries.extend(downloads::entries());
     entries
 }
 

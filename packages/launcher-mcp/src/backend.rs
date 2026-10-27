@@ -42,6 +42,57 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    DownloadJobList {
+        #[serde(default)]
+        status: Option<String>,
+        #[serde(default)]
+        provider: Option<String>,
+        #[serde(default)]
+        query: Option<String>,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    DownloadJobGet {
+        job_id: uuid::Uuid,
+    },
+    DownloadJobGetItems {
+        job_id: uuid::Uuid,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    DownloadJobRetry {
+        job_id: uuid::Uuid,
+    },
+    DownloadJobResume {
+        job_id: uuid::Uuid,
+    },
+    DownloadJobCancel {
+        job_id: uuid::Uuid,
+    },
+    DownloadJobDelete {
+        job_id: uuid::Uuid,
+    },
+    DownloadHistoryClear {},
+    InstallJobMissingFiles {
+        job_id: uuid::Uuid,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    InstallJobScanMissingFiles {
+        job_id: uuid::Uuid,
+    },
+    InstallJobSkipMissing {
+        job_id: uuid::Uuid,
+    },
+    InstallJobRepairAndRetry {
+        job_id: uuid::Uuid,
+    },
     JavaListVendors {},
     JavaListVersions {
         vendor: String,
@@ -490,6 +541,14 @@ impl Command {
                 | Self::JavaInstall { .. }
                 | Self::JavaTest { .. }
                 | Self::JavaSetDefault { .. }
+                | Self::DownloadJobRetry { .. }
+                | Self::DownloadJobResume { .. }
+                | Self::DownloadJobCancel { .. }
+                | Self::DownloadJobDelete { .. }
+                | Self::DownloadHistoryClear { .. }
+                | Self::InstallJobScanMissingFiles { .. }
+                | Self::InstallJobSkipMissing { .. }
+                | Self::InstallJobRepairAndRetry { .. }
         )
     }
 }
