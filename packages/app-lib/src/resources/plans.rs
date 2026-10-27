@@ -2385,7 +2385,10 @@ impl ResourceService {
             if !draft.resolve_dependencies {
                 continue;
             }
-            let dependencies =
+            // Dependencies resolve six at a time and are applied in declaration
+            // order as soon as each one and those before it are known, so the
+            // plan never depends on which request finished first.
+            let mut dependencies = std::pin::pin!(
                 futures::stream::iter(artifact.dependencies.clone())
                     .map(|dependency| {
                         let parent = selection.clone();
@@ -2407,13 +2410,24 @@ impl ResourceService {
                                 )
                                 .await
                             };
+                            // Look the child up while its siblings still resolve,
+                            // so reaching it in the queue costs no further round
+                            // trip. The lookup is cached and its result unused here.
+                            if let Ok(Some(child)) = &child {
+                                let _ = analysis::canonical(
+                                    &service,
+                                    &mut child.clone(),
+                                    &cancel,
+                                    memo,
+                                )
+                                .await;
+                            }
                             (dependency, child)
                         }
                     })
                     .buffered(6)
-                    .collect::<Vec<_>>()
-                    .await;
-            for (dependency, child) in dependencies {
+            );
+            while let Some((dependency, child)) = dependencies.next().await {
                 if dependency.kind == ResourceDependencyKind::Embedded {
                     continue;
                 }
