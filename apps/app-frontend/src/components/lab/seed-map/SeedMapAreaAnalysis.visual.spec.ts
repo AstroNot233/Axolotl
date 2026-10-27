@@ -53,7 +53,9 @@ it('shows mineral counts while searching and keeps them, marked incomplete, afte
         const button = (label: string) =>
             wrapper.findAll('button').find((candidate) => candidate.text() === label)!
         await button('Count mineral blocks').trigger('click')
+        await flushPromises()
         publish({ counts: [{ ore: 'iron', count: 7 }], truncated: false })
+        await new Promise(requestAnimationFrame)
         await flushPromises()
         expect(wrapper.text()).toContain('Results so far')
         expect(wrapper.find('tbody').text()).toContain('7')

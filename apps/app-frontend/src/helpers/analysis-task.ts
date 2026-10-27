@@ -44,6 +44,8 @@ export interface AnalysisTask<I, P, R> {
     /** Stops the current run. Its results are no longer accepted from this moment on. */
     cancel(): Promise<void>
     retry(): Promise<R | undefined>
+    /** Abandons the current run and forgets its input and results, as if nothing had run. */
+    reset(): void
     /** Cancels the current run and refuses later starts. */
     dispose(): void
 }
@@ -177,6 +179,19 @@ export function createAnalysisTask<I, P, R>(
         return input.value === null ? Promise.resolve(undefined) : start(input.value)
     }
 
+    function reset() {
+        if (current) {
+            abandon(current)
+            current = null
+        }
+        input.value = null
+        progress.value = null
+        partial.value = null
+        result.value = null
+        error.value = null
+        settle('idle')
+    }
+
     function dispose() {
         disposed = true
         if (current) {
@@ -197,6 +212,7 @@ export function createAnalysisTask<I, P, R>(
         start,
         cancel,
         retry,
+        reset,
         dispose,
     }
 }

@@ -3,6 +3,7 @@ import { XIcon } from '@modrinth/assets'
 import { Button, defineMessages, StyledInput, useVIntl } from '@modrinth/ui'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
+import { createAnalysisTask } from '@/helpers/analysis-task'
 import {
     analyzeAreaOres,
     areaChunkCount,
@@ -132,16 +133,58 @@ const tab = ref<'ores' | 'loot'>('ores')
 const minY = ref<string | number | undefined>(props.yRange[0])
 const maxY = ref<string | number | undefined>(props.yRange[1])
 const query = ref('')
-const committedQuery = ref('')
-const oreResult = ref<AreaOreResult>()
-const oreResultY = ref<[number, number]>()
-const lootResult = ref<AreaLootResult>()
-/** Partial results arrive while searching; only a finished search may report that nothing was found. */
-const resultState = ref<'partial' | 'complete' | 'incomplete'>('complete')
-const busy = ref(false)
-const status = ref<'idle' | 'canceled' | 'failed'>('idle')
-const progress = ref<AreaProgress>({ done: 0, total: 0 })
-let active: AbortController | undefined
+const oreTask = createAnalysisTask<{ range: [number, number] }, AreaProgress, AreaOreResult>({
+    label: 'seed-map-area-ores',
+    run: ({ range }, { signal, progress, partial }) =>
+        analyzeAreaOres(
+            props.context,
+            props.area,
+            props.ores,
+            range[0],
+            range[1],
+            signal,
+            progress,
+            undefined,
+            partial,
+        ),
+})
+const lootTask = createAnalysisTask<{ query: string }, AreaProgress, AreaLootResult>({
+    label: 'seed-map-area-loot',
+    run: ({ query: text }, { signal, progress, partial }) => {
+        const search = text.toLocaleLowerCase()
+        return searchAreaLoot(
+            props.context,
+            props.area,
+            props.featureMask,
+            (id) =>
+                id.toLocaleLowerCase().includes(search) ||
+                labels.value.item(id).toLocaleLowerCase().includes(search),
+            signal,
+            progress,
+            undefined,
+            partial,
+        )
+    },
+})
+const activeTask = computed(() => (tab.value === 'ores' ? oreTask : lootTask))
+// Results found so far stay visible; only a finished search may report that nothing was found.
+const oreResult = computed(() => oreTask.partial.value)
+const oreResultY = computed(() => oreTask.input.value?.range)
+const lootResult = computed(() => lootTask.partial.value)
+const committedQuery = computed(() => lootTask.input.value?.query ?? '')
+const busy = computed(() => oreTask.running.value || lootTask.running.value)
+const progress = computed(
+    () => (oreTask.running.value ? oreTask : lootTask).progress.value ?? { done: 0, total: 0 },
+)
+const resultState = computed(() => {
+    const status = activeTask.value.status.value
+    if (status === 'ready') return 'complete'
+    return status === 'queued' || status === 'processing' ? 'partial' : 'incomplete'
+})
+const status = computed(() => {
+    const value = activeTask.value.status.value
+    return value === 'canceled' ? 'canceled' : value === 'error' ? 'failed' : 'idle'
+})
 const chunkCount = computed(() => areaChunkCount(props.area))
 const maxChunks = computed(() =>
     tab.value === 'ores' ? SEED_MAP_AREA_ORE_MAX_CHUNKS : SEED_MAP_AREA_LOOT_MAX_CHUNKS,
@@ -158,13 +201,9 @@ const validY = computed(
         Number(minY.value) <= Number(maxY.value),
 )
 function cancel() {
-    active?.abort()
-    active = undefined
-    busy.value = false
-    status.value = 'canceled'
-    if (resultState.value === 'partial') resultState.value = 'incomplete'
+    void (oreTask.running.value ? oreTask : lootTask).cancel()
 }
-async function run() {
+function run() {
     if (
         busy.value ||
         tooLarge.value ||
@@ -172,83 +211,21 @@ async function run() {
         (tab.value === 'loot' && !query.value.trim())
     )
         return
-    const controller = new AbortController()
-    active = controller
-    busy.value = true
-    status.value = 'idle'
-    resultState.value = 'partial'
-    progress.value = { done: 0, total: 0 }
-    const update = (value: AreaProgress) => {
-        if (active === controller) progress.value = value
-    }
-    try {
-        if (tab.value === 'ores') {
-            const range: [number, number] = [Number(minY.value), Number(maxY.value)]
-            oreResult.value = undefined
-            oreResultY.value = range
-            const result = await analyzeAreaOres(
-                props.context,
-                props.area,
-                props.ores,
-                range[0],
-                range[1],
-                controller.signal,
-                update,
-                undefined,
-                (partial) => {
-                    if (active === controller) oreResult.value = partial
-                },
-            )
-            if (active === controller) {
-                oreResult.value = result
-                resultState.value = 'complete'
-            }
-        } else {
-            const text = query.value.trim()
-            const search = text.toLocaleLowerCase()
-            lootResult.value = undefined
-            committedQuery.value = text
-            const result = await searchAreaLoot(
-                props.context,
-                props.area,
-                props.featureMask,
-                (id) =>
-                    id.toLocaleLowerCase().includes(search) ||
-                    labels.value.item(id).toLocaleLowerCase().includes(search),
-                controller.signal,
-                update,
-                undefined,
-                (partial) => {
-                    if (active === controller) lootResult.value = partial
-                },
-            )
-            if (active === controller) {
-                lootResult.value = result
-                resultState.value = 'complete'
-            }
-        }
-    } catch {
-        if (active === controller) {
-            status.value = 'failed'
-            resultState.value = 'incomplete'
-        }
-    } finally {
-        if (active === controller) {
-            busy.value = false
-            active = undefined
-        }
-    }
+    if (tab.value === 'ores')
+        void oreTask.start({ range: [Number(minY.value), Number(maxY.value)] })
+    else void lootTask.start({ query: query.value.trim() })
 }
 watch(
     () => JSON.stringify([props.context, props.area]),
     () => {
-        cancel()
-        oreResult.value = undefined
-        lootResult.value = undefined
-        status.value = 'idle'
+        oreTask.reset()
+        lootTask.reset()
     },
 )
-onBeforeUnmount(cancel)
+onBeforeUnmount(() => {
+    oreTask.dispose()
+    lootTask.dispose()
+})
 </script>
 
 <template>

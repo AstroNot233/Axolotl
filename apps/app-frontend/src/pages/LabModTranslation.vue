@@ -8,6 +8,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ModTranslationFilePicker from '@/components/lab/mod-translation/ModTranslationFilePicker.vue'
 import ModTranslationJobList from '@/components/lab/mod-translation/ModTranslationJobList.vue'
 import ModTranslationSettingsPanel from '@/components/lab/mod-translation/ModTranslationSettingsPanel.vue'
+import { createAnalysisTask } from '@/helpers/analysis-task'
 import { analyzeMod } from '@/lab/mod-translation/backend'
 import { modTranslationMessages as messages } from '@/lab/mod-translation/i18n'
 import type { ModTranslationJob } from '@/lab/mod-translation/types.ts'
@@ -18,7 +19,13 @@ const { handleError } = injectNotificationManager()
 
 const store = useModTranslationStore()
 const { inputPath, analysis, providerId, modelId, options, jobs } = storeToRefs(store)
-const analyzing = ref(false)
+// The file being analyzed is fixed when analysis starts. Picking another file
+// or leaving the page abandons that analysis, including its error.
+const modAnalysis = createAnalysisTask({
+    label: 'mod-translation-analysis',
+    run: ({ path }: { path: string }) => analyzeMod(path),
+})
+const analyzing = modAnalysis.running
 const starting = ref(false)
 
 const analyzeStartedAt = ref<number | null>(null)
@@ -40,7 +47,7 @@ watch(analyzing, (value) => {
 })
 
 onBeforeUnmount(() => {
-    analysisRequest++
+    modAnalysis.dispose()
     if (analyzeTimer) clearInterval(analyzeTimer)
 })
 
@@ -101,31 +108,19 @@ function defaultOutputPath(path: string): string {
     return path.replace(/\.jar$/i, '-zh_cn.jar')
 }
 
-// The file being analyzed is fixed when analysis starts. Picking another file
-// or leaving the page discards that analysis, including its error.
-let analysisRequest = 0
-
 async function runAnalyze() {
     const path = inputPath.value
     if (!path) return
-    const request = ++analysisRequest
-    analyzing.value = true
     store.setAnalysis(null)
-    try {
-        const result = await analyzeMod(path)
-        if (request === analysisRequest) store.setAnalysis(result, path)
-    } catch (error) {
-        if (request === analysisRequest) handleError(new Error(errorMessage(error)))
-    } finally {
-        if (request === analysisRequest) analyzing.value = false
-    }
+    const input = { path }
+    const result = await modAnalysis.start(input)
+    if (result) store.setAnalysis(result, path)
+    else if (modAnalysis.input.value === input && modAnalysis.status.value === 'error')
+        handleError(new Error(errorMessage(modAnalysis.error.value)))
 }
 
 watch(inputPath, (path) => {
-    if (analyzing.value) {
-        analysisRequest++
-        analyzing.value = false
-    }
+    if (modAnalysis.running.value) modAnalysis.reset()
     if (store.analysisInputPath !== path) store.setAnalysis(null)
 })
 
