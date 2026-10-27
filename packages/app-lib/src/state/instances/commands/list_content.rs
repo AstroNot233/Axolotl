@@ -2693,7 +2693,6 @@ async fn get_modpack_identifiers(
             .with_download_meta(download_meta),
         &pack_path,
         &state.download_semaphore,
-        &state.pool,
         None,
     )
     .await?;

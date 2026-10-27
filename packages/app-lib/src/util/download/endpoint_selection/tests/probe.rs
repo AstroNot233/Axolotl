@@ -721,7 +721,7 @@ async fn legacy_memory_cdn_fetch_holds_physical_budget_until_body_or_cancellatio
         let mut route = route;
         route.proxy = ProxyPolicy::System;
         let initial = native_budget::available(&route);
-        let fetch = crate::util::fetch::fetch_official(&route.url, None, None, None, &semaphore, &pool);
+        let fetch = crate::util::fetch::fetch_official(&route.url, None, None, None, &semaphore, );
         tokio::pin!(fetch);
         tokio::select! {
             result = &mut fetch => panic!("slow body completed before cancellation: {result:?}"),

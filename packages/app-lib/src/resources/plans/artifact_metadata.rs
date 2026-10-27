@@ -75,7 +75,6 @@ impl ArtifactMetadataReader for RuntimeArtifactMetadataReader {
             request,
             &path,
             &state.download_semaphore,
-            &state.pool,
             None,
         )
         .await?;

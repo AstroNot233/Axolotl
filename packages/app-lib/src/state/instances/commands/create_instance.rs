@@ -311,15 +311,7 @@ async fn fetch_icon_bytes(
         return Ok(response.bytes().await?);
     }
 
-    fetch::fetch(
-        icon_url,
-        None,
-        None,
-        None,
-        &state.fetch_semaphore,
-        &state.pool,
-    )
-    .await
+    fetch::fetch(icon_url, None, None, None, &state.fetch_semaphore).await
 }
 
 fn is_direct_cdn_icon_url(url: &str) -> bool {
