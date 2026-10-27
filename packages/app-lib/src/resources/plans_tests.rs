@@ -462,6 +462,17 @@ async fn dependency_analysis_failure_keeps_root_validation_and_other_resolved_de
         .await
         .unwrap();
     assert!(failed.plan.issues.iter().any(|issue| issue.blocking));
+    let context = failed
+        .plan
+        .issues
+        .iter()
+        .find(|issue| issue.blocking)
+        .unwrap()
+        .context
+        .as_ref()
+        .unwrap();
+    assert!(!context.dependency);
+    assert_eq!(context.source, Some(SourceId::modrinth()));
     let forced = service
         .revise_operation(
             failed,

@@ -82,6 +82,41 @@ fn issue(
     blocking: bool,
     message: impl Into<String>,
 ) {
+    let selection = plan
+        .selections
+        .iter()
+        .find(|selection| &selection.id == node);
+    let context = ResourceIssueContext {
+        dependency: selection.is_none(),
+        subject: plan
+            .nodes
+            .iter()
+            .find(|candidate| &candidate.id == node)
+            .and_then(|node| node.artifact.as_ref())
+            .and_then(|artifact| artifact.file_name.clone()),
+        source: selection
+            .and_then(|selection| match &selection.resource {
+                ResourceRef::Source { project } => Some(project.source.clone()),
+                _ => match &selection.release {
+                    ReleaseSelection::Release { reference } => {
+                        Some(reference.project.source.clone())
+                    }
+                    ReleaseSelection::Artifact { reference } => {
+                        Some(reference.release.project.source.clone())
+                    }
+                    ReleaseSelection::Automatic => None,
+                },
+            })
+            .or_else(|| {
+                plan.nodes
+                    .iter()
+                    .find(|candidate| &candidate.id == node)
+                    .and_then(|node| node.artifact.as_ref())
+                    .map(|artifact| {
+                        artifact.reference.release.project.source.clone()
+                    })
+            }),
+    };
     plan.issues.push(ResourcePlanIssue {
         code,
         selection_id: Some(node.clone()),
@@ -89,6 +124,7 @@ fn issue(
         blocking,
         message: message.into(),
         conflict: None,
+        context: Some(context),
     });
 }
 
@@ -106,7 +142,37 @@ fn conflict_issue(
         blocking,
         message: message.into(),
         conflict: Some(conflict),
+        context: None,
     });
+}
+
+fn selection_failure(
+    plan: &mut ResourceOperationPlan,
+    selection: &ResourceSelection,
+    code: ResourceIssueCode,
+    message: impl Into<String>,
+    subject: Option<String>,
+) {
+    issue(plan, code, &selection.id, true, message);
+    if let Some(context) = plan
+        .issues
+        .last_mut()
+        .and_then(|issue| issue.context.as_mut())
+    {
+        context.subject = subject;
+        context.source = match &selection.resource {
+            ResourceRef::Source { project } => Some(project.source.clone()),
+            _ => match &selection.release {
+                ReleaseSelection::Release { reference } => {
+                    Some(reference.project.source.clone())
+                }
+                ReleaseSelection::Artifact { reference } => {
+                    Some(reference.release.project.source.clone())
+                }
+                ReleaseSelection::Automatic => None,
+            },
+        };
+    }
 }
 
 fn artifact_file(artifact: &ResourceArtifact) -> String {
@@ -1438,12 +1504,12 @@ impl ResourceService {
                             );
                             continue;
                         }
-                        issue(
+                        selection_failure(
                             &mut draft.plan,
+                            &selection,
                             ResourceIssueCode::SourceUnavailable,
-                            &selection.id,
-                            true,
                             error.to_string(),
+                            None,
                         );
                         continue;
                     }
@@ -1634,13 +1700,22 @@ impl ResourceService {
                             },
                         );
                     } else {
-                        issue(
+                        selection_failure(
                             &mut draft.plan,
+                            &selection,
                             code,
-                            &selection.id,
-                            true,
                             error.to_string(),
+                            Some(metadata.title.clone()),
                         );
+                        if let Some(context) = draft
+                            .plan
+                            .issues
+                            .last_mut()
+                            .and_then(|issue| issue.context.as_mut())
+                        {
+                            context.source =
+                                Some(metadata.project.source.clone());
+                        }
                     }
                     continue;
                 }

@@ -1,4 +1,241 @@
 {
+  "app.resources.operation.review-issues": {
+    "message": "安装问题详情"
+  },
+  "app.resources.operation.issue-subject": {
+    "message": "{subject}：{reason}"
+  },
+  "app.resources.operation.issue-source": {
+    "message": "{subject}（{source}）：{reason}"
+  },
+  "app.resources.operation.file-issue": {
+    "message": "{reason} 文件：{path}"
+  },
+  "app.resources.operation.compatibility-detail": {
+    "message": "{subject}：{assessment}。请选择匹配的版本，或接受兼容性例外并安装所选内容。"
+  },
+  "app.resources.feedback.unknown.detail": {
+    "message": "无法完成操作。请重试；若仍失败，请重新打开审核窗口。"
+  },
+  "app.resources.feedback.unknown.summary": {
+    "message": "操作未完成。"
+  },
+  "app.resources.feedback.network.detail": {
+    "message": "无法连接内容来源。请检查网络或代理设置后重试。"
+  },
+  "app.resources.feedback.network.summary": {
+    "message": "无法连接内容来源。"
+  },
+  "app.resources.feedback.timeout.detail": {
+    "message": "请求超时，请检查网络后重试。"
+  },
+  "app.resources.feedback.timeout.summary": {
+    "message": "请求超时。"
+  },
+  "app.resources.feedback.tls.detail": {
+    "message": "无法建立安全连接。请检查系统时间、代理和证书后重试。"
+  },
+  "app.resources.feedback.tls.summary": {
+    "message": "无法建立安全连接。"
+  },
+  "app.resources.feedback.notFound.detail": {
+    "message": "所选项目或版本已不可用，请刷新项目并选择其他版本。"
+  },
+  "app.resources.feedback.notFound.summary": {
+    "message": "所选项目或版本不可用。"
+  },
+  "app.resources.feedback.rateLimited.detail": {
+    "message": "内容来源请求过于频繁，请稍候重试。"
+  },
+  "app.resources.feedback.rateLimited.summary": {
+    "message": "请求过于频繁。"
+  },
+  "app.resources.feedback.accessDenied.detail": {
+    "message": "内容来源拒绝访问。请检查来源访问设置，或选择其他来源。"
+  },
+  "app.resources.feedback.accessDenied.summary": {
+    "message": "内容来源拒绝访问。"
+  },
+  "app.resources.feedback.server.detail": {
+    "message": "内容来源暂时发生故障。请稍后重试，或选择其他来源。"
+  },
+  "app.resources.feedback.server.summary": {
+    "message": "内容来源暂时故障。"
+  },
+  "app.resources.feedback.unavailable.detail": {
+    "message": "内容来源暂不可用，请检查网络及来源设置后重试。"
+  },
+  "app.resources.feedback.unavailable.summary": {
+    "message": "内容来源不可用。"
+  },
+  "app.resources.feedback.invalidResponse.detail": {
+    "message": "内容来源返回的信息不完整或无效。请重试或选择其他版本。"
+  },
+  "app.resources.feedback.invalidResponse.summary": {
+    "message": "来源返回的信息无效。"
+  },
+  "app.resources.feedback.noCompatibleRelease.detail": {
+    "message": "没有符合当前游戏版本和加载器的版本。请打开项目的“版本”标签页选择具体版本。"
+  },
+  "app.resources.feedback.noCompatibleRelease.summary": {
+    "message": "找不到匹配版本。"
+  },
+  "app.resources.feedback.catalogIncomplete.detail": {
+    "message": "无法完整加载版本列表，请打开项目的“版本”标签页选择具体版本或文件。"
+  },
+  "app.resources.feedback.catalogIncomplete.summary": {
+    "message": "版本列表不完整。"
+  },
+  "app.resources.feedback.chooseFile.detail": {
+    "message": "所选版本无法确定唯一的安装文件，请打开项目的“版本”标签页选择具体文件。"
+  },
+  "app.resources.feedback.chooseFile.summary": {
+    "message": "需要选择具体安装文件。"
+  },
+  "app.resources.feedback.invalidArtifact.detail": {
+    "message": "所选文件不可用，或无法核验其完整性信息。请刷新项目或选择其他文件。"
+  },
+  "app.resources.feedback.invalidArtifact.summary": {
+    "message": "无法核验所选文件。"
+  },
+  "app.resources.feedback.identity.detail": {
+    "message": "无法确认所选内容与本地条目匹配，请刷新实例后重新选择目标内容。"
+  },
+  "app.resources.feedback.identity.summary": {
+    "message": "无法确认内容身份。"
+  },
+  "app.resources.feedback.manualDownload.detail": {
+    "message": "来源要求手动下载，请在项目页面下载所选的准确文件，再导入实例。"
+  },
+  "app.resources.feedback.manualDownload.summary": {
+    "message": "需要手动下载。"
+  },
+  "app.resources.feedback.localMismatch.detail": {
+    "message": "导入文件与所选版本不匹配，请下载正确文件后重新选择。"
+  },
+  "app.resources.feedback.localMismatch.summary": {
+    "message": "导入文件不匹配。"
+  },
+  "app.resources.feedback.integrity.detail": {
+    "message": "下载文件未通过完整性校验，请重新下载或选择其他来源。"
+  },
+  "app.resources.feedback.integrity.summary": {
+    "message": "文件校验失败。"
+  },
+  "app.resources.feedback.path.detail": {
+    "message": "安装路径无效或不在实例目录内，请选择有效文件或目标世界后重试。"
+  },
+  "app.resources.feedback.path.summary": {
+    "message": "安装路径无效。"
+  },
+  "app.resources.feedback.occupied.detail": {
+    "message": "目标位置已被其他文件占用，请核对已有文件，按需移除或重命名后重试。"
+  },
+  "app.resources.feedback.occupied.summary": {
+    "message": "目标位置已被占用。"
+  },
+  "app.resources.feedback.permission.detail": {
+    "message": "无法写入文件，请关闭占用程序并检查实例目录的写入权限后重试。"
+  },
+  "app.resources.feedback.permission.summary": {
+    "message": "文件无法写入。"
+  },
+  "app.resources.feedback.diskFull.detail": {
+    "message": "磁盘空间不足，请清理实例及缓存所在磁盘后重试。"
+  },
+  "app.resources.feedback.diskFull.summary": {
+    "message": "磁盘空间不足。"
+  },
+  "app.resources.feedback.stale.detail": {
+    "message": "实例或所选文件已变更，请刷新审核后重试。"
+  },
+  "app.resources.feedback.stale.summary": {
+    "message": "实例内容已变更。"
+  },
+  "app.resources.feedback.planExpired.detail": {
+    "message": "本次审核已失效或已提交，请重新打开审核，并检查现有任务后再试。"
+  },
+  "app.resources.feedback.planExpired.summary": {
+    "message": "本次审核已失效。"
+  },
+  "app.resources.feedback.instanceBusy.detail": {
+    "message": "实例暂时无法修改内容，请等待安装或其他内容任务完成后重试。"
+  },
+  "app.resources.feedback.instanceBusy.summary": {
+    "message": "实例暂时忙碌。"
+  },
+  "app.resources.feedback.instanceMissing.detail": {
+    "message": "找不到目标实例，请返回实例库并选择现有实例。"
+  },
+  "app.resources.feedback.instanceMissing.summary": {
+    "message": "找不到目标实例。"
+  },
+  "app.resources.feedback.cache.detail": {
+    "message": "无法读取资源缓存，请重启启动器后重试。"
+  },
+  "app.resources.feedback.cache.summary": {
+    "message": "资源缓存不可用。"
+  },
+  "app.resources.feedback.database.detail": {
+    "message": "无法读取或保存内容状态，请重启启动器后重试。"
+  },
+  "app.resources.feedback.database.summary": {
+    "message": "无法读写内容状态。"
+  },
+  "app.resources.feedback.dependency.detail": {
+    "message": "无法准备所需依赖。请重试或选择兼容的依赖版本；仅安装所选内容时，不会安装尚未解析的依赖。"
+  },
+  "app.resources.feedback.dependency.summary": {
+    "message": "无法准备所需依赖。"
+  },
+  "app.resources.feedback.analysis.detail": {
+    "message": "依赖检查未完成。可以重试检查；仅安装所选内容时会跳过这些检查。"
+  },
+  "app.resources.feedback.analysis.summary": {
+    "message": "依赖检查未完成。"
+  },
+  "app.resources.feedback.selected.detail": {
+    "message": "无法准备所选内容。请重试或选择其他版本或文件；跳过依赖检查无法解决此问题。"
+  },
+  "app.resources.feedback.selected.summary": {
+    "message": "无法准备所选内容。"
+  },
+  "app.resources.feedback.constraints.detail": {
+    "message": "无法同时满足依赖要求，请选择兼容版本或移除冲突项。"
+  },
+  "app.resources.feedback.constraints.summary": {
+    "message": "依赖要求存在冲突。"
+  },
+  "app.resources.feedback.scope.detail": {
+    "message": "此内容无法安装到所选位置，请选择适用的实例或目标世界。"
+  },
+  "app.resources.feedback.scope.summary": {
+    "message": "安装位置不适用。"
+  },
+  "app.resources.feedback.missingFile.detail": {
+    "message": "所需本地文件缺失、已禁用或存在多个匹配项，请检查实例文件并启用或安装所需依赖。"
+  },
+  "app.resources.feedback.missingFile.summary": {
+    "message": "所需本地文件不可用。"
+  },
+  "app.resources.feedback.backup.detail": {
+    "message": "回滚备份不可用或已变更，请刷新备份列表并选择可用备份。"
+  },
+  "app.resources.feedback.backup.summary": {
+    "message": "回滚备份不可用。"
+  },
+  "app.resources.feedback.canceled.detail": {
+    "message": "内容操作已取消，需要时可重试。"
+  },
+  "app.resources.feedback.canceled.summary": {
+    "message": "操作已取消。"
+  },
+  "app.resources.feedback.unsupported.detail": {
+    "message": "此来源不支持当前操作，请选择其他来源或具体文件。"
+  },
+  "app.resources.feedback.unsupported.summary": {
+    "message": "来源不支持当前操作。"
+  },
   "app.mcp.require-auth": {
     "message": "要求身份验证"
   },

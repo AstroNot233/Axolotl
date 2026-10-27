@@ -1,4 +1,241 @@
 {
+  "app.resources.operation.review-issues": {
+    "message": "Installation issues"
+  },
+  "app.resources.operation.issue-subject": {
+    "message": "{subject}: {reason}"
+  },
+  "app.resources.operation.issue-source": {
+    "message": "{subject} ({source}): {reason}"
+  },
+  "app.resources.operation.file-issue": {
+    "message": "{reason} File: {path}"
+  },
+  "app.resources.operation.compatibility-detail": {
+    "message": "{subject}: {assessment}. Choose a matching version, or install the selected content with these compatibility exceptions."
+  },
+  "app.resources.feedback.unknown.detail": {
+    "message": "The operation could not be completed. Retry, or reopen this review if it keeps failing."
+  },
+  "app.resources.feedback.unknown.summary": {
+    "message": "The operation could not be completed."
+  },
+  "app.resources.feedback.network.detail": {
+    "message": "Could not connect to the content source. Check your connection or proxy and retry."
+  },
+  "app.resources.feedback.network.summary": {
+    "message": "Could not connect to the content source."
+  },
+  "app.resources.feedback.timeout.detail": {
+    "message": "The request timed out. Check your connection and retry."
+  },
+  "app.resources.feedback.timeout.summary": {
+    "message": "The request timed out."
+  },
+  "app.resources.feedback.tls.detail": {
+    "message": "A secure connection could not be established. Check your system time, proxy and certificates, then retry."
+  },
+  "app.resources.feedback.tls.summary": {
+    "message": "A secure connection could not be established."
+  },
+  "app.resources.feedback.notFound.detail": {
+    "message": "The selected project or version is no longer available. Refresh the project and choose another version."
+  },
+  "app.resources.feedback.notFound.summary": {
+    "message": "The selected project or version is unavailable."
+  },
+  "app.resources.feedback.rateLimited.detail": {
+    "message": "The content source is receiving too many requests. Wait a moment and retry."
+  },
+  "app.resources.feedback.rateLimited.summary": {
+    "message": "Too many requests."
+  },
+  "app.resources.feedback.accessDenied.detail": {
+    "message": "The content source denied access. Check source access settings or choose another source."
+  },
+  "app.resources.feedback.accessDenied.summary": {
+    "message": "The content source denied access."
+  },
+  "app.resources.feedback.server.detail": {
+    "message": "The content source is temporarily failing. Retry later or choose another source."
+  },
+  "app.resources.feedback.server.summary": {
+    "message": "The content source is temporarily failing."
+  },
+  "app.resources.feedback.unavailable.detail": {
+    "message": "The content source is unavailable. Check the connection and source settings, then retry."
+  },
+  "app.resources.feedback.unavailable.summary": {
+    "message": "The content source is unavailable."
+  },
+  "app.resources.feedback.invalidResponse.detail": {
+    "message": "The content source returned incomplete or invalid information. Retry or choose another version."
+  },
+  "app.resources.feedback.invalidResponse.summary": {
+    "message": "The content source returned invalid information."
+  },
+  "app.resources.feedback.noCompatibleRelease.detail": {
+    "message": "No version matches the current game version and loader. Open the project’s Versions tab and choose a specific version."
+  },
+  "app.resources.feedback.noCompatibleRelease.summary": {
+    "message": "No matching version was found."
+  },
+  "app.resources.feedback.catalogIncomplete.detail": {
+    "message": "The version list could not be fully loaded. Open the project’s Versions tab and choose a specific version or file."
+  },
+  "app.resources.feedback.catalogIncomplete.summary": {
+    "message": "The version list is incomplete."
+  },
+  "app.resources.feedback.chooseFile.detail": {
+    "message": "The selected version does not identify one installable file. Open the project’s Versions tab and choose a specific file."
+  },
+  "app.resources.feedback.chooseFile.summary": {
+    "message": "Select a specific installation file."
+  },
+  "app.resources.feedback.invalidArtifact.detail": {
+    "message": "The selected file is unavailable or its integrity information cannot be verified. Refresh the project or choose another file."
+  },
+  "app.resources.feedback.invalidArtifact.summary": {
+    "message": "The selected file cannot be verified."
+  },
+  "app.resources.feedback.identity.detail": {
+    "message": "The selected content and installed entry do not match reliably. Refresh the instance and select the intended content again."
+  },
+  "app.resources.feedback.identity.summary": {
+    "message": "The content identity could not be confirmed."
+  },
+  "app.resources.feedback.manualDownload.detail": {
+    "message": "The source requires a manual download. Download the exact selected file from its project page, then import it into the instance."
+  },
+  "app.resources.feedback.manualDownload.summary": {
+    "message": "A manual download is required."
+  },
+  "app.resources.feedback.localMismatch.detail": {
+    "message": "The imported file does not match the selected version. Download the correct file and select it again."
+  },
+  "app.resources.feedback.localMismatch.summary": {
+    "message": "The imported file does not match."
+  },
+  "app.resources.feedback.integrity.detail": {
+    "message": "The downloaded file failed verification. Retry the download or choose another source."
+  },
+  "app.resources.feedback.integrity.summary": {
+    "message": "The file failed verification."
+  },
+  "app.resources.feedback.path.detail": {
+    "message": "The installation path is invalid or outside the instance. Choose a valid file or target world and retry."
+  },
+  "app.resources.feedback.path.summary": {
+    "message": "The installation path is invalid."
+  },
+  "app.resources.feedback.occupied.detail": {
+    "message": "Another file already occupies the destination. Review the existing file, then remove or rename it if appropriate before retrying."
+  },
+  "app.resources.feedback.occupied.summary": {
+    "message": "The destination is occupied."
+  },
+  "app.resources.feedback.permission.detail": {
+    "message": "The launcher cannot write the file. Close programs using it and check the instance folder’s write permissions, then retry."
+  },
+  "app.resources.feedback.permission.summary": {
+    "message": "The file cannot be written."
+  },
+  "app.resources.feedback.diskFull.detail": {
+    "message": "There is not enough disk space. Free space on the instance and cache drives, then retry."
+  },
+  "app.resources.feedback.diskFull.summary": {
+    "message": "There is not enough disk space."
+  },
+  "app.resources.feedback.stale.detail": {
+    "message": "The instance or selected files changed. Refresh this review and retry."
+  },
+  "app.resources.feedback.stale.summary": {
+    "message": "The instance content has changed."
+  },
+  "app.resources.feedback.planExpired.detail": {
+    "message": "This review is no longer current or was already submitted. Reopen the review and check existing tasks before trying again."
+  },
+  "app.resources.feedback.planExpired.summary": {
+    "message": "This review is no longer current."
+  },
+  "app.resources.feedback.instanceBusy.detail": {
+    "message": "The instance is not ready for content changes. Wait for installation or other content tasks to finish, then retry."
+  },
+  "app.resources.feedback.instanceBusy.summary": {
+    "message": "The instance is busy."
+  },
+  "app.resources.feedback.instanceMissing.detail": {
+    "message": "The target instance could not be found. Return to the library and select an existing instance."
+  },
+  "app.resources.feedback.instanceMissing.summary": {
+    "message": "The instance could not be found."
+  },
+  "app.resources.feedback.cache.detail": {
+    "message": "The resource cache cannot be read. Restart the launcher and retry."
+  },
+  "app.resources.feedback.cache.summary": {
+    "message": "The resource cache is unavailable."
+  },
+  "app.resources.feedback.database.detail": {
+    "message": "The launcher could not read or save the content state. Restart the launcher and retry."
+  },
+  "app.resources.feedback.database.summary": {
+    "message": "The content state could not be saved or read."
+  },
+  "app.resources.feedback.dependency.detail": {
+    "message": "A required dependency could not be prepared. Retry or select a compatible dependency version; installing only selected content will omit unresolved dependencies."
+  },
+  "app.resources.feedback.dependency.summary": {
+    "message": "A required dependency could not be prepared."
+  },
+  "app.resources.feedback.analysis.detail": {
+    "message": "Dependency checks could not be completed. Retry the check; installing only selected content will skip these checks."
+  },
+  "app.resources.feedback.analysis.summary": {
+    "message": "Dependency checks could not be completed."
+  },
+  "app.resources.feedback.selected.detail": {
+    "message": "The selected content could not be prepared. Retry or select another version or file. Skipping dependencies cannot resolve this failure."
+  },
+  "app.resources.feedback.selected.summary": {
+    "message": "The selected content could not be prepared."
+  },
+  "app.resources.feedback.constraints.detail": {
+    "message": "The dependency requirements cannot be satisfied together. Choose compatible versions or remove the conflicting selection."
+  },
+  "app.resources.feedback.constraints.summary": {
+    "message": "The dependency requirements conflict."
+  },
+  "app.resources.feedback.scope.detail": {
+    "message": "This content cannot be installed in the selected location. Choose the appropriate instance or target world."
+  },
+  "app.resources.feedback.scope.summary": {
+    "message": "The installation location is unsuitable."
+  },
+  "app.resources.feedback.missingFile.detail": {
+    "message": "A required local file is missing, disabled, or ambiguous. Check the instance files and enable or install the intended dependency."
+  },
+  "app.resources.feedback.missingFile.summary": {
+    "message": "A required local file is unavailable."
+  },
+  "app.resources.feedback.backup.detail": {
+    "message": "The rollback backup is unavailable or has changed. Refresh the backup list and choose an available backup."
+  },
+  "app.resources.feedback.backup.summary": {
+    "message": "The rollback backup is unavailable."
+  },
+  "app.resources.feedback.canceled.detail": {
+    "message": "The content operation was cancelled. Retry when you are ready."
+  },
+  "app.resources.feedback.canceled.summary": {
+    "message": "The operation was cancelled."
+  },
+  "app.resources.feedback.unsupported.detail": {
+    "message": "This source does not support the requested operation. Choose another source or an exact file."
+  },
+  "app.resources.feedback.unsupported.summary": {
+    "message": "The source does not support this operation."
+  },
   "app.mcp.require-auth": {
     "message": "Require authentication"
   },

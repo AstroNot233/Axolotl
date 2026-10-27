@@ -1,6 +1,7 @@
 import { defineMessages, type useVIntl } from '@modrinth/ui'
 
 import type { ResourcePage, ResourceSearchExpression, ResourceSearchQuery } from './resources'
+import { resourceFailureFeedback, resourceFailureKind } from './resource-operation-feedback'
 
 export function resourceSourceName(source: string): string {
     switch (source) {
@@ -193,6 +194,7 @@ export function resourceOperationError(error: unknown, formatMessage?: FormatMes
     if (/invalid source response/i.test(message)) return formatMessage(errorMessages.sourceResponse)
     if (/resource cache unavailable/i.test(message)) return formatMessage(errorMessages.cache)
     if (/resource database unavailable/i.test(message)) return formatMessage(errorMessages.database)
+    if (resourceFailureKind(error)) return resourceFailureFeedback(error, formatMessage).detail
     return formatMessage(errorMessages.failed)
 }
 

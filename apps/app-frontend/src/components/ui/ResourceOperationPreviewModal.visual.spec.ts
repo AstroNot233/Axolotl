@@ -40,7 +40,7 @@ vi.mock('@modrinth/ui', () => ({
         setup:
             (props, { slots }) =>
             () =>
-                h('aside', [h('h2', props.header), slots.default?.()]),
+                h('aside', [h('h2', props.header), slots.default?.(), slots.actions?.()]),
     }),
     Avatar: defineComponent({ setup: () => () => h('span') }),
     Combobox: defineComponent({
@@ -320,6 +320,68 @@ it.each(['en', 'zh-CN'])(
     },
 )
 
+it('explains a selected mod resolution failure at the top without calling it a dependency failure', async () => {
+    ready()
+    testLocale.language = 'zh-CN'
+    testLocale.messages = zhMessages
+    const failed = {
+        ...plan(),
+        nodes: [],
+        actions: [],
+        issues: [
+            {
+                code: 'missingDependency',
+                selectionId: 'root',
+                blocking: true,
+                message: 'opaque selected release diagnostic',
+                context: { dependency: false, subject: 'Example Mod', source: 'modrinth' },
+            },
+        ],
+    } as ResourceOperationPlan
+    vi.mocked(resourcePrepareEntryOperation).mockResolvedValue(failed)
+    vi.mocked(resourceRevisePlan).mockResolvedValue({ ...failed, revision: 2 })
+    const wrapper = mount(ResourceOperationPreviewModal, {
+        global: {
+            directives: {
+                tooltip: {
+                    mounted: (element, binding) => {
+                        element.dataset.tooltip = binding.value ?? ''
+                    },
+                    updated: (element, binding) => {
+                        element.dataset.tooltip = binding.value ?? ''
+                    },
+                },
+            },
+        },
+    })
+    const result = wrapper.vm.show(input)
+    try {
+        await flushPromises()
+        const details = wrapper.find('[data-resource-conflicts]')
+        expect(details.element.parentElement?.firstElementChild).toBe(details.element)
+        expect(details.text()).toContain('Example Mod（Modrinth）')
+        expect(details.text()).toContain('无法准备所选内容')
+        expect(details.text()).toContain('跳过依赖检查无法解决此问题')
+        expect(details.text()).not.toContain('无法解析所需的依赖')
+        expect(details.text()).not.toContain('opaque selected release diagnostic')
+        const button = wrapper
+            .findAll('button')
+            .find(
+                (button) => button.text() === zhMessages['app.resources.operation.apply'].message,
+            )!
+        expect(button.attributes('data-tooltip')).toBe('无法准备所选内容。')
+        expect(button.attributes('disabled')).toBeUndefined()
+        await button.trigger('click')
+        await flushPromises()
+        expect(resourceQueuePlan).not.toHaveBeenCalled()
+        expect(wrapper.find('[data-resource-conflicts]').findAll('li')).toHaveLength(1)
+        await wrapper.vm.cancel()
+        expect(await result).toBeNull()
+    } finally {
+        wrapper.unmount()
+    }
+})
+
 it('uses the cart analysis and closes its preview when that cart snapshot is invalidated', async () => {
     ready()
     const controller = new AbortController()
@@ -524,7 +586,7 @@ it('preserves blocking root file validation after preparing a roots-only preview
             expect.any(AbortSignal),
             expect.any(Function),
         )
-        expect(wrapper.text()).toContain('The file path is invalid')
+        expect(wrapper.text()).toContain('The installation path is invalid')
         expect(button.attributes('disabled')).toBeUndefined()
         expect(button.attributes('color')).toBe('orange')
         await button.trigger('click')
@@ -1170,7 +1232,7 @@ it('previews an exact path, retains the previous revision on optional failure, a
             .trigger('click')
         await flushPromises()
         expect(wrapper.text()).toContain(
-            'Could not complete the content operation. Refresh and try again.',
+            'The content source is unavailable. Check the connection and source settings, then retry.',
         )
         expect(wrapper.text()).toContain('mods/custom.jar.disabled')
         vi.mocked(resourceRevisePlan).mockResolvedValueOnce({
@@ -1513,8 +1575,9 @@ it('shows satisfied entries, labels activated optionals, and phrases blocking is
         expect(wrapper.text()).toContain('Already satisfied')
         expect(wrapper.text()).not.toContain('source requires an exact manual download')
         expect(wrapper.text()).not.toContain('target already exists')
-        expect(wrapper.text()).toContain('requires a manual download')
-        expect(wrapper.text()).toContain('mods/conflict.jar is already used by another file')
+        expect(wrapper.text()).toContain('The source requires a manual download')
+        expect(wrapper.text()).toContain('Another file already occupies the destination')
+        expect(wrapper.text()).toContain('mods/conflict.jar')
         expect(wrapper.text()).toContain('Optional dependency of dependency')
         await wrapper
             .findAll('button')

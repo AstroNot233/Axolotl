@@ -969,6 +969,7 @@ async fn verified_manual_import_rejects_changed_bytes_and_preserves_connector_so
         blocking: true,
         message: "manual".into(),
         conflict: None,
+        context: None,
     });
     plans::verify_import_files(&mut draft).await.unwrap();
     assert!(draft.plan.issues.is_empty());

@@ -431,6 +431,7 @@ export type ResourceOperationPlan = {
         message: string
         selectionId: string | null
         conflict?: ResourceConflictDetails | null
+        context?: { dependency: boolean; subject: string | null; source: string | null } | null
     }[]
     exceptions: {
         selectionId: string
