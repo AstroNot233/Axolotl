@@ -265,15 +265,36 @@ function onEditorInit(editor: Ace.Editor) {
     })
 }
 
+let pendingSave: Promise<boolean> | null = null
+
 /**
  * Writes the text as it was when saving started and resolves whether that
  * write succeeded. Only that snapshot is marked as saved, so input typed while
- * the write was pending stays unsaved.
+ * the write was pending stays unsaved. A save requested while another one is
+ * writing waits for it and then writes only what is still unsaved.
  */
 async function saveFileContent(exit: boolean = false): Promise<boolean> {
+    if (pendingSave) {
+        const saved = await pendingSave
+        if (!saved) return false
+        if (pendingSave) return saveFileContent(exit)
+        if (!hasUnsavedChanges.value) {
+            if (exit) emit('close')
+            return true
+        }
+    }
     const file = props.file
-    if (!file || ctx.isBusy?.value || saving.value) return false
+    if (!file || ctx.isBusy?.value) return false
+    const save = writeSnapshot(file, exit)
+    pendingSave = save
+    try {
+        return await save
+    } finally {
+        if (pendingSave === save) pendingSave = null
+    }
+}
 
+async function writeSnapshot(file: EditingFile, exit: boolean): Promise<boolean> {
     const normalizedPath = file.path.startsWith('/') ? file.path : `/${file.path}`
     const snapshot = fileContent.value
     saving.value = true
