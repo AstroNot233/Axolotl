@@ -327,3 +327,31 @@ async fn a_row_another_part_of_the_queue_owns_is_refused() {
     .await;
     assert!(early.is_err());
 }
+
+#[tokio::test]
+async fn a_due_replacement_keeps_the_events_that_are_not_due_yet() {
+    let handle = support::handle().await;
+    TelemetryOutbox::set(&handle, &key("due"), Some(&event(10)))
+        .await
+        .unwrap();
+    let mut later = event(20);
+    later.next_attempt_at = 100;
+    TelemetryOutbox::set(&handle, &key("later"), Some(&later))
+        .await
+        .unwrap();
+
+    TelemetryOutbox::set_scoped(
+        &handle,
+        &TelemetryOutboxScope::Due {
+            kind: TelemetryEventType::Heartbeat,
+            at: 50,
+        },
+        &[(key("due"), event(10))],
+    )
+    .await
+    .unwrap();
+
+    let remaining = TelemetryOutbox::get_all(&handle).await.unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].0, "later");
+}

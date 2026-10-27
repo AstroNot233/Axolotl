@@ -139,12 +139,30 @@ impl Collection for ModrinthUsers {
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
         ensure_one_active(records)?;
+        ensure_records_are_in_scope(scope, records)?;
         delete_omitted(conn, Some(*scope), records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
         }
         Ok(())
     }
+}
+
+/// A session written into a scope is in the state that scope names: writing a
+/// signed-in session into the idle group would clear the others and then take
+/// the session away from where it belongs.
+fn ensure_records_are_in_scope(
+    scope: &ModrinthUserScope,
+    records: &[(ModrinthUserKey, ModrinthUserRecord)],
+) -> crate::Result<()> {
+    if records.iter().all(|(_, record)| record.active == *scope) {
+        return Ok(());
+    }
+
+    Err(crate::ErrorKind::InputError(
+        "A session was written into a state it is not in".to_string(),
+    )
+    .into())
 }
 
 /// The table carries one active session; it no longer has an index that says so,
