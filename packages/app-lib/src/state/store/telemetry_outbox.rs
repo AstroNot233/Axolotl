@@ -384,11 +384,23 @@ async fn ensure_keys_belong_to_scope(
         .fetch_all(&mut *conn)
         .await?;
 
-        for (stored_id, event_type, next_attempt_at) in stored {
+        for (stored_id, stored_kind, next_attempt_at) in stored {
+            let Some(event_type) = TelemetryEventType::parse(&stored_kind)
+            else {
+                tracing::warn!(
+                    event_id = %stored_id,
+                    stored = %stored_kind,
+                    "Refusing to replace a queued telemetry event of a kind this build does not know"
+                );
+                return Err(crate::ErrorKind::InputError(format!(
+                    "Telemetry event {stored_id} was written by another build"
+                ))
+                .into());
+            };
             let in_scope = match scope {
-                TelemetryOutboxScope::Kind(kind) => event_type == kind.as_str(),
+                TelemetryOutboxScope::Kind(kind) => event_type == *kind,
                 TelemetryOutboxScope::Due { kind, at } => {
-                    event_type == kind.as_str() && next_attempt_at <= *at
+                    event_type == *kind && next_attempt_at <= *at
                 }
             };
             if !in_scope {
