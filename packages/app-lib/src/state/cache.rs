@@ -3020,7 +3020,6 @@ impl CachedEntry {
     pub(crate) async fn get_modpack_files(
         version_id: &str,
         handle: &Handle,
-        _fetch_semaphore: &FetchSemaphore,
     ) -> crate::Result<Option<CachedModpackFiles>> {
         let state = crate::State::get().await?;
         let service = state

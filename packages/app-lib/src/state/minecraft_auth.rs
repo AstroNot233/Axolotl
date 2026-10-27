@@ -113,15 +113,12 @@ pub enum MinecraftDeviceLoginPoll {
     Complete { credentials: Credentials },
 }
 
-#[tracing::instrument(skip(handle))]
-pub async fn login_begin(handle: &Handle) -> crate::Result<MinecraftLoginFlow> {
-    login_begin_with_redirect(AUTH_REPLY_URL, handle).await
+pub async fn login_begin() -> crate::Result<MinecraftLoginFlow> {
+    login_begin_with_redirect(AUTH_REPLY_URL).await
 }
 
-#[tracing::instrument(skip(_handle))]
 pub async fn login_begin_with_redirect(
     redirect_uri: &str,
-    _handle: &Handle,
 ) -> crate::Result<MinecraftLoginFlow> {
     let verifier = generate_oauth_challenge();
     let state = generate_oauth_challenge();
@@ -148,11 +145,8 @@ pub async fn login_begin_with_redirect(
     })
 }
 
-#[tracing::instrument(skip(handle))]
-pub async fn browser_login_begin(
-    handle: &Handle,
-) -> crate::Result<MinecraftLoginFlow> {
-    login_begin_with_redirect(BROWSER_AUTH_REPLY_URL, handle).await
+pub async fn browser_login_begin() -> crate::Result<MinecraftLoginFlow> {
+    login_begin_with_redirect(BROWSER_AUTH_REPLY_URL).await
 }
 
 #[tracing::instrument]
@@ -1011,25 +1005,6 @@ impl Credentials {
         };
 
         let mut unit = atom(handle).await?;
-        if self.active {
-            for (stored_account_id, stored) in
-                MinecraftUsers::atom_get_all(&mut unit).await?
-            {
-                if !stored.active || stored_account_id == account_id {
-                    continue;
-                }
-                let cleared = MinecraftUserRecord {
-                    active: false,
-                    ..stored
-                };
-                MinecraftUsers::atom_set(
-                    &mut unit,
-                    &stored_account_id,
-                    Some(&cleared),
-                )
-                .await?;
-            }
-        }
         MinecraftUsers::atom_set(&mut unit, &account_id, Some(&record)).await?;
         unit.commit().await
     }

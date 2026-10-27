@@ -332,12 +332,7 @@ pub(crate) async fn list_content(
     } else {
         match linked_modrinth_modpack_ids(&link) {
             Some((_, version_id)) => {
-                get_cached_modpack_identifiers(
-                    version_id,
-                    &state.data,
-                    &state.api_semaphore,
-                )
-                .await?
+                get_cached_modpack_identifiers(version_id, &state.data).await?
             }
             None => None,
         }
@@ -560,7 +555,7 @@ pub(crate) async fn list_linked_modpack_content(
     let ids = match get_modpack_identifiers(
         version_id,
         &resolved.content_set,
-        &state.data,
+        state,
         &state.api_semaphore,
     )
     .await
@@ -2574,11 +2569,9 @@ impl ModpackIdentifiers {
 async fn get_cached_modpack_identifiers(
     version_id: &str,
     handle: &Handle,
-    fetch_semaphore: &FetchSemaphore,
 ) -> crate::Result<Option<ModpackIdentifiers>> {
     let Some(cached) =
-        CachedEntry::get_modpack_files(version_id, handle, fetch_semaphore)
-            .await?
+        CachedEntry::get_modpack_files(version_id, handle).await?
     else {
         return Ok(None);
     };
@@ -2596,13 +2589,12 @@ async fn get_cached_modpack_identifiers(
 async fn get_modpack_identifiers(
     version_id: &str,
     content_set: &ContentSet,
-    handle: &Handle,
+    state: &crate::State,
     fetch_semaphore: &FetchSemaphore,
 ) -> crate::Result<ModpackIdentifiers> {
     let _cache_usage = crate::storage::usage::lease().await?;
     if let Some(cached) =
-        CachedEntry::get_modpack_files(version_id, handle, fetch_semaphore)
-            .await?
+        CachedEntry::get_modpack_files(version_id, &state.data).await?
     {
         if !cached.project_ids.is_empty() {
             return Ok(ModpackIdentifiers {
@@ -2616,9 +2608,13 @@ async fn get_modpack_identifiers(
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>();
-        let files =
-            CachedEntry::get_file_many(&hash_refs, None, pool, fetch_semaphore)
-                .await?;
+        let files = CachedEntry::get_file_many(
+            &hash_refs,
+            None,
+            &state.pool,
+            fetch_semaphore,
+        )
+        .await?;
         let project_ids = files
             .iter()
             .map(|file| file.project_id.clone())
@@ -2629,7 +2625,7 @@ async fn get_modpack_identifiers(
             version_id,
             cached.file_hashes.clone(),
             project_ids.clone(),
-            pool,
+            &state.pool,
         )
         .await?;
 
@@ -2642,7 +2638,7 @@ async fn get_modpack_identifiers(
     let version = CachedEntry::get_version(
         &ModrinthVersionId::new(version_id.to_string())?,
         None,
-        pool,
+        &state.pool,
         fetch_semaphore,
     )
     .await?
@@ -2699,7 +2695,7 @@ async fn get_modpack_identifiers(
             .with_download_meta(download_meta),
         &pack_path,
         &state.download_semaphore,
-        pool,
+        &state.pool,
         None,
     )
     .await?;
@@ -2766,7 +2762,7 @@ async fn get_modpack_identifiers(
         version_id,
         hashes.clone(),
         project_ids.clone(),
-        pool,
+        &state.pool,
     )
     .await?;
 
