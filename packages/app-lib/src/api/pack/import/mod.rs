@@ -36,7 +36,7 @@ pub mod gdlauncher;
 pub(crate) mod generic;
 pub mod hmcl;
 pub mod hmcl_config;
-mod instance_json;
+pub(crate) mod instance_json;
 pub mod mmc;
 mod modrinth_app;
 mod pcl;
