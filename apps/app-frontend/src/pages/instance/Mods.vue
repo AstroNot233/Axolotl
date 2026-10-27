@@ -2418,6 +2418,21 @@ async function handleModpackUpdateRequest(selectedVersion: Labrinth.Versions.v2.
     pendingModpackUpdateVersion.value = selectedVersion
 
     const currentVersionId = props.instance?.link?.version_id
+    // Versions arrive page by page. Until the installed one is listed, a pick
+    // cannot be told apart from a downgrade, so wait for the list to finish.
+    if (
+        loadingVersions.value &&
+        !updatingProjectVersions.value.some((version) => version.id === currentVersionId)
+    ) {
+        await new Promise<void>((resolve) => {
+            const stop = watch(loadingVersions, (loading) => {
+                if (loading) return
+                stop()
+                resolve()
+            })
+        })
+        if (!updatingModpack.value || pendingModpackUpdateVersion.value !== selectedVersion) return
+    }
     const currentVersion = updatingProjectVersions.value.find((v) => v.id === currentVersionId)
     isModpackUpdateDowngrade.value = currentVersion
         ? new Date(selectedVersion.date_published) < new Date(currentVersion.date_published)
