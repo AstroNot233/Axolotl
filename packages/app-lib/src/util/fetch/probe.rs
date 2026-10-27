@@ -2,12 +2,6 @@ use super::client::{
     DIRECT_REQWEST_CLIENT, DownloadClients, HTTP1_DIRECT_REQWEST_CLIENT,
     HTTP1_NO_REDIRECT_REQWEST_CLIENT, NO_REDIRECT_REQWEST_CLIENT,
 };
-use super::download::modrinth_cdn;
-use super::download::native_request::send_path_request_with_clients;
-use super::download::route_health::{
-    ROUTE_HEALTH, ResourceFamily, TASK_PROBE_STATES, TaskProbeGuard,
-    TaskProbeKey,
-};
 use super::file::parse_content_range;
 use super::model::{
     DownloadMeta, DownloadRequest, DownloadRoute, ResourceClass,
@@ -33,6 +27,12 @@ use crate::util::download::constants::{
     SEGMENTED_DOWNLOAD_THRESHOLD, TASK_PROBE_MAX_ROUTES, TASK_PROBE_MAX_WAIT,
     TASK_PROBE_WINDOW,
 };
+use crate::util::download::modrinth_cdn;
+use crate::util::download::native_request::send_path_request_with_clients;
+use crate::util::download::route_health::{
+    ROUTE_HEALTH, ResourceFamily, TASK_PROBE_STATES, TaskProbeGuard,
+    TaskProbeKey,
+};
 use futures::StreamExt;
 use reqwest::{StatusCode, header};
 use std::collections::HashSet;
@@ -45,9 +45,9 @@ use url::Url;
 
 #[derive(Clone, Debug)]
 pub(crate) struct RouteProbeResult {
-    route: DownloadRoute,
-    bytes_per_second: u64,
-    effective_authority: String,
+    pub(crate) route: DownloadRoute,
+    pub(crate) bytes_per_second: u64,
+    pub(crate) effective_authority: String,
 }
 
 pub(crate) type RouteProbeFuture<'a> =
@@ -318,7 +318,7 @@ pub(crate) async fn probe_recovery_route(
         total
     };
     let http1 = http1.filter(|probe| {
-        super::download::native_slow::should_switch(
+        crate::util::download::native_slow::should_switch(
             speed,
             probe.bytes_per_second,
             remaining,
@@ -383,7 +383,7 @@ struct TaskProbePlan {
     size: u64,
     candidates: Vec<DownloadRoute>,
     task_key: TaskProbeKey,
-    state: Arc<super::download::route_health::TaskProbeState>,
+    state: Arc<crate::util::download::route_health::TaskProbeState>,
 }
 
 fn build_task_probe_plan(
@@ -425,14 +425,14 @@ fn build_task_probe_plan(
         .iter()
         .filter_map(|route| {
             effective_route_authority(route).map(|authority| {
-                super::download::proxy_context::authority_key(
+                crate::util::download::proxy_context::authority_key(
                     &authority,
                     route.proxy,
                 )
             })
         })
         .collect::<Vec<_>>();
-    let scope = super::download::route_health::probe_scope(
+    let scope = crate::util::download::route_health::probe_scope(
         family.as_str(),
         &mut probe_authorities,
     );
@@ -494,7 +494,9 @@ async fn run_task_probe(
             notify: notify.clone(),
             armed: true,
         };
-        use super::download::endpoint_selection::tuning::{TRIALS, TrialKind};
+        use crate::util::download::endpoint_selection::tuning::{
+            TRIALS, TrialKind,
+        };
         let Some(_trial) = TRIALS.acquire(
             TrialKind::Endpoint,
             Instant::now(),
@@ -548,13 +550,13 @@ async fn ensure_task_routes_probed(
     system_client: &reqwest::Client,
     direct_client: &reqwest::Client,
 ) {
-    if super::download::proxy_context::clients().is_some_and(|clients| {
-        clients.endpoints.mode() == super::download::endpoint_selection::SelectionMode::Auto
+    if crate::util::download::proxy_context::clients().is_some_and(|clients| {
+        clients.endpoints.mode() == crate::util::download::endpoint_selection::SelectionMode::Auto
             && request.integrity.supports_resume() && request.header.is_none()
             && Url::parse(&request.url).is_ok_and(|url| modrinth_cdn::is_current_url(&url) && url.path().starts_with(MODRINTH_DATA_PREFIX) && url.query().is_none())
             && !routes.is_empty() && routes.iter().all(|route| !route.is_mirror
                 && Url::parse(&route.url).is_ok_and(|url| modrinth_cdn::is_current_url(&url))
-                && super::download::endpoint_selection::EndpointSelector::eligible_network(&clients, route.proxy))
+                && crate::util::download::endpoint_selection::EndpointSelector::eligible_network(&clients, route.proxy))
     }) {
         // One official authority has no alternate URL to rank. Its endpoint
         // selector owns any needed throughput trial and shared body budget.
@@ -572,7 +574,7 @@ async fn ensure_task_routes_probed(
             let clients =
                 DownloadClients::for_request(&system_client, &direct_client);
             tokio::spawn(async move {
-                super::download::proxy_context::with_snapshot(
+                crate::util::download::proxy_context::with_snapshot(
                     clients,
                     run_task_probe(
                         &request,

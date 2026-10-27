@@ -1,5 +1,5 @@
-use super::download::retired_sources;
-use super::download_dns::DownloadDnsResolver;
+#[cfg(test)]
+use super::BENCHMARK_TIMING;
 use super::throttle::DOWNLOAD_DNS_RESOLVER;
 use crate::util::download::constants::{
     FETCH_CLIENT_CONFIGURATION_SHOULD_BE_VALID, FETCH_GOAWAY, FETCH_HTTP_2,
@@ -11,6 +11,8 @@ use crate::util::download::constants::{
     FILE_TRANSFER_CONNECT_TIMEOUT, FILE_TRANSFER_READ_TIMEOUT,
     NATIVE_DOWNLOAD_SOURCE_HAS_BEEN_RETIRED,
 };
+use crate::util::download::retired_sources;
+use crate::util::download_dns::DownloadDnsResolver;
 use std::error::Error;
 use std::sync::{Arc, LazyLock};
 use std::time;
@@ -85,7 +87,9 @@ pub fn build_proxied_client(
 /// Authentication and reachability probes share the current proxy, DNS and TLS
 /// settings. The fallback is only for callers before application initialization.
 pub(crate) fn authentication_client() -> reqwest::Client {
-    if let Some(clients) = super::download::proxy_context::explicit_clients() {
+    if let Some(clients) =
+        crate::util::download::proxy_context::explicit_clients()
+    {
         return clients.metadata;
     }
     if let Some(state) = crate::State::get_if_initialized() {
@@ -98,7 +102,9 @@ pub(crate) fn authentication_client() -> reqwest::Client {
 }
 
 pub async fn configured_client() -> crate::Result<reqwest::Client> {
-    if let Some(clients) = super::download::proxy_context::explicit_clients() {
+    if let Some(clients) =
+        crate::util::download::proxy_context::explicit_clients()
+    {
         return Ok(clients.metadata);
     }
     Ok(crate::State::get().await?.configured_http_client())
@@ -120,7 +126,7 @@ pub(crate) struct DownloadClients {
     pub(crate) doh_enabled: bool,
     pub(crate) force_http1: bool,
     pub(crate) endpoints:
-        Arc<super::download::endpoint_selection::EndpointSelector>,
+        Arc<crate::util::download::endpoint_selection::EndpointSelector>,
 }
 
 impl DownloadClients {
@@ -158,8 +164,8 @@ impl DownloadClients {
             // automatic mode its idle sockets would outlive request permits
             // and accumulate alongside probes and new endpoint generations.
             // Native H2 retains its separately budgeted multiplexed pool.
-            let builder = if super::download::endpoint_selection::SelectionMode::configured()
-                == super::download::endpoint_selection::SelectionMode::Auto
+            let builder = if crate::util::download::endpoint_selection::SelectionMode::configured()
+                == crate::util::download::endpoint_selection::SelectionMode::Auto
             {
                 builder.pool_max_idle_per_host(0)
             } else {
@@ -190,8 +196,8 @@ impl DownloadClients {
         Ok(Self {
             system_proxy_fingerprint,
             endpoints:
-                super::download::endpoint_selection::EndpointSelector::new(
-                    super::download::proxy_context::fingerprint_with_doh(
+                crate::util::download::endpoint_selection::EndpointSelector::new(
+                    crate::util::download::proxy_context::fingerprint_with_doh(
                         proxy,
                         ignore_ssl_errors,
                         doh_enabled,
@@ -210,7 +216,7 @@ impl DownloadClients {
             http1_direct: build(true, true)?,
             proxy: proxy.clone(),
             ignore_ssl_errors,
-            scope: super::download::proxy_context::fingerprint_with_doh(
+            scope: crate::util::download::proxy_context::fingerprint_with_doh(
                 proxy,
                 ignore_ssl_errors,
                 doh_enabled,
@@ -226,7 +232,9 @@ impl DownloadClients {
         system: &reqwest::Client,
         direct: &reqwest::Client,
     ) -> Self {
-        if let Some(mut clients) = super::download::proxy_context::clients() {
+        if let Some(mut clients) =
+            crate::util::download::proxy_context::clients()
+        {
             if std::ptr::eq(
                 system,
                 &raw const *HTTP1_NO_REDIRECT_REQWEST_CLIENT,
@@ -256,7 +264,7 @@ impl DownloadClients {
                 &raw const *HTTP1_NO_REDIRECT_REQWEST_CLIENT,
             ),
             endpoints:
-                super::download::endpoint_selection::EndpointSelector::new(
+                crate::util::download::endpoint_selection::EndpointSelector::new(
                     FETCH_UNCONFIGURED,
                 ),
         }

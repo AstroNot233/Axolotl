@@ -1,10 +1,10 @@
-use super::download_dns::DownloadDnsResolver;
 use super::model::ProxyPolicy;
 use crate::ErrorKind;
 use crate::util::download::constants::{
     FILE_VALIDATION_CONCURRENCY, H2_FALLBACK_TTL, H2_SLOW_FALLBACK_TTL,
     MAX_GLOBAL_TAIL_HEDGES, ROUTE_PROBE_CONCURRENCY,
 };
+use crate::util::download_dns::DownloadDnsResolver;
 use parking_lot::Mutex;
 use reqwest::header;
 use std::collections::HashMap;
@@ -71,7 +71,7 @@ pub(crate) fn authority_uses_http1_fallback_for(
     proxy: ProxyPolicy,
 ) -> bool {
     let authority =
-        super::download::proxy_context::authority_key(authority, proxy);
+        crate::util::download::proxy_context::authority_key(authority, proxy);
     {
         let mut preferences = HTTP1_PREFERENCE_AUTHORITIES.lock();
         preferences.retain(|_, until| *until > Instant::now());
@@ -102,7 +102,7 @@ pub(crate) fn record_authority_h2_failure_for(
     let mut fallbacks = H2_FALLBACK_AUTHORITIES.lock();
     fallbacks.retain(|_, until| *until > now);
     fallbacks.insert(
-        super::download::proxy_context::authority_key(authority, proxy),
+        crate::util::download::proxy_context::authority_key(authority, proxy),
         now + H2_FALLBACK_TTL,
     );
 }
@@ -111,7 +111,7 @@ pub(crate) fn prefer_measured_http1(authority: &str, proxy: ProxyPolicy) {
     let mut preferences = HTTP1_PREFERENCE_AUTHORITIES.lock();
     preferences.retain(|_, until| *until > Instant::now());
     preferences.insert(
-        super::download::proxy_context::authority_key(authority, proxy),
+        crate::util::download::proxy_context::authority_key(authority, proxy),
         Instant::now() + H2_SLOW_FALLBACK_TTL,
     );
 }

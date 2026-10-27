@@ -2302,7 +2302,6 @@ impl CachedEntry {
                     None,
                     uri_path,
                     fetch_semaphore,
-                    pool,
                 )
             }))
             .await?;

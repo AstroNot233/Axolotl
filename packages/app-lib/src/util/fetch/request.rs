@@ -3,12 +3,6 @@ use super::client::{
     DIRECT_REQWEST_CLIENT, DownloadClients, INSECURE_REQWEST_CLIENT,
     NO_REDIRECT_REQWEST_CLIENT, configured_client,
 };
-use super::download::constants::DOWNLOAD_META_HEADER;
-use super::download::diagnostics::{
-    attach_download_attempt_history, record_download_attempt_failure,
-};
-use super::download::modrinth_redirect::is_official_redirect as is_official_modrinth_cdn_redirect;
-use super::download::retired_sources;
 use super::file;
 use super::file::{response_status_error, response_validator, sha1_async};
 use super::model::{
@@ -29,6 +23,7 @@ use super::routes::{
 use super::throttle::FetchSemaphore;
 use crate::event::LoadingBarId;
 use crate::event::emit::emit_loading;
+use crate::util::download::constants::DOWNLOAD_META_HEADER;
 use crate::util::download::constants::{
     AUTHORIZATION_HEADER, DOWNLOAD_PROGRESS_LOG_INTERVAL, FETCH_CDN,
     FETCH_CLEAN_RETRY, FETCH_COOLDOWN_THEN_RETRY, FETCH_EO_CACHE_STATUS,
@@ -38,6 +33,11 @@ use crate::util::download::constants::{
     METADATA_ATTEMPT_BUDGET, METADATA_HEDGE_DELAY, METADATA_REQUEST_TIMEOUT,
     MODRINTH_CDN_ATTEMPT_TIMEOUT, MODRINTH_CDN_ATTEMPTS, RESOURCE_WAIT_TIMEOUT,
 };
+use crate::util::download::diagnostics::{
+    attach_download_attempt_history, record_download_attempt_failure,
+};
+use crate::util::download::modrinth_redirect::is_official_redirect as is_official_modrinth_cdn_redirect;
+use crate::util::download::retired_sources;
 use crate::{ErrorKind, LabrinthError};
 use bytes::Bytes;
 use eyre::{Context, eyre};
@@ -480,7 +480,7 @@ async fn fetch_advanced_with_client_and_progress(
     >,
     attempt_budget: usize,
 ) -> crate::Result<Bytes> {
-    super::download::proxy_context::with_clients(fetch_advanced_inner(
+    crate::util::download::proxy_context::with_clients(fetch_advanced_inner(
         method,
         url,
         sha1,
@@ -710,7 +710,7 @@ async fn fetch_advanced_inner(
                 Some(
                     tokio::time::timeout(
                         RESOURCE_WAIT_TIMEOUT,
-                        super::download::native_budget::acquire(route),
+                        crate::util::download::native_budget::acquire(route),
                     )
                     .await
                     .map_err(|_| {
@@ -726,7 +726,7 @@ async fn fetch_advanced_inner(
             let permit = semaphore.0.acquire().await?;
             let request_started = Instant::now();
             let result = if let Some(native_budget) = native_budget {
-                super::download::native_request::send_cdn_request_with_budget(
+                crate::util::download::native_request::send_cdn_request_with_budget(
                     req,
                     &download_clients,
                     route.proxy,
@@ -744,7 +744,7 @@ async fn fetch_advanced_inner(
                     // bytes()/bytes_stream()/JSON consumption and cancellation.
                     let _physical_budget = resp
                         .extensions()
-                        .get::<super::download::native_request::ResponseBudget>(
+                        .get::<crate::util::download::native_request::ResponseBudget>(
                         )
                         .cloned();
                     let status = resp.status();
@@ -962,7 +962,7 @@ async fn fetch_advanced_inner(
                         );
                     }
                     let transfer_started = Instant::now();
-                    let endpoint_feedback = resp.extensions().get::<super::download::endpoint_selection::metrics::EndpointTransferGuard>().cloned();
+                    let endpoint_feedback = resp.extensions().get::<crate::util::download::endpoint_selection::metrics::EndpointTransferGuard>().cloned();
                     let bytes: eyre::Result<Bytes> = if loading_bar.is_some()
                         || progress.is_some()
                     {
@@ -983,7 +983,7 @@ async fn fetch_advanced_inner(
                                 })?;
 
                                 downloaded += chunk.len() as u64;
-                                if let Some(feedback) = &endpoint_feedback { feedback.record(chunk.len(), super::download::local_resources::network_pressure()); }
+                                if let Some(feedback) = &endpoint_feedback { feedback.record(chunk.len(), crate::util::download::local_resources::network_pressure()); }
                                 bytes.extend_from_slice(&chunk);
 
                                 if modrinth_request_kind == Some(FETCH_CDN)
@@ -1045,7 +1045,7 @@ async fn fetch_advanced_inner(
                     {
                         feedback.record(
                             bytes.len(),
-                            super::download::local_resources::network_pressure(
+                            crate::util::download::local_resources::network_pressure(
                             ),
                         );
                     }
@@ -1156,7 +1156,7 @@ async fn fetch_advanced_inner(
                             remote_addr = ?remote_addr,
                             http_version = ?http_version,
                             dns_candidates = ?route_host(route).map(|host| {
-                                super::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
+                                crate::util::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
                             }),
                             ttfb_ms = ttfb.as_millis(),
                             "Recorded download route connection details"

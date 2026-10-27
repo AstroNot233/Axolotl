@@ -1,5 +1,3 @@
-use super::download::retired_sources;
-use super::io::{self, IOError};
 use super::model::{DownloadRoute, IN_FLIGHT_DOWNLOADS, Integrity};
 use super::policy::range_splitting_allowed;
 use super::routes;
@@ -13,6 +11,12 @@ use crate::util::download::constants::{
     FETCH_RESOURCE_VALIDATOR_CHANGED_DURING_TAIL_HEDGE, FETCH_SEGMENT,
     HTTPS_SCHEME, PARTIAL_FILE_SUFFIX, STALE_PARTIAL_DOWNLOAD_MAX_AGE,
 };
+#[cfg(test)]
+use crate::util::download::constants::{
+    FETCH_127_0_0_1, FETCH_LOCALHOST, HTTP_SCHEME,
+};
+use crate::util::download::retired_sources;
+use crate::util::io::{self, IOError};
 use crate::{ErrorKind, LabrinthError};
 use bytes::Bytes;
 use eyre::Context;
@@ -298,12 +302,12 @@ pub(crate) fn destination_download_lock(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ParsedContentRange {
-    start: u64,
-    end: u64,
+pub(crate) struct ParsedContentRange {
+    pub(crate) start: u64,
+    pub(crate) end: u64,
     /// `None` when the server reports an unknown complete length (`*`),
     /// which RFC 9110 permits on a 206 response.
-    total: Option<u64>,
+    pub(crate) total: Option<u64>,
 }
 
 pub(crate) fn parse_content_range(
@@ -572,7 +576,7 @@ pub async fn sha1_file_async(
 ) -> crate::Result<(u64, String)> {
     let path = path.as_ref();
     #[cfg(test)]
-    super::download::verified_file::record_scan();
+    crate::util::download::verified_file::record_scan();
     let started = Instant::now();
     let _permit = acquire_native_validation_permit().await?;
     // Local files can be multi-gigabyte .mrpacks, so hash them without materializing bytes.
@@ -606,7 +610,7 @@ pub async fn sha1_file_cancellable(
 ) -> crate::Result<(u64, String)> {
     let path = path.as_ref();
     #[cfg(test)]
-    super::download::verified_file::record_scan();
+    crate::util::download::verified_file::record_scan();
     let started = Instant::now();
     let _permit = tokio::select! { biased; _ = cancellation.cancelled() => return Err(ErrorKind::OtherError("verification canceled while waiting for resources".into()).into()), permit = acquire_native_validation_permit() => permit? };
     let mut file = File::open(path)

@@ -1,11 +1,8 @@
-use super::download::integrity::verify_file;
-use super::download::retired_sources;
 use super::file;
 use super::file::{
     any_route_can_resume, destination_download_lock, part_resume_expected,
     preserve_or_remove_partial, remove_if_exists, suffixed_path,
 };
-use super::io::{self, IOError};
 use super::model::{
     DownloadRequest, DownloadResult, DownloadRoute, DownloadRouteSource,
     FetchProgressFn, Integrity, attach_verified_integrity,
@@ -36,6 +33,9 @@ use crate::util::download::constants::{
     FETCH_TIMED_OUT_WAITING_FOR_DESTINATION_DOWNLOAD_LOCK,
     MAX_SEGMENT_CONCURRENCY, PARTIAL_FILE_SUFFIX, RESOURCE_WAIT_TIMEOUT,
 };
+use crate::util::download::integrity::verify_file;
+use crate::util::download::retired_sources;
+use crate::util::io::{self, IOError};
 use reqwest::header;
 use std::collections::HashSet;
 use std::error::Error;
@@ -88,7 +88,7 @@ pub async fn download_to_path(
             }
             Err(_) => {}
         }
-        super::download::proxy_context::with_clients(
+        crate::util::download::proxy_context::with_clients(
             crate::util::single_flight::run(
                 destination_path,
                 &integrity,
@@ -207,7 +207,8 @@ pub(crate) async fn select_h2_download_route(
         return None;
     }
     let policy = if request.h2_range_concurrency.is_some() {
-        if !super::download::h2_pool::has_live_connection(&h2_route).await {
+        if !crate::util::download::h2_pool::has_live_connection(&h2_route).await
+        {
             return None;
         }
         crate::util::download::native::explicit_h2_policy(&h2_route)
@@ -242,7 +243,8 @@ async fn reuse_existing_download(
         .cloned()
         .unwrap_or_else(|| official_route(&request.url, request.resource));
     remove_if_exists(part_path).await?;
-    remove_if_exists(&super::download::range_journal::path(part_path)).await?;
+    remove_if_exists(&crate::util::download::range_journal::path(part_path))
+        .await?;
     Ok(Some(DownloadResult {
         path: destination.to_path_buf(),
         url: route.url,
@@ -390,7 +392,7 @@ async fn resume_checkpointed_download(
         routes,
         part_path,
         |route| async move {
-            super::download::h2_range::resume_http1(
+            crate::util::download::h2_range::resume_http1(
                 request,
                 &route,
                 destination,
@@ -413,7 +415,7 @@ where
     F: FnMut(DownloadRoute) -> Fut,
     Fut: std::future::Future<
             Output = crate::Result<
-                Option<super::download::h2_download::H2DownloadOutcome>,
+                Option<crate::util::download::h2_download::H2DownloadOutcome>,
             >,
         >,
 {
@@ -421,7 +423,7 @@ where
     for route in routes {
         if let Some(outcome) = attempt(route.clone()).await? {
             match outcome {
-                super::download::h2_download::H2DownloadOutcome::Completed(
+                crate::util::download::h2_download::H2DownloadOutcome::Completed(
                     result,
                 ) => {
                     return Ok(Some(
@@ -429,18 +431,18 @@ where
                             .await,
                     ));
                 }
-                super::download::h2_download::H2DownloadOutcome::Canceled => {
+                crate::util::download::h2_download::H2DownloadOutcome::Canceled => {
                     return Err(ErrorKind::OtherError(
                         FETCH_DOWNLOAD_CANCELED.into(),
                     )
                     .into());
                 }
-                super::download::h2_download::H2DownloadOutcome::Fallback {
+                crate::util::download::h2_download::H2DownloadOutcome::Fallback {
                     failure,
                     preserve_partial,
                 } => {
                     if failure
-                        == super::download::h2_download::H2DownloadFailure::Io
+                        == crate::util::download::h2_download::H2DownloadFailure::Io
                     {
                         return Err(ErrorKind::OtherError(
                             FETCH_CHECKPOINT_RESUME_FAILED_DUE_TO_LOCAL_I_O
@@ -449,7 +451,7 @@ where
                         .into());
                     }
                     if !preserve_partial {
-                        super::download::h2_range::discard(part_path).await?;
+                        crate::util::download::h2_range::discard(part_path).await?;
                         had_range_failure = false;
                         break;
                     }
@@ -462,7 +464,7 @@ where
         }
     }
     if had_range_failure {
-        super::download::h2_range::discard(part_path).await?;
+        crate::util::download::h2_range::discard(part_path).await?;
     }
     Ok(None)
 }
@@ -473,8 +475,9 @@ pub(crate) async fn download_to_path_inner(
     semaphore: &FetchSemaphore,
     progress: Option<&mut FetchProgressFn<'_>>,
 ) -> crate::Result<DownloadResult> {
-    let _endpoint_registration = super::download::proxy_context::clients()
-        .and_then(|clients| clients.endpoints.register_download(&request));
+    let _endpoint_registration =
+        crate::util::download::proxy_context::clients()
+            .and_then(|clients| clients.endpoints.register_download(&request));
     if let Some(parent) = destination.parent() {
         io::create_dir_all(parent).await?;
     }

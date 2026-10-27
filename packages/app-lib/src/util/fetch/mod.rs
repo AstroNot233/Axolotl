@@ -96,8 +96,9 @@ fn is_safe_redirect_location(location: &str) -> bool {
     location.len() <= MAX_REDIRECT_LOCATION_BYTES && location.is_ascii()
 }
 
-use super::download::integrity::{
-    is_integrity_error, verify_computed_integrity, verify_file,
+pub(crate) use super::download::integrity::{
+    compute_file_integrity, is_integrity_error, validate_file_content,
+    verify_computed_integrity, verify_file,
 };
 #[cfg(test)]
 use super::download::native_request::byte_range_header_value;

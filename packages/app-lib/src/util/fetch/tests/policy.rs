@@ -1,5 +1,7 @@
 //! Fetch policy tests.
 
+use std::time::Duration;
+
 use super::super::*;
 
 #[test]

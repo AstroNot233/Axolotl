@@ -1,15 +1,8 @@
 use super::client::{DownloadClients, is_h2_protocol_failure};
-use super::download::integrity::{
-    compute_file_integrity, validate_file_content, verify_computed_integrity,
-};
-use super::download::native_request::send_path_request_with_clients;
-use super::download::route_health::ROUTE_HEALTH;
-use super::download_manager::DownloadSpeedTracker;
 use super::file::{
     ResourceValidator, parse_content_range, remove_if_exists,
     resource_validator_changed, validate_resource_version,
 };
-use super::io::{self, IOError};
 use super::model::{
     DownloadMeta, DownloadRequest, DownloadRoute, DownloadRouteSource,
     FetchProgressFn,
@@ -63,6 +56,13 @@ use crate::util::download::constants::{
     MIN_PARALLEL_RANGES, SEGMENT_EXPANSION_INTERVAL, SEGMENT_RETRY_ATTEMPTS,
     TAIL_HEDGE_MIN_REMAINING,
 };
+use crate::util::download::integrity::{
+    compute_file_integrity, validate_file_content, verify_computed_integrity,
+};
+use crate::util::download::native_request::send_path_request_with_clients;
+use crate::util::download::route_health::ROUTE_HEALTH;
+use crate::util::download_manager::DownloadSpeedTracker;
+use crate::util::io::{self, IOError};
 use futures::StreamExt;
 use parking_lot::Mutex;
 use reqwest::{StatusCode, header};
@@ -76,13 +76,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
 
-struct SegmentedDownloadSuccess {
-    size: u64,
-    final_url: String,
-    ttfb: time::Duration,
-    transfer_elapsed: time::Duration,
-    remote_addr: Option<std::net::SocketAddr>,
-    http_version: Option<reqwest::Version>,
+pub(crate) struct SegmentedDownloadSuccess {
+    pub(crate) size: u64,
+    pub(crate) final_url: String,
+    pub(crate) ttfb: time::Duration,
+    pub(crate) transfer_elapsed: time::Duration,
+    pub(crate) remote_addr: Option<std::net::SocketAddr>,
+    pub(crate) http_version: Option<reqwest::Version>,
 }
 
 pub(crate) enum SegmentedDownloadOutcome {
@@ -135,7 +135,8 @@ pub(crate) async fn download_segment(
     let mut final_url = route.url.clone();
     let mut remote_addr = None;
     let mut http_version = None;
-    let mut slow = super::download::native_slow::NativeSlowPolicy::new(0, None);
+    let mut slow =
+        crate::util::download::native_slow::NativeSlowPolicy::new(0, None);
     let mut last_slow_speed = None;
     for attempt in 1..=SEGMENT_RETRY_ATTEMPTS {
         let requested_start = range.start + {
@@ -245,7 +246,7 @@ pub(crate) async fn download_segment(
                 "Confirmed byte-range download support"
             );
         }
-        let endpoint_feedback = response.extensions().get::<super::download::endpoint_selection::metrics::EndpointTransferGuard>().cloned();
+        let endpoint_feedback = response.extensions().get::<crate::util::download::endpoint_selection::metrics::EndpointTransferGuard>().cloned();
         let mut stream = Some(response.bytes_stream());
         let mut stream_end_reason = None;
         loop {
@@ -424,7 +425,7 @@ pub(crate) async fn download_segment(
             if let Some(feedback) = &endpoint_feedback {
                 feedback.record(
                     chunk.len(),
-                    super::download::local_resources::pressure(part_path),
+                    crate::util::download::local_resources::pressure(part_path),
                 );
             }
             let (accepted, completed) = range.accept_chunk(chunk.len());
@@ -444,9 +445,9 @@ pub(crate) async fn download_segment(
                 break;
             }
             let pressure =
-                super::download::local_resources::pressure(part_path);
+                crate::util::download::local_resources::pressure(part_path);
             let downloaded_range = range.state.lock().downloaded;
-            if let super::download::native_slow::SlowDecision::Probe {
+            if let crate::util::download::native_slow::SlowDecision::Probe {
                 bytes_per_second,
             } = slow.observe_with_pressure(
                 downloaded_range,
@@ -454,13 +455,14 @@ pub(crate) async fn download_segment(
                 pressure,
             ) {
                 last_slow_speed = Some(bytes_per_second);
-                if let Some(clients) = super::download::proxy_context::clients()
+                if let Some(clients) =
+                    crate::util::download::proxy_context::clients()
                 {
                     clients.endpoints.on_slow_region(
                         request,
                         route,
                         &clients,
-                        super::download::endpoint_selection::Protocol::Http1,
+                        crate::util::download::endpoint_selection::Protocol::Http1,
                         remote_addr.map(|a| a.ip()),
                         range.start + downloaded_range
                             ..range.end().saturating_add(1),
@@ -471,13 +473,13 @@ pub(crate) async fn download_segment(
             }
             if let Some(current_speed) = last_slow_speed
                 && !pressure.blocks_expansion()
-                && let Some(clients) = super::download::proxy_context::clients()
+                && let Some(clients) = crate::util::download::proxy_context::clients()
                 && clients
                     .endpoints
                     .recovery_lease(
                         request,
                         route,
-                        super::download::endpoint_selection::Protocol::Http1,
+                        crate::util::download::endpoint_selection::Protocol::Http1,
                         remote_addr,
                         current_speed,
                         range.remaining(),
@@ -629,7 +631,7 @@ async fn finalize_segmented_output(
 
 impl<'a> SegmentedDownloadContext<'a> {
     #[allow(clippy::too_many_arguments)]
-    fn new(
+    pub(crate) fn new(
         request: &'a DownloadRequest,
         route: &'a DownloadRoute,
         candidate_routes: &'a [DownloadRoute],
@@ -715,7 +717,8 @@ pub(crate) async fn try_segmented_download(
             })
             .unwrap_or_default();
     let disk_cap =
-        super::download::local_resources::http1_range_limit(part_path).await;
+        crate::util::download::local_resources::http1_range_limit(part_path)
+            .await;
     let range_recovery = (request.batch_download && request.prefer_http1)
         || request.minimum_range_connections(size) > 1;
     let mut concurrency_cap = adaptive_range_cap(
@@ -782,7 +785,7 @@ pub(crate) async fn try_segmented_download(
     let transfer_started = Instant::now();
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
     if request.batch_download && request.prefer_http1 {
-        super::download::endpoint_selection::tuning::TRIALS
+        crate::util::download::endpoint_selection::tuning::TRIALS
             .invalidate_for_range_recovery();
     }
     let speed = DownloadSpeedTracker::default();
@@ -840,7 +843,7 @@ pub(crate) async fn try_segmented_download(
     let mut last_expansion = Instant::now();
     let mut expansion_baseline: Option<RangeExpansionBaseline> = None;
     let mut expansion_trial: Option<
-        super::download::endpoint_selection::tuning::TrialLease,
+        crate::util::download::endpoint_selection::tuning::TrialLease,
     > = None;
     let mut expansion_exhausted: Option<u64> = None;
     let mut last_block_reason = None;
@@ -913,7 +916,7 @@ pub(crate) async fn try_segmented_download(
                 let slow_decision = slow_policy.observe_with_pressure(
                     downloaded,
                     size.saturating_sub(downloaded),
-                    super::download::local_resources::pressure(part_path),
+                    crate::util::download::local_resources::pressure(part_path),
                 );
                 if allow_low_throughput_abort
                     && !alternate_probe_finished
@@ -955,7 +958,7 @@ pub(crate) async fn try_segmented_download(
                 if hedge_active.load(Ordering::Acquire) {
                     continue;
                 }
-                let pressure = super::download::local_resources::pressure(part_path);
+                let pressure = crate::util::download::local_resources::pressure(part_path);
                 if pressure.blocks_expansion() {
                     tracing::debug!(cpu_percent = pressure.cpu_percent, write_latency_ms = pressure.write_latency_ms, "Pausing range expansion under local resource pressure");
                     continue;
@@ -965,12 +968,12 @@ pub(crate) async fn try_segmented_download(
                 concurrency_cap = adaptive_range_cap(
                     remaining_size,
                     route_cap,
-                    super::download::local_resources::http1_range_limit(part_path).await,
+                    crate::util::download::local_resources::http1_range_limit(part_path).await,
                     health.consecutive_failures,
                     range_recovery,
                 );
                 let snapshot = speed.speed_snapshot();
-                use super::download::endpoint_selection::tuning::{TRIALS, TrialKind};
+                use crate::util::download::endpoint_selection::tuning::{TRIALS, TrialKind};
                 if expansion_trial.as_ref().is_some_and(|lease| !lease.valid(Instant::now())) {
                     expansion_trial = None;
                     expansion_baseline = None;
@@ -1006,7 +1009,7 @@ pub(crate) async fn try_segmented_download(
                     expansion_exhausted = None;
                 }
                 // Reuse the last productive connection count as ranges finish.
-                let remaining_time = super::download::native_slow::estimated_duration(
+                let remaining_time = crate::util::download::native_slow::estimated_duration(
                     remaining_bytes,
                     snapshot.recent_average.min(snapshot.aggregate_speed),
                 );
@@ -1015,8 +1018,8 @@ pub(crate) async fn try_segmented_download(
                     .max(requested_range_floor(request, size, remaining_bytes, concurrency_cap));
                 let below_floor = active_ranges < floor_target;
                 if !below_floor && ((expansion_exhausted.is_some() && active_ranges >= retained_ranges)
-                    || remaining_time <= super::download::constants::NATIVE_SLOW_RECONNECT_OVERHEAD
-                        + super::download::constants::NATIVE_SLOW_MIN_SAVINGS
+                    || remaining_time <= crate::util::download::constants::NATIVE_SLOW_RECONNECT_OVERHEAD
+                        + crate::util::download::constants::NATIVE_SLOW_MIN_SAVINGS
                 ) {
                     continue;
                 }

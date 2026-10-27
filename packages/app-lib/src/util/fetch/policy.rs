@@ -1,7 +1,4 @@
 use super::client;
-use super::download::route_health::{
-    ROUTE_HEALTH, RouteHealth, RouteHealthKey,
-};
 use super::model::{DownloadRoute, ProxyPolicy, ResourceClass};
 use super::routes::{effective_route_authority, route, route_host};
 use crate::util::download::constants::{
@@ -11,6 +8,9 @@ use crate::util::download::constants::{
     FETCH_RETRY_JITTER_MIN, FETCH_V2_SESSION, FETCH_V2_USER, FETCH_V3_FRIEND,
     FETCH_V3_FRIENDS, FETCH_V3_NOTIFICATION, MAX_FAILURE_COOLDOWN,
     RANGE_SPLITTING_DISABLE_THRESHOLD, RETRY_AFTER_CAP,
+};
+use crate::util::download::route_health::{
+    ROUTE_HEALTH, RouteHealth, RouteHealthKey,
 };
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
@@ -26,18 +26,18 @@ pub(crate) fn route_health_key(
     route: &DownloadRoute,
     resource: ResourceClass,
 ) -> Option<RouteHealthKey> {
-    super::download::route_health::route_health_key(route, resource)
+    crate::util::download::route_health::route_health_key(route, resource)
 }
 
 fn update_ewma(current: &mut Option<f64>, sample: f64) {
-    super::download::route_health::update_ewma(current, sample);
+    crate::util::download::route_health::update_ewma(current, sample);
 }
 
 pub(crate) fn persisted_route_health(
     key: &RouteHealthKey,
     proxy: ProxyPolicy,
 ) -> RouteHealth {
-    super::download::route_health::persisted_route_health(key, proxy)
+    crate::util::download::route_health::persisted_route_health(key, proxy)
 }
 
 pub(crate) fn fetch_retry_delay(attempt: usize) -> time::Duration {
@@ -122,7 +122,7 @@ pub(crate) fn record_route_success(
     remote_addr: Option<std::net::SocketAddr>,
 ) {
     if let (Some(host), Some(remote_addr)) = (route_host(route), remote_addr) {
-        super::download::proxy_context::resolver(route.proxy)
+        crate::util::download::proxy_context::resolver(route.proxy)
             .record_host_success(&host, remote_addr.ip());
     }
     if let Some(key) = route_health_key(route, resource) {
@@ -206,7 +206,7 @@ pub(crate) fn record_dns_connection_failure(
         .and_then(Url::host_str)
         .map(str::to_owned)
         .or_else(|| route_host(route))?;
-    super::download::proxy_context::resolver(route.proxy)
+    crate::util::download::proxy_context::resolver(route.proxy)
         .record_connection_failure(&host)
         .then_some(host)
 }
@@ -291,7 +291,7 @@ pub(crate) fn range_splitting_allowed(route: &DownloadRoute) -> bool {
     }
 
     range_splitting_authority(route).is_none_or(|authority| {
-        let authority = super::download::proxy_context::authority_key(
+        let authority = crate::util::download::proxy_context::authority_key(
             &authority,
             route.proxy,
         );
@@ -312,8 +312,10 @@ pub(crate) fn disable_range_splitting(route: &DownloadRoute) {
     let Some(authority) = range_splitting_authority(route) else {
         return;
     };
-    let authority =
-        super::download::proxy_context::authority_key(&authority, route.proxy);
+    let authority = crate::util::download::proxy_context::authority_key(
+        &authority,
+        route.proxy,
+    );
     let mut failures = RANGE_SPLITTING_PROTOCOL_FAILURES.lock();
     let count = failures.entry(authority.clone()).or_insert(0);
     *count += 1;
@@ -329,7 +331,7 @@ pub(crate) fn disable_range_splitting(route: &DownloadRoute) {
 pub(crate) fn record_range_splitting_success(route: &DownloadRoute) {
     if let Some(authority) = range_splitting_authority(route) {
         RANGE_SPLITTING_SUPPORTED.lock().insert(
-            super::download::proxy_context::authority_key(
+            crate::util::download::proxy_context::authority_key(
                 &authority,
                 route.proxy,
             ),

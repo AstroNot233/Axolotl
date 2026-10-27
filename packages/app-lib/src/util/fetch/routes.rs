@@ -1,5 +1,3 @@
-use super::download::route_health::{ROUTE_HEALTH, RouteHealth};
-use super::download::{modrinth_cdn, retired_sources, route_policy};
 use super::model::{
     DownloadRoute, DownloadRouteSource, ProxyPolicy, ResourceClass,
 };
@@ -20,6 +18,8 @@ use crate::util::download::constants::{
     ROUTE_POLICY_MAVEN_MINECRAFTFORGE_NET, ROUTE_POLICY_MAVEN_NEOFORGED_NET,
     ROUTE_POLICY_PISTON_META_MOJANG_COM,
 };
+use crate::util::download::route_health::{ROUTE_HEALTH, RouteHealth};
+use crate::util::download::{modrinth_cdn, retired_sources, route_policy};
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -43,14 +43,14 @@ pub(crate) fn original_route_authority(
 pub(crate) fn effective_route_authority(
     route: &DownloadRoute,
 ) -> Option<String> {
-    super::download::route_health::effective_route_authority(route)
+    crate::util::download::route_health::effective_route_authority(route)
 }
 
 pub(crate) fn remember_effective_route_authority(
     route: &DownloadRoute,
     final_url: &str,
 ) {
-    super::download::route_health::remember_effective_route_authority(
+    crate::util::download::route_health::remember_effective_route_authority(
         route, final_url,
     )
 }
@@ -59,7 +59,7 @@ pub(crate) fn forget_effective_route_authority(
     route: &DownloadRoute,
     failed_url: &Url,
 ) {
-    super::download::route_health::forget_effective_route_authority(
+    crate::util::download::route_health::forget_effective_route_authority(
         route, failed_url,
     )
 }

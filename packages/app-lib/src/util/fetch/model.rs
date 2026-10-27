@@ -164,8 +164,9 @@ pub struct DownloadRequest {
     pub(crate) install_tracking: Option<DownloadInstallTracking>,
     pub(crate) endpoint_migrations: Arc<std::sync::atomic::AtomicU8>,
     pub(crate) endpoint_migration_generations: Arc<Mutex<HashSet<(u64, u64)>>>,
-    pub(crate) transfer_counters:
-        Arc<super::download::endpoint_selection::metrics::TransferCounters>,
+    pub(crate) transfer_counters: Arc<
+        crate::util::download::endpoint_selection::metrics::TransferCounters,
+    >,
 }
 
 #[derive(Clone, Debug)]
@@ -243,7 +244,7 @@ impl DownloadRequest {
                     && size >= MIN_SEGMENT_SIZE * MIN_PARALLEL_RANGES as u64))
     }
 
-    fn minimum_range_connections(&self, size: u64) -> usize {
+    pub(crate) fn minimum_range_connections(&self, size: u64) -> usize {
         self.range_connection_floor.unwrap_or_else(|| {
             if self.prefers_independent_ranges(size) {
                 LARGE_FILE_RANGE_CONNECTION_FLOOR
@@ -319,7 +320,7 @@ pub struct DownloadResult {
     pub verified_sha512: Option<String>,
     #[serde(skip)]
     pub(crate) verified_file:
-        Option<super::download::verified_file::VerifiedFile>,
+        Option<crate::util::download::verified_file::VerifiedFile>,
 }
 
 pub(crate) async fn attach_verified_integrity(

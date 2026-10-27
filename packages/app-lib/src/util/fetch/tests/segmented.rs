@@ -1,5 +1,7 @@
 //! Fetch segmented tests.
 
+use std::time::Duration;
+
 use super::super::*;
 use super::fixtures;
 use super::fixtures::*;

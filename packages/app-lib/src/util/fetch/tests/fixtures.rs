@@ -1,28 +1,29 @@
 //! Fixtures shared by the fetch tests.
 
 use super::super::*;
+use std::time::Duration;
 
-static RANGE_SPLITTING_TEST_LOCK: LazyLock<AsyncMutex<()>> =
+pub(super) static RANGE_SPLITTING_TEST_LOCK: LazyLock<AsyncMutex<()>> =
     LazyLock::new(|| AsyncMutex::new(()));
 
-static AUTO_SOURCE_TEST_LOCK: LazyLock<std::sync::Mutex<()>> =
+pub(super) static AUTO_SOURCE_TEST_LOCK: LazyLock<std::sync::Mutex<()>> =
     LazyLock::new(|| std::sync::Mutex::new(()));
 
-static H2_FALLBACK_TEST_LOCK: LazyLock<std::sync::Mutex<()>> =
+pub(super) static H2_FALLBACK_TEST_LOCK: LazyLock<std::sync::Mutex<()>> =
     LazyLock::new(|| std::sync::Mutex::new(()));
 
 #[derive(Clone, Copy, Debug, Default)]
-struct RangeServerBehavior {
-    wrong_content_range: bool,
-    ignore_range: bool,
-    slow_body: bool,
-    fail_first_range: bool,
-    stall_first_range: bool,
-    vary_mod_validators: bool,
-    vary_range_validators: bool,
+pub(super) struct RangeServerBehavior {
+    pub(super) wrong_content_range: bool,
+    pub(super) ignore_range: bool,
+    pub(super) slow_body: bool,
+    pub(super) fail_first_range: bool,
+    pub(super) stall_first_range: bool,
+    pub(super) vary_mod_validators: bool,
+    pub(super) vary_range_validators: bool,
 }
 
-async fn spawn_range_server(
+pub(super) async fn spawn_range_server(
     data: Arc<Vec<u8>>,
     behavior: RangeServerBehavior,
 ) -> (
@@ -164,7 +165,7 @@ async fn spawn_range_server(
     )
 }
 
-async fn spawn_stream_server(
+pub(super) async fn spawn_stream_server(
     chunks: Vec<(Duration, Vec<u8>)>,
     content_length: usize,
     hold_open: bool,
@@ -214,7 +215,7 @@ async fn spawn_stream_server(
     (format!("http://{address}/file"), handle)
 }
 
-async fn spawn_json_server(
+pub(super) async fn spawn_json_server(
     body: String,
 ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -248,15 +249,18 @@ async fn spawn_json_server(
     )
 }
 
-struct HttpFixture {
-    status_line: &'static str,
-    extra_headers: &'static str,
-    body: Vec<u8>,
-    response_delay: Duration,
+pub(super) struct HttpFixture {
+    pub(super) status_line: &'static str,
+    pub(super) extra_headers: &'static str,
+    pub(super) body: Vec<u8>,
+    pub(super) response_delay: Duration,
 }
 
 impl HttpFixture {
-    fn new(status_line: &'static str, body: impl Into<Vec<u8>>) -> Self {
+    pub(super) fn new(
+        status_line: &'static str,
+        body: impl Into<Vec<u8>>,
+    ) -> Self {
         Self {
             status_line,
             extra_headers: "",
@@ -265,18 +269,18 @@ impl HttpFixture {
         }
     }
 
-    fn with_headers(mut self, headers: &'static str) -> Self {
+    pub(super) fn with_headers(mut self, headers: &'static str) -> Self {
         self.extra_headers = headers;
         self
     }
 
-    fn with_delay(mut self, delay: Duration) -> Self {
+    pub(super) fn with_delay(mut self, delay: Duration) -> Self {
         self.response_delay = delay;
         self
     }
 }
 
-async fn spawn_http_fixture(
+pub(super) async fn spawn_http_fixture(
     fixture: HttpFixture,
 ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -326,7 +330,7 @@ async fn spawn_http_fixture(
     (format!("http://{address}/file"), requests, handle)
 }
 
-fn direct_test_route(
+pub(super) fn direct_test_route(
     url: String,
     source: DownloadRouteSource,
 ) -> DownloadRoute {
@@ -340,7 +344,7 @@ fn direct_test_route(
     }
 }
 
-async fn spawn_redirect_server(
+pub(super) async fn spawn_redirect_server(
     location: String,
     response_delay: Duration,
 ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
@@ -382,7 +386,7 @@ async fn spawn_redirect_server(
     (format!("http://{address}/redirect"), requests, handle)
 }
 
-async fn test_download(
+pub(super) async fn test_download(
     url: &str,
     destination: &Path,
     expected_size: u64,

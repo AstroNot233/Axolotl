@@ -1,4 +1,5 @@
-use super::download_manager::SpeedSnapshot;
+#[cfg(test)]
+use super::BENCHMARK_TIMING;
 use super::file;
 use super::file::{remove_if_exists, suffixed_path, write};
 use super::model::{DownloadRequest, DownloadRoute};
@@ -25,6 +26,7 @@ use crate::util::download::constants::{
     SEGMENT_EXPANSION_RETRY_SPEED_PERCENT, SEGMENT_EXPANSION_SAMPLE_COUNT,
     SEGMENTED_DOWNLOAD_THRESHOLD, TAIL_HEDGE_IDLE_TIMEOUT, TAIL_SPLIT_PERCENT,
 };
+use crate::util::download_manager::SpeedSnapshot;
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -34,15 +36,15 @@ use tokio::sync::SemaphorePermit;
 
 #[derive(Clone)]
 pub(crate) struct DownloadRange {
-    index: usize,
+    pub(crate) index: usize,
     pub(crate) start: u64,
-    state: Arc<Mutex<DownloadRangeState>>,
+    pub(crate) state: Arc<Mutex<DownloadRangeState>>,
 }
 
-struct DownloadRangeState {
-    end: u64,
-    downloaded: u64,
-    active: bool,
+pub(crate) struct DownloadRangeState {
+    pub(crate) end: u64,
+    pub(crate) downloaded: u64,
+    pub(crate) active: bool,
 }
 
 impl DownloadRange {
@@ -70,7 +72,7 @@ impl DownloadRange {
             .saturating_sub(self.start.saturating_add(state.downloaded))
     }
 
-    fn is_active(&self) -> bool {
+    pub(crate) fn is_active(&self) -> bool {
         self.state.lock().active
     }
 
@@ -96,7 +98,7 @@ impl DownloadRange {
         Some(Self::new(index, split_start, split_end))
     }
 
-    fn accept_chunk(&self, chunk_size: usize) -> (usize, bool) {
+    pub(crate) fn accept_chunk(&self, chunk_size: usize) -> (usize, bool) {
         let mut state = self.state.lock();
         let remaining = state
             .end
@@ -109,14 +111,14 @@ impl DownloadRange {
         (accepted, state.downloaded == state.end - self.start + 1)
     }
 
-    fn finish(&self) -> bool {
+    pub(crate) fn finish(&self) -> bool {
         let mut state = self.state.lock();
         state.active = false;
         state.downloaded == state.end - self.start + 1
     }
 }
 
-pub(crate) struct DownloadRangeGuard(Arc<Mutex<DownloadRangeState>>);
+pub(crate) struct DownloadRangeGuard(pub(crate) Arc<Mutex<DownloadRangeState>>);
 
 impl Drop for DownloadRangeGuard {
     fn drop(&mut self) {
@@ -125,11 +127,11 @@ impl Drop for DownloadRangeGuard {
 }
 
 pub(crate) struct SegmentDownloadCompletion {
-    final_url: String,
-    is_first_range: bool,
-    ttfb: time::Duration,
-    remote_addr: Option<std::net::SocketAddr>,
-    http_version: Option<reqwest::Version>,
+    pub(crate) final_url: String,
+    pub(crate) is_first_range: bool,
+    pub(crate) ttfb: time::Duration,
+    pub(crate) remote_addr: Option<std::net::SocketAddr>,
+    pub(crate) http_version: Option<reqwest::Version>,
 }
 
 pub(crate) struct SegmentCleanupGuard {
@@ -139,7 +141,7 @@ pub(crate) struct SegmentCleanupGuard {
 }
 
 impl SegmentCleanupGuard {
-    fn new(part_path: &Path) -> Self {
+    pub(crate) fn new(part_path: &Path) -> Self {
         Self {
             part_path: part_path.to_path_buf(),
             armed: true,
@@ -147,12 +149,12 @@ impl SegmentCleanupGuard {
         }
     }
 
-    fn preserve_prefix(mut self, bytes: u64) -> Self {
+    pub(crate) fn preserve_prefix(mut self, bytes: u64) -> Self {
         self.preserved_prefix = bytes;
         self
     }
 
-    fn disarm(&mut self) {
+    pub(crate) fn disarm(&mut self) {
         self.armed = false;
     }
 }

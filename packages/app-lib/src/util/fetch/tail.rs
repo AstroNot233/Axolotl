@@ -1,12 +1,10 @@
 use super::SegmentDownloadError;
 use super::client::{DownloadClients, is_h2_protocol_failure};
-use super::download::native_request::send_path_request_with_clients;
 use super::file;
 use super::file::{
     ResourceValidator, create_download_file, parse_content_range,
     suffixed_path, validate_resource_version, write,
 };
-use super::io::IOError;
 use super::model::{DownloadMeta, DownloadRoute, Integrity};
 use super::routes::{route, url_authority};
 use super::segment;
@@ -18,6 +16,9 @@ use crate::util::download::constants::{
     FETCH_INVALID_HEDGED_CONTENT_RANGE,
     FETCH_RESOURCE_VALIDATOR_CHANGED_DURING_TAIL_HEDGE,
 };
+use crate::util::download::native_request::send_path_request_with_clients;
+use crate::util::io::IOError;
+use futures::StreamExt;
 use parking_lot::Mutex;
 use reqwest::StatusCode;
 use std::path::{Path, PathBuf};
@@ -60,11 +61,11 @@ impl Drop for TailCandidateCleanupGuard {
     }
 }
 
-struct TailCandidateCompletion {
-    path: PathBuf,
-    final_url: String,
-    remote_addr: Option<std::net::SocketAddr>,
-    http_version: reqwest::Version,
+pub(crate) struct TailCandidateCompletion {
+    pub(crate) path: PathBuf,
+    pub(crate) final_url: String,
+    pub(crate) remote_addr: Option<std::net::SocketAddr>,
+    pub(crate) http_version: reqwest::Version,
 }
 
 impl Drop for TailCandidateCompletion {
@@ -161,7 +162,7 @@ async fn download_tail_candidate(
         let accepted = usize::try_from(expected.saturating_sub(received))
             .unwrap_or(usize::MAX)
             .min(chunk.len());
-        super::download::local_resources::write(
+        crate::util::download::local_resources::write(
             &path,
             accepted as u64,
             async {
@@ -184,7 +185,7 @@ async fn download_tail_candidate(
     if received != expected {
         return Err(SegmentDownloadError::Transport);
     }
-    super::download::local_resources::write(&path, 0, file.flush())
+    crate::util::download::local_resources::write(&path, 0, file.flush())
         .await
         .map_err(|error| {
             SegmentDownloadError::Fatal(IOError::with_path(error, &path).into())

@@ -6,6 +6,7 @@ use crate::install::DownloadItemStatus;
 use crate::util::download::constants::{
     DOWNLOAD_DNS_PREWARM_CONCURRENCY, FILE_TCP_KEEPALIVE,
 };
+use futures::StreamExt;
 use std::sync::Arc;
 use std::time;
 
@@ -78,7 +79,7 @@ pub(crate) async fn prewarm_download_dns_for(
     proxy: ProxyPolicy,
     hosts: &[&str],
 ) {
-    let resolver = super::download::proxy_context::resolver(proxy);
+    let resolver = crate::util::download::proxy_context::resolver(proxy);
     let hosts = hosts
         .iter()
         .map(|host| (*host).to_string())

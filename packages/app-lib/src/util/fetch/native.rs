@@ -4,16 +4,6 @@ use super::client::{
     DownloadClients, HTTP1_DIRECT_REQWEST_CLIENT,
     HTTP1_NO_REDIRECT_REQWEST_CLIENT, is_h2_protocol_failure,
 };
-use super::download::diagnostics::{
-    DownloadAttemptDiagnostic, attach_download_attempt_history,
-    push_download_attempt_diagnostic, record_download_attempt_failure,
-};
-use super::download::integrity::{
-    validate_file_content, verify_computed_integrity,
-};
-use super::download::native_request::{
-    send_path_request, send_path_request_with_clients,
-};
 use super::file;
 use super::file::{
     IntegrityHashers, any_route_can_resume, copy, create_download_file,
@@ -22,7 +12,6 @@ use super::file::{
     preserve_or_remove_partial, remove_if_exists, resource_validator_changed,
     response_status_error, write,
 };
-use super::io::IOError;
 use super::model::{
     DownloadRequest, DownloadResult, DownloadRoute, FetchProgressFn,
 };
@@ -70,6 +59,17 @@ use crate::util::download::constants::{
     FILE_RETRY_SINGLE_STREAM_ROUNDS, MIN_PARALLEL_RANGES, MIN_SEGMENT_SIZE,
     RESOURCE_WAIT_TIMEOUT, SEGMENTED_DOWNLOAD_THRESHOLD,
 };
+use crate::util::download::diagnostics::{
+    DownloadAttemptDiagnostic, attach_download_attempt_history,
+    push_download_attempt_diagnostic, record_download_attempt_failure,
+};
+use crate::util::download::integrity::{
+    validate_file_content, verify_computed_integrity,
+};
+use crate::util::download::native_request::{
+    send_path_request, send_path_request_with_clients,
+};
+use crate::util::io::IOError;
 use futures::StreamExt;
 use reqwest::{Method, StatusCode, header};
 use sha2::Digest;
@@ -189,7 +189,7 @@ async fn try_segmented_native_attempt(
                     remote_addr = ?result.remote_addr,
                     http_version = ?result.http_version,
                     dns_candidates = ?route_host(route).map(|host| {
-                        super::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
+                        crate::util::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
                     }),
                     attempt = session.attempts,
                     max_attempts = session.file_attempt_budget,
@@ -779,7 +779,7 @@ async fn run_native_route_attempts(
             remote_addr = ?remote_addr,
             http_version = ?http_version,
             dns_candidates = ?route_host(route).map(|host| {
-                super::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
+                crate::util::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
             }),
             "Received file download response"
         );
@@ -979,10 +979,11 @@ async fn run_native_route_attempts(
         } else {
             create_download_file(part_path).await?
         };
-        let mut file =
-            super::download::stream_output::StreamOutput::new(file, part_path);
+        let mut file = crate::util::download::stream_output::StreamOutput::new(
+            file, part_path,
+        );
         let response_length = response.content_length().unwrap_or(0);
-        let endpoint_feedback = response.extensions().get::<super::download::endpoint_selection::metrics::EndpointTransferGuard>().cloned();
+        let endpoint_feedback = response.extensions().get::<crate::util::download::endpoint_selection::metrics::EndpointTransferGuard>().cloned();
         let total_size = request
             .integrity
             .size
@@ -990,7 +991,9 @@ async fn run_native_route_attempts(
         let transfer_started = Instant::now();
         let mut downloaded = starting_size;
         let mut batch_tail =
-            super::download::h2_receive::BatchTailWindow::new(transfer_started);
+            crate::util::download::h2_receive::BatchTailWindow::new(
+                transfer_started,
+            );
         let mut recover_file_ranges = !batch_ranges_attempted
             && !retry_with_single_thread
             && !session.single_thread_routes.contains(&route.url)
@@ -999,18 +1002,18 @@ async fn run_native_route_attempts(
             && route.supports_range
             && range_splitting_allowed(route);
         let mut progress_gate =
-            super::download::h2_receive::H2ProgressGate::with_starting_bytes(
+            crate::util::download::h2_receive::H2ProgressGate::with_starting_bytes(
                 total_size,
                 starting_size,
             );
         let expected_speed = expected_route_speed(route, request.resource);
         let mut slow_policy = if downgrade_slow_http2 {
-            super::download::native_slow::NativeSlowPolicy::for_http2(
+            crate::util::download::native_slow::NativeSlowPolicy::for_http2(
                 starting_size,
                 expected_speed,
             )
         } else {
-            super::download::native_slow::NativeSlowPolicy::new(
+            crate::util::download::native_slow::NativeSlowPolicy::new(
                 starting_size,
                 expected_speed,
             )
@@ -1049,7 +1052,7 @@ async fn run_native_route_attempts(
                         }
                     };
                     request.transfer_counters.received(chunk.len() as u64);
-                    if let Some(feedback) = &endpoint_feedback { feedback.record(chunk.len(), super::download::local_resources::pressure(part_path)); }
+                    if let Some(feedback) = &endpoint_feedback { feedback.record(chunk.len(), crate::util::download::local_resources::pressure(part_path)); }
                     {
                     #[cfg(test)]
                     let _phase = request.transfer_counters.phases.output();
@@ -1091,9 +1094,9 @@ async fn run_native_route_attempts(
                         && route.supports_range
                         && range_splitting_allowed(route)
                         && can_recover_file_ranges(request, total_size.saturating_sub(downloaded))
-                        && !super::download::local_resources::pressure(part_path).blocks_expansion()
-                        && semaphore.0.available_permits() >= super::download::constants::BATCH_DOWNLOAD_CONNECTION_FLOOR
-                        && super::download::native_budget::available(route) >= super::download::constants::BATCH_DOWNLOAD_CONNECTION_FLOOR;
+                        && !crate::util::download::local_resources::pressure(part_path).blocks_expansion()
+                        && semaphore.0.available_permits() >= crate::util::download::constants::BATCH_DOWNLOAD_CONNECTION_FLOOR
+                        && crate::util::download::native_budget::available(route) >= crate::util::download::constants::BATCH_DOWNLOAD_CONNECTION_FLOOR;
                     if batch_tail.observe(downloaded.saturating_sub(starting_size), can_recover, Instant::now()) {
                         recover_file_ranges = true;
                         break;
@@ -1101,31 +1104,31 @@ async fn run_native_route_attempts(
                     let slow_decision = slow_policy.observe_with_pressure(
                         downloaded,
                         total_size.saturating_sub(downloaded),
-                        super::download::local_resources::pressure(part_path),
+                        crate::util::download::local_resources::pressure(part_path),
                     );
-                    if let super::download::native_slow::SlowDecision::Probe { bytes_per_second } = slow_decision {
+                    if let crate::util::download::native_slow::SlowDecision::Probe { bytes_per_second } = slow_decision {
                         last_endpoint_speed = bytes_per_second;
                     }
-                    if !super::download::local_resources::pressure(part_path).blocks_expansion()
-                        && let Some(clients) = super::download::proxy_context::clients() {
+                    if !crate::util::download::local_resources::pressure(part_path).blocks_expansion()
+                        && let Some(clients) = crate::util::download::proxy_context::clients() {
                         let protocol = if http_version == reqwest::Version::HTTP_2 {
-                            super::download::endpoint_selection::Protocol::H2
-                        } else { super::download::endpoint_selection::Protocol::Http1 };
+                            crate::util::download::endpoint_selection::Protocol::H2
+                        } else { crate::util::download::endpoint_selection::Protocol::Http1 };
                         if clients.endpoints.recovery_lease(request, route, protocol, remote_addr,
                             last_endpoint_speed, total_size.saturating_sub(downloaded)).is_some() {
                             switched_endpoint = true;
                             break;
                         }
                     }
-                    if matches!(slow_decision, super::download::native_slow::SlowDecision::Probe { .. })
-                        && let Some(clients) = super::download::proxy_context::clients()
+                    if matches!(slow_decision, crate::util::download::native_slow::SlowDecision::Probe { .. })
+                        && let Some(clients) = crate::util::download::proxy_context::clients()
                     {
                         let protocol = if http_version == reqwest::Version::HTTP_2 {
-                            super::download::endpoint_selection::Protocol::H2
-                        } else { super::download::endpoint_selection::Protocol::Http1 };
+                            crate::util::download::endpoint_selection::Protocol::H2
+                        } else { crate::util::download::endpoint_selection::Protocol::Http1 };
                         clients.endpoints.on_slow_region(request, route, &clients, protocol,
                             remote_addr.map(|address| address.ip()), downloaded..total_size, Some(last_endpoint_speed),
-                            super::download::local_resources::pressure(part_path));
+                            crate::util::download::local_resources::pressure(part_path));
                         if clients.endpoints.is_probing() { continue; }
                     }
                     if downgrade_slow_http2 && alternate_probe_finished
@@ -1240,7 +1243,7 @@ async fn run_native_route_attempts(
             // Best-effort durability for data a later resume builds
             // on; a power loss could otherwise leave a zero-filled
             // tail that wastes the resumed transfer.
-            let _ = super::download::local_resources::write(
+            let _ = crate::util::download::local_resources::write(
                 part_path,
                 0,
                 file.sync_data(),
@@ -1508,7 +1511,7 @@ async fn run_native_route_attempts(
             remote_addr = ?remote_addr,
             http_version = ?http_version,
             dns_candidates = ?route_host(route).map(|host| {
-                super::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
+                crate::util::download::proxy_context::resolver(route.proxy).resolved_addresses(&host)
             }),
             "Completed file download"
         );
