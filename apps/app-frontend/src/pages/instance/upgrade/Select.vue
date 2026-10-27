@@ -118,17 +118,31 @@
             {{ errorMessage(flow.error.value) }}
         </Admonition>
 
-        <div
-            v-if="flow.busy.value"
-            class="flex items-center gap-2 text-[var(--color-text-tertiary)]"
-            role="status"
-        >
-            <SpinnerIcon class="size-5 animate-spin" aria-hidden="true" />
-            {{
-                formatMessage(messages.planningStatus, {
-                    count: snapshotItemCount ?? '…',
-                })
-            }}
+        <div v-if="flow.busy.value" class="flex flex-col gap-3" data-upgrade-planning>
+            <div class="flex items-center gap-2 text-[var(--color-text-tertiary)]" role="status">
+                <SpinnerIcon class="size-5 shrink-0 animate-spin" aria-hidden="true" />
+                <span class="grow">{{ planningStatusText }}</span>
+                <Button type="outlined" size="sm" @click="cancelPlanning">{{
+                    formatMessage(messages.stopAnalysis)
+                }}</Button>
+            </div>
+            <ul
+                v-if="planningItems.length"
+                class="m-0 flex max-h-80 list-none flex-col gap-1 overflow-y-auto p-0"
+            >
+                <li
+                    v-for="item in planningItems"
+                    :key="item.contentId"
+                    class="flex items-center justify-between gap-3 text-sm"
+                >
+                    <span class="min-w-0 truncate text-[var(--color-text-default)]">{{
+                        fileName(item.relativePath)
+                    }}</span>
+                    <span class="shrink-0 text-[var(--color-text-tertiary)]">{{
+                        formatMessage(messages.itemState, { state: itemState(item) })
+                    }}</span>
+                </li>
+            </ul>
         </div>
     </section>
 </template>
@@ -137,6 +151,7 @@
 import { SpinnerIcon } from '@modrinth/assets'
 import {
     Admonition,
+    Button,
     Card,
     Combobox,
     defineMessages,
@@ -147,13 +162,16 @@ import {
 } from '@modrinth/ui'
 import type { GameVersionTag } from '@modrinth/utils'
 import { useQuery } from '@tanstack/vue-query'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, triggerRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { loadInstanceContentData } from '@/helpers/instance-content'
 import {
     discard_instance_upgrade_plan,
     get_instance_upgrade_plan,
+    type InstanceUpgradeItemProgress,
+    type InstanceUpgradePlanningPhase,
+    type InstanceUpgradePlanningProgress,
     plan_instance_upgrade,
 } from '@/helpers/instance-upgrade'
 import { get_loader_versions } from '@/helpers/metadata'
@@ -244,6 +262,20 @@ const messages = defineMessages({
     planningStatus: {
         id: 'instance.upgrade.select.planning-status',
         defaultMessage: 'Analyzing compatibility for {count} content items…',
+    },
+    planningPhase: {
+        id: 'instance.upgrade.select.planning-phase',
+        defaultMessage:
+            '{phase, select, reading_content {Reading content files ({completed}/{total})} checking_candidates {Checking releases for Minecraft {version} ({completed}/{total})} solving {Resolving dependencies…} other {Making sure the instance has not changed…}}',
+    },
+    itemState: {
+        id: 'instance.upgrade.select.item-state',
+        defaultMessage:
+            '{state, select, checking {Checking…} found {Compatible release found} missing {No compatible release} unidentified {Not identified} unsupported {Not supported} other {Needs review}}',
+    },
+    stopAnalysis: {
+        id: 'instance.upgrade.select.stop-analysis',
+        defaultMessage: 'Stop analysis',
     },
     checkCompatibility: {
         id: 'instance.upgrade.select.check-compatibility',
@@ -413,10 +445,90 @@ onMounted(registerControls)
 watch([canPlan, reusesPlan, () => flow.busy.value], registerControls)
 let planningGeneration = 0
 let disposed = false
-onBeforeUnmount(() => {
-    disposed = true
+let planningController: AbortController | null = null
+const planningPhase = ref<{
+    phase: InstanceUpgradePlanningPhase
+    completed: number
+    total: number
+} | null>(null)
+const planningItems = ref<InstanceUpgradeItemProgress[]>([])
+const checkedProjects = shallowRef(new Map<string, number>())
+const projectKey = (provider: string | null, projectId: string | null) => `${provider}:${projectId}`
+
+const planningStatusText = computed(() => {
+    const progress = planningPhase.value
+    if (!progress)
+        return formatMessage(messages.planningStatus, { count: snapshotItemCount.value ?? '…' })
+    return formatMessage(messages.planningPhase, {
+        phase: progress.phase,
+        completed: progress.completed,
+        total: progress.total || '…',
+        version: selectedGameVersion.value ?? '',
+    })
+})
+
+function itemState(item: InstanceUpgradeItemProgress) {
+    switch (item.status) {
+        case null:
+            break
+        case 'upgrade_available':
+        case 'already_compatible':
+            return 'found'
+        case 'no_compatible_release':
+        case 'prerelease_only':
+            return 'missing'
+        case 'unidentified':
+            return 'unidentified'
+        case 'unsupported_content_type':
+            return 'unsupported'
+        default:
+            return 'review'
+    }
+    const compatible = checkedProjects.value.get(projectKey(item.provider, item.projectId))
+    if (compatible === undefined) return 'checking'
+    return compatible > 0 ? 'found' : 'missing'
+}
+
+function fileName(path: string) {
+    return path.split(/[\\/]/).pop() || path
+}
+
+function onPlanningProgress(progress: InstanceUpgradePlanningProgress) {
+    if (progress.kind === 'phase') {
+        planningPhase.value = {
+            phase: progress.phase,
+            completed: progress.completed,
+            total: progress.total,
+        }
+    } else if (progress.kind === 'items') {
+        planningItems.value = progress.items
+    } else {
+        checkedProjects.value.set(
+            projectKey(progress.provider, progress.projectId),
+            progress.compatible,
+        )
+        triggerRef(checkedProjects)
+    }
+}
+
+function resetPlanningProgress() {
+    planningPhase.value = null
+    planningItems.value = []
+    checkedProjects.value = new Map()
+}
+
+/** Stops the running analysis in the planner as well, not only on this page. */
+function cancelPlanning() {
+    planningController?.abort()
+    planningController = null
     planningGeneration += 1
     flow.busy.value = false
+    resetPlanningProgress()
+}
+
+onBeforeUnmount(() => {
+    disposed = true
+    cancelPlanning()
     flow.registerStepControls(null)
 })
 
@@ -432,9 +544,13 @@ async function startPlanning() {
 
     const targetEnvironment = requestedTargetEnvironment.value!
     const instanceId = flow.instanceId.value
+    planningController?.abort()
+    const controller = new AbortController()
+    planningController = controller
     const generation = ++planningGeneration
     flow.error.value = null
     flow.busy.value = true
+    resetPlanningProgress()
     try {
         if (flow.plan.value) {
             try {
@@ -447,7 +563,13 @@ async function startPlanning() {
             instanceId,
             flow.plan.value,
             targetEnvironment,
-            plan_instance_upgrade,
+            (id, target) =>
+                plan_instance_upgrade(id, target, {
+                    signal: controller.signal,
+                    onProgress: (progress) => {
+                        if (generation === planningGeneration) onPlanningProgress(progress)
+                    },
+                }),
         )
         const routeInstanceId = Array.isArray(route.params.id)
             ? route.params.id[0]
@@ -470,9 +592,14 @@ async function startPlanning() {
         flow.setTargetEnvironment(planned.plan.targetEnvironment)
         await router.push(`/instance/${encodeURIComponent(instanceId)}/upgrade/compatibility`)
     } catch (error) {
-        if (!disposed && generation === planningGeneration) flow.error.value = error
+        if (!disposed && generation === planningGeneration && !controller.signal.aborted)
+            flow.error.value = error
     } finally {
-        if (!disposed && generation === planningGeneration) flow.busy.value = false
+        if (!disposed && generation === planningGeneration) {
+            flow.busy.value = false
+            planningController = null
+            resetPlanningProgress()
+        }
     }
 }
 </script>

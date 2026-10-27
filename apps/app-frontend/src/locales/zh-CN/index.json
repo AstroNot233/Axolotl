@@ -14243,6 +14243,9 @@
   "instance.upgrade.select.fabric-versions-error": {
     "message": "无法加载 Fabric 版本。仍可使用自动选择。"
   },
+  "instance.upgrade.select.item-state": {
+    "message": "{state, select, checking {正在检查……} found {找到兼容版本} missing {没有兼容版本} unidentified {无法识别} unsupported {不支持} other {需要检查}}"
+  },
   "instance.upgrade.select.loading-fabric-versions": {
     "message": "正在加载 Fabric 版本……"
   },
@@ -14273,11 +14276,17 @@
   "instance.upgrade.select.planning-error-title": {
     "message": "兼容性分析失败"
   },
+  "instance.upgrade.select.planning-phase": {
+    "message": "{phase, select, reading_content {正在读取内容文件（{completed}/{total}）} checking_candidates {正在检查适用于 Minecraft {version} 的版本（{completed}/{total}）} solving {正在解析依赖……} other {正在确认实例未被修改……}}"
+  },
   "instance.upgrade.select.planning-status": {
     "message": "正在分析 {count} 个内容项目的兼容性……"
   },
   "instance.upgrade.select.review-compatibility": {
     "message": "返回兼容性检查"
+  },
+  "instance.upgrade.select.stop-analysis": {
+    "message": "停止分析"
   },
   "instance.upgrade.select.target": {
     "message": "目标"

@@ -16094,6 +16094,9 @@
   "instance.upgrade.select.fabric-versions-error": {
     "message": "Fabric versions could not be loaded. Automatic remains available."
   },
+  "instance.upgrade.select.item-state": {
+    "message": "{state, select, checking {Checking…} found {Compatible release found} missing {No compatible release} unidentified {Not identified} unsupported {Not supported} other {Needs review}}"
+  },
   "instance.upgrade.select.loading-fabric-versions": {
     "message": "Loading Fabric versions…"
   },
@@ -16124,11 +16127,17 @@
   "instance.upgrade.select.planning-error-title": {
     "message": "Compatibility analysis failed"
   },
+  "instance.upgrade.select.planning-phase": {
+    "message": "{phase, select, reading_content {Reading content files ({completed}/{total})} checking_candidates {Checking releases for Minecraft {version} ({completed}/{total})} solving {Resolving dependencies…} other {Making sure the instance has not changed…}}"
+  },
   "instance.upgrade.select.planning-status": {
     "message": "Analyzing compatibility for {count} content items…"
   },
   "instance.upgrade.select.review-compatibility": {
     "message": "Review compatibility"
+  },
+  "instance.upgrade.select.stop-analysis": {
+    "message": "Stop analysis"
   },
   "instance.upgrade.select.target": {
     "message": "Target"

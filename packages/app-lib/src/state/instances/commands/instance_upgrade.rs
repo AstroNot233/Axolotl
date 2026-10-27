@@ -1,8 +1,10 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
+use tokio_util::sync::CancellationToken;
 
 use crate::State;
 use crate::state::instances::DependencyRelation;
@@ -17,7 +19,9 @@ use crate::state::{
     InstanceUpgradeDependencyChangeKind, InstanceUpgradeDependencyRequirement,
     InstanceUpgradeEnvironment, InstanceUpgradeFixedConstraint,
     InstanceUpgradeIssue, InstanceUpgradeIssueCode, InstanceUpgradeItem,
-    InstanceUpgradeItemStatus, InstanceUpgradePlan, InstanceUpgradeResolution,
+    InstanceUpgradeItemProgress, InstanceUpgradeItemStatus,
+    InstanceUpgradePlan, InstanceUpgradePlanningPhase,
+    InstanceUpgradePlanningProgress, InstanceUpgradeResolution,
     InstanceUpgradeSelection, InstanceUpgradeSolution,
     InstanceUpgradeSolutionKind, InstanceUpgradeSourceFile, ModrinthProjectId,
     ProjectType, ShaderRuntime, Version,
@@ -154,7 +158,91 @@ struct SolverResult {
 struct SearchState {
     visited: usize,
     limit_reached: bool,
+    canceled: bool,
+    cancel: Option<CancellationToken>,
     first_issue: Option<InstanceUpgradeIssue>,
+}
+
+pub(crate) type UpgradePlanningReporter =
+    Arc<dyn Fn(InstanceUpgradePlanningProgress) + Send + Sync>;
+
+/// Lets the creator of an upgrade plan stop it and follow its progress.
+/// Cancellation is checked between files, while candidate releases are
+/// fetched and inside the dependency solver.
+#[derive(Clone, Default)]
+pub(crate) struct UpgradePlanningObserver {
+    cancel: CancellationToken,
+    reporter: Option<UpgradePlanningReporter>,
+}
+
+impl UpgradePlanningObserver {
+    pub(crate) fn new(
+        cancel: CancellationToken,
+        reporter: Option<UpgradePlanningReporter>,
+    ) -> Self {
+        Self { cancel, reporter }
+    }
+
+    pub(crate) fn report(&self, progress: InstanceUpgradePlanningProgress) {
+        if let Some(reporter) = &self.reporter
+            && !self.cancel.is_cancelled()
+        {
+            reporter(progress);
+        }
+    }
+
+    pub(crate) fn phase(
+        &self,
+        phase: InstanceUpgradePlanningPhase,
+        completed: usize,
+        total: usize,
+    ) {
+        self.report(InstanceUpgradePlanningProgress::Phase {
+            phase,
+            completed,
+            total,
+        });
+    }
+
+    pub(crate) fn check(&self) -> crate::Result<()> {
+        if self.cancel.is_cancelled() {
+            return Err(upgrade_planning_canceled());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn token(&self) -> &CancellationToken {
+        &self.cancel
+    }
+}
+
+pub(crate) fn upgrade_planning_canceled() -> crate::Error {
+    crate::ErrorKind::OtherError("Upgrade planning was canceled".to_string())
+        .into()
+}
+
+fn item_progress(
+    items: &[InstanceUpgradeItem],
+    checked: bool,
+) -> InstanceUpgradePlanningProgress {
+    InstanceUpgradePlanningProgress::Items {
+        items: items
+            .iter()
+            .map(|item| InstanceUpgradeItemProgress {
+                content_id: item.content_id.clone(),
+                relative_path: item.relative_path.clone(),
+                provider: item.provider,
+                project_id: item.project_id.clone(),
+                status: (checked
+                    || matches!(
+                        item.status,
+                        InstanceUpgradeItemStatus::Unidentified
+                            | InstanceUpgradeItemStatus::UnsupportedContentType
+                    ))
+                .then_some(item.status),
+            })
+            .collect(),
+    }
 }
 
 #[derive(Clone)]
@@ -248,6 +336,7 @@ pub(crate) async fn create_instance_upgrade_plan_with_source(
     instance_id: &str,
     target_environment: InstanceUpgradeEnvironment,
     state: &State,
+    observer: &UpgradePlanningObserver,
 ) -> crate::Result<(InstanceUpgradePlan, ReadOnlyUpgradeSource)> {
     let metadata = super::get_instance_metadata(instance_id, &state.pool)
         .await?
@@ -269,7 +358,8 @@ pub(crate) async fn create_instance_upgrade_plan_with_source(
         .into());
     }
 
-    let mut source = read_only_upgrade_source(instance_id, state).await?;
+    let mut source =
+        read_only_upgrade_source(instance_id, state, observer).await?;
     let snapshot = source.snapshot.clone();
     if snapshot.revision != metadata.applied_content_set.revision {
         return Err(crate::ErrorKind::InputError(
@@ -288,6 +378,7 @@ pub(crate) async fn create_instance_upgrade_plan_with_source(
         ),
     };
     let (mut items, installed) = snapshot_upgrade_items(&snapshot);
+    observer.report(item_progress(&items, false));
     let root_types = installed
         .iter()
         .filter(|node| !node.auto_dependency && node.migratable)
@@ -300,18 +391,17 @@ pub(crate) async fn create_instance_upgrade_plan_with_source(
         &fixed,
         &target_environment,
         state,
+        observer,
     )
     .await?;
     classify_items(&mut items, &installed, &catalog, &target_environment);
+    observer.report(item_progress(&items, true));
 
     let roots = roots_from_items(&items, &installed);
-    let outcome = solve_upgrade_with_fixed_roots(
-        &roots,
-        &installed,
-        &catalog,
-        &fixed,
-        &confirmed_prereleases(&items),
-    );
+    observer.phase(InstanceUpgradePlanningPhase::Solving, 0, 0);
+    let (outcome, catalog, installed, roots) =
+        solve_upgrade_off_thread(roots, installed, catalog, &items, observer)
+            .await?;
     apply_solver_issues_to_items(&mut items, &outcome.issues);
     let mut blocking_issues = outcome.issues;
     for item in &items {
@@ -374,6 +464,7 @@ pub(crate) async fn create_instance_upgrade_plan_with_source(
 async fn read_only_upgrade_source(
     instance_id: &str,
     state: &State,
+    observer: &UpgradePlanningObserver,
 ) -> crate::Result<ReadOnlyUpgradeSource> {
     let mut snapshot =
         super::get_cached_content_snapshot(instance_id, state).await?;
@@ -400,11 +491,19 @@ async fn read_only_upgrade_source(
         .collect();
     let mut scanned_by_path = HashMap::new();
     let mut source_files = Vec::new();
-    for file in scanned {
+    let total = scanned.len();
+    observer.phase(InstanceUpgradePlanningPhase::ReadingContent, 0, total);
+    for (index, file) in scanned.into_iter().enumerate() {
+        observer.check()?;
         let (_, sha1) = crate::util::fetch::sha1_file_async(
             instance_dir.join(&file.relative_path),
         )
         .await?;
+        observer.phase(
+            InstanceUpgradePlanningPhase::ReadingContent,
+            index + 1,
+            total,
+        );
         source_files.push(InstanceUpgradeSourceFile {
             relative_path: file.relative_path.clone(),
             sha1: sha1.clone(),
@@ -512,7 +611,12 @@ pub(crate) async fn validate_instance_upgrade_plan_source(
     plan: &InstanceUpgradePlan,
     state: &State,
 ) -> crate::Result<ReadOnlyUpgradeSource> {
-    let current = read_only_upgrade_source(&plan.instance_id, state).await?;
+    let current = read_only_upgrade_source(
+        &plan.instance_id,
+        state,
+        &UpgradePlanningObserver::default(),
+    )
+    .await?;
     ensure_upgrade_source_files_match(
         &plan.instance_id,
         &plan.source_files,
@@ -525,9 +629,13 @@ pub(crate) async fn scan_instance_upgrade_source_files(
     instance_id: &str,
     state: &State,
 ) -> crate::Result<Vec<InstanceUpgradeSourceFile>> {
-    Ok(read_only_upgrade_source(instance_id, state)
-        .await?
-        .source_files)
+    Ok(read_only_upgrade_source(
+        instance_id,
+        state,
+        &UpgradePlanningObserver::default(),
+    )
+    .await?
+    .source_files)
 }
 
 impl UpgradePlanRuntimeValidation {
@@ -933,8 +1041,21 @@ fn is_world_datapack(path: &str) -> bool {
 struct SolveOutcome {
     solutions: Vec<SolverResult>,
     issues: Vec<InstanceUpgradeIssue>,
+    canceled: bool,
     #[cfg(test)]
     visited_states: usize,
+}
+
+impl SolveOutcome {
+    fn canceled() -> Self {
+        Self {
+            solutions: Vec::new(),
+            issues: Vec::new(),
+            canceled: true,
+            #[cfg(test)]
+            visited_states: 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1103,6 +1224,7 @@ fn retain_best_failure(
 struct StrategySolveOutcome {
     solution: Option<SolverResult>,
     issue: Option<InstanceUpgradeIssue>,
+    canceled: bool,
     #[cfg(test)]
     visited_states: usize,
 }
@@ -1171,6 +1293,7 @@ pub(crate) async fn recompute_instance_upgrade_plan_from_source(
                     &fixed,
                     &plan.target_environment,
                     state,
+                    &UpgradePlanningObserver::default(),
                 )
                 .await?
             }
@@ -1287,6 +1410,7 @@ async fn load_upgrade_catalog(
     fixed: &FixedRootConstraints,
     target: &InstanceUpgradeEnvironment,
     state: &State,
+    observer: &UpgradePlanningObserver,
 ) -> crate::Result<UpgradeCatalog> {
     let current_versions = installed
         .iter()
@@ -1303,15 +1427,24 @@ async fn load_upgrade_catalog(
         .collect::<VecDeque<_>>();
     let mut seen = HashSet::new();
     let mut exact_versions = fixed.versions_by_project.clone();
+    let checked = std::sync::atomic::AtomicUsize::new(0);
+    let mut requested = 0;
+    observer.phase(InstanceUpgradePlanningPhase::CheckingCandidates, 0, 0);
     while !queue.is_empty() {
+        observer.check()?;
         let mut batch = Vec::new();
         while let Some((key, project_type)) = queue.pop_front() {
             if seen.insert(key.clone()) {
                 batch.push((key, project_type));
             }
         }
-        let results = futures::future::try_join_all(batch.into_iter().map(
-            |(key, project_type)| {
+        requested += batch.len();
+        let checked = &checked;
+        // Each project reports as soon as its candidates are known. The batch
+        // is still merged in its original order, so the catalog does not
+        // depend on which request finished first.
+        let batch_results = futures::future::try_join_all(
+            batch.into_iter().map(|(key, project_type)| {
                 let current = current_versions.get(&key).cloned();
                 let exact =
                     exact_versions.get(&key).cloned().unwrap_or_default();
@@ -1349,11 +1482,36 @@ async fn load_upgrade_catalog(
                             CandidatePool::default()
                         }
                     };
+                    let completed = checked
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        + 1;
+                    observer.report(
+                        InstanceUpgradePlanningProgress::Candidates {
+                            provider: key.provider,
+                            project_id: key.project_id.clone(),
+                            compatible: candidates
+                                .candidates
+                                .iter()
+                                .filter(|candidate| candidate.compatible)
+                                .count(),
+                        },
+                    );
+                    observer.phase(
+                        InstanceUpgradePlanningPhase::CheckingCandidates,
+                        completed,
+                        requested,
+                    );
                     Ok::<_, crate::Error>((key, candidates))
                 }
-            },
-        ))
-        .await?;
+            }),
+        );
+        let results = tokio::select! {
+            biased;
+            _ = observer.token().cancelled() => {
+                return Err(upgrade_planning_canceled());
+            }
+            results = batch_results => results?,
+        };
         for (key, candidates) in results {
             for candidate in &candidates.candidates {
                 for dependency in &candidate.dependencies {
@@ -2039,6 +2197,51 @@ fn confirmed_prereleases(
         .collect()
 }
 
+/// Runs the dependency solver on a blocking thread. Canceling returns at once;
+/// the solver notices the same token between search states and stops.
+async fn solve_upgrade_off_thread(
+    roots: Vec<RootRequest>,
+    installed: Vec<InstalledNode>,
+    catalog: UpgradeCatalog,
+    items: &[InstanceUpgradeItem],
+    observer: &UpgradePlanningObserver,
+) -> crate::Result<(
+    SolveOutcome,
+    UpgradeCatalog,
+    Vec<InstalledNode>,
+    Vec<RootRequest>,
+)> {
+    observer.check()?;
+    let confirmed = confirmed_prereleases(items);
+    let cancel = observer.token().clone();
+    let solve = tokio::task::spawn_blocking(move || {
+        let outcome = solve_upgrade_with_fixed_roots_cancellable(
+            &roots,
+            &installed,
+            &catalog,
+            &FixedRootConstraints::default(),
+            &confirmed,
+            Some(&cancel),
+        );
+        (outcome, catalog, installed, roots)
+    });
+    let (outcome, catalog, installed, roots) = tokio::select! {
+        biased;
+        _ = observer.token().cancelled() => {
+            return Err(upgrade_planning_canceled());
+        }
+        result = solve => result.map_err(|error| {
+            crate::ErrorKind::OtherError(format!(
+                "Upgrade dependency solver stopped unexpectedly: {error}"
+            ))
+        })?,
+    };
+    if outcome.canceled {
+        return Err(upgrade_planning_canceled());
+    }
+    Ok((outcome, catalog, installed, roots))
+}
+
 #[cfg(test)]
 fn solve_upgrade(
     roots: &[RootRequest],
@@ -2064,23 +2267,51 @@ fn solve_upgrade_with_fixed_roots(
     fixed: &FixedRootConstraints,
     confirmed_prereleases: &HashSet<(NodeKey, String)>,
 ) -> SolveOutcome {
+    solve_upgrade_with_fixed_roots_cancellable(
+        roots,
+        installed,
+        catalog,
+        fixed,
+        confirmed_prereleases,
+        None,
+    )
+}
+
+fn solve_upgrade_with_fixed_roots_cancellable(
+    roots: &[RootRequest],
+    installed: &[InstalledNode],
+    catalog: &UpgradeCatalog,
+    fixed: &FixedRootConstraints,
+    confirmed_prereleases: &HashSet<(NodeKey, String)>,
+    cancel: Option<&CancellationToken>,
+) -> SolveOutcome {
     let aliases = InstalledAliasIndex::new(installed);
-    let newest = solve_for_strategy_with_fixed_roots(
+    let newest = solve_for_strategy_with_fixed_roots_and_limit(
         SolveStrategy::Newest,
         roots,
         catalog,
         fixed,
         confirmed_prereleases,
         &aliases,
+        MAX_SEARCH_STATES,
+        cancel,
     );
-    let minimal = solve_for_strategy_with_fixed_roots(
+    if newest.canceled {
+        return SolveOutcome::canceled();
+    }
+    let minimal = solve_for_strategy_with_fixed_roots_and_limit(
         SolveStrategy::MinimalChange,
         roots,
         catalog,
         fixed,
         confirmed_prereleases,
         &aliases,
+        MAX_SEARCH_STATES,
+        cancel,
     );
+    if minimal.canceled {
+        return SolveOutcome::canceled();
+    }
     let candidate_issues = [newest.issue.clone(), minimal.issue.clone()];
     let mut solutions = Vec::new();
     if fixed.is_empty() {
@@ -2106,6 +2337,7 @@ fn solve_upgrade_with_fixed_roots(
     SolveOutcome {
         solutions,
         issues,
+        canceled: false,
         #[cfg(test)]
         visited_states: newest.visited_states + minimal.visited_states,
     }
@@ -2267,6 +2499,7 @@ fn solve_for_strategy(
     )
 }
 
+#[cfg(test)]
 fn solve_for_strategy_with_fixed_roots(
     strategy: SolveStrategy,
     roots: &[RootRequest],
@@ -2283,6 +2516,7 @@ fn solve_for_strategy_with_fixed_roots(
         confirmed_prereleases,
         aliases,
         MAX_SEARCH_STATES,
+        None,
     )
 }
 
@@ -2305,9 +2539,11 @@ fn solve_for_strategy_with_limit(
         confirmed_prereleases,
         aliases,
         max_search_states,
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn solve_for_strategy_with_fixed_roots_and_limit(
     strategy: SolveStrategy,
     roots: &[RootRequest],
@@ -2316,6 +2552,7 @@ fn solve_for_strategy_with_fixed_roots_and_limit(
     confirmed_prereleases: &HashSet<(NodeKey, String)>,
     aliases: &InstalledAliasIndex,
     max_search_states: usize,
+    cancel: Option<&CancellationToken>,
 ) -> StrategySolveOutcome {
     let options = roots
         .iter()
@@ -2337,6 +2574,7 @@ fn solve_for_strategy_with_fixed_roots_and_limit(
         return StrategySolveOutcome {
             solution: None,
             issue: Some(unavailable_root_issue(root, catalog)),
+            canceled: false,
             #[cfg(test)]
             visited_states: 0,
         };
@@ -2350,6 +2588,15 @@ fn solve_for_strategy_with_fixed_roots_and_limit(
     let mut best_failure: Option<ConflictFailure> = None;
 
     while let Some(FrontierState { selected, .. }) = frontier.pop() {
+        if cancel.is_some_and(CancellationToken::is_cancelled) {
+            return StrategySolveOutcome {
+                solution: None,
+                issue: None,
+                canceled: true,
+                #[cfg(test)]
+                visited_states: total_visited,
+            };
+        }
         let mut requirements = roots
             .iter()
             .zip(&options)
@@ -2371,6 +2618,7 @@ fn solve_for_strategy_with_fixed_roots_and_limit(
         });
         let mut state = SearchState {
             visited: total_visited,
+            cancel: cancel.cloned(),
             ..SearchState::default()
         };
         let mut solutions = Vec::new();
@@ -2397,10 +2645,20 @@ fn solve_for_strategy_with_fixed_roots_and_limit(
             );
         }
         total_visited = state.visited;
+        if state.canceled {
+            return StrategySolveOutcome {
+                solution: None,
+                issue: None,
+                canceled: true,
+                #[cfg(test)]
+                visited_states: total_visited,
+            };
+        }
         if let Some(solution) = solutions.into_iter().next() {
             return StrategySolveOutcome {
                 solution: Some(solution),
                 issue: None,
+                canceled: false,
                 #[cfg(test)]
                 visited_states: total_visited,
             };
@@ -2409,6 +2667,7 @@ fn solve_for_strategy_with_fixed_roots_and_limit(
             return StrategySolveOutcome {
                 solution: None,
                 issue: Some(search_limit_issue(true)),
+                canceled: false,
                 #[cfg(test)]
                 visited_states: total_visited,
             };
@@ -2460,6 +2719,7 @@ fn solve_for_strategy_with_fixed_roots_and_limit(
 
     StrategySolveOutcome {
         solution: None,
+        canceled: false,
         issue: Some(match best_failure {
             Some(failure) if failure.conflict.candidate_search_incomplete() => {
                 search_limit_issue(false)
@@ -2758,11 +3018,19 @@ fn search_solutions(
     state: &mut SearchState,
     solutions: &mut Vec<SolverResult>,
 ) {
-    if !solutions.is_empty() {
+    if !solutions.is_empty() || state.canceled {
         return;
     }
     if state.visited >= max_search_states {
         state.limit_reached = true;
+        return;
+    }
+    if state
+        .cancel
+        .as_ref()
+        .is_some_and(CancellationToken::is_cancelled)
+    {
+        state.canceled = true;
         return;
     }
     state.visited += 1;
@@ -4009,6 +4277,94 @@ mod tests {
             &HashMap::new(),
             &HashSet::new(),
         )
+    }
+
+    #[test]
+    fn canceled_solver_stops_without_a_solution_or_issue() {
+        let roots = vec![root("a", "a-old", true)];
+        let catalog = catalog([(key("a"), vec![candidate("a", "a-new", 2)])]);
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let outcome = solve_upgrade_with_fixed_roots_cancellable(
+            &roots,
+            &[],
+            &catalog,
+            &FixedRootConstraints::default(),
+            &HashSet::new(),
+            Some(&cancel),
+        );
+        assert!(outcome.canceled);
+        assert!(outcome.solutions.is_empty());
+        assert!(outcome.issues.is_empty());
+        assert!(!solve(&roots, &catalog).canceled);
+    }
+
+    #[test]
+    fn search_stops_at_the_next_state_once_canceled() {
+        let roots = vec![root("a", "a-old", true)];
+        let catalog = catalog([(key("a"), vec![candidate("a", "a-new", 2)])]);
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let mut state = SearchState {
+            cancel: Some(cancel),
+            ..SearchState::default()
+        };
+        let mut solutions = Vec::new();
+        search_solutions(
+            vec![Requirement {
+                key: key("a"),
+                version_id: Some("a-new".to_string()),
+                explicit_prerelease: false,
+                preserve_unsafe: false,
+                root_content_id: "a".to_string(),
+                root_key: key("a"),
+                origins: Vec::new(),
+            }],
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashSet::new(),
+            HashSet::new(),
+            &roots,
+            &catalog,
+            &HashSet::new(),
+            &InstalledAliasIndex::new(&[]),
+            SolveStrategy::Newest,
+            MAX_SEARCH_STATES,
+            &mut state,
+            &mut solutions,
+        );
+        assert!(state.canceled);
+        assert_eq!(state.visited, 0);
+        assert!(solutions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn off_thread_solve_returns_as_soon_as_planning_is_canceled() {
+        let roots = vec![root("a", "a-old", true)];
+        let catalog = catalog([(key("a"), vec![candidate("a", "a-new", 2)])]);
+        let observer = UpgradePlanningObserver::default();
+        let solved = solve_upgrade_off_thread(
+            roots.clone(),
+            Vec::new(),
+            catalog.clone(),
+            &[],
+            &observer,
+        )
+        .await
+        .unwrap();
+        assert_eq!(solved.0.solutions.len(), 1);
+
+        observer.token().cancel();
+        let canceled = solve_upgrade_off_thread(
+            roots,
+            Vec::new(),
+            catalog,
+            &[],
+            &observer,
+        )
+        .await;
+        assert!(canceled.is_err());
     }
 
     #[test]
@@ -6597,6 +6953,7 @@ mod tests {
                 shader_runtime: ShaderRuntime::None,
             },
             &state,
+            &UpgradePlanningObserver::default(),
         )
         .await
         .unwrap();
@@ -6677,6 +7034,115 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(metadata.applied_content_set.revision, plan.source_revision);
+    }
+
+    #[tokio::test]
+    async fn real_planner_reports_progress_and_stops_when_canceled() {
+        let temp = tempfile::tempdir().unwrap();
+        let directories = crate::state::DirectoryInfo {
+            settings_dir: temp.path().to_path_buf(),
+            config_dir: temp.path().to_path_buf(),
+            app_identifier: "upgrade-planner-progress-test".to_string(),
+        };
+        std::fs::create_dir_all(directories.instances_dir()).unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(4)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(temp.path().join("state.db"))
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        let state = crate::state::test_state(directories, pool.clone())
+            .await
+            .unwrap();
+        let instance = crate::state::instances::create_instance(
+            crate::state::instances::CreateInstance {
+                name: "Planner Progress".to_string(),
+                path: Some("planner-progress".to_string()),
+                game_version: "1.21.4".to_string(),
+                loader: crate::state::ModLoader::Vanilla,
+                loader_version: None,
+                icon_path: None,
+                link: InstanceLink::Unmanaged,
+                symlink_target: None,
+                game_dir_override: None,
+            },
+            &state,
+        )
+        .await
+        .unwrap();
+        let instance_dir =
+            state.directories.instances_dir().join(&instance.path);
+        let mods = instance_dir.join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        std::fs::write(mods.join("new.jar"), b"not-a-real-jar").unwrap();
+        let target = InstanceUpgradeEnvironment {
+            game_version: "1.21.5".to_string(),
+            mod_loader: crate::state::ModLoader::Vanilla,
+            mod_loader_version: None,
+            shader_runtime: ShaderRuntime::None,
+        };
+
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let reporter = {
+            let events = events.clone();
+            Arc::new(move |progress| events.lock().unwrap().push(progress))
+                as UpgradePlanningReporter
+        };
+        create_instance_upgrade_plan_with_source(
+            &instance.id,
+            target.clone(),
+            &state,
+            &UpgradePlanningObserver::new(
+                CancellationToken::new(),
+                Some(reporter.clone()),
+            ),
+        )
+        .await
+        .unwrap();
+        let events = std::mem::take(&mut *events.lock().unwrap());
+        assert!(events.contains(&InstanceUpgradePlanningProgress::Phase {
+            phase: InstanceUpgradePlanningPhase::ReadingContent,
+            completed: 1,
+            total: 1,
+        }));
+        let identified = events
+            .iter()
+            .find_map(|event| match event {
+                InstanceUpgradePlanningProgress::Items { items } => Some(items),
+                _ => None,
+            })
+            .unwrap();
+        assert!(identified.iter().any(|item| {
+            item.relative_path == "mods/new.jar"
+                && item.status == Some(InstanceUpgradeItemStatus::Unidentified)
+        }));
+        assert!(events.contains(&InstanceUpgradePlanningProgress::Phase {
+            phase: InstanceUpgradePlanningPhase::Solving,
+            completed: 0,
+            total: 0,
+        }));
+
+        let before =
+            planner_state_digest(&pool, &instance_dir, &instance.id).await;
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let canceled = create_instance_upgrade_plan_with_source(
+            &instance.id,
+            target,
+            &state,
+            &UpgradePlanningObserver::new(cancel, Some(reporter)),
+        )
+        .await;
+        assert!(canceled.is_err());
+        assert_eq!(
+            planner_state_digest(&pool, &instance_dir, &instance.id).await,
+            before
+        );
     }
 
     #[tokio::test]
@@ -6761,9 +7227,13 @@ mod tests {
             .file_watcher
             .content_watch_snapshot(&instance.id)
             .await;
-        let source = read_only_upgrade_source(&instance.id, &state)
-            .await
-            .unwrap();
+        let source = read_only_upgrade_source(
+            &instance.id,
+            &state,
+            &UpgradePlanningObserver::default(),
+        )
+        .await
+        .unwrap();
         let environment = InstanceUpgradeEnvironment {
             game_version: "1.21.4".to_string(),
             mod_loader: crate::state::ModLoader::Vanilla,

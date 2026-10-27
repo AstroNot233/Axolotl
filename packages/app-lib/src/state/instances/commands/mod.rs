@@ -62,7 +62,7 @@ pub(crate) use content_file_operations::recover_content_file_operations;
 mod instance_upgrade;
 pub(crate) use self::instance_upgrade::{
     ReadOnlyUpgradeSource, UpgradePlanRuntimeValidation,
-    create_instance_upgrade_plan_with_source,
+    UpgradePlanningObserver, create_instance_upgrade_plan_with_source,
     recompute_instance_upgrade_plan_from_source,
     scan_instance_upgrade_source_files, validate_instance_upgrade_plan_source,
 };
