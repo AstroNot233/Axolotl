@@ -196,6 +196,7 @@ impl Collection for TelemetryOutbox {
         records: &[(Self::Key, Self::Record)],
     ) -> crate::Result<()> {
         ensure_records_are_in_scope(scope, records)?;
+        ensure_keys_belong_to_scope(conn, scope, records).await?;
         delete_omitted(conn, scope, records).await?;
         for (key, record) in records {
             write_row(conn, key, record).await?;
@@ -351,6 +352,34 @@ fn ensure_records_are_in_scope(
         if !in_scope {
             return Err(crate::ErrorKind::InputError(format!(
                 "Telemetry event {key} is not among the events of the scope it was written to"
+            ))
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
+/// A scoped replacement writes by event id, so an event already stored under
+/// another kind would move between the kinds instead of being replaced here.
+async fn ensure_keys_belong_to_scope(
+    conn: &mut SqliteConnection,
+    scope: &TelemetryOutboxScope,
+    records: &[(TelemetryOutboxKey, TelemetryOutboxRecord)],
+) -> crate::Result<()> {
+    for (key, _) in records {
+        let Some(existing) = TelemetryOutbox::read(conn, key).await? else {
+            continue;
+        };
+        let in_scope = match scope {
+            TelemetryOutboxScope::Kind(kind) => existing.event_type == *kind,
+            TelemetryOutboxScope::Due { kind, .. } => {
+                existing.event_type == *kind
+            }
+        };
+        if !in_scope {
+            return Err(crate::ErrorKind::InputError(format!(
+                "Telemetry event {key} belongs to another kind"
             ))
             .into());
         }

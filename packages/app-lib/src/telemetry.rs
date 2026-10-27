@@ -200,7 +200,7 @@ async fn insert_outbox_event(
         dedupe_key: dedupe_key.to_string(),
         occurrence_count: 1,
     };
-    TelemetryOutbox::atom_set(unit, event_id, Some(&record)).await
+    TelemetryOutbox::atom_set(unit, &event_id.to_string(), Some(&record)).await
 }
 
 /// Trimming the queue keeps the newest events up to a count and a byte budget,

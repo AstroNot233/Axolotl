@@ -77,7 +77,7 @@ impl Collection for ResourceOperationPlans {
     async fn read_all(
         conn: &mut SqliteConnection,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let rows: Vec<(String, PlanRow)> = sqlx::query_as(
+        let rows: Vec<PlanRowWithKey> = sqlx::query_as(
             "
             SELECT id, instance_id, revision, payload, job_id, queued,
                 completed
@@ -87,10 +87,7 @@ impl Collection for ResourceOperationPlans {
         .fetch_all(&mut *conn)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(id, row)| (id, to_record(row)))
-            .collect())
+        Ok(rows.into_iter().map(split_row).collect())
     }
 
     async fn replace_all(
@@ -110,7 +107,7 @@ impl Collection for ResourceOperationPlans {
         conn: &mut SqliteConnection,
         scope: &Self::Scope,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let rows: Vec<(String, PlanRow)> = sqlx::query_as(
+        let rows: Vec<PlanRowWithKey> = sqlx::query_as(
             "
             SELECT id, instance_id, revision, payload, job_id, queued,
                 completed
@@ -122,10 +119,7 @@ impl Collection for ResourceOperationPlans {
         .fetch_all(&mut *conn)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(id, row)| (id, to_record(row)))
-            .collect())
+        Ok(rows.into_iter().map(split_row).collect())
     }
 
     async fn replace_scoped(
@@ -144,6 +138,32 @@ impl Collection for ResourceOperationPlans {
 }
 
 type PlanRow = (String, i64, String, Option<String>, bool, bool);
+
+type PlanRowWithKey = (String, String, i64, String, Option<String>, bool, bool);
+
+fn split_row(
+    (
+        id,
+        instance_id,
+        revision,
+        payload,
+        job_id,
+        queued,
+        completed,
+    ): PlanRowWithKey,
+) -> (String, ResourceOperationPlanRecord) {
+    (
+        id,
+        ResourceOperationPlanRecord {
+            instance_id,
+            revision,
+            payload,
+            job_id,
+            queued,
+            completed,
+        },
+    )
+}
 
 fn to_record(row: PlanRow) -> ResourceOperationPlanRecord {
     let (instance_id, revision, payload, job_id, queued, completed) = row;

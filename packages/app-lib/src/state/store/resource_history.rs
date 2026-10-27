@@ -90,7 +90,7 @@ impl Collection for ResourceHistory {
     async fn read_all(
         conn: &mut SqliteConnection,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let rows: Vec<(String, HistoryRow)> = sqlx::query_as(
+        let rows: Vec<HistoryRowWithKey> = sqlx::query_as(
             "
             SELECT id, instance_id, entry_id, recorded_at, payload,
                 backup_relative_path, backup_size, backup_sha1,
@@ -101,10 +101,7 @@ impl Collection for ResourceHistory {
         .fetch_all(&mut *conn)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(id, row)| (id, to_record(row)))
-            .collect())
+        Ok(rows.into_iter().map(split_row).collect())
     }
 
     async fn replace_all(
@@ -127,7 +124,7 @@ impl Collection for ResourceHistory {
         conn: &mut SqliteConnection,
         scope: &Self::Scope,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let rows: Vec<(String, HistoryRow)> = match scope {
+        let rows: Vec<HistoryRowWithKey> = match scope {
             ResourceHistoryScope::Instance(instance_id) => {
                 sqlx::query_as(
                     "
@@ -164,10 +161,7 @@ impl Collection for ResourceHistory {
             }
         };
 
-        Ok(rows
-            .into_iter()
-            .map(|(id, row)| (id, to_record(row)))
-            .collect())
+        Ok(rows.into_iter().map(split_row).collect())
     }
 
     async fn replace_scoped(
@@ -195,6 +189,46 @@ type HistoryRow = (
     Option<String>,
     bool,
 );
+
+type HistoryRowWithKey = (
+    String,
+    String,
+    String,
+    i64,
+    String,
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+    bool,
+);
+
+fn split_row(
+    (
+        id,
+        instance_id,
+        entry_id,
+        recorded_at,
+        payload,
+        backup_relative_path,
+        backup_size,
+        backup_sha1,
+        backup_available,
+    ): HistoryRowWithKey,
+) -> (String, ResourceHistoryRecord) {
+    (
+        id,
+        ResourceHistoryRecord {
+            instance_id,
+            entry_id,
+            recorded_at,
+            payload,
+            backup_relative_path,
+            backup_size,
+            backup_sha1,
+            backup_available,
+        },
+    )
+}
 
 fn to_record(row: HistoryRow) -> ResourceHistoryRecord {
     let (
