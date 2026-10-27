@@ -774,7 +774,8 @@ function hide() {
     release()
     // Leaving during analysis stops the cart's analysis too; the selection itself is kept.
     analysis?.cancel()
-    if (!committing.value) {
+    // A queued submission keeps its controls locked until the close animation ends.
+    if (!committing.value && !closing.value) {
         busy.value = false
         queueing.value = false
     }
@@ -986,7 +987,14 @@ async function submit(retryStale: boolean) {
         }
         busy.value = true
         committing.value = true
-        const job = await resourceQueuePlan(reviewed.id, reviewed.revision)
+        let job: InstallJobSnapshot
+        try {
+            job = await resourceQueuePlan(reviewed.id, reviewed.revision)
+        } finally {
+            // Only the queue request itself is locked; the refresh after a stale
+            // plan below is analysis again and must stay cancellable.
+            committing.value = false
+        }
         if (generation !== current) return
         const skippedRoots = new Set(
             reviewed.issues
@@ -1031,7 +1039,6 @@ async function submit(retryStale: boolean) {
             queueing.value = false
             closing.value = false
         }
-        committing.value = false
     }
 }
 async function refresh() {

@@ -52,8 +52,11 @@ export function createContentAnalysis() {
     let canceledSelection: string | null = null
 
     function clear() {
-        current?.controller.abort()
+        // Detach before aborting: abort listeners may call back into cancel(),
+        // which must not mistake this replacement for a user cancel.
+        const replaced = current
         current = null
+        replaced?.controller.abort()
         const previous = session
         session = null
         if (previous) void previous.id.then(resourceAnalysisClose).catch(() => {})
@@ -70,7 +73,9 @@ export function createContentAnalysis() {
         canceledSelection = null
         const key = JSON.stringify(input)
         if (current?.key === key) return
-        current?.controller.abort()
+        const replaced = current
+        current = null
+        replaced?.controller.abort()
         const context = JSON.stringify([input.instanceId, input.context])
         if (session?.context !== context) {
             clear()

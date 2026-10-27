@@ -1544,6 +1544,39 @@ it('refreshes a stale reviewed plan and queues the selected root draft without a
     }
 })
 
+it('lets the user cancel the re-analysis that follows a stale queue attempt', async () => {
+    ready()
+    const wrapper = mount(ResourceOperationPreviewModal)
+    const result = wrapper.vm.show(input)
+    try {
+        await flushPromises()
+        vi.mocked(resourceQueuePlan).mockRejectedValueOnce({
+            message: 'instance changed after review',
+        })
+        let refreshSignal: AbortSignal | undefined
+        vi.mocked(resourcePrepareOperation).mockImplementationOnce((...args) => {
+            refreshSignal = args[4]
+            return new Promise(() => {})
+        })
+        await wrapper
+            .findAll('button')
+            .find((button) => button.text() === 'Queue changes')!
+            .trigger('click')
+        await flushPromises()
+        expect(refreshSignal).toBeDefined()
+        const cancel = wrapper.findAll('button').find((button) => button.text() === 'Cancel')!
+        expect(cancel.attributes('disabled')).toBeUndefined()
+        await cancel.trigger('click')
+        await flushPromises()
+        expect(refreshSignal!.aborted).toBe(true)
+        expect(await result).toBeNull()
+        expect(wrapper.find('section').exists()).toBe(false)
+        expect(resourceQueuePlan).toHaveBeenCalledOnce()
+    } finally {
+        wrapper.unmount()
+    }
+})
+
 it('returns the submitted root range after a selection revision and modal closure', async () => {
     ready()
     vi.mocked(resourcePrepareOperation).mockResolvedValueOnce({ ...plan(), intent: 'install' })

@@ -217,3 +217,22 @@ it('a finished analysis survives a review cancel', async () => {
     expect(resourceAnalysisClose).not.toHaveBeenCalled()
     cart.clear()
 })
+
+it('replacing the analysis while a review waits is not recorded as a user cancel', async () => {
+    vi.clearAllMocks()
+    vi.mocked(resourceAnalysisUpdate).mockImplementation(() => new Promise(() => {}))
+    const cart = createContentAnalysis()
+    cart.update(input())
+    await tick()
+    const review = cart.review()!
+    // The preview cancels its borrowed analysis when that analysis is aborted.
+    review.signal.addEventListener('abort', () => review.cancel())
+    void review.prepare(new AbortController().signal, vi.fn()).catch(() => {})
+    cart.update({ ...input(), context: 'a download finished' })
+    await tick()
+    expect(resourceAnalysisUpdate).toHaveBeenCalledTimes(2)
+    cart.update({ ...input(), context: 'another download finished' })
+    await tick()
+    expect(resourceAnalysisUpdate).toHaveBeenCalledTimes(3)
+    cart.clear()
+})
