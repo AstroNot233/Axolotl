@@ -95,8 +95,10 @@ export default defineConfig({
         // specs click every layer button twice. Under full-suite parallelism a
         // case can take five times its isolated time and would otherwise ride
         // the default budget, failing on scheduling rather than on behaviour.
-        // This raises the ceiling only; no assertion is relaxed.
-        testTimeout: 30_000,
+        // `SeedMapStructureDetails` builds the End city meshes and needs ~25-40s
+        // on its own, so the ceiling covers that worst case too. This raises the
+        // ceiling only; no assertion is relaxed.
+        testTimeout: 90_000,
         // The suite is layout- and WebGL-bound, so running every file at once
         // makes timings depend on how many browsers happen to be mid-frame.
         // Two workers keeps the wall clock close to the fully parallel run
