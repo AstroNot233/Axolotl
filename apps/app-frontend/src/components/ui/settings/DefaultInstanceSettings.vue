@@ -165,6 +165,7 @@ function setResolutionDimension(index: 0 | 1, value: unknown) {
         return nextTick().then(() => {
             const field = index === 0 ? widthInput.value : heightInput.value
             field?.focus()
+            field?.select()
         })
     }
     const next: [number, number] = [...current]

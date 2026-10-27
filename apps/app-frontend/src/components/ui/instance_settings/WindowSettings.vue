@@ -58,6 +58,7 @@ function setDimension(index: 0 | 1, value: unknown) {
         return nextTick().then(() => {
             const field = index === 0 ? widthInput.value : heightInput.value
             field?.focus()
+            field?.select()
         })
     }
     resolution.value = index === 0 ? [usable, resolution.value[1]] : [resolution.value[0], usable]
