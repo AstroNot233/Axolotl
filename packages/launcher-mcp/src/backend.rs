@@ -42,6 +42,33 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    AccountList {
+        #[serde(default)]
+        offline_only: bool,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "page_size")]
+        limit: usize,
+    },
+    AccountGet {
+        account_id: String,
+    },
+    AccountGetDefault {
+        #[serde(default)]
+        offline_mode: bool,
+    },
+    AccountSetDefault {
+        account_id: String,
+    },
+    AccountRemove {
+        account_id: String,
+    },
+    AccountAddOffline {
+        username: String,
+        #[serde(default)]
+        uuid: Option<uuid::Uuid>,
+    },
+    AccountGetEligibility {},
     DownloadJobList {
         #[serde(default)]
         status: Option<String>,
@@ -549,6 +576,9 @@ impl Command {
                 | Self::InstallJobScanMissingFiles { .. }
                 | Self::InstallJobSkipMissing { .. }
                 | Self::InstallJobRepairAndRetry { .. }
+                | Self::AccountSetDefault { .. }
+                | Self::AccountRemove { .. }
+                | Self::AccountAddOffline { .. }
         )
     }
 }

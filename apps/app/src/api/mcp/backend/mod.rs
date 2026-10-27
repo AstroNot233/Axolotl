@@ -1,3 +1,4 @@
+mod accounts;
 mod backups;
 mod downloads;
 mod instances;
@@ -32,6 +33,15 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::AccountList { .. }
+                | Command::AccountGet { .. }
+                | Command::AccountGetDefault { .. }
+                | Command::AccountSetDefault { .. }
+                | Command::AccountRemove { .. }
+                | Command::AccountAddOffline { .. }
+                | Command::AccountGetEligibility {}) => {
+                    accounts::execute(command).await
+                }
                 command @ (Command::DownloadJobList { .. }
                 | Command::DownloadJobGet { .. }
                 | Command::DownloadJobGetItems { .. }

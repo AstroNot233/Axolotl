@@ -592,6 +592,10 @@ async fn business_tools_require_approved_transport_scoped_sessions() {
     assert_eq!(tool_error(&client.tool("content_remove", json!({"session_id":control,"instance_id":"instance","entry_id":"entry"})).await), "full_access_required");
     for (name, args) in [
         (
+            "account_remove",
+            json!({"session_id":control,"account_id":format!("account:{}","a".repeat(64))}),
+        ),
+        (
             "download_job_delete",
             json!({"session_id":control,"job_id":uuid::Uuid::new_v4()}),
         ),
@@ -726,6 +730,13 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             json!({"source":"mcarchive","project_id":"project","release_id":"release"}),
         ),
         ("content_list", json!({"instance_id":"instance"})),
+        ("account_list", json!({"offline_only":true,"limit":10})),
+        (
+            "account_get",
+            json!({"account_id":format!("account:{}","a".repeat(64))}),
+        ),
+        ("account_get_default", json!({"offline_mode":true})),
+        ("account_get_eligibility", json!({})),
         (
             "download_job_list",
             json!({"status":"failed","provider":"java","query":"测试","limit":10}),
@@ -859,7 +870,7 @@ async fn full_access_allows_deletion_and_all_business_commands_are_dispatched()
             "{name}: {result}"
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 62);
+    assert_eq!(backend.calls.lock().unwrap().len(), 66);
     assert!(
         backend
             .scopes
@@ -892,6 +903,25 @@ async fn invalid_arguments_are_rejected_before_backend_execution() {
     let client = connect(&server, false, "Validation").await;
     let control = control_id(&client.tool("start_session", json!({})).await);
     let cases = [
+        ("account_get", json!({"account_id":"native-account-id"})),
+        (
+            "account_set_default",
+            json!({"account_id":format!("account:{}","z".repeat(64))}),
+        ),
+        ("account_add_offline", json!({"username":"bad name"})),
+        ("account_add_offline", json!({"username":"a".repeat(17)})),
+        (
+            "account_add_offline",
+            json!({"username":"valid","uuid":"invalid-uuid"}),
+        ),
+        (
+            "account_add_offline",
+            json!({"username":"valid","bypass_eligibility":true}),
+        ),
+        (
+            "account_get",
+            json!({"account_id":format!("account:{}","a".repeat(64)),"include_tokens":true}),
+        ),
         ("download_job_list", json!({"status":"unknown"})),
         ("download_job_list", json!({"provider":"curseforge"})),
         (

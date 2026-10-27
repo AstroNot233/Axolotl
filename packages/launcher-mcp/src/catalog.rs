@@ -3,6 +3,7 @@ use rmcp::{
     model::{Tool, ToolAnnotations},
 };
 use serde_json::{Map, Value, json};
+mod accounts;
 mod backups;
 mod downloads;
 mod java;
@@ -398,6 +399,7 @@ pub(crate) fn entries() -> Vec<Entry> {
     entries.extend(worlds::entries());
     entries.extend(java::entries());
     entries.extend(downloads::entries());
+    entries.extend(accounts::entries());
     entries
 }
 
@@ -468,6 +470,9 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
                     || crate::world_input::valid_world_id(s))
                 && (rule["format"] != "server-address"
                     || crate::world_input::valid_address(s))
+                && (rule["format"] != "account-id" || valid_account_id(s))
+                && (rule["format"] != "minecraft-username"
+                    || s.chars().all(|c| c.is_alphanumeric() || c == '_'))
         }),
         Some("integer") => value.as_u64().is_some_and(|n| {
             rule["minimum"].as_u64().is_none_or(|min| n >= min)
@@ -485,6 +490,15 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
         }),
         _ => false,
     }
+}
+
+fn valid_account_id(id: &str) -> bool {
+    id.strip_prefix("account:").is_some_and(|digest| {
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|c| c.is_ascii_digit() || matches!(c, b'a'..=b'f'))
+    })
 }
 
 fn valid_relative_path(path: &str) -> bool {

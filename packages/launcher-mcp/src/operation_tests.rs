@@ -206,6 +206,18 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             "java_install",
             json!({"vendor":"Vendor Name","major_version":21}),
         ),
+        (
+            "account_set_default",
+            json!({"account_id":format!("account:{}","a".repeat(64))}),
+        ),
+        (
+            "account_remove",
+            json!({"account_id":format!("account:{}","a".repeat(64))}),
+        ),
+        (
+            "account_add_offline",
+            json!({"username":"玩家_1","uuid":uuid::Uuid::new_v4()}),
+        ),
         ("download_job_retry", json!({"job_id":uuid::Uuid::new_v4()})),
         (
             "download_job_resume",
@@ -252,7 +264,7 @@ async fn resource_planning_and_execution_are_deferred_and_use_server_scope() {
             true
         );
     }
-    assert_eq!(backend.calls.lock().unwrap().len(), 19);
+    assert_eq!(backend.calls.lock().unwrap().len(), 22);
     assert!(matches!(
         &backend.calls.lock().unwrap()[0],
         Command::ResourcePrepareInstall {
