@@ -44,6 +44,33 @@ pub trait ProtocolTransport: Send + Sync {
 
 pub(crate) struct LauncherTransport;
 
+struct RequestPacer {
+    next: tokio::sync::Mutex<tokio::time::Instant>,
+    interval: std::time::Duration,
+}
+
+impl RequestPacer {
+    fn new(interval: std::time::Duration) -> Self {
+        Self {
+            next: tokio::sync::Mutex::new(tokio::time::Instant::now()),
+            interval,
+        }
+    }
+
+    async fn wait(&self) {
+        let mut next = self.next.lock().await;
+        tokio::time::sleep_until(*next).await;
+        *next = tokio::time::Instant::now() + self.interval;
+    }
+}
+
+// Keep background discovery below Modrinth's 300 requests/minute allowance,
+// leaving capacity for foreground launcher requests outside this service.
+static MODRINTH_REQUESTS: std::sync::LazyLock<RequestPacer> =
+    std::sync::LazyLock::new(|| {
+        RequestPacer::new(std::time::Duration::from_millis(250))
+    });
+
 #[async_trait]
 impl ProtocolTransport for LauncherTransport {
     async fn request(
@@ -84,6 +111,7 @@ impl ProtocolTransport for LauncherTransport {
             })?;
         url.query_pairs_mut().extend_pairs(request.query);
         if source == &SourceId::modrinth() {
+            MODRINTH_REQUESTS.wait().await;
             let state = crate::State::get().await?;
             return crate::util::fetch::fetch_json(
                 request.method,
@@ -108,6 +136,26 @@ impl ProtocolTransport for LauncherTransport {
             crate::api::planet_minecraft::connector_get(url.as_str())
                 .await
                 .map_err(Into::into)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn concurrent_requests_share_a_paced_start_budget() {
+        let pacer = RequestPacer::new(std::time::Duration::from_millis(30));
+        let start = tokio::time::Instant::now();
+        let mut arrivals = futures::future::join_all((0..4).map(|_| async {
+            pacer.wait().await;
+            start.elapsed()
+        }))
+        .await;
+        arrivals.sort();
+        for pair in arrivals.windows(2) {
+            assert!(pair[1] - pair[0] >= std::time::Duration::from_millis(25));
         }
     }
 }

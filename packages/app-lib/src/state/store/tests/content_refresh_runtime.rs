@@ -16,6 +16,8 @@ struct Provider {
     fail: AtomicBool,
     queries: AtomicUsize,
     identify_queries: AtomicUsize,
+    batches: AtomicUsize,
+    largest_batch: AtomicUsize,
 }
 
 fn reference(project: &str, version: &str) -> SourceReleaseRef {
@@ -115,6 +117,9 @@ impl ResourceProvider for Provider {
         &self,
         queries: &[ProviderQuery],
     ) -> Vec<ResourceResult<ProviderValue>> {
+        self.batches.fetch_add(1, Ordering::SeqCst);
+        self.largest_batch
+            .fetch_max(queries.len(), Ordering::SeqCst);
         let mut results = Vec::new();
         for query in queries {
             self.queries.fetch_add(1, Ordering::SeqCst);
@@ -574,6 +579,58 @@ async fn all_refresh_content_kinds_recover_candidates_and_reuse_hashes() {
     }
 }
 
+#[tokio::test]
+async fn refresh_rows_fill_source_batches_without_increasing_network_concurrency()
+ {
+    let (_temp, state, provider) = fixture().await;
+    let records = content_snapshot::get(&state.data, "instance")
+        .await
+        .unwrap();
+    let root = crate::state::instances::commands::instance_content_root(
+        &state.directories,
+        &records.instance,
+    )
+    .unwrap();
+    let hash = sha1_smol::Sha1::from(b"old").hexdigest();
+    for number in 0..62 {
+        let project = format!("project-{number}");
+        let path = format!("resourcepacks/{project}.zip");
+        std::fs::write(root.join(&path), b"old").unwrap();
+        sqlx::query("INSERT INTO instance_files(id,instance_id,relative_path,file_name,enabled,sha1,size,missing,added_at,modified_at) VALUES (?,'instance',?,?,1,?,3,0,1,1)")
+            .bind(&project).bind(&path).bind(format!("{project}.zip")).bind(&hash).execute(&state.pool).await.unwrap();
+        sqlx::query("INSERT INTO instance_content_entries(id,instance_id,content_set_id,file_id,project_type,source_kind,server_requirement,client_requirement,enabled,added_at,modified_at) VALUES (?,'instance','set',?,'resourcepack','local','optional','optional',1,1,1)")
+            .bind(&project).bind(&project).execute(&state.pool).await.unwrap();
+        sqlx::query("INSERT INTO resource_installed_artifacts(entry_id,artifact,scope) VALUES (?,?,'{\"kind\":\"instance\"}')")
+            .bind(&project).bind(serde_json::to_string(&artifact(&project,"old",&hash)).unwrap()).execute(&state.pool).await.unwrap();
+    }
+    state
+        .content_refresh
+        .start(state.clone(), "instance".into(), RefreshMode::Normal)
+        .await
+        .unwrap();
+    finished(&state).await;
+    let snapshot = state
+        .content_refresh
+        .state(&state, "instance")
+        .await
+        .unwrap();
+    assert_eq!(
+        snapshot
+            .snapshot
+            .items
+            .iter()
+            .filter(|item| item.resource_update.is_some())
+            .count(),
+        64
+    );
+    assert!(provider.largest_batch.load(Ordering::SeqCst) >= 8);
+    // Each fallback catalog is intentionally scalar in this fixture; release
+    // and project requests must be shared across the rows instead of adding 128 more calls.
+    assert!(provider.batches.load(Ordering::SeqCst) < 128);
+    state.content_refresh.shutdown().await;
+    state.pool.close().await;
+}
+
 async fn fixture() -> (tempfile::TempDir, Arc<crate::State>, Arc<Provider>) {
     let temp = tempfile::tempdir().unwrap();
     let directories = crate::state::DirectoryInfo {
@@ -613,6 +670,8 @@ async fn fixture() -> (tempfile::TempDir, Arc<crate::State>, Arc<Provider>) {
         fail: AtomicBool::new(false),
         queries: AtomicUsize::new(0),
         identify_queries: AtomicUsize::new(0),
+        batches: AtomicUsize::new(0),
+        largest_batch: AtomicUsize::new(0),
     });
     let cache = Arc::new(
         crate::resources::cache::ResourceCache::open(

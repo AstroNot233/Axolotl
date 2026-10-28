@@ -503,33 +503,50 @@ impl ResourceService {
         let source = source.clone();
         tokio::spawn(async move {
             // A bounded collection window combines independent row requests.
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             let runtime = &service.sources[&source];
-            let fresh = std::mem::take(&mut *runtime.pending.lock());
-            let mut groups =
-                HashMap::<(u8, CachePolicy, i64), Vec<Arc<Flight>>>::new();
-            for flight in fresh {
-                groups
-                    .entry((
-                        flight.query.batch_group(),
-                        flight.key.policy,
-                        flight.key.generation,
-                    ))
-                    .or_default()
-                    .push(flight);
-            }
-            for group in groups.into_values() {
-                let limit =
-                    runtime.provider.batch_limit(&group[0].query).max(1);
-                for batch in group.chunks(limit) {
-                    let service = service.clone();
-                    let provider = runtime.provider.clone();
-                    let semaphore = runtime.semaphore.clone();
-                    let batch = batch.to_vec();
-                    tokio::spawn(async move {
-                        service.fetch_batch(provider, semaphore, batch).await;
+            loop {
+                // Form the batch only when it can run. Requests arriving while
+                // the source is busy must not become queued one-item batches.
+                let Ok(permit) =
+                    runtime.semaphore.clone().acquire_owned().await
+                else {
+                    return;
+                };
+                let batch = {
+                    let mut queued = runtime.pending.lock();
+                    let Some(first) = queued.first() else {
+                        return;
+                    };
+                    let group = (
+                        first.query.batch_group(),
+                        first.key.policy,
+                        first.key.generation,
+                    );
+                    let limit =
+                        runtime.provider.batch_limit(&first.query).max(1);
+                    let mut batch = Vec::new();
+                    queued.retain(|flight| {
+                        if batch.len() < limit
+                            && (
+                                flight.query.batch_group(),
+                                flight.key.policy,
+                                flight.key.generation,
+                            ) == group
+                        {
+                            batch.push(flight.clone());
+                            false
+                        } else {
+                            true
+                        }
                     });
-                }
+                    batch
+                };
+                let service = service.clone();
+                let provider = runtime.provider.clone();
+                tokio::spawn(async move {
+                    service.fetch_batch(provider, permit, batch).await;
+                });
             }
         });
     }
@@ -537,14 +554,10 @@ impl ResourceService {
     async fn fetch_batch(
         self: Arc<Self>,
         provider: Arc<dyn ResourceProvider>,
-        semaphore: Arc<Semaphore>,
+        _permit: tokio::sync::OwnedSemaphorePermit,
         batch: Vec<Arc<Flight>>,
     ) {
         let operation = async {
-            let _permit = semaphore
-                .acquire()
-                .await
-                .map_err(|_| ResourceError::Canceled)?;
             let active: Vec<_> = batch
                 .iter()
                 .filter(|flight| flight.subscribers.load(Ordering::Acquire) > 0)

@@ -416,7 +416,9 @@ async fn run_round(
     let mut scans_closed = false;
     let mut failed_paths = HashSet::new();
     loop {
-        while workers.len() < 8 {
+        // Keep enough independent rows ready to fill source batches while the
+        // provider semaphore still bounds actual network concurrency to three.
+        while workers.len() < 32 {
             let Some(item) = pending.pop_front() else {
                 break;
             };

@@ -368,7 +368,7 @@ export function useContentPipeline(config: ContentPipelineConfig) {
         }
     }
 
-    // Trigger pipeline when any dependency changes (debounced)
+    // Bound recomputation without postponing it indefinitely during a stream of patches.
     watch(
         [
             sortedItems,
@@ -379,8 +379,9 @@ export function useContentPipeline(config: ContentPipelineConfig) {
             selectedStatusFilters,
         ],
         () => {
-            if (pipelineTimer) clearTimeout(pipelineTimer)
+            if (pipelineTimer) return
             pipelineTimer = setTimeout(() => {
+                pipelineTimer = null
                 result.value = runPipeline()
             }, 100)
         },
@@ -513,6 +514,7 @@ export function useContentPipeline(config: ContentPipelineConfig) {
     )
 
     onBeforeUnmount(() => {
+        if (pipelineTimer) clearTimeout(pipelineTimer)
         if (pruneTimer) clearTimeout(pruneTimer)
     })
 

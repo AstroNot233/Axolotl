@@ -69,3 +69,58 @@ it('keeps an update filter through zero results and admits progressive candidate
     expect(pipeline.selectedStatusFilters.value).toEqual(['updates'])
     wrapper.unmount()
 })
+
+it('publishes counts during a continuous stream instead of waiting for a quiet period', async () => {
+    vi.useFakeTimers()
+    const items = ref<ContentItem[]>(
+        Array.from({ length: 20 }, (_, index) => ({
+            id: String(index),
+            file_name: `${index}.jar`,
+            enabled: true,
+            project_type: 'mod',
+        })),
+    )
+    let pipeline!: ReturnType<typeof useContentPipeline>
+    const wrapper = mount(
+        defineComponent({
+            setup() {
+                pipeline = useContentPipeline({
+                    items,
+                    duplicateItems: ref([]),
+                    sortItems: (items) => items,
+                    getItemId: (item) => item.id,
+                    showUpdateFilter: true,
+                    initialFilters: { typeFilters: [], statusFilters: ['updates'] },
+                })
+                return () => h('div', String(pipeline.filterCounts.value.updates ?? 0))
+            },
+        }),
+    )
+    try {
+        for (let index = 0; index < 20; index++) {
+            items.value = items.value.map((item, position) =>
+                position === index
+                    ? {
+                          ...item,
+                          resourceUpdate: {
+                              project: { source: 'modrinth', projectId: item.id },
+                              releaseId: 'new',
+                          },
+                      }
+                    : item,
+            )
+            await nextTick()
+            await vi.advanceTimersByTimeAsync(20)
+            if (index === 7) {
+                expect(pipeline.filterCounts.value.updates).toBeGreaterThan(0)
+                expect(pipeline.filterCounts.value.updates).toBeLessThan(20)
+                expect(Number(wrapper.text())).toBeGreaterThan(0)
+            }
+        }
+        await vi.advanceTimersByTimeAsync(100)
+        expect(pipeline.filterCounts.value.updates).toBe(20)
+    } finally {
+        wrapper.unmount()
+        vi.useRealTimers()
+    }
+})

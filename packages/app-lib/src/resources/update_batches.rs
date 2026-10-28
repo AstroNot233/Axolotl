@@ -1,5 +1,56 @@
 use super::*;
 
+#[tokio::test]
+async fn requests_accumulate_into_one_batch_while_source_capacity_is_busy() {
+    let (_temp, cache) = cache().await;
+    let gate = Arc::new(Semaphore::new(0));
+    let provider = MockProvider::new(100, Some(gate.clone()));
+    let service =
+        ResourceService::new(cache.clone(), vec![provider.clone()]).unwrap();
+    let mut tasks = Vec::new();
+    for index in 0..3 {
+        let service = service.clone();
+        tasks.push(tokio::spawn(async move {
+            service
+                .query(
+                    &SourceId::modrinth(),
+                    project_query(&format!("block-{index}")),
+                    CachePolicy::UseFresh,
+                    &CancellationToken::new(),
+                )
+                .await
+        }));
+        wait_until(|| provider.calls() == index + 1).await;
+    }
+    for group in 0..2 {
+        for index in 0..10 {
+            let service = service.clone();
+            tasks.push(tokio::spawn(async move {
+                service
+                    .query(
+                        &SourceId::modrinth(),
+                        project_query(&format!("queued-{group}-{index}")),
+                        CachePolicy::UseFresh,
+                        &CancellationToken::new(),
+                    )
+                    .await
+            }));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(provider.calls(), 3);
+    gate.add_permits(30);
+    for task in tasks {
+        task.await.unwrap().unwrap();
+    }
+    let batches = provider.batches.lock().unwrap();
+    assert_eq!(batches.len(), 4);
+    assert_eq!(batches[3].len(), 20);
+    assert_eq!(provider.max_in_flight.load(Ordering::Acquire), 3);
+    drop(batches);
+    cache.close().await;
+}
+
 fn update_query(
     project: &str,
     hash: String,

@@ -360,6 +360,16 @@ where
                 cancel,
             )
             .await;
+        let resolved = resolved.and_then(|resolved| {
+            if publication.is_some() && resolved.record.is_none() {
+                Err(crate::resources::ResourceError::InvalidRequest(format!(
+                    "{}: file modification time is unavailable",
+                    file.relative_path
+                )))
+            } else {
+                Ok(resolved)
+            }
+        });
         let resolved = match resolved {
             Ok(resolved) => resolved,
             Err(error)
