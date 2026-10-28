@@ -55,7 +55,7 @@ defineExpose({ show })
     <NewModal
         ref="modal"
         :header="formatMessage(messages.title)"
-        width="min(46rem, calc(100vw - 2rem))"
+        width="min(46rem, calc(95vw - 10rem))"
         max-width="46rem"
         scrollable
         max-content-height="min(42rem, 82vh)"

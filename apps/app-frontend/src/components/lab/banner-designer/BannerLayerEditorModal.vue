@@ -128,7 +128,7 @@ defineExpose({ show })
     <NewModal
         ref="modal"
         :header="formatMessage(isEditing ? messages.editTitle : messages.addTitle)"
-        width="min(58rem, calc(100vw - 2rem))"
+        width="min(58rem, calc(95vw - 10rem))"
         max-width="58rem"
     >
         <div class="flex min-h-0 gap-5 max-[820px]:flex-col">

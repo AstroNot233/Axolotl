@@ -149,7 +149,7 @@ defineExpose({ show })
     <NewModal
         ref="modal"
         :header="formatMessage(messages.title)"
-        width="min(44rem, calc(100vw - 2rem))"
+        width="min(44rem, calc(95vw - 10rem))"
         max-width="44rem"
         :on-hide="dropPendingFile"
     >

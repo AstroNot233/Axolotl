@@ -42,7 +42,7 @@ defineExpose({ show })
     <NewModal
         ref="modal"
         :header="formatMessage(messages.title)"
-        width="min(34rem, calc(100vw - 2rem))"
+        width="min(34rem, calc(95vw - 10rem))"
         max-width="34rem"
     >
         <div class="flex flex-col gap-3">
