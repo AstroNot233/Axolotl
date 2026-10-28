@@ -367,7 +367,7 @@ import {
     pendingContentChangeAffectsItem,
 } from '@/helpers/content-change-jobs'
 import { createContentEventRefresh } from '@/helpers/content-event-refresh'
-import { isUnresolvedProjectId } from '@/helpers/content-identity'
+import { isUnresolvedContentProject, isUnresolvedProjectId } from '@/helpers/content-identity'
 import { mergeContentItemMetadata } from '@/helpers/content-item-metadata'
 import { applyContentItemUpdates, matchesContentItem } from '@/helpers/content-item-state'
 import { drainContentMetadata } from '@/helpers/content-metadata-refresh'
