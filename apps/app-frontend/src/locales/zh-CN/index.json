@@ -562,6 +562,7 @@
   },
   "app.lab.banner-designer.undo": {
     "message": "撤销"
+  },
   "app.java.searching": {
     "message": "正在查找 Java 安装……"
   },
