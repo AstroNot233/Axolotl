@@ -62,6 +62,17 @@ const text = ref('')
 const error = ref<string | null>(null)
 const showFileButton = computed(() => isTauri())
 
+/**
+ * Identifies the file read the dialog is currently waiting on. Closing the
+ * dialog or asking for another file bumps it, so a read that finishes later
+ * cannot import into a session the user already left.
+ */
+let fileRequest = 0
+
+function dropPendingFile() {
+    fileRequest += 1
+}
+
 function describeError(cause: unknown): string {
     if (!(cause instanceof BannerParseError)) {
         return formatMessage(messages.errorData)
@@ -78,6 +89,7 @@ function describeError(cause: unknown): string {
 }
 
 function show() {
+    dropPendingFile()
     text.value = ''
     error.value = null
     modal.value?.show()
@@ -95,16 +107,20 @@ function submit() {
 }
 
 async function chooseFile() {
+    const request = ++fileRequest
     try {
         const selected = await open({
             multiple: false,
             filters: [{ name: 'Banner design', extensions: ['json', 'txt', 'snbt'] }],
         })
-        if (typeof selected !== 'string') return
-        text.value = await readTextFile(selected)
+        if (typeof selected !== 'string' || request !== fileRequest) return
+        const content = await readTextFile(selected)
+        if (request !== fileRequest) return
+        text.value = content
         error.value = null
         submit()
     } catch {
+        if (request !== fileRequest) return
         error.value = formatMessage(messages.fileFailed)
     }
 }
@@ -118,6 +134,7 @@ defineExpose({ show })
         :header="formatMessage(messages.title)"
         width="min(44rem, calc(100vw - 2rem))"
         max-width="44rem"
+        :on-hide="dropPendingFile"
     >
         <div class="flex flex-col gap-3">
             <p class="m-0 text-sm text-[var(--color-text-tertiary)]">
