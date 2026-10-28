@@ -20,30 +20,162 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// What a dependency analysis is doing before and after it resolves nodes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ResourceOperationProgress {
-    pub plan_id: PlanId,
-    pub revision: u32,
-    pub node: ResourceDependencyNode,
-    pub metadata: Option<SourceProjectMetadata>,
+pub enum ResourceOperationPhase {
+    RefreshingContent,
+    IdentifyingInstalled,
+    CollectingConstraints,
+    Prefetching,
+    Validating,
+}
+
+/// One update from a dependency analysis that is still running. Resolution
+/// can take several rounds: each starts with `RoundStarted`, sends `Node` for
+/// every node it resolves or changes, and ends with `NodeRemoved` for each
+/// node that an earlier round, or the plan being revised, had and it no longer
+/// has. The finished plan stays authoritative.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ResourceOperationProgress {
+    Phase {
+        phase: ResourceOperationPhase,
+    },
+    RoundStarted {
+        plan_id: PlanId,
+        revision: u32,
+        round: u32,
+    },
+    Node {
+        plan_id: PlanId,
+        revision: u32,
+        round: u32,
+        node: Box<ResourceDependencyNode>,
+        metadata: Option<Box<SourceProjectMetadata>>,
+    },
+    NodeRemoved {
+        plan_id: PlanId,
+        revision: u32,
+        round: u32,
+        node_id: SelectionId,
+    },
 }
 
 pub type OperationProgress<'a> =
     Option<&'a (dyn Fn(ResourceOperationProgress) + Send + Sync)>;
 
-fn report_node(
-    plan: &ResourceOperationPlan,
-    metadata: Option<SourceProjectMetadata>,
+pub(crate) fn report_phase(
     progress: OperationProgress<'_>,
+    phase: ResourceOperationPhase,
 ) {
-    if let (Some(progress), Some(node)) = (progress, plan.nodes.last()) {
-        progress(ResourceOperationProgress {
+    if let Some(progress) = progress {
+        progress(ResourceOperationProgress::Phase { phase });
+    }
+}
+
+/// Sends the node events of one analysis and remembers the last version of
+/// each node it sent, so the end of a round can retract the nodes that are
+/// gone and re-send the ones a later step changed.
+pub(crate) struct OperationReporter<'a> {
+    sink: OperationProgress<'a>,
+    round: u32,
+    sent: HashMap<SelectionId, ResourceDependencyNode>,
+}
+
+impl<'a> OperationReporter<'a> {
+    /// `shown` are the nodes the caller already displays, such as those of
+    /// the plan being revised, so a round can remove them too.
+    pub(crate) fn new(
+        sink: OperationProgress<'a>,
+        shown: &[ResourceDependencyNode],
+    ) -> Self {
+        let sent = if sink.is_some() {
+            shown
+                .iter()
+                .map(|node| (node.id.clone(), node.clone()))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        Self {
+            sink,
+            round: 0,
+            sent,
+        }
+    }
+
+    pub(crate) fn phase(&self, phase: ResourceOperationPhase) {
+        report_phase(self.sink, phase);
+    }
+
+    pub(crate) fn round_started(
+        &mut self,
+        plan: &ResourceOperationPlan,
+        round: u32,
+    ) {
+        self.round = round;
+        if let Some(sink) = self.sink {
+            sink(ResourceOperationProgress::RoundStarted {
+                plan_id: plan.id.clone(),
+                revision: plan.revision,
+                round,
+            });
+        }
+    }
+
+    pub(crate) fn node(
+        &mut self,
+        plan: &ResourceOperationPlan,
+        node: &ResourceDependencyNode,
+        metadata: Option<SourceProjectMetadata>,
+    ) {
+        let Some(sink) = self.sink else {
+            return;
+        };
+        self.sent.insert(node.id.clone(), node.clone());
+        sink(ResourceOperationProgress::Node {
             plan_id: plan.id.clone(),
             revision: plan.revision,
-            node: node.clone(),
-            metadata,
+            round: self.round,
+            node: Box::new(node.clone()),
+            metadata: metadata.map(Box::new),
         });
+    }
+
+    /// Brings what was sent in line with `plan`: nodes that are gone are
+    /// removed and nodes that changed since they were sent are sent again.
+    pub(crate) fn reconcile(&mut self, plan: &ResourceOperationPlan) {
+        let Some(sink) = self.sink else {
+            return;
+        };
+        let current: HashSet<&SelectionId> =
+            plan.nodes.iter().map(|node| &node.id).collect();
+        let mut removed: Vec<SelectionId> = self
+            .sent
+            .keys()
+            .filter(|id| !current.contains(id))
+            .cloned()
+            .collect();
+        removed.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        for node_id in removed {
+            self.sent.remove(&node_id);
+            sink(ResourceOperationProgress::NodeRemoved {
+                plan_id: plan.id.clone(),
+                revision: plan.revision,
+                round: self.round,
+                node_id,
+            });
+        }
+        for node in &plan.nodes {
+            if self.sent.get(&node.id) != Some(node) {
+                self.node(plan, node, None);
+            }
+        }
     }
 }
 
@@ -1339,10 +1471,12 @@ impl ResourceService {
         memo: Option<&analysis::AnalysisMemo>,
     ) -> ResourceResult<OperationDraft> {
         let mut draft = draft;
+        let mut reporter = OperationReporter::new(progress, &draft.plan.nodes);
         let mut retained_warning = None;
         draft.retained_requirements = if !draft.resolve_dependencies {
             Vec::new()
         } else {
+            reporter.phase(ResourceOperationPhase::CollectingConstraints);
             match if let Some(memo) = memo {
                 memo.retained_requirements(self, &draft, installed, cancel)
                     .await
@@ -1375,13 +1509,14 @@ impl ResourceService {
                 pass = pass + 1,
                 "Resolving resource dependency constraints"
             );
+            reporter.round_started(&original.plan, pass);
             let mut result = self
                 .build_operation_pass(
                     original.clone(),
                     target,
                     installed,
                     cancel,
-                    progress,
+                    &mut reporter,
                     &seeded,
                     memo,
                 )
@@ -1391,6 +1526,7 @@ impl ResourceService {
                     dependency_analysis_issue(&mut result.plan, &root, message);
                 }
             }
+            reporter.reconcile(&result.plan);
             if !result
                 .plan
                 .issues
@@ -1448,7 +1584,7 @@ impl ResourceService {
         target: &ResourceTarget,
         installed: &[InstalledResource],
         cancel: &CancellationToken,
-        progress: OperationProgress<'_>,
+        reporter: &mut OperationReporter<'_>,
         seeded: &HashMap<SelectionKey, Vec<String>>,
         memo: Option<&analysis::AnalysisMemo>,
     ) -> ResourceResult<OperationDraft> {
@@ -1464,6 +1600,7 @@ impl ResourceService {
         let mut incompatible = Vec::new();
         let mut seen = HashSet::new();
         if let Some(memo) = memo {
+            reporter.phase(ResourceOperationPhase::Prefetching);
             memo.prefetch(
                 self,
                 &queue,
@@ -2404,7 +2541,9 @@ impl ResourceService {
                 basis,
             });
             let selection_title = metadata.title.clone();
-            report_node(&draft.plan, Some(metadata), progress);
+            if let Some(node) = draft.plan.nodes.last() {
+                reporter.node(&draft.plan, node, Some(metadata));
+            }
             if let Some(root) = draft
                 .plan
                 .selections
@@ -2419,7 +2558,10 @@ impl ResourceService {
             if !draft.resolve_dependencies {
                 continue;
             }
-            let dependencies =
+            // Dependencies resolve six at a time and are applied in declaration
+            // order as soon as each one and those before it are known, so the
+            // plan never depends on which request finished first.
+            let mut dependencies = std::pin::pin!(
                 futures::stream::iter(artifact.dependencies.clone())
                     .map(|dependency| {
                         let parent = selection.clone();
@@ -2441,13 +2583,28 @@ impl ResourceService {
                                 )
                                 .await
                             };
+                            // Look a required child up while its siblings still
+                            // resolve, so reaching it in the queue costs no further
+                            // round trip. Only required children are queued and
+                            // looked up later; the result is unused here.
+                            if dependency.kind
+                                == ResourceDependencyKind::Required
+                                && let Ok(Some(child)) = &child
+                            {
+                                let _ = analysis::canonical(
+                                    &service,
+                                    &mut child.clone(),
+                                    &cancel,
+                                    memo,
+                                )
+                                .await;
+                            }
                             (dependency, child)
                         }
                     })
                     .buffered(6)
-                    .collect::<Vec<_>>()
-                    .await;
-            for (dependency, child) in dependencies {
+            );
+            while let Some((dependency, child)) = dependencies.next().await {
                 if dependency.kind == ResourceDependencyKind::Embedded {
                     continue;
                 }
@@ -2734,7 +2891,9 @@ impl ResourceService {
                 compatibility,
                 declared_compatibility,
             });
-            report_node(&draft.plan, None, progress);
+            if let Some(node) = draft.plan.nodes.last() {
+                reporter.node(&draft.plan, node, None);
+            }
             if satisfied.is_empty() {
                 candidates.push(candidate);
             }
@@ -3183,6 +3342,7 @@ pub(crate) async fn prepare_with_installed(
         cancel,
         verified,
         resolve_dependencies,
+        progress,
     )
     .await?;
     let state = crate::State::get().await?;
@@ -3194,6 +3354,7 @@ pub(crate) async fn prepare_with_installed(
             draft, &target, &installed, cancel, progress,
         )
         .await?;
+    report_phase(progress, ResourceOperationPhase::Validating);
     super::write_access::review(&mut draft, &state).await?;
     if cancel.is_cancelled() {
         return Err(ResourceError::Canceled);
@@ -3224,6 +3385,7 @@ async fn initialize_operation(
     cancel: &CancellationToken,
     verified: Option<&[InstalledResource]>,
     resolve_dependencies: bool,
+    progress: OperationProgress<'_>,
 ) -> ResourceResult<(OperationDraft, ResourceTarget, Vec<InstalledResource>)> {
     match intent {
         ResourceOperationIntent::Install
@@ -3266,6 +3428,7 @@ async fn initialize_operation(
         return Err(invalid("instance is not ready for resource changes"));
     }
     if verified.is_none() {
+        report_phase(progress, ResourceOperationPhase::RefreshingContent);
         if intent == ResourceOperationIntent::Install {
             super::installed::refresh_install_snapshot(
                 &state,
@@ -3329,6 +3492,7 @@ async fn initialize_operation(
     let installed = if let Some(verified) = verified {
         verified.to_vec()
     } else {
+        report_phase(progress, ResourceOperationPhase::IdentifyingInstalled);
         super::installed::hydrate_selected(
             &state,
             &draft.plan.instance_id,
@@ -3560,6 +3724,7 @@ pub async fn revise_with_progress(
             draft, decisions, &target, &installed, cancel, progress,
         )
         .await?;
+    report_phase(progress, ResourceOperationPhase::Validating);
     super::write_access::review(&mut draft, &state).await?;
     if cancel.is_cancelled() {
         return Err(ResourceError::Canceled);

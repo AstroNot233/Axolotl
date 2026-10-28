@@ -922,7 +922,15 @@ pub async fn prepare_entries_with_progress(
         ));
     }
     let state = crate::State::get().await?;
+    plans::report_phase(
+        progress,
+        plans::ResourceOperationPhase::RefreshingContent,
+    );
     refresh_snapshot(&state, &instance_id, cancel).await?;
+    plans::report_phase(
+        progress,
+        plans::ResourceOperationPhase::IdentifyingInstalled,
+    );
     let hydrated =
         hydrate_selected(&state, &instance_id, cancel, Some(&entry_ids))
             .await?;
