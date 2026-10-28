@@ -220,6 +220,7 @@ pub struct State {
     pub(crate) data: store::Handle,
 
     resource_service: OnceCell<Arc<crate::resources::ResourceService>>,
+    pub(crate) file_fingerprints: crate::resources::fingerprints::FileFingerprints,
 
     /// CurseForge API key set in the launcher. Takes precedence over the key
     /// from the environment or the build, which stays the fallback until the
@@ -1336,6 +1337,7 @@ impl State {
             data,
             pool,
             resource_service: OnceCell::new(),
+            file_fingerprints: Default::default(),
             curseforge_api_key: RwLock::new(curseforge_api_key),
             curseforge_api_key_update: AsyncMutex::new(()),
             configured_http_client: RwLock::new(configured_http_client),
@@ -1460,6 +1462,7 @@ pub(crate) async fn test_state(
         data: store::Handle::new(pool.clone()),
         pool,
         resource_service: OnceCell::new(),
+        file_fingerprints: Default::default(),
         curseforge_api_key: RwLock::new(curseforge_api_key),
         curseforge_api_key_update: AsyncMutex::new(()),
         configured_http_client: RwLock::new(configured_http_client),

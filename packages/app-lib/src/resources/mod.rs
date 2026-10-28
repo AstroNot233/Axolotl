@@ -7,6 +7,7 @@ pub mod catalog;
 pub(crate) mod execution;
 pub mod export;
 pub mod favorites;
+pub(crate) mod fingerprints;
 pub mod history;
 pub mod history_cleanup;
 pub mod identity;

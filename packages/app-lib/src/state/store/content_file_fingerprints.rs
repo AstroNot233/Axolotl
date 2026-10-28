@@ -8,6 +8,82 @@ use super::Collection;
 
 pub(crate) struct ContentFileFingerprints;
 
+impl ContentFileFingerprints {
+    pub(crate) async fn transfer(
+        handle: &super::Handle,
+        instance_id: &str,
+        original: &str,
+        destination: &str,
+        root: &std::path::Path,
+        integrity: &crate::resources::ArtifactIntegrity,
+    ) -> crate::Result<()> {
+        let mut unit = super::atom(handle).await?;
+        let row: Option<(String, String)> = sqlx::query_as(
+            "SELECT file.id, fingerprint.payload FROM instance_files file
+             JOIN content_file_fingerprints fingerprint ON fingerprint.instance_id = file.instance_id AND fingerprint.file_id = file.id
+             WHERE file.instance_id = ? AND file.relative_path = ? AND file.missing = 0"
+        ).bind(instance_id).bind(destination).fetch_optional(unit.connection()).await?;
+        if let Some((file_id, payload)) = row
+            && let Some(mut record) = decode(&payload)
+            && record.relative_path == original
+            && record.content_root == root.to_string_lossy()
+            && integrity.size == Some(record.size)
+            && integrity.hashes.iter().any(|hash| {
+                hash.algorithm == HashAlgorithm::Sha1
+                    && hash.value.eq_ignore_ascii_case(record.sha1())
+            })
+        {
+            record.relative_path = destination.into();
+            Self::atom_set(
+                &mut unit,
+                &FingerprintKey {
+                    instance_id: instance_id.into(),
+                    file_id,
+                },
+                Some(&record),
+            )
+            .await?;
+        }
+        unit.commit().await
+    }
+
+    pub(crate) async fn get_current(
+        handle: &super::Handle,
+        instance_id: &str,
+        relative_path: &str,
+    ) -> crate::Result<Option<FileFingerprintRecord>> {
+        let payload: Option<String> = sqlx::query_scalar(
+            "SELECT fingerprint.payload FROM content_file_fingerprints fingerprint
+             JOIN instance_files file ON file.instance_id = fingerprint.instance_id AND file.id = fingerprint.file_id
+             WHERE file.instance_id = ? AND file.relative_path = ? AND file.missing = 0"
+        ).bind(instance_id).bind(relative_path).fetch_optional(handle.pool()).await?;
+        Ok(payload.and_then(|payload| decode(&payload)))
+    }
+
+    /// Recognition can finish after another operation replaced the tracked file.
+    pub(crate) async fn set_current(
+        handle: &super::Handle,
+        instance_id: &str,
+        record: &FileFingerprintRecord,
+    ) -> crate::Result<()> {
+        if !record.valid() {
+            return Err(crate::ErrorKind::InputError(
+                "Invalid fingerprint".into(),
+            )
+            .into());
+        }
+        let mut unit = super::atom(handle).await?;
+        sqlx::query(
+            "INSERT INTO content_file_fingerprints (instance_id, file_id, payload)
+             SELECT instance_id, id, ? FROM instance_files
+             WHERE instance_id = ? AND relative_path = ? AND sha1 = ? AND size = ? AND missing = 0
+             ON CONFLICT (instance_id, file_id) DO UPDATE SET payload = excluded.payload"
+        ).bind(serde_json::to_string(record)?).bind(instance_id).bind(&record.relative_path)
+            .bind(record.sha1()).bind(record.size as i64).execute(unit.connection()).await?;
+        unit.commit().await
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FingerprintKey {
     pub instance_id: String,

@@ -1,6 +1,8 @@
 use crate::State;
-use crate::state::instances::adapters::{filesystem, sqlite};
+use crate::state::instances::adapters::filesystem;
 use crate::state::instances::{Instance, InstanceFile};
+use crate::state::store::content_file_fingerprints::ContentFileFingerprints;
+use crate::state::store::{Collection as _, instance_content_files};
 use crate::state::{
     CacheBehaviour, CachedEntry, CachedFileUpdate, ContentProvider,
     ContentProviderRef, DirectoryInfo, ModrinthVersionId, ProjectType,
@@ -73,7 +75,7 @@ async fn sync_content_files_with_verification(
     verify_all: bool,
 ) -> crate::Result<Vec<InstanceFile>> {
     let instance =
-        sqlite::instance_rows::get_instance_by_id(instance_id, &state.pool)
+        instance_content_files::get_instance(&state.data, instance_id)
             .await?
             .ok_or_else(|| {
                 crate::ErrorKind::InputError("Unknown instance".to_string())
@@ -151,50 +153,25 @@ async fn scan_and_commit<F, Fut>(
     instance: &Instance,
     state: &State,
     verify_all: bool,
-    changed: &HashSet<String>,
+    _changed: &HashSet<String>,
     before_commit: &mut F,
 ) -> crate::Result<ScanAttempt>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    let content_set = sqlite::content_rows::get_applied_content_set(
-        &instance.id,
-        &state.pool,
-    )
-    .await?;
+    let content_set =
+        instance_content_files::get_content_set(&state.data, &instance.id)
+            .await?;
     let watch_snapshot = state
         .file_watcher
         .content_watch_snapshot(&instance.id)
         .await;
-    let mut dirty_paths: HashSet<String> = watch_snapshot
-        .as_ref()
-        .map(|snapshot| snapshot.dirty_paths.clone())
-        .unwrap_or_default();
-    dirty_paths.extend(changed.iter().cloned());
     let content_root = instance_content_root(&state.directories, instance)?;
-    // The hash-cache layer resolves key paths against Axolotl's own instances
-    // folder (`state/cache.rs`). For directly associated instances the
-    // absolute linked root is passed as the "instance path": joining an
-    // absolute path replaces the base, so the cache layer hashes the linked
-    // files instead of failing on the nonexistent profile path. Managed
-    // instances keep the relative profile path so the cache layer can resolve
-    // a `game_dir_override` target from the database.
-    let is_direct_linked = crate::launcher::linked_game_dir(instance).is_some()
-        || instance
-            .linked_dot_minecraft
-            .as_deref()
-            .map(str::trim)
-            .is_some_and(|linked| !linked.is_empty());
     let instance_files_root = content_root.clone();
-    let cache_key_path = if is_direct_linked {
-        content_root.to_string_lossy().into_owned()
-    } else {
-        instance.path.clone()
-    };
     let scan_root = content_root.clone();
     let scanned = tokio::task::spawn_blocking(move || {
-        filesystem::scan_content_files_from(&scan_root, &cache_key_path)
+        filesystem::scan_content_files_from(&scan_root, "")
     })
     .await??;
     let scanned_state = scan_state(&scanned);
@@ -203,8 +180,7 @@ where
         .map(|file| file.relative_path.clone())
         .collect::<HashSet<_>>();
     let existing_files =
-        sqlite::content_rows::get_instance_files(&instance.id, &state.pool)
-            .await?;
+        instance_content_files::get_files(&state.data, &instance.id).await?;
     let mut existing_files_by_path = HashMap::new();
     let mut existing_files_by_sha1: HashMap<String, Vec<InstanceFile>> =
         HashMap::new();
@@ -215,48 +191,23 @@ where
             .push(file.clone());
         existing_files_by_path.insert(file.relative_path.clone(), file);
     }
-    // A cache miss computes a hash. Only ask for new paths here; existing
-    // rows are reused or rehashed below according to the watcher snapshot.
-    let cache_keys: Vec<_> = scanned
-        .iter()
-        .filter(|file| {
-            !verify_all
-                && !existing_files_by_path.contains_key(&file.relative_path)
-                && !content_path_is_dirty(&file.relative_path, &dirty_paths)
-        })
-        .map(|file| file.hash_cache_key.as_str())
-        .collect();
-    let hashes = CachedEntry::get_file_hash_many(
-        &cache_keys,
-        Some(CacheBehaviour::CacheOnly),
-        &state.pool,
-        &state.api_semaphore,
-    )
-    .await?;
-    let hashes_by_key: HashMap<_, _> = hashes
-        .into_iter()
-        .map(|hash| {
-            (
-                format!(
-                    "{}-{}",
-                    hash.size,
-                    hash.path.trim_end_matches(".disabled")
-                ),
-                hash,
-            )
-        })
-        .collect();
+    let saved_fingerprints =
+        ContentFileFingerprints::get_scoped(&state.data, &instance.id)
+            .await?
+            .into_iter()
+            .map(|(key, record)| (key.file_id, record))
+            .collect::<HashMap<_, _>>();
     let entry_file_ids = match content_set.as_ref() {
-        Some(content_set) => sqlite::content_rows::get_content_entries(
-            &content_set.id,
-            &state.pool,
-        )
-        .await?
-        .into_iter()
-        .filter_map(|entry| entry.file_id)
-        .collect(),
+        Some(content_set) => {
+            instance_content_files::get_entry_file_ids(
+                &state.data,
+                &content_set.id,
+            )
+            .await?
+        }
         None => HashSet::new(),
     };
+    let mut fingerprint_records = HashMap::new();
 
     let now = Utc::now();
     let mut files: Vec<InstanceFile> = Vec::new();
@@ -267,34 +218,36 @@ where
     let mut refreshed_metadata_file_ids = HashSet::new();
 
     for file in scanned {
-        let hash_key = file.hash_cache_key.trim_end_matches(".disabled");
         let existing_file = existing_files_by_path.get(&file.relative_path);
-        let (scanned_sha1, scanned_size) = if let Some(existing_file) =
-            existing_file
-            && !verify_all
-            && !existing_file.missing
-            && existing_file.size == file.size
-            && !content_path_is_dirty(&file.relative_path, &dirty_paths)
-        {
-            (existing_file.sha1.clone(), file.size)
-        } else if existing_file.is_some() {
-            let path =
-                join_content_path(&instance_files_root, &file.relative_path);
-            let (_, sha1) = fetch::sha1_file_async(&path).await?;
-            (sha1, file.size)
-        } else {
-            match hashes_by_key.get(hash_key).filter(|_| !verify_all) {
-                Some(hash) => (hash.hash.clone(), hash.size),
-                None => {
-                    let path = join_content_path(
-                        &instance_files_root,
-                        &file.relative_path,
-                    );
-                    let (_, sha1) = fetch::sha1_file_async(&path).await?;
-                    (sha1, file.size)
-                }
-            }
-        };
+        let previous =
+            existing_file.and_then(|file| saved_fingerprints.get(&file.id));
+        let resolved = state
+            .file_fingerprints
+            .resolve_scan(
+                &instance_files_root,
+                &file.relative_path,
+                previous,
+                verify_all,
+                &tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .map_err(crate::ErrorKind::ResourceError)?;
+        let scanned_size =
+            resolved.identity.integrity.size.unwrap_or(file.size);
+        let scanned_sha1 = resolved
+            .identity
+            .integrity
+            .hashes
+            .iter()
+            .find(|hash| {
+                hash.algorithm == crate::resources::HashAlgorithm::Sha1
+            })
+            .expect("fingerprint service always supplies SHA-1")
+            .value
+            .clone();
+        if let Some(record) = resolved.record {
+            fingerprint_records.insert(file.relative_path.clone(), record);
+        }
         let reclaim_candidate = if existing_file.is_some() {
             None
         } else {
@@ -461,11 +414,9 @@ where
         &instance_files_root,
     )
     .await?;
-    let latest_set = sqlite::content_rows::get_applied_content_set(
-        &instance.id,
-        &state.pool,
-    )
-    .await?;
+    let latest_set =
+        instance_content_files::get_content_set(&state.data, &instance.id)
+            .await?;
     let latest_watch = state
         .file_watcher
         .content_watch_snapshot(&instance.id)
@@ -486,110 +437,31 @@ where
     {
         return Ok(ScanAttempt::Retry(changed_paths));
     }
-    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
-    sqlite::content_rows::ensure_instance_exists(&instance.id, &mut tx).await?;
-    sqlite::content_rows::mark_instance_files_missing(&instance.id, &mut tx)
-        .await?;
-    let mut invalidated_provider_identity =
-        !externally_changed_file_ids.is_empty();
-    for file_id in &externally_changed_file_ids {
-        sqlx::query("UPDATE instance_files SET local_mod_data = NULL, icon_path = NULL WHERE instance_id = ? AND id = ?").bind(&instance.id).bind(file_id).execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM instance_content_dependencies WHERE parent_entry_id IN (SELECT id FROM instance_content_entries WHERE instance_id = ? AND file_id = ?)").bind(&instance.id).bind(file_id).execute(&mut *tx).await?;
-    }
-    if let Some(content_set) = content_set.as_ref() {
-        let refreshed_metadata_file_ids: Vec<_> =
-            refreshed_metadata_file_ids.iter().collect();
-        for file_ids in refreshed_metadata_file_ids.chunks(400) {
-            let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-                "DELETE FROM instance_content_dependencies WHERE content_set_id = ",
-            );
-            query.push_bind(&content_set.id).push(" AND evidence_provider = 'local' AND parent_entry_id IN (SELECT entry.id FROM instance_content_entries entry WHERE entry.content_set_id = ");
-            query
-                .push_bind(&content_set.id)
-                .push(" AND entry.file_id IN (");
-            let mut separated = query.separated(", ");
-            for id in file_ids {
-                separated.push_bind(*id);
-            }
-            separated.push_unseparated(") AND NOT EXISTS (SELECT 1 FROM instance_content_provider_refs ref WHERE ref.content_entry_id = entry.id))");
-            let removed = query.build().execute(&mut *tx).await?;
-            invalidated_provider_identity |= removed.rows_affected() > 0;
-        }
-        for file_id in &externally_changed_file_ids {
-            invalidated_provider_identity |= sqlite::content_rows::invalidate_exact_provider_refs_for_file_in_transaction(
-                &content_set.id,
-                file_id,
-                &mut tx,
-            )
-            .await?;
-        }
-    }
-
-    // Upsert with a fresh id lookup inside the transaction. The ids assigned
-    // during the scan may be stale if a concurrent operation (e.g. batch
-    // disable renaming files to `.disabled`) moved a row after the snapshot;
-    // reusing a stale id against the moved row would trip the UNIQUE
-    // constraint on `instance_files.id` (code 1555).
-    let mut synced_files: Vec<InstanceFile> = Vec::with_capacity(files.len());
-    for file in &files {
-        let synced =
-            if let Some(tracked_file_id) = merges.get(&file.relative_path) {
-                sqlite::content_rows::adopt_untracked_file_in_transaction(
-                    &instance.id,
-                    &file.relative_path,
-                    tracked_file_id,
-                    &mut tx,
-                )
-                .await?;
-                upsert_scanned_file(&instance.id, file, &mut tx).await?
-            } else if let Some(old_relative_path) =
-                reclaims.get(&file.relative_path)
-            {
-                match sqlite::content_rows::move_instance_file_in_transaction(
-                    &instance.id,
-                    old_relative_path,
-                    &file.relative_path,
-                    &file.file_name,
-                    file.enabled,
-                    &file.sha1,
-                    file.size,
-                    file.local_mod_data.as_deref(),
-                    file.icon_path.as_deref(),
-                    &mut tx,
-                )
-                .await?
-                {
-                    Some(file) => file,
-                    None => {
-                        upsert_scanned_file(&instance.id, file, &mut tx).await?
-                    }
-                }
-            } else {
-                upsert_scanned_file(&instance.id, file, &mut tx).await?
-            };
-        synced_files.push(synced);
-    }
-
-    if invalidated_provider_identity
-        && let Some(content_set) = content_set.as_ref()
-    {
-        sqlite::content_rows::bump_content_set_revision_in_transaction(
-            &content_set.id,
-            &mut tx,
+    let Some(synced_files) =
+        crate::state::store::instance_content_files::set_scanned(
+            &state.data,
+            crate::state::store::instance_content_files::ScannedFiles {
+                instance_id: &instance.id,
+                content_set: &content_set,
+                files: &files,
+                reclaims: &reclaims,
+                merges: &merges,
+                externally_changed_file_ids: &externally_changed_file_ids,
+                refreshed_metadata_file_ids: &refreshed_metadata_file_ids,
+                fingerprints: &fingerprint_records,
+            },
+            || async {
+                state
+                    .file_watcher
+                    .content_watch_snapshot(&instance.id)
+                    .await
+                    == watch_snapshot
+            },
         )
-        .await?;
-    }
-
-    if state
-        .file_watcher
-        .content_watch_snapshot(&instance.id)
-        .await
-        != watch_snapshot
-    {
-        tx.rollback().await?;
+        .await?
+    else {
         return Ok(ScanAttempt::Retry(HashSet::new()));
-    }
-    tx.commit().await?;
+    };
 
     if let Some(snapshot) = watch_snapshot {
         state
@@ -623,15 +495,6 @@ fn changed_scan_paths(
         .filter(|path| before.get(*path) != after.get(*path))
         .cloned()
         .collect()
-}
-
-fn content_path_is_dirty(path: &str, dirty_paths: &HashSet<String>) -> bool {
-    dirty_paths.iter().any(|dirty| {
-        path == dirty
-            || path
-                .strip_prefix(dirty)
-                .is_some_and(|rest| rest.starts_with('/'))
-    })
 }
 
 async fn cache_extracted_icon(
@@ -760,28 +623,6 @@ fn physical_file_identity_changed(
     existing.sha1 != scanned_sha1 || existing.size != scanned_size
 }
 
-async fn upsert_scanned_file(
-    instance_id: &str,
-    file: &InstanceFile,
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-) -> crate::Result<InstanceFile> {
-    sqlite::content_rows::upsert_instance_file_from_parts_in_transaction(
-        sqlite::content_rows::UpsertInstanceFile {
-            instance_id,
-            relative_path: &file.relative_path,
-            file_name: &file.file_name,
-            enabled: file.enabled,
-            sha1: &file.sha1,
-            size: file.size,
-            missing: false,
-            local_mod_data: file.local_mod_data.as_deref(),
-            icon_path: file.icon_path.as_deref(),
-        },
-        tx,
-    )
-    .await
-}
-
 /// Finds the single missing file row that can safely inherit a scanned file's
 /// installed identity. A rename should keep its provider refs, entry, and
 /// install history; ambiguous duplicates and cross-type moves stay untracked.
@@ -863,24 +704,13 @@ fn mergeable_tracked_file<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::instances::adapters::sqlite;
     use crate::state::{
         CurseForgeFileId, CurseForgeProjectId, ModrinthProjectId,
         ModrinthVersionId,
     };
     use std::fs;
     use std::sync::Arc;
-
-    #[test]
-    fn unchanged_content_paths_reuse_existing_hashes_until_watcher_marks_them_dirty()
-     {
-        let dirty = HashSet::from([
-            "mods/changed.jar".to_string(),
-            "resourcepacks".to_string(),
-        ]);
-        assert!(!content_path_is_dirty("mods/unchanged.jar", &dirty));
-        assert!(content_path_is_dirty("mods/changed.jar", &dirty));
-        assert!(content_path_is_dirty("resourcepacks/pack.zip", &dirty));
-    }
 
     fn modrinth_ref() -> ContentProviderRef {
         ContentProviderRef::Modrinth {
@@ -1017,7 +847,7 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
 
-        // A second refresh re-hashes the existing row. It must continue to
+        // A second refresh reuses the fingerprint baseline. It must continue to
         // use the linked external root rather than the Axolotl profile path.
         let refreshed = sync_instance_content_files(&instance, &state)
             .await
