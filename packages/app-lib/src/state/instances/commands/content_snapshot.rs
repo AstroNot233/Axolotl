@@ -90,23 +90,17 @@ async fn get_content_snapshot_inner(
             && cached_files.is_empty())
     {
         let cancel = tokio_util::sync::CancellationToken::new();
-        let refreshed = if refresh_remote {
-            crate::resources::installed::refresh_snapshot(
-                state,
-                instance_id,
-                &cancel,
-            )
-            .await
-        } else {
-            crate::resources::installed::refresh_install_snapshot(
-                state,
-                instance_id,
-                &cancel,
-            )
-            .await
-        };
-        refreshed
+        let refreshed = crate::resources::installed::refresh_snapshot(
+            state,
+            instance_id,
+            &cancel,
+        )
+        .await;
+        let stable = refreshed
             .map_err(|error| crate::ErrorKind::OtherError(error.to_string()))?;
+        if !stable {
+            return local::get(instance_id, state).await;
+        }
         content_rows::get_instance_files(&instance.id, &state.pool).await?
     } else {
         cached_files

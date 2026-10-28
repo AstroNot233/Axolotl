@@ -353,8 +353,18 @@ pub(crate) async fn refresh_snapshot(
     state: &crate::State,
     instance_id: &str,
     cancel: &CancellationToken,
+) -> ResourceResult<bool> {
+    refresh_snapshot_with_consistency(state, instance_id, cancel, true).await
+}
+
+pub(crate) async fn refresh_operation_snapshot(
+    state: &crate::State,
+    instance_id: &str,
+    cancel: &CancellationToken,
 ) -> ResourceResult<()> {
-    refresh_snapshot_with_verification(state, instance_id, cancel, false).await
+    refresh_snapshot_with_consistency(state, instance_id, cancel, false)
+        .await
+        .map(|_| ())
 }
 
 pub(crate) async fn refresh_install_snapshot(
@@ -362,24 +372,30 @@ pub(crate) async fn refresh_install_snapshot(
     instance_id: &str,
     cancel: &CancellationToken,
 ) -> ResourceResult<()> {
-    refresh_snapshot_with_verification(state, instance_id, cancel, false).await
+    refresh_snapshot_with_consistency(state, instance_id, cancel, false)
+        .await
+        .map(|_| ())
 }
 
-async fn refresh_snapshot_with_verification(
+async fn refresh_snapshot_with_consistency(
     state: &crate::State,
     instance_id: &str,
     cancel: &CancellationToken,
-    verify_all: bool,
-) -> ResourceResult<()> {
+    allow_committed_snapshot: bool,
+) -> ResourceResult<bool> {
     if cancel.is_cancelled() {
         return Err(ResourceError::Canceled);
     }
-    if verify_all {
-        crate::state::instances::commands::sync_content_files_for_operation(
-            instance_id,
-            state,
-        )
-        .await?;
+    if allow_committed_snapshot {
+        let outcome =
+            crate::state::instances::commands::sync_content_files_for_display(
+                instance_id,
+                state,
+            )
+            .await?;
+        if !outcome.stable {
+            return Ok(false);
+        }
     } else {
         crate::state::instances::commands::sync_content_files(
             instance_id,
@@ -394,7 +410,7 @@ async fn refresh_snapshot_with_verification(
         instance_id,
     )
     .await?;
-    Ok(())
+    Ok(true)
 }
 
 pub(crate) async fn hydrate(
@@ -417,7 +433,7 @@ pub(crate) async fn hydrate_with_failures(
     instance_id: &str,
     cancel: &CancellationToken,
 ) -> ResourceResult<HydratedInstalled> {
-    refresh_snapshot(state, instance_id, cancel).await?;
+    refresh_operation_snapshot(state, instance_id, cancel).await?;
     hydrate_selected(state, instance_id, cancel, None).await
 }
 
@@ -926,7 +942,7 @@ pub async fn prepare_entries_with_progress(
         progress,
         plans::ResourceOperationPhase::RefreshingContent,
     );
-    refresh_snapshot(&state, &instance_id, cancel).await?;
+    refresh_operation_snapshot(&state, &instance_id, cancel).await?;
     plans::report_phase(
         progress,
         plans::ResourceOperationPhase::IdentifyingInstalled,
