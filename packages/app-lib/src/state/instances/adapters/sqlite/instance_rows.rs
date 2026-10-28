@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use super::values::{optional_timestamp, timestamp, unsigned};
 use crate::state::instances::{
     ContentSet, ContentSetStatus, ContentSourceKind, Instance,
     InstanceLaunchContext, InstanceLaunchOverrides,
@@ -8,7 +9,7 @@ use crate::state::instances::{
 use crate::state::{
     InstanceInstallStage, LauncherFeatureVersion, ModLoader, ReleaseChannel,
 };
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use sqlx::{Executor, Sqlite, SqlitePool, Transaction};
 use std::collections::HashMap;
@@ -1757,27 +1758,6 @@ where
     })
 }
 
-fn timestamp(value: i64) -> DateTime<Utc> {
-    Utc.timestamp_opt(value, 0)
-        .single()
-        .unwrap_or_else(Utc::now)
-}
-
-fn optional_timestamp(value: i64) -> Option<DateTime<Utc>> {
-    Utc.timestamp_opt(value, 0).single()
-}
-
-fn unsigned(value: i64, column: &str) -> crate::Result<u64> {
-    if value < 0 {
-        return Err(crate::ErrorKind::InputError(format!(
-            "Expected {column} to be non-negative"
-        ))
-        .into());
-    }
-
-    Ok(value as u64)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1918,4 +1898,201 @@ mod tests {
             .unwrap();
         assert_eq!(launch.applied_content_set.revision, 5);
     }
+}
+
+/// Marks the install stage an instance reached.
+///
+/// An unknown instance is a no-op: the launch flow may race a deletion.
+pub(crate) async fn set_install_stage(
+    instance_id: &str,
+    install_stage: InstanceInstallStage,
+    modified: i64,
+    pool: &SqlitePool,
+) -> crate::Result<()> {
+    let install_stage = install_stage.as_str();
+
+    sqlx::query!(
+        "
+        UPDATE instances
+        SET install_stage = ?, modified = ?
+        WHERE id = ?
+        ",
+        install_stage,
+        modified,
+        instance_id,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Records when an instance was last launched.
+pub(crate) async fn set_last_played(
+    instance_id: &str,
+    last_played: DateTime<Utc>,
+    modified: i64,
+    pool: &SqlitePool,
+) -> crate::Result<()> {
+    let last_played = last_played.timestamp();
+
+    sqlx::query!(
+        "
+        UPDATE instances
+        SET last_played = ?, modified = ?
+        WHERE id = ?
+        ",
+        last_played,
+        modified,
+        instance_id,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Pins an instance to the top of the list, or unpins it.
+///
+/// Rejects an unknown instance.
+pub(crate) async fn set_pinned(
+    instance_id: &str,
+    pinned_at: Option<i64>,
+    modified: i64,
+    pool: &SqlitePool,
+) -> crate::Result<()> {
+    let result = sqlx::query!(
+        "
+        UPDATE instances
+        SET pinned_at = ?, modified = ?
+        WHERE id = ?
+        ",
+        pinned_at,
+        modified,
+        instance_id,
+    )
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(crate::ErrorKind::InputError(
+            "Unknown instance".to_string(),
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
+/// Narrows an instance to its display name.
+///
+/// Rejects an unknown instance.
+pub(crate) async fn get_instance_name<'e, E>(
+    instance_id: &str,
+    exec: E,
+) -> crate::Result<String>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_scalar!(
+        "
+        SELECT name
+        FROM instances
+        WHERE id = ?
+        ",
+        instance_id,
+    )
+    .fetch_optional(exec)
+    .await?
+    .ok_or_else(|| {
+        crate::ErrorKind::InputError("Unknown instance".to_string()).into()
+    })
+}
+
+/// Seeds an instance's sync preferences from the launcher defaults.
+pub(crate) async fn insert_default_sync_preferences_in_transaction(
+    instance_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "INSERT INTO instance_sync_preferences (instance_id, feature, enabled)
+         SELECT ?, feature, new_instance_default FROM sync_feature_settings",
+    )
+    .bind(instance_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// One row of the install-candidate query: the instance and whether the
+/// project is already installed in it.
+#[derive(sqlx::FromRow)]
+pub(crate) struct InstanceInstallCandidateRow {
+    pub id: String,
+    pub name: String,
+    pub icon_path: Option<String>,
+    pub game_version: String,
+    pub loader: String,
+    pub installed: i64,
+}
+
+/// Reads the instances that can take a project, with the profile they run.
+pub(crate) async fn get_install_candidates(
+    project_id: &str,
+    pool: &SqlitePool,
+) -> crate::Result<Vec<InstanceInstallCandidateRow>> {
+    let rows = sqlx::query_as::<_, InstanceInstallCandidateRow>(
+        r#"
+        SELECT
+            i.id,
+            i.name,
+            i.icon_path,
+            cs.game_version,
+            cs.loader,
+            CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM instance_content_entries entry
+                    INNER JOIN instance_files file
+                        ON file.id = entry.file_id
+                    WHERE entry.content_set_id = cs.id
+                        AND EXISTS (
+                            SELECT 1
+                            FROM instance_content_provider_refs ref
+                            WHERE ref.content_entry_id = entry.id
+                                AND ref.provider = CASE
+                                    WHEN ? LIKE 'curseforge:%' THEN 'curseforge'
+                                    ELSE 'modrinth'
+                                END
+                                AND ref.provider_project_id = CASE
+                                    WHEN ? LIKE 'curseforge:%' THEN substr(?, 12)
+                                    ELSE ?
+                                    END
+                        )
+                        AND file.missing = 0
+                )
+                    THEN 1
+                ELSE 0
+            END AS installed
+        FROM instances i
+        INNER JOIN instance_content_sets cs
+            ON cs.id = i.applied_content_set_id
+        LEFT JOIN instance_links link
+            ON link.instance_id = i.id
+        WHERE COALESCE(link.link_kind, 'unmanaged') NOT IN (
+            'server_project',
+            'server_project_modpack'
+        )
+        ORDER BY i.name ASC
+        "#,
+    )
+    .bind(project_id)
+    .bind(project_id)
+    .bind(project_id)
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
 }

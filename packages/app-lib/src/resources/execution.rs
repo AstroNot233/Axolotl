@@ -1,5 +1,4 @@
 use super::*;
-use crate::state::instances::adapters::sqlite::content_rows;
 use crate::state::instances::commands::{
     instance_content_root, materialize_verified_project_download_copy,
     resolve_content_scope, restore_project_materialization,
@@ -19,6 +18,10 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio_util::sync::CancellationToken;
+
+use crate::state::instances::adapters::sqlite::{
+    content_entries, content_sets, files, pack_members,
+};
 
 fn input(message: impl Into<String>) -> crate::Error {
     crate::ErrorKind::InputError(message.into()).into()
@@ -933,13 +936,13 @@ async fn persist_plan(
     draft: &plans::OperationDraft,
 ) -> crate::Result<()> {
     let old_dependencies =
-        content_rows::get_content_dependency_edges(set_id, pool).await?;
-    let old_members = content_rows::get_pack_members(set_id, pool).await?;
+        content_entries::get_content_dependency_edges(set_id, pool).await?;
+    let old_members = pack_members::get_pack_members(set_id, pool).await?;
     let mut prior = HashMap::new();
     for action in &plan.actions {
         let id = action.entry_id.as_str();
         let refs =
-            content_rows::get_content_provider_refs_with_origin(id, pool)
+            content_entries::get_content_provider_refs_with_origin(id, pool)
                 .await?;
         let graph: Option<(String, String)> = sqlx::query_as(
             "SELECT nodes, edges FROM resource_entry_graphs WHERE entry_id = ?",
@@ -947,7 +950,7 @@ async fn persist_plan(
         .bind(id)
         .fetch_optional(pool)
         .await?;
-        let entry = content_rows::get_content_entry_by_id(id, pool).await?;
+        let entry = content_entries::get_content_entry_by_id(id, pool).await?;
         prior.insert(action.entry_id.clone(), (refs, graph, entry));
     }
     let instance_path: String =
@@ -1014,25 +1017,24 @@ async fn persist_plan(
             sqlx::query("UPDATE instance_files SET relative_path = ?, file_name = ? WHERE id = (SELECT file_id FROM instance_content_entries WHERE id = ?) AND instance_id = ? AND relative_path = ?")
                 .bind(&action.target_relative_path).bind(file_name).bind(id).bind(&plan.instance_id).bind(&current.relative_path).execute(&mut *tx).await?;
         }
-        let disk_file =
-            content_rows::upsert_instance_file_from_parts_in_transaction(
-                content_rows::UpsertInstanceFile {
-                    instance_id: &plan.instance_id,
-                    relative_path: &action.target_relative_path,
-                    file_name,
-                    enabled: action
-                        .current
-                        .as_ref()
-                        .is_none_or(|current| current.enabled),
-                    sha1,
-                    size: *size,
-                    missing: false,
-                    local_mod_data: local_mod_data.as_deref(),
-                    icon_path: None,
-                },
-                &mut tx,
-            )
-            .await?;
+        let disk_file = files::upsert_instance_file_from_parts_in_transaction(
+            files::UpsertInstanceFile {
+                instance_id: &plan.instance_id,
+                relative_path: &action.target_relative_path,
+                file_name,
+                enabled: action
+                    .current
+                    .as_ref()
+                    .is_none_or(|current| current.enabled),
+                sha1,
+                size: *size,
+                missing: false,
+                local_mod_data: local_mod_data.as_deref(),
+                icon_path: None,
+            },
+            &mut tx,
+        )
+        .await?;
         let cache =
             crate::state::CacheValue::FileHash(crate::state::CachedFileHash {
                 path: format!(
@@ -1082,8 +1084,8 @@ async fn persist_plan(
             sqlx::query("UPDATE instance_content_entries SET enabled = ?, modified_at = ? WHERE id = ?").bind(disk_file.enabled as i64).bind(now.timestamp()).bind(id).execute(&mut *tx).await?;
         } else {
             let entry =
-                content_rows::upsert_content_entry_from_parts_in_transaction(
-                    content_rows::UpsertContentEntry {
+                content_entries::upsert_content_entry_from_parts_in_transaction(
+                    content_entries::UpsertContentEntry {
                         instance_id: &plan.instance_id,
                         content_set_id: set_id,
                         file_id: Some(&disk_file.id),
@@ -1116,7 +1118,7 @@ async fn persist_plan(
             != "planet_minecraft"
         {
             let reference = provider_ref(&action.target)?;
-            content_rows::upsert_content_provider_ref_in_transaction(
+            content_entries::upsert_content_provider_ref_in_transaction(
                 id, &reference, true, &mut tx,
             )
             .await?;
@@ -1126,7 +1128,7 @@ async fn persist_plan(
                 serde_json::from_value(restore["restoreProviderRefs"].clone())?;
             sqlx::query("DELETE FROM instance_content_provider_refs WHERE content_entry_id = ?").bind(id).execute(&mut *tx).await?;
             for (previous, origin) in previous_refs {
-                content_rows::upsert_content_provider_ref_in_transaction(
+                content_entries::upsert_content_provider_ref_in_transaction(
                     id, &previous, origin, &mut tx,
                 )
                 .await?;
@@ -1266,7 +1268,7 @@ async fn persist_plan(
             edges =
                 serde_json::from_value(restore["restoreDependencies"].clone())?;
         }
-        content_rows::replace_content_dependency_edges_for_parent(
+        content_entries::replace_content_dependency_edges_for_parent(
             set_id,
             action.entry_id.as_str(),
             &edges,
@@ -1287,7 +1289,7 @@ async fn persist_plan(
                 serde_json::from_value(member.clone())?;
             let unlinked: i64 = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM resource_pack_unlinks WHERE instance_id = ? AND content_set_id = ?)").bind(&plan.instance_id).bind(set_id).fetch_one(&mut *tx).await?;
             if unlinked == 0 {
-                content_rows::upsert_pack_member_in_transaction(
+                pack_members::upsert_pack_member_in_transaction(
                     &member, &mut tx,
                 )
                 .await?;
@@ -1296,7 +1298,7 @@ async fn persist_plan(
         sqlx::query("UPDATE resource_entry_graphs SET nodes = ?, edges = ? WHERE entry_id = ?").bind(serde_json::to_string(&previous.previous_nodes)?).bind(serde_json::to_string(&previous.previous_dependencies)?).bind(previous.entry_id.as_str()).execute(&mut *tx).await?;
         sqlx::query("UPDATE resource_history SET backup_available = 0, payload = ? WHERE id = ?").bind(payload.to_string()).bind(id.as_str()).execute(&mut *tx).await?;
     }
-    content_rows::bump_content_set_revision_in_transaction(set_id, &mut tx)
+    content_sets::bump_content_set_revision_in_transaction(set_id, &mut tx)
         .await?;
     sqlx::query("UPDATE resource_operation_plans SET completed = 1 WHERE id = ? AND revision = ?").bind(plan.id.as_str()).bind(plan.revision).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM resource_execution_journals WHERE plan_id = ?")

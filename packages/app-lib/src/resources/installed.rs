@@ -1,6 +1,8 @@
 use super::{identity::LocalArtifactIdentity, *};
 use tokio_util::sync::CancellationToken;
 
+use crate::state::instances::adapters::sqlite::files;
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InstalledArtifactRecord {
@@ -494,6 +496,8 @@ pub(super) async fn installed_file_identity(
     cancel: &CancellationToken,
 ) -> ResourceResult<LocalArtifactIdentity> {
     use crate::state::store::content_file_fingerprints::ContentFileFingerprints;
+
+    use crate::state::instances::adapters::sqlite::files;
     let previous = ContentFileFingerprints::get_current(
         &state.data,
         instance_id,
@@ -671,8 +675,8 @@ async fn hydrate_entries_with_service(
         indices.into_iter().zip(identities).zip(recognized)
     {
         let entry = &mut entries[index];
-        let refs = crate::state::instances::adapters::sqlite::content_rows::get_content_provider_refs(entry.entry_id.as_str(), &state.pool).await?;
-        let origin = crate::state::instances::adapters::sqlite::content_rows::get_content_origin_provider(entry.entry_id.as_str(), &state.pool).await?;
+        let refs = crate::state::instances::adapters::sqlite::content_entries::get_content_provider_refs(entry.entry_id.as_str(), &state.pool).await?;
+        let origin = crate::state::instances::adapters::sqlite::content_entries::get_content_origin_provider(entry.entry_id.as_str(), &state.pool).await?;
         let mut matches = recognition.matches;
         if let Some(artifact) = verified.remove(&index)
             && !matches

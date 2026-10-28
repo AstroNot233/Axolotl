@@ -1,0 +1,77 @@
+#![allow(dead_code)]
+
+use crate::state::InstancePostUpgradeNotice;
+use sqlx::{Row, SqliteConnection, SqlitePool};
+
+/// Reads the notice an upgraded instance still owes the user.
+pub(crate) async fn get_post_upgrade_notice(
+    instance_id: &str,
+    pool: &SqlitePool,
+) -> crate::Result<Option<InstancePostUpgradeNotice>> {
+    let row = sqlx::query(
+        "SELECT upgrade_job_id, target_game_version, consecutive_clean_launches, warnings_json FROM instance_post_upgrade_notices WHERE instance_id = ?",
+    )
+    .bind(instance_id)
+    .fetch_optional(pool)
+    .await?;
+
+    row.map(|row| {
+        let warnings_json: String = row.try_get("warnings_json")?;
+        Ok(InstancePostUpgradeNotice {
+            instance_id: instance_id.to_string(),
+            upgrade_job_id: row.try_get("upgrade_job_id")?,
+            target_game_version: row.try_get("target_game_version")?,
+            consecutive_clean_launches: row
+                .try_get::<i64, _>("consecutive_clean_launches")?
+                .clamp(0, u8::MAX as i64)
+                as u8,
+            warnings: serde_json::from_str(&warnings_json)?,
+        })
+    })
+    .transpose()
+}
+
+/// Stores the notice, or drops it when it carries no warnings.
+pub(crate) async fn replace_post_upgrade_notice_on_connection(
+    notice: &InstancePostUpgradeNotice,
+    connection: &mut SqliteConnection,
+) -> crate::Result<()> {
+    if notice.warnings.is_empty() {
+        sqlx::query(
+            "DELETE FROM instance_post_upgrade_notices WHERE instance_id = ?",
+        )
+        .bind(&notice.instance_id)
+        .execute(&mut *connection)
+        .await?;
+
+        return Ok(());
+    }
+
+    sqlx::query(
+        "INSERT INTO instance_post_upgrade_notices (instance_id, upgrade_job_id, target_game_version, consecutive_clean_launches, warnings_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(instance_id) DO UPDATE SET upgrade_job_id = excluded.upgrade_job_id, target_game_version = excluded.target_game_version, consecutive_clean_launches = excluded.consecutive_clean_launches, warnings_json = excluded.warnings_json, modified = CURRENT_TIMESTAMP",
+    )
+    .bind(&notice.instance_id)
+    .bind(&notice.upgrade_job_id)
+    .bind(&notice.target_game_version)
+    .bind(i64::from(notice.consecutive_clean_launches))
+    .bind(serde_json::to_string(&notice.warnings)?)
+    .execute(&mut *connection)
+    .await?;
+
+    Ok(())
+}
+
+/// Drops the notice an instance no longer owes.
+pub(crate) async fn dismiss_post_upgrade_notice(
+    instance_id: &str,
+    pool: &SqlitePool,
+) -> crate::Result<()> {
+    sqlx::query(
+        "DELETE FROM instance_post_upgrade_notices WHERE instance_id = ?",
+    )
+    .bind(instance_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
