@@ -24,7 +24,7 @@ use crate::state::instances::{
 use crate::state::{
     CacheBehaviour, CachedEntry, ContentItem, ContentItemProject,
     ContentItemVersion, ContentProvider, ContentProviderRef,
-    ContentRequirement, ContentSourceKind,
+    ContentRequirement, ContentSourceKind, local_id,
 };
 
 pub(crate) async fn get_content_snapshot(
@@ -349,8 +349,10 @@ async fn get_content_snapshot_inner(
             project: Some(ContentItemProject {
                 id: local_mod
                     .as_ref()
-                    .map(|metadata| format!("local:{}", metadata.mod_id))
-                    .unwrap_or_else(|| format!("local:file:{}", file.sha1)),
+                    .map(|metadata| local_id(&metadata.mod_id))
+                    .unwrap_or_else(|| {
+                        local_id(format_args!("file:{}", file.sha1))
+                    }),
                 slug: local_mod
                     .as_ref()
                     .map(|metadata| metadata.mod_id.clone()),
@@ -360,7 +362,7 @@ async fn get_content_snapshot_inner(
             }),
             version: local_mod.as_ref().and_then(|metadata| {
                 metadata.version.clone().map(|version| ContentItemVersion {
-                    id: format!("local:{}", metadata.mod_id),
+                    id: local_id(&metadata.mod_id),
                     version_number: version,
                     file_name: file.file_name.clone(),
                     date_published: None,
