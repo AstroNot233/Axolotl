@@ -32,6 +32,11 @@ export interface AnalysisTaskOptions<I, P, R> {
     stop?: (input: I) => Promise<void> | void
     /** Coalesces progress and partial results; defaults to one commit per animation frame. */
     schedule?: (commit: () => void) => void
+    /**
+     * Receives a result that arrived after its run was abandoned or canceled,
+     * so whatever it holds, such as a native session, can be released.
+     */
+    discard?: (result: R, input: I) => void
 }
 
 export interface AnalysisTask<I, P, R> {
@@ -141,7 +146,10 @@ export function createAnalysisTask<I, P, R>(
                     run.stops.push(acknowledged)
                 },
             })
-            if (!isCurrent()) return undefined
+            if (!isCurrent()) {
+                options.discard?.(outcome, value)
+                return undefined
+            }
             pending = null
             result.value = outcome
             partial.value = outcome
