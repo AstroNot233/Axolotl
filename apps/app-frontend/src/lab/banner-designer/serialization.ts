@@ -134,6 +134,8 @@ export function toGiveCommand(design: BannerDesign, options: BannerCommandOption
         return `/give ${target} ${CLASSIC_BANNER_ITEM} ${count} 0${data ? ` ${data}` : ''}`
     }
     const item = dyeColorDefinition(design.baseColor).bannerItem
+    // The component or NBT hangs off the item id with no space in between, so a
+    // plain banner still renders as `minecraft:blue_banner 1`, never with two.
     return `/give ${target} ${item}${data} ${count}`
 }
 
