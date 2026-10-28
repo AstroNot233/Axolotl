@@ -169,6 +169,25 @@ async fn check_entry(
     preferred: &SourceId,
     cancel: &CancellationToken,
 ) -> ResourceResult<Option<SourceReleaseRef>> {
+    check_entry_with_policy(
+        service,
+        entry,
+        target,
+        preferred,
+        cancel,
+        CachePolicy::UseFresh,
+    )
+    .await
+}
+
+pub(crate) async fn check_entry_with_policy(
+    service: &std::sync::Arc<ResourceService>,
+    entry: &InstalledResource,
+    target: &ipc::ResourceTarget,
+    preferred: &SourceId,
+    cancel: &CancellationToken,
+    policy: CachePolicy,
+) -> ResourceResult<Option<SourceReleaseRef>> {
     if cancel.is_cancelled() {
         return Err(ResourceError::Canceled);
     }
@@ -189,14 +208,20 @@ async fn check_entry(
         scope: entry.scope.clone(),
         entry_id: Some(entry.entry_id.clone()),
     };
-    let current = service.release(&artifact.release, None, cancel).await?;
+    let current = service
+        .release_with_policy(&artifact.release, None, cancel, policy)
+        .await?;
     let (release, artifact, _) = service
-        .selected_release_for_current(
+        .selected_release_with_requirements_policy(
             &selection,
             target,
             preferred,
             cancel,
             Some(&current),
+            &[],
+            &[],
+            policy,
+            true,
         )
         .await?;
     Ok(

@@ -112,7 +112,55 @@ async fn sync_with_retry<F, Fut>(
     instance: &Instance,
     state: &State,
     verify_all: bool,
+    before_commit: F,
+) -> crate::Result<Vec<InstanceFile>>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    sync_with_retry_progress(instance, state, verify_all, before_commit, None)
+        .await
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ScanProgress {
+    Files(Vec<InstanceFile>),
+    Failed { path: String, error: String },
+}
+
+pub(crate) struct ScanPublication<'a> {
+    pub sender: &'a tokio::sync::mpsc::Sender<ScanProgress>,
+    pub cancel: &'a tokio_util::sync::CancellationToken,
+}
+
+pub(crate) async fn sync_content_files_progressively(
+    instance_id: &str,
+    state: &State,
+    sender: &tokio::sync::mpsc::Sender<ScanProgress>,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> crate::Result<Vec<InstanceFile>> {
+    let instance =
+        instance_content_files::get_instance(&state.data, instance_id)
+            .await?
+            .ok_or_else(|| {
+                crate::ErrorKind::InputError("Unknown instance".into())
+            })?;
+    sync_with_retry_progress(
+        &instance,
+        state,
+        false,
+        || std::future::ready(()),
+        Some(ScanPublication { sender, cancel }),
+    )
+    .await
+}
+
+async fn sync_with_retry_progress<F, Fut>(
+    instance: &Instance,
+    state: &State,
+    verify_all: bool,
     mut before_commit: F,
+    publication: Option<ScanPublication<'_>>,
 ) -> crate::Result<Vec<InstanceFile>>
 where
     F: FnMut() -> Fut,
@@ -137,6 +185,7 @@ where
             verify_all,
             &changed,
             &mut before_commit,
+            publication.as_ref(),
         )
         .await?
         {
@@ -155,12 +204,13 @@ async fn scan_and_commit<F, Fut>(
     verify_all: bool,
     _changed: &HashSet<String>,
     before_commit: &mut F,
+    publication: Option<&ScanPublication<'_>>,
 ) -> crate::Result<ScanAttempt>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    let content_set =
+    let mut content_set =
         instance_content_files::get_content_set(&state.data, &instance.id)
             .await?;
     let watch_snapshot = state
@@ -216,11 +266,35 @@ where
     let mut claimed_reclaim_ids = HashSet::new();
     let mut externally_changed_file_ids = HashSet::new();
     let mut refreshed_metadata_file_ids = HashSet::new();
+    let mut published_count = 0;
+    let mut failed_files = Vec::new();
+    let mut last_publish = std::time::Instant::now();
+    let no_cancel = tokio_util::sync::CancellationToken::new();
+    let cancel = publication
+        .map(|publication| publication.cancel)
+        .unwrap_or(&no_cancel);
 
-    for file in scanned {
+    let mut scanned = scanned;
+    scanned.sort_by_key(|file| {
+        let known = existing_files_by_path.get(&file.relative_path)
+            .and_then(|file| saved_fingerprints.get(&file.id))
+            .is_some_and(|record| record.matches(&instance_files_root.to_string_lossy(), &file.relative_path, file.size,
+                file.modified.and_then(crate::state::store::content_file_fingerprints::FileModifiedTime::from_system_time).as_ref()));
+        !known
+    });
+    let mut scanned = scanned.into_iter().peekable();
+    while let Some(file) = scanned.next() {
+        if cancel.is_cancelled() {
+            return Err(crate::ErrorKind::ResourceError(
+                crate::resources::ResourceError::Canceled,
+            )
+            .into());
+        }
         let existing_file = existing_files_by_path.get(&file.relative_path);
         let previous =
             existing_file.and_then(|file| saved_fingerprints.get(&file.id));
+        let attributes_known = previous.is_some_and(|record| record.matches(&instance_files_root.to_string_lossy(), &file.relative_path, file.size,
+            file.modified.and_then(crate::state::store::content_file_fingerprints::FileModifiedTime::from_system_time).as_ref()));
         let resolved = state
             .file_fingerprints
             .resolve_scan(
@@ -228,10 +302,32 @@ where
                 &file.relative_path,
                 previous,
                 verify_all,
-                &tokio_util::sync::CancellationToken::new(),
+                cancel,
             )
-            .await
-            .map_err(crate::ErrorKind::ResourceError)?;
+            .await;
+        let resolved = match resolved {
+            Ok(resolved) => resolved,
+            Err(error)
+                if publication.is_some()
+                    && error != crate::resources::ResourceError::Canceled =>
+            {
+                let _ = publication
+                    .unwrap()
+                    .sender
+                    .send(ScanProgress::Failed {
+                        path: file.relative_path.clone(),
+                        error: error.to_string(),
+                    })
+                    .await;
+                if let Some(existing) = existing_file {
+                    failed_files.push(existing.clone());
+                }
+                continue;
+            }
+            Err(error) => {
+                return Err(crate::ErrorKind::ResourceError(error).into());
+            }
+        };
         let scanned_size =
             resolved.identity.integrity.size.unwrap_or(file.size);
         let scanned_sha1 = resolved
@@ -314,93 +410,115 @@ where
                 .and_then(|file| file.local_mod_data.clone()),
             icon_path: metadata_source.and_then(|file| file.icon_path.clone()),
         });
-    }
-
-    // Extract local mod metadata (Mod JARs) and cached icons (Mod JARs and
-    // resource packs) for files that don't have them yet. This also backfills
-    // rows created before these features existed; `icon_path` distinguishes
-    // not-attempted (NULL), no-icon (empty string), and cached (path).
-    // `content_root` already resolves the override / linked root consistently
-    // for both managed and directly associated instances.
-    let instance_dir = content_root;
-    let icon_cache_dir = state.directories.caches_dir().join("icons");
-    for file in &mut files {
-        let Some(project_type) = project_type_for_file(file) else {
-            continue;
-        };
-        let extract_metadata = project_type == ProjectType::Mod
-            && file
-                .local_mod_data
-                .as_ref()
-                .and_then(|json| {
-                    serde_json::from_str::<
-                        crate::mod_metadata::LocalModMetadata,
-                    >(json)
-                    .ok()
-                })
-                .is_none_or(|metadata| metadata.needs_refresh());
-        let extract_icon = file.icon_path.is_none()
-            && matches!(
-                project_type,
-                ProjectType::Mod | ProjectType::ResourcePack
-            );
-        if !extract_metadata && !extract_icon {
-            continue;
-        }
-
-        let path = join_content_path(&instance_dir, &file.relative_path);
-
-        // Resource packs are read entry-wise so large archives are not
-        // materialized in memory just to fetch `pack.png`.
-        if extract_icon && project_type == ProjectType::ResourcePack {
-            let icon =
-                crate::mod_metadata::icon::extract_resource_pack_icon(&path);
-            file.icon_path = Some(
-                cache_extracted_icon(icon, &file.sha1, &icon_cache_dir, state)
-                    .await,
-            );
-            continue;
-        }
-
-        // Mods: one in-memory read serves both metadata and icon extraction.
-        let bytes = match tokio::fs::read(&path).await {
-            Ok(data) => bytes::Bytes::from(data),
-            Err(_) => {
-                // File temporarily inaccessible; skip silently.
-                continue;
+        if publication.is_some() {
+            let current = files.last_mut().unwrap();
+            let previous = current.local_mod_data.clone();
+            enrich_local_file(current, &instance_files_root, state).await;
+            if previous != current.local_mod_data {
+                refreshed_metadata_file_ids.insert(current.id.clone());
             }
-        };
-
-        if extract_metadata
-            && let Some(meta) =
-                crate::mod_metadata::extract_mod_metadata(&bytes)
-            && let Ok(json) = serde_json::to_string(&meta)
-        {
-            file.local_mod_data = Some(json);
-            refreshed_metadata_file_ids.insert(file.id.clone());
-        }
-
-        if extract_icon {
-            let meta = file.local_mod_data.as_ref().and_then(|json| {
-                serde_json::from_str::<crate::mod_metadata::LocalModMetadata>(
-                    json,
-                )
-                .ok()
+            let next_needs_hash = scanned.peek().is_some_and(|next| {
+                existing_files_by_path.get(&next.relative_path).and_then(|file| saved_fingerprints.get(&file.id)).is_none_or(|record| {
+                    !record.matches(&instance_files_root.to_string_lossy(), &next.relative_path, next.size,
+                        next.modified.and_then(crate::state::store::content_file_fingerprints::FileModifiedTime::from_system_time).as_ref())
+                })
             });
-            let icon = crate::mod_metadata::icon::extract_mod_icon(
-                &bytes,
-                meta.as_ref(),
-            );
-            file.icon_path = Some(
-                cache_extracted_icon(icon, &file.sha1, &icon_cache_dir, state)
-                    .await,
-            );
+            if published_count == 0
+                || (attributes_known && next_needs_hash)
+                || files.len() - published_count >= 32
+                || last_publish.elapsed()
+                    >= std::time::Duration::from_millis(50)
+            {
+                let batch = &files[published_count..];
+                let _lock =
+                    state.lock_instance_content_exclusive(&instance.id).await;
+                ensure_scan_location(instance, state).await?;
+                let latest = instance_content_files::get_content_set(
+                    &state.data,
+                    &instance.id,
+                )
+                .await?;
+                if latest.as_ref().map(|set| (&set.id, set.revision))
+                    != content_set.as_ref().map(|set| (&set.id, set.revision))
+                {
+                    return Ok(ScanAttempt::Retry(HashSet::new()));
+                }
+                let valid = batch.iter().all(|file| {
+                    let path = join_content_path(
+                        &instance_files_root,
+                        &file.relative_path,
+                    );
+                    std::fs::metadata(path).ok().is_some_and(|metadata| {
+                        metadata.len() == file.size
+                            && metadata.modified().ok()
+                                == scanned_state
+                                    .get(&file.relative_path)
+                                    .and_then(|state| state.1)
+                    })
+                });
+                if !valid {
+                    return Ok(ScanAttempt::Retry(HashSet::new()));
+                }
+                if let Some(committed) = instance_content_files::set_scanned(
+                    &state.data,
+                    instance_content_files::ScannedFiles {
+                        instance_id: &instance.id,
+                        content_set: &content_set,
+                        files: batch,
+                        reclaims: &reclaims,
+                        merges: &merges,
+                        externally_changed_file_ids:
+                            &externally_changed_file_ids,
+                        refreshed_metadata_file_ids:
+                            &refreshed_metadata_file_ids,
+                        fingerprints: &fingerprint_records,
+                        complete: false,
+                        create_entries: true,
+                    },
+                    || std::future::ready(!cancel.is_cancelled()),
+                )
+                .await?
+                {
+                    content_set = instance_content_files::get_content_set(
+                        &state.data,
+                        &instance.id,
+                    )
+                    .await?;
+                    published_count = files.len();
+                    last_publish = std::time::Instant::now();
+                    externally_changed_file_ids.clear();
+                    refreshed_metadata_file_ids.clear();
+                    drop(_lock);
+                    let _ = publication
+                        .unwrap()
+                        .sender
+                        .send(ScanProgress::Files(committed))
+                        .await;
+                }
+            }
         }
     }
+
+    if publication.is_none() {
+        for file in &mut files {
+            let old = file.local_mod_data.clone();
+            enrich_local_file(file, &content_root, state).await;
+            if old != file.local_mod_data {
+                refreshed_metadata_file_ids.insert(file.id.clone());
+            }
+        }
+    }
+    files.extend(failed_files);
 
     // Hashing is deliberately outside the instance lock. The lock only
     // protects the short database reconciliation transaction, so a large
     // modpack cannot block disable/delete operations for its entire scan.
+    if cancel.is_cancelled() {
+        return Err(crate::ErrorKind::ResourceError(
+            crate::resources::ResourceError::Canceled,
+        )
+        .into());
+    }
     before_commit().await;
     let _instance_lock = state
         .lock_instance_content_with_timeout(
@@ -414,6 +532,7 @@ where
         &instance_files_root,
     )
     .await?;
+    ensure_scan_location(instance, state).await?;
     let latest_set =
         instance_content_files::get_content_set(&state.data, &instance.id)
             .await?;
@@ -449,6 +568,8 @@ where
                 externally_changed_file_ids: &externally_changed_file_ids,
                 refreshed_metadata_file_ids: &refreshed_metadata_file_ids,
                 fingerprints: &fingerprint_records,
+                complete: true,
+                create_entries: publication.is_some(),
             },
             || async {
                 state
@@ -473,10 +594,37 @@ where
             .await;
     }
 
+    if let Some(publication) = publication {
+        drop(_instance_lock);
+        let _ = publication
+            .sender
+            .send(ScanProgress::Files(synced_files.clone()))
+            .await;
+    }
     Ok(ScanAttempt::Committed(synced_files))
 }
 
 type ScanState = HashMap<String, (u64, Option<std::time::SystemTime>)>;
+
+async fn ensure_scan_location(
+    instance: &Instance,
+    state: &State,
+) -> crate::Result<()> {
+    let current =
+        instance_content_files::get_instance(&state.data, &instance.id).await?;
+    if current.as_ref().is_none_or(|current| {
+        crate::state::store::content_refresh_checks::location_key(current)
+            != crate::state::store::content_refresh_checks::location_key(
+                instance,
+            )
+    }) {
+        return Err(crate::ErrorKind::ResourceError(
+            crate::resources::ResourceError::Canceled,
+        )
+        .into());
+    }
+    Ok(())
+}
 
 fn scan_state(files: &[filesystem::ScannedContentFile]) -> ScanState {
     files
@@ -495,6 +643,75 @@ fn changed_scan_paths(
         .filter(|path| before.get(*path) != after.get(*path))
         .cloned()
         .collect()
+}
+
+pub(crate) async fn enrich_local_file(
+    file: &mut InstanceFile,
+    instance_dir: &Path,
+    state: &State,
+) {
+    let icon_cache_dir = state.directories.caches_dir().join("icons");
+    let Some(project_type) = project_type_for_file(file) else {
+        return;
+    };
+    let extract_metadata = project_type == ProjectType::Mod
+        && file
+            .local_mod_data
+            .as_ref()
+            .and_then(|json| {
+                serde_json::from_str::<crate::mod_metadata::LocalModMetadata>(
+                    json,
+                )
+                .ok()
+            })
+            .is_none_or(|metadata| metadata.needs_refresh());
+    let extract_icon = file.icon_path.is_none()
+        && matches!(project_type, ProjectType::Mod | ProjectType::ResourcePack);
+    if !extract_metadata && !extract_icon {
+        return;
+    }
+
+    let path = join_content_path(&instance_dir, &file.relative_path);
+
+    // Resource packs are read entry-wise so large archives are not
+    // materialized in memory just to fetch `pack.png`.
+    if extract_icon && project_type == ProjectType::ResourcePack {
+        let icon = crate::mod_metadata::icon::extract_resource_pack_icon(&path);
+        file.icon_path = Some(
+            cache_extracted_icon(icon, &file.sha1, &icon_cache_dir, state)
+                .await,
+        );
+        return;
+    }
+
+    // Mods: one in-memory read serves both metadata and icon extraction.
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(data) => bytes::Bytes::from(data),
+        Err(_) => {
+            // File temporarily inaccessible; skip silently.
+            return;
+        }
+    };
+
+    if extract_metadata
+        && let Some(meta) = crate::mod_metadata::extract_mod_metadata(&bytes)
+        && let Ok(json) = serde_json::to_string(&meta)
+    {
+        file.local_mod_data = Some(json);
+    }
+
+    if extract_icon {
+        let meta = file.local_mod_data.as_ref().and_then(|json| {
+            serde_json::from_str::<crate::mod_metadata::LocalModMetadata>(json)
+                .ok()
+        });
+        let icon =
+            crate::mod_metadata::icon::extract_mod_icon(&bytes, meta.as_ref());
+        file.icon_path = Some(
+            cache_extracted_icon(icon, &file.sha1, &icon_cache_dir, state)
+                .await,
+        );
+    }
 }
 
 async fn cache_extracted_icon(

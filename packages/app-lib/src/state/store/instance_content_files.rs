@@ -45,6 +45,8 @@ pub(crate) async fn get_entry_file_ids(
 }
 
 pub(crate) struct ScannedFiles<'a> {
+    pub complete: bool,
+    pub create_entries: bool,
     pub instance_id: &'a str,
     pub content_set: &'a Option<ContentSet>,
     pub files: &'a [InstanceFile],
@@ -65,6 +67,8 @@ where
     Fut: std::future::Future<Output = bool>,
 {
     let ScannedFiles {
+        complete,
+        create_entries,
         instance_id,
         content_set,
         files,
@@ -76,8 +80,10 @@ where
     } = scan;
     let mut tx = handle.pool().begin_with("BEGIN IMMEDIATE").await?;
     sqlite::content_rows::ensure_instance_exists(instance_id, &mut tx).await?;
-    sqlite::content_rows::mark_instance_files_missing(instance_id, &mut tx)
-        .await?;
+    if complete {
+        sqlite::content_rows::mark_instance_files_missing(instance_id, &mut tx)
+            .await?;
+    }
     let mut invalidated_provider_identity =
         !externally_changed_file_ids.is_empty();
     for file_id in externally_changed_file_ids {
@@ -157,6 +163,26 @@ where
         synced_files.push(synced);
     }
 
+    if create_entries && let Some(content_set) = content_set {
+        for file in &synced_files {
+            let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM instance_content_entries WHERE content_set_id = ? AND file_id = ?)")
+                .bind(&content_set.id).bind(&file.id).fetch_one(&mut *tx).await?;
+            if exists {
+                continue;
+            }
+            let Some(kind) = crate::state::instances::adapters::filesystem::project_type_from_relative_path(&file.relative_path) else { continue; };
+            sqlite::content_rows::upsert_content_entry_from_parts_in_transaction(
+                sqlite::content_rows::UpsertContentEntry {
+                    instance_id, content_set_id: &content_set.id, file_id: Some(&file.id), project_type: kind,
+                    source_kind: crate::state::ContentSourceKind::Local,
+                    ownership_kind: crate::state::ContentOwnershipKind::UserAdded, auto_dependency: false,
+                    server_requirement: crate::state::ContentRequirement::Unknown,
+                    client_requirement: crate::state::ContentRequirement::Unknown, enabled: file.enabled,
+                }, &mut tx,
+            ).await?;
+            invalidated_provider_identity = true;
+        }
+    }
     if invalidated_provider_identity
         && let Some(content_set) = content_set.as_ref()
     {
@@ -184,6 +210,22 @@ where
             }
         }
     }
+    if complete {
+        for table in [
+            "content_file_fingerprints",
+            "content_refresh_checks",
+            "content_refresh_presentations",
+        ] {
+            let query = format!(
+                "DELETE FROM {table} WHERE instance_id = ? AND file_id IN (SELECT id FROM instance_files WHERE instance_id = ? AND missing = 1)"
+            );
+            sqlx::query(&query)
+                .bind(instance_id)
+                .bind(instance_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
     tx.commit().await?;
     Ok(Some(synced_files))
 }
@@ -208,4 +250,69 @@ async fn upsert_scanned_file(
         tx,
     )
     .await
+}
+
+pub(crate) async fn set_discovered_entries(
+    handle: &Handle,
+    instance_id: &str,
+) -> crate::Result<()> {
+    use crate::state::{
+        ContentOwnershipKind, ContentRequirement, ContentSourceKind,
+    };
+    let mut tx = handle.pool().begin_with("BEGIN IMMEDIATE").await?;
+    let content_set =
+        sqlite::content_rows::get_applied_content_set(instance_id, &mut *tx)
+            .await?
+            .ok_or_else(|| {
+                crate::ErrorKind::InputError(
+                    "Instance has no applied content set".into(),
+                )
+            })?;
+    let rows: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT file.id, file.relative_path, file.enabled FROM instance_files file WHERE file.instance_id = ? AND file.missing = 0 AND NOT EXISTS (SELECT 1 FROM instance_content_entries entry WHERE entry.content_set_id = ? AND entry.file_id = file.id)"
+    ).bind(instance_id).bind(&content_set.id).fetch_all(&mut *tx).await?;
+    let mut changed = false;
+    for (id, path, enabled) in rows {
+        let Some(kind) = crate::state::instances::adapters::filesystem::project_type_from_relative_path(&path) else { continue };
+        if !matches!(
+            kind,
+            crate::state::ProjectType::Mod
+                | crate::state::ProjectType::ResourcePack
+                | crate::state::ProjectType::ShaderPack
+                | crate::state::ProjectType::DataPack
+        ) {
+            continue;
+        }
+        sqlite::content_rows::upsert_content_entry_from_parts_in_transaction(
+            sqlite::content_rows::UpsertContentEntry {
+                instance_id,
+                content_set_id: &content_set.id,
+                file_id: Some(&id),
+                project_type: kind,
+                source_kind: ContentSourceKind::Local,
+                ownership_kind: ContentOwnershipKind::UserAdded,
+                auto_dependency: false,
+                server_requirement: ContentRequirement::Unknown,
+                client_requirement: ContentRequirement::Unknown,
+                enabled: enabled != 0,
+            },
+            &mut tx,
+        )
+        .await?;
+        changed = true;
+    }
+    changed |= sqlite::content_rows::repair_pack_members_in_transaction(
+        &content_set.id,
+        &mut tx,
+    )
+    .await?;
+    if changed {
+        sqlite::content_rows::bump_content_set_revision_in_transaction(
+            &content_set.id,
+            &mut tx,
+        )
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }

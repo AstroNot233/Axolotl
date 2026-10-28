@@ -1,7 +1,7 @@
 use super::{identity::LocalArtifactIdentity, *};
 use tokio_util::sync::CancellationToken;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InstalledArtifactRecord {
     #[serde(flatten)]
@@ -371,10 +371,6 @@ async fn refresh_snapshot_with_verification(
     cancel: &CancellationToken,
     verify_all: bool,
 ) -> ResourceResult<()> {
-    use crate::state::instances::adapters::sqlite::content_rows;
-    use crate::state::{
-        ContentOwnershipKind, ContentRequirement, ContentSourceKind,
-    };
     if cancel.is_cancelled() {
         return Err(ResourceError::Canceled);
     }
@@ -393,59 +389,11 @@ async fn refresh_snapshot_with_verification(
     }
     let _writer = state.acquire_install_db_permit().await?;
     let _lock = state.lock_instance_content_exclusive(instance_id).await;
-    let scope = crate::state::instances::commands::resolve_content_scope(
+    crate::state::store::instance_content_files::set_discovered_entries(
+        &state.data,
         instance_id,
-        None,
-        state,
     )
     .await?;
-    let mut tx = state.pool.begin().await.map_err(plans::db)?;
-    let rows: Vec<(String, String, i64)> = sqlx::query_as(
-        "SELECT file.id, file.relative_path, file.enabled FROM instance_files file WHERE file.instance_id = ? AND file.missing = 0 AND NOT EXISTS (SELECT 1 FROM instance_content_entries entry WHERE entry.content_set_id = ? AND entry.file_id = file.id)"
-    ).bind(instance_id).bind(&scope.content_set_id).fetch_all(&mut *tx).await.map_err(plans::db)?;
-    let mut changed = false;
-    for (id, path, enabled) in rows {
-        let Some(kind) = crate::state::instances::adapters::filesystem::project_type_from_relative_path(&path) else { continue };
-        if !matches!(
-            kind,
-            crate::state::ProjectType::Mod
-                | crate::state::ProjectType::ResourcePack
-                | crate::state::ProjectType::ShaderPack
-                | crate::state::ProjectType::DataPack
-        ) {
-            continue;
-        }
-        content_rows::upsert_content_entry_from_parts_in_transaction(
-            content_rows::UpsertContentEntry {
-                instance_id,
-                content_set_id: &scope.content_set_id,
-                file_id: Some(&id),
-                project_type: kind,
-                source_kind: ContentSourceKind::Local,
-                ownership_kind: ContentOwnershipKind::UserAdded,
-                auto_dependency: false,
-                server_requirement: ContentRequirement::Unknown,
-                client_requirement: ContentRequirement::Unknown,
-                enabled: enabled != 0,
-            },
-            &mut tx,
-        )
-        .await?;
-        changed = true;
-    }
-    changed |= content_rows::repair_pack_members_in_transaction(
-        &scope.content_set_id,
-        &mut tx,
-    )
-    .await?;
-    if changed {
-        content_rows::bump_content_set_revision_in_transaction(
-            &scope.content_set_id,
-            &mut tx,
-        )
-        .await?;
-    }
-    tx.commit().await.map_err(plans::db)?;
     Ok(())
 }
 

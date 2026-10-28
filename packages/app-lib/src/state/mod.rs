@@ -221,6 +221,7 @@ pub struct State {
 
     resource_service: OnceCell<Arc<crate::resources::ResourceService>>,
     pub(crate) file_fingerprints: crate::resources::fingerprints::FileFingerprints,
+    pub(crate) content_refresh: crate::resources::refresh::RefreshCoordinator,
 
     /// CurseForge API key set in the launcher. Takes precedence over the key
     /// from the environment or the build, which stays the fallback until the
@@ -239,6 +240,15 @@ pub struct State {
 }
 
 impl State {
+    #[cfg(test)]
+    pub(crate) fn set_resource_service_for_test(
+        &self,
+        service: Arc<crate::resources::ResourceService>,
+    ) {
+        self.resource_service
+            .set(service)
+            .unwrap_or_else(|_| panic!("resource service already initialized"));
+    }
     pub async fn maintain_database_backups(&self) -> crate::Result<()> {
         db_backup::maintain_app_db_backups(
             self.pool.connect_options().get_filename(),
@@ -1198,6 +1208,7 @@ impl State {
     /// Aborts the maintenance loops and closes the Discord IPC connection;
     /// intended for the app-exit path.
     pub async fn shutdown(&self) {
+        self.content_refresh.shutdown().await;
         for task in self.background_tasks.lock().drain(..) {
             task.abort();
         }
@@ -1338,6 +1349,7 @@ impl State {
             pool,
             resource_service: OnceCell::new(),
             file_fingerprints: Default::default(),
+            content_refresh: Default::default(),
             curseforge_api_key: RwLock::new(curseforge_api_key),
             curseforge_api_key_update: AsyncMutex::new(()),
             configured_http_client: RwLock::new(configured_http_client),
@@ -1463,6 +1475,7 @@ pub(crate) async fn test_state(
         pool,
         resource_service: OnceCell::new(),
         file_fingerprints: Default::default(),
+        content_refresh: Default::default(),
         curseforge_api_key: RwLock::new(curseforge_api_key),
         curseforge_api_key_update: AsyncMutex::new(()),
         configured_http_client: RwLock::new(configured_http_client),

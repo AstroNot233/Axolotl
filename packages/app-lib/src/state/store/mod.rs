@@ -17,6 +17,7 @@ pub(crate) mod cache;
 pub(crate) mod content_favorites;
 pub(crate) mod content_file_fingerprints;
 pub(crate) mod content_file_operations;
+pub(crate) mod content_refresh;
 pub(crate) mod content_refresh_checks;
 pub(crate) mod content_refresh_presentations;
 pub(crate) mod content_snapshot;

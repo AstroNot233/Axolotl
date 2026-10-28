@@ -49,6 +49,9 @@ mod sync_content_files;
 pub(crate) use self::sync_content_files::{
     instance_content_root, sync_content_files, sync_content_files_for_operation,
 };
+pub(crate) use sync_content_files::{
+    ScanProgress, sync_content_files_progressively,
+};
 
 mod launch_context;
 pub(crate) use self::launch_context::*;

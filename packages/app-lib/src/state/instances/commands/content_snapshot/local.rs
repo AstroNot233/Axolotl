@@ -23,6 +23,7 @@ pub(crate) async fn get(
 
 pub(crate) fn project(records: SnapshotRecords) -> InstanceContentSnapshot {
     let SnapshotRecords {
+        fingerprints,
         presentations,
         instance,
         content_set,
@@ -297,6 +298,9 @@ pub(crate) fn project(records: SnapshotRecords) -> InstanceContentSnapshot {
             continue;
         };
         if check.file_id != item.file_id.as_deref().unwrap_or_default()
+            || fingerprints.get(&check.file_id).is_some_and(|fingerprint| {
+                fingerprint.content_root != check.context.content_root
+            })
             || check.context.location_key != location_key
             || check.context.sha1 != sha1
             || check.context.size != size

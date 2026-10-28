@@ -18,6 +18,7 @@ pub(crate) mod packs;
 pub mod plans;
 pub(crate) mod protocol;
 pub mod providers;
+pub mod refresh;
 pub mod search;
 mod service;
 pub mod updates;

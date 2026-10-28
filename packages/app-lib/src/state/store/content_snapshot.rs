@@ -12,6 +12,10 @@ use sqlx::Row;
 use std::collections::HashMap;
 
 pub(crate) struct SnapshotRecords {
+    pub fingerprints: HashMap<
+        String,
+        super::content_file_fingerprints::FileFingerprintRecord,
+    >,
     pub presentations: HashMap<
         String,
         super::content_refresh_presentations::PresentationRecord,
@@ -57,23 +61,7 @@ where
 {
     use super::Collection as _;
     let mut tx = handle.pool().begin().await?;
-    let row: instance_rows::InstanceRow =
-        sqlx::query_as("SELECT * FROM instances WHERE id = ?")
-            .bind(instance_id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| {
-                crate::ErrorKind::InputError("Unknown instance".into())
-            })?;
-    let mut instance: Instance = row.try_into()?;
-    let direct =
-        instance_rows::get_direct_link_fields(instance_id, &mut *tx).await?;
-    instance.linked_launcher = direct.launcher;
-    instance.linked_launcher_root = direct.launcher_root;
-    instance.linked_dot_minecraft = direct.dot_minecraft;
-    instance.linked_version_id = direct.version_id;
-    instance.linked_version_json_path = direct.version_json_path;
-    instance.linked_game_dir_mode = direct.game_dir_mode;
+    let instance = get_instance(&mut tx, instance_id).await?;
     let content_set =
         content_rows::get_applied_content_set(instance_id, &mut *tx)
             .await?
@@ -177,7 +165,7 @@ where
     }
     let rows: Vec<(String, String)> = sqlx::query_as("SELECT exact.entry_id, exact.artifact FROM resource_installed_artifacts exact JOIN instance_content_entries entry ON entry.id = exact.entry_id WHERE entry.content_set_id = ?")
         .bind(&content_set.id).fetch_all(&mut *tx).await?;
-    let artifacts = rows.into_iter().filter_map(|(entry, payload)| {
+    let artifacts: HashMap<String, crate::resources::installed::InstalledArtifactRecord> = rows.into_iter().filter_map(|(entry, payload)| {
         match serde_json::from_str(&payload) {
             Ok(record) => Some((entry, record)),
             Err(error) => { tracing::warn!(%entry, %error, "Skipping invalid installed artifact"); None }
@@ -185,7 +173,31 @@ where
     }).collect();
     let rows: Vec<(String, String)> = sqlx::query_as("SELECT entry.id, COALESCE(MAX(CASE WHEN ref.is_origin = 1 THEN link.resource_id END), MIN(link.resource_id)) FROM instance_content_entries entry JOIN instance_content_provider_refs ref ON ref.content_entry_id = entry.id LEFT JOIN resource_entry_links link ON link.reference_id = ref.id WHERE entry.content_set_id = ? GROUP BY entry.id HAVING (MAX(ref.is_origin) = 0 AND COUNT(link.resource_id) = COUNT(*) AND COUNT(DISTINCT link.resource_id) = 1) OR (MAX(ref.is_origin) = 1 AND SUM(CASE WHEN ref.is_origin = 1 AND link.resource_id IS NOT NULL THEN 1 ELSE 0 END) = 1)")
         .bind(&content_set.id).fetch_all(&mut *tx).await?;
-    let entry_resources = resource_ids(rows);
+    let mut entry_resources = resource_ids(rows);
+    let mut projects = HashMap::new();
+    for (entry, record) in &artifacts {
+        if entry_resources.contains_key(entry) {
+            continue;
+        }
+        let project = &record.artifact.reference.release.project;
+        if !projects.contains_key(project) {
+            let key =
+                super::resource_source_projects::ResourceSourceProjectKey {
+                    source: project.source.as_str().into(),
+                    project_id: project.project_id.as_str().into(),
+                };
+            let resource =
+                super::resource_source_projects::ResourceSourceProjects::read(
+                    &mut tx, &key,
+                )
+                .await?
+                .and_then(|record| ResourceId::new(record.resource_id).ok());
+            projects.insert(project.clone(), resource);
+        }
+        if let Some(Some(resource)) = projects.get(project) {
+            entry_resources.insert(entry.clone(), resource.clone());
+        }
+    }
     let rows: Vec<(String, String)> = sqlx::query_as("SELECT link.member_id, link.resource_id FROM resource_pack_links link JOIN instance_pack_members member ON member.id = link.member_id WHERE member.content_set_id = ?")
         .bind(&content_set.id).fetch_all(&mut *tx).await?;
     let pack_resources = resource_ids(rows);
@@ -205,10 +217,20 @@ where
             &instance_id.to_owned(),
         )
         .await?;
+    let fingerprints =
+        super::content_file_fingerprints::ContentFileFingerprints::read_scoped(
+            &mut tx,
+            &instance_id.to_owned(),
+        )
+        .await?
+        .into_iter()
+        .map(|(key, record)| (key.file_id, record))
+        .collect();
     let presentations = super::content_refresh_presentations::ContentRefreshPresentations::read_scoped(&mut tx, &instance_id.to_owned()).await?
         .into_iter().map(|(key, record)| (key.file_id, record)).collect();
     tx.commit().await?;
     Ok(SnapshotRecords {
+        fingerprints,
         presentations,
         instance,
         content_set,
@@ -239,3 +261,27 @@ fn resource_ids(rows: Vec<(String, String)>) -> HashMap<String, ResourceId> {
 #[cfg(test)]
 #[path = "tests/content_snapshot.rs"]
 mod tests;
+
+pub(crate) async fn get_instance(
+    conn: &mut sqlx::SqliteConnection,
+    instance_id: &str,
+) -> crate::Result<Instance> {
+    let row: instance_rows::InstanceRow =
+        sqlx::query_as("SELECT * FROM instances WHERE id = ?")
+            .bind(instance_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .ok_or_else(|| {
+                crate::ErrorKind::InputError("Unknown instance".into())
+            })?;
+    let mut instance: Instance = row.try_into()?;
+    let direct =
+        instance_rows::get_direct_link_fields(instance_id, &mut *conn).await?;
+    instance.linked_launcher = direct.launcher;
+    instance.linked_launcher_root = direct.launcher_root;
+    instance.linked_dot_minecraft = direct.dot_minecraft;
+    instance.linked_version_id = direct.version_id;
+    instance.linked_version_json_path = direct.version_json_path;
+    instance.linked_game_dir_mode = direct.game_dir_mode;
+    Ok(instance)
+}
