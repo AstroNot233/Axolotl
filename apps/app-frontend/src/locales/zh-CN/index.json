@@ -19707,7 +19707,7 @@
     "message": "颜色或样式"
   },
   "app.instance.content.checking": {
-    "message": "正在检查更新… 已检查 {count} 项"
+    "message": "刷新…… {current}/{total}"
   },
   "app.instance.content.check-failures": {
     "message": "{count} 项检查失败"

@@ -359,7 +359,8 @@ const bulkItemCount = ref(0)
 // 整合包分组展开状态（导航切换保留，关软件丢弃）
 const expandedGroupsMemory = getContentTabMap<string, Set<string>>('expandedGroups')
 
-const refreshing = ref(false)
+const refreshSubmitting = ref(false)
+const refreshing = computed(() => refreshSubmitting.value || !!ctx.refreshStatus?.value)
 
 const expandedGroups = ref<Set<string>>(
     ctx.instanceId
@@ -524,11 +525,11 @@ onBeforeUnmount(() => {
 
 async function handleRefresh() {
     if (refreshing.value) return
-    refreshing.value = true
+    refreshSubmitting.value = true
     try {
         await ctx.refresh()
     } finally {
-        refreshing.value = false
+        refreshSubmitting.value = false
     }
 }
 
@@ -1138,6 +1139,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
                     :disable-add-content="ctx.disableAddContent?.value"
                     :disable-add-content-tooltip="ctx.disableAddContentTooltip"
                     :refreshing="refreshing"
+                    :refresh-status="ctx.refreshStatus?.value"
                     :view-dependencies="!!ctx.viewDependencies"
                     @browse="ctx.browse"
                     @refresh="handleRefresh"
@@ -1260,6 +1262,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
                 :busy="ctx.isBusy.value"
                 :busy-tooltip="ctx.busyMessage?.value"
                 :refreshing="refreshing"
+                :refresh-status="ctx.refreshStatus?.value"
                 :disable-add-content="ctx.disableAddContent?.value"
                 :disable-add-content-tooltip="ctx.disableAddContentTooltip"
                 @browse="ctx.browse"

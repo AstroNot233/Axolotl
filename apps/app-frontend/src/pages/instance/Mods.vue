@@ -194,16 +194,12 @@
         </CollapsibleAdmonition>
         <div
             v-if="
-                contentRefreshTask?.running ||
                 contentRefreshTask?.failed ||
-                contentRefreshTask?.unresolved
+                (!contentRefreshTask?.running && contentRefreshTask?.unresolved)
             "
             class="mb-3 flex flex-wrap items-center gap-3 text-sm text-[var(--color-text-tertiary)]"
             role="status"
         >
-            <span v-if="contentRefreshTask.running">{{
-                formatMessage(messages.checkingContent, { count: contentRefreshTask.checked })
-            }}</span>
             <span v-if="contentRefreshTask.failed">{{
                 formatMessage(messages.contentCheckFailures, { count: contentRefreshTask.failed })
             }}</span>
@@ -448,7 +444,7 @@ import { useTheming } from '@/store/state'
 const messages = defineMessages({
     checkingContent: {
         id: 'app.instance.content.checking',
-        defaultMessage: 'Checking updates… {count} checked',
+        defaultMessage: 'Refreshing… {current}/{total}',
     },
     contentCheckFailures: {
         id: 'app.instance.content.check-failures',
@@ -2840,6 +2836,14 @@ provideContentManager({
     },
     getDeleteDependencyWarning,
     refresh: () => refreshContentState('bypass'),
+    refreshStatus: computed(() =>
+        contentRefreshTask.value?.running
+            ? formatMessage(messages.checkingContent, {
+                  current: contentRefreshTask.value.checked,
+                  total: contentRefreshTask.value.scanned,
+              })
+            : null,
+    ),
     browse: handleBrowseContent,
     uploadFiles: handleUploadFiles,
     hasUpdateSupport: true,

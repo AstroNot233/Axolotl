@@ -16488,7 +16488,7 @@
     "message": "Unknown file warning"
   },
   "app.instance.content.checking": {
-    "message": "Checking updates… {count} checked"
+    "message": "Refreshing… {current}/{total}"
   },
   "app.instance.content.check-failures": {
     "message": "{count, plural, one {# check failed} other {# checks failed}}"
