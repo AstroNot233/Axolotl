@@ -179,6 +179,14 @@ describe('banner import', () => {
         assert.equal(parsed.layers[0].color, 'red')
     })
 
+    it('takes the base color from the damage value of a plain banner', () => {
+        const parsed = parseBannerText(
+            '/give @p minecraft:banner 1 14 {BlockEntityTag:{Patterns:[{Pattern:"bs",Color:0}]}}',
+        )
+        assert.equal(parsed.baseColor, 'red')
+        assert.equal(parsed.layers[0].pattern, 'stripe_bottom')
+    })
+
     it('rejects give commands for items that are not banners', () => {
         assert.equal(
             codes(() => parseBannerText('/give @p minecraft:diamond')),
