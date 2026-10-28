@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { CheckIcon, ClipboardCopyIcon, SaveIcon, TriangleAlertIcon } from '@modrinth/assets'
-import { Button, Chips, defineMessages, NewModal, useVIntl } from '@modrinth/ui'
+import { Button, Chips, Combobox, defineMessages, NewModal, useVIntl } from '@modrinth/ui'
 import { isTauri } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeTextFile } from '@tauri-apps/plugin-fs'
@@ -40,7 +40,11 @@ const messages = defineMessages({
     },
     legacy: {
         id: 'app.lab.banner-designer.export.version.legacy',
-        defaultMessage: '1.20.4 and older',
+        defaultMessage: '1.13 – 1.20.4',
+    },
+    classic: {
+        id: 'app.lab.banner-designer.export.version.classic',
+        defaultMessage: '1.12.2 and older',
     },
     version: { id: 'app.lab.banner-designer.export.version', defaultMessage: 'Game version' },
     hintModern: {
@@ -50,6 +54,11 @@ const messages = defineMessages({
     hintLegacy: {
         id: 'app.lab.banner-designer.export.hint.legacy',
         defaultMessage: 'Short pattern codes. 1.20.5 and newer reject this item NBT.',
+    },
+    hintClassic: {
+        id: 'app.lab.banner-designer.export.hint.classic',
+        defaultMessage:
+            'The single banner item, with a damage value of 0. 1.13 and newer need one item per dye.',
     },
     dropped: {
         id: 'app.lab.banner-designer.export.dropped',
@@ -103,7 +112,7 @@ let copyTimer: ReturnType<typeof setTimeout> | undefined
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 
 const formats: BannerExportFormat[] = ['give', 'data', 'json']
-const versions: BannerGameVersion[] = ['modern', 'legacy']
+const versions: BannerGameVersion[] = ['modern', 'legacy', 'classic']
 
 const activeFormat = computed<BannerExportFormat>(() => format.value ?? 'give')
 const activeVersion = computed<BannerGameVersion>(() => version.value ?? 'modern')
@@ -133,9 +142,17 @@ const code = computed(() => {
 
 const showVersion = computed(() => activeFormat.value !== 'json')
 
-const versionHint = computed(() =>
-    activeVersion.value === 'legacy' ? messages.hintLegacy : messages.hintModern,
+const versionOptions = computed(() =>
+    versions.map((value) => ({ value, label: versionLabel(value) })),
 )
+
+const versionHints: Record<BannerGameVersion, (typeof messages)['hintModern']> = {
+    modern: messages.hintModern,
+    legacy: messages.hintLegacy,
+    classic: messages.hintClassic,
+}
+
+const versionHint = computed(() => versionHints[activeVersion.value])
 
 /**
  * Item data and design JSON are meant to be kept, so they can be written to a
@@ -226,14 +243,17 @@ defineExpose({ show })
                     :capitalize="false"
                     :aria-label="formatMessage(messages.title)"
                 />
-                <Chips
-                    v-if="showVersion"
-                    v-model="version"
-                    :items="versions"
-                    :format-label="versionLabel"
-                    :capitalize="false"
-                    :aria-label="formatMessage(messages.version)"
-                />
+                <div v-if="showVersion" class="flex items-center gap-2">
+                    <span class="text-xs font-medium text-[var(--color-text-tertiary)]">
+                        {{ formatMessage(messages.version) }}
+                    </span>
+                    <Combobox
+                        :model-value="activeVersion"
+                        :options="versionOptions"
+                        width="content"
+                        @update:model-value="version = $event"
+                    />
+                </div>
             </div>
 
             <div class="flex flex-col gap-2">
