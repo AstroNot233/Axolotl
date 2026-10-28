@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict'
-import test from 'node:test'
+import { expect, it } from 'vitest'
 
 import {
     clearRecentBanners,
@@ -40,19 +39,19 @@ function design(baseColor: BannerDesign['baseColor'], layers = 1): BannerDesign 
     }
 }
 
-test('recent banners deduplicate identical designs and keep the newest first', () => {
+it('recent banners deduplicate identical designs and keep the newest first', () => {
     useStorage()
     recordRecentBanner(design('white'))
     recordRecentBanner(design('red'))
     recordRecentBanner(design('white'))
 
     const records = loadRecentBanners()
-    assert.equal(records.length, 2)
-    assert.equal(records[0].design.baseColor, 'white')
-    assert.equal(records[1].design.baseColor, 'red')
+    expect(records.length).toBe(2)
+    expect(records[0].design.baseColor).toBe('white')
+    expect(records[1].design.baseColor).toBe('red')
 })
 
-test('recent banners retain at most six entries', () => {
+it('recent banners retain at most six entries', () => {
     useStorage()
     const colors: BannerDesign['baseColor'][] = [
         'white',
@@ -67,12 +66,12 @@ test('recent banners retain at most six entries', () => {
     for (const color of colors) recordRecentBanner(design(color))
 
     const records = loadRecentBanners()
-    assert.equal(records.length, 6)
-    assert.equal(records[0].design.baseColor, 'gray')
-    assert.equal(records[5].design.baseColor, 'magenta')
+    expect(records.length).toBe(6)
+    expect(records[0].design.baseColor).toBe('gray')
+    expect(records[5].design.baseColor).toBe('magenta')
 })
 
-test('recent banners drop records that no longer parse', () => {
+it('recent banners drop records that no longer parse', () => {
     useStorage()
     recordRecentBanner(design('blue'))
     const raw = JSON.parse(localStorage.getItem('axolotl:lab:banner-designer:recent:v1') ?? '[]')
@@ -81,48 +80,48 @@ test('recent banners drop records that no longer parse', () => {
     localStorage.setItem('axolotl:lab:banner-designer:recent:v1', JSON.stringify(raw))
 
     const records = loadRecentBanners()
-    assert.equal(records.length, 1)
-    assert.equal(records[0].design.baseColor, 'blue')
+    expect(records.length).toBe(1)
+    expect(records[0].design.baseColor).toBe('blue')
 })
 
-test('recent banners can be removed individually or cleared', () => {
+it('recent banners can be removed individually or cleared', () => {
     useStorage()
     recordRecentBanner(design('white'))
     const [record] = recordRecentBanner(design('black'))
 
-    assert.equal(removeRecentBanner(record.id).length, 1)
-    assert.equal(loadRecentBanners().length, 1)
-    assert.deepEqual(clearRecentBanners(), [])
-    assert.equal(loadRecentBanners().length, 0)
+    expect(removeRecentBanner(record.id).length).toBe(1)
+    expect(loadRecentBanners().length).toBe(1)
+    expect(clearRecentBanners()).toEqual([])
+    expect(loadRecentBanners().length).toBe(0)
 })
 
-test('a broken store degrades to an empty list', () => {
+it('a broken store degrades to an empty list', () => {
     useStorage()
     localStorage.setItem('axolotl:lab:banner-designer:recent:v1', 'not json')
-    assert.deepEqual(loadRecentBanners(), [])
+    expect(loadRecentBanners()).toEqual([])
 })
 
-test('the export preference survives a reload', () => {
+it('the export preference survives a reload', () => {
     useStorage()
-    assert.equal(loadExportPreference(), null)
+    expect(loadExportPreference()).toBe(null)
     saveExportPreference({ format: 'data', version: 'legacy' })
-    assert.deepEqual(loadExportPreference(), { format: 'data', version: 'legacy' })
+    expect(loadExportPreference()).toEqual({ format: 'data', version: 'legacy' })
 })
 
-test('an unknown export preference falls back to the defaults', () => {
+it('an unknown export preference falls back to the defaults', () => {
     useStorage()
     localStorage.setItem(
         'axolotl:lab:banner-designer:export:v1',
         JSON.stringify({ format: 'schematic', version: 'modern' }),
     )
-    assert.equal(loadExportPreference(), null)
+    expect(loadExportPreference()).toBe(null)
 
     localStorage.setItem(
         'axolotl:lab:banner-designer:export:v1',
         JSON.stringify({ format: 'give', version: '1.20.4' }),
     )
-    assert.equal(loadExportPreference(), null)
+    expect(loadExportPreference()).toBe(null)
 
     localStorage.setItem('axolotl:lab:banner-designer:export:v1', 'not json')
-    assert.equal(loadExportPreference(), null)
+    expect(loadExportPreference()).toBe(null)
 })

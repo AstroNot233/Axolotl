@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict'
-import test from 'node:test'
+import { expect, it } from 'vitest'
 
 import type { DyeColor } from './colors.ts'
 import { describeColorUsage, replaceBannerColors } from './recolor.ts'
@@ -15,7 +14,7 @@ function design(
     } satisfies BannerDesign
 }
 
-test('color usage lists each painted color once, in dye order', () => {
+it('color usage lists each painted color once, in dye order', () => {
     const usage = describeColorUsage(
         design('white', [
             ['stripe_center', 'red'],
@@ -24,19 +23,19 @@ test('color usage lists each painted color once, in dye order', () => {
         ]),
     )
 
-    assert.deepEqual(usage, [
+    expect(usage).toEqual([
         { color: 'white', layers: 1, base: true },
         { color: 'red', layers: 2, base: false },
     ])
 })
 
-test('color usage reports a plain banner as its base color only', () => {
-    assert.deepEqual(describeColorUsage(design('blue', [])), [
+it('color usage reports a plain banner as its base color only', () => {
+    expect(describeColorUsage(design('blue', []))).toEqual([
         { color: 'blue', layers: 0, base: true },
     ])
 })
 
-test('replacing a color rewrites every layer painted in it', () => {
+it('replacing a color rewrites every layer painted in it', () => {
     const before = design('white', [
         ['stripe_center', 'red'],
         ['cross', 'blue'],
@@ -45,14 +44,11 @@ test('replacing a color rewrites every layer painted in it', () => {
 
     const after = replaceBannerColors(before, { colors: ['red'], target: 'green' })
 
-    assert.deepEqual(
-        after.layers.map((layer) => layer.color),
-        ['green', 'blue', 'green'],
-    )
-    assert.equal(after.baseColor, 'white')
+    expect(after.layers.map((layer) => layer.color)).toEqual(['green', 'blue', 'green'])
+    expect(after.baseColor).toBe('white')
 })
 
-test('replacing several colors at once leaves the others untouched', () => {
+it('replacing several colors at once leaves the others untouched', () => {
     const before = design('white', [
         ['stripe_center', 'red'],
         ['cross', 'blue'],
@@ -61,52 +57,48 @@ test('replacing several colors at once leaves the others untouched', () => {
 
     const after = replaceBannerColors(before, { colors: ['red', 'blue'], target: 'lime' })
 
-    assert.deepEqual(
-        after.layers.map((layer) => layer.color),
-        ['lime', 'lime', 'black'],
-    )
+    expect(after.layers.map((layer) => layer.color)).toEqual(['lime', 'lime', 'black'])
 })
 
-test('the base follows a replacement unless it is excluded', () => {
+it('the base follows a replacement unless it is excluded', () => {
     const before = design('white', [['stripe_center', 'white']])
 
     const included = replaceBannerColors(before, { colors: ['white'], target: 'black' })
-    assert.equal(included.baseColor, 'black')
-    assert.equal(included.layers[0].color, 'black')
+    expect(included.baseColor).toBe('black')
+    expect(included.layers[0].color).toBe('black')
 
     const excluded = replaceBannerColors(before, {
         colors: ['white'],
         target: 'black',
         includeBase: false,
     })
-    assert.equal(excluded.baseColor, 'white')
-    assert.equal(excluded.layers[0].color, 'black')
+    expect(excluded.baseColor).toBe('white')
+    expect(excluded.layers[0].color).toBe('black')
 })
 
-test('a base color that is not being replaced keeps its color', () => {
+it('a base color that is not being replaced keeps its color', () => {
     const before = design('yellow', [['stripe_center', 'red']])
 
     const after = replaceBannerColors(before, { colors: ['red'], target: 'black' })
 
-    assert.equal(after.baseColor, 'yellow')
+    expect(after.baseColor).toBe('yellow')
 })
 
-test('a replacement that changes nothing returns the original design', () => {
+it('a replacement that changes nothing returns the original design', () => {
     const before = design('white', [['stripe_center', 'red']])
 
-    assert.equal(replaceBannerColors(before, { colors: ['red'], target: 'red' }), before)
-    assert.equal(replaceBannerColors(before, { colors: ['blue'], target: 'red' }), before)
-    assert.equal(
+    expect(replaceBannerColors(before, { colors: ['red'], target: 'red' })).toBe(before)
+    expect(replaceBannerColors(before, { colors: ['blue'], target: 'red' })).toBe(before)
+    expect(
         replaceBannerColors(before, { colors: ['white'], target: 'red', includeBase: false }),
-        before,
-    )
+    ).toBe(before)
 })
 
-test('replacing keeps layer identities so the layer list stays stable', () => {
+it('replacing keeps layer identities so the layer list stays stable', () => {
     const before = design('white', [['stripe_center', 'red']])
 
     const after = replaceBannerColors(before, { colors: ['red'], target: 'green' })
 
-    assert.equal(after.layers[0].id, before.layers[0].id)
-    assert.equal(after.layers[0].pattern, 'stripe_center')
+    expect(after.layers[0].id).toBe(before.layers[0].id)
+    expect(after.layers[0].pattern).toBe('stripe_center')
 })

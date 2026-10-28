@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict'
-import test from 'node:test'
+import { expect, it } from 'vitest'
 
 import { emptyHistory, MAX_HISTORY, recordHistory, redoHistory, undoHistory } from './history.ts'
 import { type BannerDesign, createBannerLayer } from './types.ts'
@@ -8,7 +7,13 @@ function design(baseColor: BannerDesign['baseColor']): BannerDesign {
     return { baseColor, layers: [createBannerLayer('stripe_center', 'black')] }
 }
 
-test('undo walks back through every recorded state', () => {
+/** Vitest's matchers do not narrow types, so a step the test needs is unwrapped here. */
+function present<T>(value: T | null): T {
+    if (!value) throw new Error('expected a history step')
+    return value
+}
+
+it('undo walks back through every recorded state', () => {
     let history = emptyHistory()
     let current = design('white')
 
@@ -17,46 +22,41 @@ test('undo walks back through every recorded state', () => {
     history = recordHistory(history, current)
     current = design('blue')
 
-    const first = undoHistory(history, current)
-    assert.ok(first)
-    assert.equal(first.design.baseColor, 'red')
+    const first = present(undoHistory(history, current))
+    expect(first.design.baseColor).toBe('red')
 
-    const second = undoHistory(first.history, first.design)
-    assert.ok(second)
-    assert.equal(second.design.baseColor, 'white')
+    const second = present(undoHistory(first.history, first.design))
+    expect(second.design.baseColor).toBe('white')
 
-    assert.equal(undoHistory(second.history, second.design), null)
+    expect(undoHistory(second.history, second.design)).toBe(null)
 })
 
-test('redo replays the states that were undone', () => {
+it('redo replays the states that were undone', () => {
     let history = emptyHistory()
     history = recordHistory(history, design('white'))
-    const undone = undoHistory(history, design('red'))
-    assert.ok(undone)
+    const undone = present(undoHistory(history, design('red')))
 
-    const redone = redoHistory(undone.history, undone.design)
-    assert.ok(redone)
-    assert.equal(redone.design.baseColor, 'red')
-    assert.equal(redoHistory(redone.history, redone.design), null)
+    const redone = present(redoHistory(undone.history, undone.design))
+    expect(redone.design.baseColor).toBe('red')
+    expect(redoHistory(redone.history, redone.design)).toBe(null)
 })
 
-test('a new edit drops the redo stack', () => {
+it('a new edit drops the redo stack', () => {
     let history = emptyHistory()
     history = recordHistory(history, design('white'))
-    const undone = undoHistory(history, design('red'))
-    assert.ok(undone)
+    const undone = present(undoHistory(history, design('red')))
 
     const edited = recordHistory(undone.history, design('blue'))
-    assert.deepEqual(edited.future, [])
-    assert.equal(redoHistory(edited, design('green')), null)
+    expect(edited.future).toEqual([])
+    expect(redoHistory(edited, design('green'))).toBe(null)
 })
 
-test('the history keeps at most MAX_HISTORY snapshots', () => {
+it('the history keeps at most MAX_HISTORY snapshots', () => {
     let history = emptyHistory()
     for (let index = 0; index < MAX_HISTORY + 10; index += 1) {
         history = recordHistory(history, design('white'))
     }
-    assert.equal(history.past.length, MAX_HISTORY)
+    expect(history.past.length).toBe(MAX_HISTORY)
 
     // Undoing everything still stops at the oldest kept snapshot.
     let steps = 0
@@ -65,11 +65,11 @@ test('the history keeps at most MAX_HISTORY snapshots', () => {
         steps += 1
         step = undoHistory(step.history, step.design)
     }
-    assert.equal(steps, MAX_HISTORY)
+    expect(steps).toBe(MAX_HISTORY)
 })
 
-test('undo and redo return null when there is nothing to restore', () => {
+it('undo and redo return null when there is nothing to restore', () => {
     const history = emptyHistory()
-    assert.equal(undoHistory(history, design('white')), null)
-    assert.equal(redoHistory(history, design('white')), null)
+    expect(undoHistory(history, design('white'))).toBe(null)
+    expect(redoHistory(history, design('white'))).toBe(null)
 })

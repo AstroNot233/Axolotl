@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, expect, it } from 'vitest'
 
 import { describeBannerMaterials } from './materials.ts'
 import {
@@ -30,43 +29,36 @@ function codes(run: () => unknown): string {
 
 describe('banner export', () => {
     it('writes the modern component syntax', () => {
-        assert.equal(
-            toPatternsComponent(design),
+        expect(toPatternsComponent(design)).toBe(
             '[{pattern:"minecraft:stripe_bottom",color:"red"},{pattern:"minecraft:creeper",color:"black"}]',
         )
-        assert.equal(
-            toGiveCommand(design),
+        expect(toGiveCommand(design)).toBe(
             '/give @p minecraft:white_banner[minecraft:banner_patterns=[{pattern:"minecraft:stripe_bottom",color:"red"},{pattern:"minecraft:creeper",color:"black"}]] 1',
         )
     })
 
     it('omits the component block for a plain banner', () => {
         const plain: BannerDesign = { baseColor: 'blue', layers: [] }
-        assert.equal(toItemData(plain), '')
-        assert.equal(toGiveCommand(plain), '/give @p minecraft:blue_banner 1')
+        expect(toItemData(plain)).toBe('')
+        expect(toGiveCommand(plain)).toBe('/give @p minecraft:blue_banner 1')
     })
 
     it('writes the pre-1.20.5 item NBT with short pattern codes', () => {
-        assert.equal(
-            toItemData(design, { version: 'legacy' }),
+        expect(toItemData(design, { version: 'legacy' })).toBe(
             '{BlockEntityTag:{Base:0b,Patterns:[{Pattern:"bs",Color:14b},{Pattern:"cre",Color:15b}]}}',
         )
-        assert.equal(
-            toGiveCommand(design, { version: 'legacy', target: '@s', count: 2 }),
+        expect(toGiveCommand(design, { version: 'legacy', target: '@s', count: 2 })).toBe(
             '/give @s minecraft:white_banner{BlockEntityTag:{Base:0b,Patterns:[{Pattern:"bs",Color:14b},{Pattern:"cre",Color:15b}]}} 2',
         )
     })
 
     it('writes a design file that round trips', () => {
         const parsed = parseBannerText(toDesignJson(design))
-        assert.equal(parsed.baseColor, 'white')
-        assert.deepEqual(
-            parsed.layers.map((layer) => [layer.pattern, layer.color]),
-            [
-                ['stripe_bottom', 'red'],
-                ['creeper', 'black'],
-            ],
-        )
+        expect(parsed.baseColor).toBe('white')
+        expect(parsed.layers.map((layer) => [layer.pattern, layer.color])).toEqual([
+            ['stripe_bottom', 'red'],
+            ['creeper', 'black'],
+        ])
     })
 })
 
@@ -76,8 +68,8 @@ describe('banner export version support', () => {
             baseColor: 'white',
             layers: [createBannerLayer('flow', 'red'), createBannerLayer('stripe_top', 'blue')],
         }
-        assert.deepEqual(unsupportedPatterns(newer, 'legacy'), ['flow'])
-        assert.deepEqual(unsupportedPatterns(newer, 'modern'), [])
+        expect(unsupportedPatterns(newer, 'legacy')).toEqual(['flow'])
+        expect(unsupportedPatterns(newer, 'modern')).toEqual([])
     })
 
     it('keeps the 1.13 pattern set and later 1.16 to 1.20 additions in legacy', () => {
@@ -89,7 +81,7 @@ describe('banner export version support', () => {
                 createBannerLayer('globe', 'blue'),
             ],
         }
-        assert.deepEqual(unsupportedPatterns(older, 'legacy'), [])
+        expect(unsupportedPatterns(older, 'legacy')).toEqual([])
     })
 
     it('reports each unsupported pattern once', () => {
@@ -101,7 +93,7 @@ describe('banner export version support', () => {
                 createBannerLayer('flow', 'black'),
             ],
         }
-        assert.deepEqual(unsupportedPatterns(repeated, 'legacy'), ['guster', 'flow'])
+        expect(unsupportedPatterns(repeated, 'legacy')).toEqual(['guster', 'flow'])
     })
 
     it('allows 1.16 to 1.20 patterns in legacy but flags the 1.20.5 ones', () => {
@@ -114,8 +106,8 @@ describe('banner export version support', () => {
                 createBannerLayer('flow', 'white'),
             ],
         }
-        assert.deepEqual(unsupportedPatterns(mixed, 'modern'), [])
-        assert.deepEqual(unsupportedPatterns(mixed, 'legacy'), ['flow'])
+        expect(unsupportedPatterns(mixed, 'modern')).toEqual([])
+        expect(unsupportedPatterns(mixed, 'legacy')).toEqual(['flow'])
     })
 
     it('writes one short code per legacy layer', () => {
@@ -126,8 +118,7 @@ describe('banner export version support', () => {
                 createBannerLayer('diagonal_up_right', 'blue'),
             ],
         }
-        assert.equal(
-            toItemData(design, { version: 'legacy' }),
+        expect(toItemData(design, { version: 'legacy' })).toBe(
             '{BlockEntityTag:{Base:8b,Patterns:[{Pattern:"ts",Color:14b},{Pattern:"rd",Color:11b}]}}',
         )
     })
@@ -138,99 +129,78 @@ describe('banner import', () => {
         const parsed = parseBannerText(
             '/give @p minecraft:red_banner[minecraft:banner_patterns=[{pattern:"minecraft:stripe_top",color:"blue"}]] 1',
         )
-        assert.equal(parsed.baseColor, 'red')
-        assert.deepEqual(
-            parsed.layers.map((layer) => [layer.pattern, layer.color]),
-            [['stripe_top', 'blue']],
-        )
+        expect(parsed.baseColor).toBe('red')
+        expect(parsed.layers.map((layer) => [layer.pattern, layer.color])).toEqual([
+            ['stripe_top', 'blue'],
+        ])
     })
 
     it('reads component data without a command', () => {
         const parsed = parseBannerText(
             '[minecraft:banner_patterns=[{pattern:"minecraft:skull",color:"white"}]]',
         )
-        assert.equal(parsed.baseColor, 'white')
-        assert.equal(parsed.layers[0].pattern, 'skull')
+        expect(parsed.baseColor).toBe('white')
+        expect(parsed.layers[0].pattern).toBe('skull')
     })
 
     it('reads legacy item NBT', () => {
         const parsed = parseBannerText(
             '{BlockEntityTag:{Base:14b,Patterns:[{Pattern:"curly_border",Color:0b}]}}',
         )
-        assert.equal(parsed.baseColor, 'red')
-        assert.equal(parsed.layers[0].pattern, 'curly_border')
-        assert.equal(parsed.layers[0].color, 'white')
+        expect(parsed.baseColor).toBe('red')
+        expect(parsed.layers[0].pattern).toBe('curly_border')
+        expect(parsed.layers[0].color).toBe('white')
     })
 
     it('falls back to the item id when the legacy NBT has no base color', () => {
         const parsed = parseBannerText(
             '/give @p minecraft:lime_banner{BlockEntityTag:{Patterns:[{Pattern:"bricks",Color:4b}]}}',
         )
-        assert.equal(parsed.baseColor, 'lime')
-        assert.equal(parsed.layers[0].color, 'yellow')
+        expect(parsed.baseColor).toBe('lime')
+        expect(parsed.layers[0].color).toBe('yellow')
     })
 
     it('reads the 1.12 give command, which keeps the data tag last', () => {
         const parsed = parseBannerText(
             '/give @p minecraft:banner 1 8 {BlockEntityTag:{Base:8,Patterns:[{Pattern:"ts",Color:14}]}}',
         )
-        assert.equal(parsed.baseColor, 'light_gray')
-        assert.equal(parsed.layers[0].pattern, 'stripe_top')
-        assert.equal(parsed.layers[0].color, 'red')
+        expect(parsed.baseColor).toBe('light_gray')
+        expect(parsed.layers[0].pattern).toBe('stripe_top')
+        expect(parsed.layers[0].color).toBe('red')
     })
 
     it('takes the base color from the damage value of a plain banner', () => {
         const parsed = parseBannerText(
             '/give @p minecraft:banner 1 14 {BlockEntityTag:{Patterns:[{Pattern:"bs",Color:0}]}}',
         )
-        assert.equal(parsed.baseColor, 'red')
-        assert.equal(parsed.layers[0].pattern, 'stripe_bottom')
+        expect(parsed.baseColor).toBe('red')
+        expect(parsed.layers[0].pattern).toBe('stripe_bottom')
     })
 
     it('rejects give commands for items that are not banners', () => {
-        assert.equal(
-            codes(() => parseBannerText('/give @p minecraft:diamond')),
-            'unsupported',
-        )
-        assert.equal(
-            codes(() => parseBannerText('/give @p minecraft:red_dye 1')),
-            'unsupported',
-        )
+        expect(codes(() => parseBannerText('/give @p minecraft:diamond'))).toBe('unsupported')
+        expect(codes(() => parseBannerText('/give @p minecraft:red_dye 1'))).toBe('unsupported')
     })
 
     it('rejects unknown patterns and colors', () => {
-        assert.equal(
-            codes(() => parseBannerText('')),
-            'empty',
-        )
-        assert.equal(
-            codes(() => parseBannerText('hello')),
-            'unsupported',
-        )
-        assert.equal(
+        expect(codes(() => parseBannerText(''))).toBe('empty')
+        expect(codes(() => parseBannerText('hello'))).toBe('unsupported')
+        expect(
             codes(() =>
                 parseBannerText('[minecraft:banner_patterns=[{pattern:"nope",color:"red"}]]'),
             ),
-            'invalid-pattern',
-        )
-        assert.equal(
+        ).toBe('invalid-pattern')
+        expect(
             codes(() =>
                 parseBannerText('[minecraft:banner_patterns=[{pattern:"cross",color:"pink2"}]]'),
             ),
-            'invalid-color',
-        )
-        assert.equal(
-            codes(() => parseBannerText('{broken')),
-            'invalid-data',
-        )
+        ).toBe('invalid-color')
+        expect(codes(() => parseBannerText('{broken'))).toBe('invalid-data')
     })
 
     it('rejects text far larger than a design', () => {
         const huge = `{BlockEntityTag:{Base:0b,Patterns:[${'{Pattern:"cross",Color:0b},'.repeat(20000)}]}}`
-        assert.equal(
-            codes(() => parseBannerText(huge)),
-            'too-large',
-        )
+        expect(codes(() => parseBannerText(huge))).toBe('too-large')
     })
 
     it('caps imported layers at the survival limit', () => {
@@ -239,19 +209,19 @@ describe('banner import', () => {
             (_, index) => `{Pattern:"cross",Color:${index}b}`,
         ).join(',')
         const parsed = parseBannerText(`{BlockEntityTag:{Base:0b,Patterns:[${layers}]}}`)
-        assert.equal(parsed.layers.length, 6)
+        expect(parsed.layers.length).toBe(6)
     })
 })
 
 describe('banner materials', () => {
     it('counts dyes, pattern items and the banner itself', () => {
         const materials = describeBannerMaterials(design)
-        assert.equal(materials.bannerItem, 'minecraft:white_banner')
-        assert.deepEqual(materials.dyes, [
+        expect(materials.bannerItem).toBe('minecraft:white_banner')
+        expect(materials.dyes).toEqual([
             { color: 'red', count: 1, item: 'minecraft:red_dye' },
             { color: 'black', count: 1, item: 'minecraft:black_dye' },
         ])
-        assert.deepEqual(materials.patternItems, ['minecraft:creeper_banner_pattern'])
+        expect(materials.patternItems).toEqual(['minecraft:creeper_banner_pattern'])
     })
 
     it('merges repeated layer colors without counting the base color', () => {
@@ -259,9 +229,9 @@ describe('banner materials', () => {
             baseColor: 'red',
             layers: [createBannerLayer('cross', 'red'), createBannerLayer('border', 'red')],
         })
-        assert.equal(materials.bannerItem, 'minecraft:red_banner')
-        assert.deepEqual(materials.dyes, [{ color: 'red', count: 2, item: 'minecraft:red_dye' }])
-        assert.deepEqual(materials.patternItems, [])
+        expect(materials.bannerItem).toBe('minecraft:red_banner')
+        expect(materials.dyes).toEqual([{ color: 'red', count: 2, item: 'minecraft:red_dye' }])
+        expect(materials.patternItems).toEqual([])
     })
 
     it('lists each pattern item once', () => {
@@ -273,7 +243,7 @@ describe('banner materials', () => {
                 createBannerLayer('globe', 'blue'),
             ],
         })
-        assert.deepEqual(materials.patternItems, [
+        expect(materials.patternItems).toEqual([
             'minecraft:creeper_banner_pattern',
             'minecraft:globe_banner_pattern',
         ])
