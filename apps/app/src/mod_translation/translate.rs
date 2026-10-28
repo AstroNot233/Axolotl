@@ -1698,7 +1698,7 @@ pub async fn run_translation_task(
     );
     let input_hash = match &prepared {
         Some(prepared) => prepared.input_hash.clone(),
-        None => analyze::input_file_hash(&input_path)?,
+        None => analyze::input_file_hash_cancellable(&input_path, &cancel)?,
     };
     tracing::info!(task_id, input_hash, "input hashed");
 
@@ -1756,12 +1756,15 @@ pub async fn run_translation_task(
         let mut inspection = marker.inspection;
         resume::prepare_resumed_inspection(&directory, &mut inspection)?;
         inspection.class_candidates =
-            analyze::discover_class_candidates(&directory)?;
+            analyze::discover_class_candidates(&directory, &cancel)?;
         (directory, inspection, true)
     } else {
         tracing::info!(task_id, "no checkpoint, extracting fresh");
-        let (directory, inspection) =
-            analyze::extract_and_inspect(&input_path, &workspace_root)?;
+        let (directory, inspection) = analyze::extract_and_inspect_cancellable(
+            &input_path,
+            &workspace_root,
+            &cancel,
+        )?;
         let marker = ResumeMarker {
             version: 3,
             input_hash: input_hash.clone(),
