@@ -128,12 +128,10 @@ pub(crate) async fn create_direct_link_instance(
 
     let mut tx = state.pool.begin().await?;
     instance_rows::insert_instance(&instance, &mut tx).await?;
-    sqlx::query(
-        "INSERT INTO instance_sync_preferences (instance_id, feature, enabled)
-         SELECT ?, feature, new_instance_default FROM sync_feature_settings",
+    instance_rows::insert_default_sync_preferences_in_transaction(
+        &instance_id,
+        &mut tx,
     )
-    .bind(&instance_id)
-    .execute(&mut *tx)
     .await?;
     instance_rows::set_direct_link_fields(
         &instance.id,

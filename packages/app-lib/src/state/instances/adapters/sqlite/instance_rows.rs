@@ -2024,3 +2024,19 @@ where
         crate::ErrorKind::InputError("Unknown instance".to_string()).into()
     })
 }
+
+/// Seeds an instance's sync preferences from the launcher defaults.
+pub(crate) async fn insert_default_sync_preferences_in_transaction(
+    instance_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "INSERT INTO instance_sync_preferences (instance_id, feature, enabled)
+         SELECT ?, feature, new_instance_default FROM sync_feature_settings",
+    )
+    .bind(instance_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
