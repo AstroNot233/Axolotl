@@ -4241,6 +4241,9 @@
   "app.lab.banner-designer.export.give": {
     "message": "Give command"
   },
+  "app.lab.banner-designer.export.hint.classic": {
+    "message": "The single banner item, with a damage value of 0. 1.13 and newer need one item per dye."
+  },
   "app.lab.banner-designer.export.hint.legacy": {
     "message": "Short pattern codes. 1.20.5 and newer reject this item NBT."
   },
@@ -4280,8 +4283,11 @@
   "app.lab.banner-designer.export.version": {
     "message": "Game version"
   },
+  "app.lab.banner-designer.export.version.classic": {
+    "message": "1.12.2 and older"
+  },
   "app.lab.banner-designer.export.version.legacy": {
-    "message": "1.20.4 and older"
+    "message": "1.13 – 1.20.4"
   },
   "app.lab.banner-designer.export.version.modern": {
     "message": "1.20.5 and newer"

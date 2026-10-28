@@ -122,6 +122,9 @@
   "app.lab.banner-designer.export.give": {
     "message": "give 指令"
   },
+  "app.lab.banner-designer.export.hint.classic": {
+    "message": "使用统一的旗帜物品，数据值填 0；1.13 及更新版本需要按颜色区分的物品 ID。"
+  },
   "app.lab.banner-designer.export.hint.legacy": {
     "message": "使用图案短代码；1.20.5 及更新版本会拒绝该物品 NBT。"
   },
@@ -161,8 +164,11 @@
   "app.lab.banner-designer.export.version": {
     "message": "游戏版本"
   },
+  "app.lab.banner-designer.export.version.classic": {
+    "message": "1.12.2 及更早版本"
+  },
   "app.lab.banner-designer.export.version.legacy": {
-    "message": "1.20.4 及更早版本"
+    "message": "1.13 – 1.20.4"
   },
   "app.lab.banner-designer.export.version.modern": {
     "message": "1.20.5 及更新版本"

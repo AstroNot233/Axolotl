@@ -73,13 +73,20 @@ export interface BannerCommandOptions {
 }
 
 /**
- * Item data dialects: the 1.20.5+ components, or the item NBT used by every
- * earlier version.
+ * Item data dialects: the 1.20.5+ components, the item NBT that 1.13 through
+ * 1.20.4 reads, or the single banner item with a damage value that 1.12.2 and
+ * older take.
  */
-export type BannerGameVersion = 'modern' | 'legacy'
+export type BannerGameVersion = 'modern' | 'legacy' | 'classic'
 
 /** Newest game version that still reads the legacy item NBT. */
 export const BANNER_LEGACY_MAX_VERSION = '1.20.4'
+
+/** Newest game version that still has one banner item for every dye. */
+export const BANNER_CLASSIC_MAX_VERSION = '1.12.2'
+
+/** The item 1.12.2 and older use for every dye; the color lives in the damage value. */
+const CLASSIC_BANNER_ITEM = 'minecraft:banner'
 
 /** Compares dotted version strings, treating missing segments as zero. */
 function compareGameVersions(left: string, right: string): number {
@@ -101,11 +108,17 @@ export function unsupportedPatterns(
     design: BannerDesign,
     version: BannerGameVersion,
 ): BannerPatternId[] {
-    if (version === 'modern') return []
+    const newest =
+        version === 'modern'
+            ? null
+            : version === 'classic'
+              ? BANNER_CLASSIC_MAX_VERSION
+              : BANNER_LEGACY_MAX_VERSION
+    if (!newest) return []
     const missing: BannerPatternId[] = []
     for (const layer of design.layers) {
         const since = bannerPattern(layer.pattern).since
-        if (!since || compareGameVersions(since, BANNER_LEGACY_MAX_VERSION) <= 0) continue
+        if (!since || compareGameVersions(since, newest) <= 0) continue
         if (!missing.includes(layer.pattern)) missing.push(layer.pattern)
     }
     return missing
@@ -115,8 +128,13 @@ export function toGiveCommand(design: BannerDesign, options: BannerCommandOption
     const target = options.target?.trim() || '@p'
     const count = Math.max(1, Math.trunc(options.count ?? 1))
     const version = options.version ?? 'modern'
+    const data = toItemData(design, { version })
+    if (version === 'classic') {
+        // 1.12 and older take the count, a damage value and the tag after the item.
+        return `/give ${target} ${CLASSIC_BANNER_ITEM} ${count} 0${data ? ` ${data}` : ''}`
+    }
     const item = dyeColorDefinition(design.baseColor).bannerItem
-    return `/give ${target} ${item}${toItemData(design, { version })} ${count}`
+    return `/give ${target} ${item}${data} ${count}`
 }
 
 export function toItemData(
@@ -129,9 +147,10 @@ export function toItemData(
             ? ''
             : `[minecraft:banner_patterns=${toPatternsComponent(design)}]`
     }
+    // Every pre-1.20.5 version stores the same block entity tag.
     const base = dyeColorDefinition(design.baseColor).legacyIndex
-    // Every pre-1.20.5 version stores a short code here. Patterns added after the
-    // 1.13 registry rename have no code of their own, so they fall back to the id.
+    // Those versions also store a short code here. Patterns added after the 1.13
+    // registry rename have no code of their own, so they fall back to the id.
     const patterns = design.layers
         .map((layer) => {
             const color = `${dyeColorDefinition(layer.color).legacyIndex}b`

@@ -122,6 +122,42 @@ describe('banner export version support', () => {
             '{BlockEntityTag:{Base:8b,Patterns:[{Pattern:"ts",Color:14b},{Pattern:"rd",Color:11b}]}}',
         )
     })
+
+    it('writes the 1.12 command with one banner item and a damage value', () => {
+        const classic: BannerDesign = {
+            baseColor: 'red',
+            layers: [
+                createBannerLayer('stripe_top', 'white'),
+                createBannerLayer('border', 'white'),
+            ],
+        }
+        expect(toGiveCommand(classic, { version: 'classic' })).toBe(
+            '/give @p minecraft:banner 1 0 {BlockEntityTag:{Base:14b,Patterns:[{Pattern:"ts",Color:0b},{Pattern:"bo",Color:0b}]}}',
+        )
+        // The tag itself is the same one 1.13 through 1.20.4 read.
+        expect(toItemData(classic, { version: 'classic' })).toBe(
+            toItemData(classic, { version: 'legacy' }),
+        )
+    })
+
+    it('keeps the count before the damage value in the 1.12 command', () => {
+        expect(toGiveCommand(design, { version: 'classic', target: '@s', count: 3 })).toBe(
+            '/give @s minecraft:banner 3 0 {BlockEntityTag:{Base:0b,Patterns:[{Pattern:"bs",Color:14b},{Pattern:"cre",Color:15b}]}}',
+        )
+    })
+
+    it('flags 1.16 and later patterns for the 1.12 target', () => {
+        const newer: BannerDesign = {
+            baseColor: 'white',
+            layers: [
+                createBannerLayer('bricks', 'red'),
+                createBannerLayer('piglin', 'black'),
+                createBannerLayer('globe', 'blue'),
+            ],
+        }
+        expect(unsupportedPatterns(newer, 'classic')).toEqual(['piglin', 'globe'])
+        expect(unsupportedPatterns(newer, 'legacy')).toEqual([])
+    })
 })
 
 describe('banner import', () => {
@@ -175,6 +211,17 @@ describe('banner import', () => {
         )
         expect(parsed.baseColor).toBe('red')
         expect(parsed.layers[0].pattern).toBe('stripe_bottom')
+    })
+
+    it('reads the 1.12 command this exporter writes', () => {
+        const parsed = parseBannerText(
+            '/give @p minecraft:banner 1 0 {BlockEntityTag:{Base:14b,Patterns:[{Pattern:"ts",Color:0b},{Pattern:"bo",Color:0b}]}}',
+        )
+        expect(parsed.baseColor).toBe('red')
+        expect(parsed.layers.map((layer) => [layer.pattern, layer.color])).toEqual([
+            ['stripe_top', 'white'],
+            ['border', 'white'],
+        ])
     })
 
     it('rejects give commands for items that are not banners', () => {

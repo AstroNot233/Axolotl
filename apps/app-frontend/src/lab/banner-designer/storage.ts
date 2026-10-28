@@ -16,7 +16,7 @@ export interface BannerExportPreference {
 }
 
 const EXPORT_FORMATS: readonly BannerExportFormat[] = ['give', 'data', 'json']
-const EXPORT_VERSIONS: readonly BannerGameVersion[] = ['modern', 'legacy']
+const EXPORT_VERSIONS: readonly BannerGameVersion[] = ['modern', 'legacy', 'classic']
 
 export interface RecentBanner {
     id: string

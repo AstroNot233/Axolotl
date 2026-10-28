@@ -106,6 +106,8 @@ it('the export preference survives a reload', () => {
     expect(loadExportPreference()).toBe(null)
     saveExportPreference({ format: 'data', version: 'legacy' })
     expect(loadExportPreference()).toEqual({ format: 'data', version: 'legacy' })
+    saveExportPreference({ format: 'give', version: 'classic' })
+    expect(loadExportPreference()).toEqual({ format: 'give', version: 'classic' })
 })
 
 it('an unknown export preference falls back to the defaults', () => {
