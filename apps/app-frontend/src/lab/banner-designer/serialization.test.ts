@@ -217,6 +217,14 @@ describe('banner import', () => {
         )
     })
 
+    it('rejects text far larger than a design', () => {
+        const huge = `{BlockEntityTag:{Base:0b,Patterns:[${'{Pattern:"cross",Color:0b},'.repeat(20000)}]}}`
+        assert.equal(
+            codes(() => parseBannerText(huge)),
+            'too-large',
+        )
+    })
+
     it('caps imported layers at the survival limit', () => {
         const layers = Array.from(
             { length: 8 },

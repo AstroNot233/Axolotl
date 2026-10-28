@@ -18,8 +18,15 @@ import { type BannerDesign, type BannerLayer, createBannerLayer } from './types.
 export const BANNER_DESIGN_FORMAT = 'axolotl-banner'
 export const BANNER_DESIGN_VERSION = 1
 
+/**
+ * Largest import the parser accepts. A six layer design is a few hundred bytes,
+ * so anything past this is either a mistake or an attempt to make the renderer
+ * chew through a file it has no use for.
+ */
+export const MAX_IMPORT_BYTES = 256 * 1024
+
 export type BannerParseErrorCode =
-    'empty' | 'unsupported' | 'invalid-color' | 'invalid-pattern' | 'invalid-data'
+    'empty' | 'unsupported' | 'too-large' | 'invalid-color' | 'invalid-pattern' | 'invalid-data'
 
 export class BannerParseError extends Error {
     readonly code: BannerParseErrorCode
@@ -148,6 +155,9 @@ function clampLayers(layers: BannerLayer[]): BannerLayer[] {
 export function parseBannerText(text: string): BannerDesign {
     const trimmed = text.trim()
     if (!trimmed) throw new BannerParseError('empty')
+    if (trimmed.length > MAX_IMPORT_BYTES) {
+        throw new BannerParseError('too-large', String(trimmed.length))
+    }
 
     if (/^\/?\s*give\b/i.test(trimmed)) return parseGiveCommand(trimmed)
     if (trimmed.startsWith('[')) return fromComponentData(trimmed, 'white')
@@ -187,6 +197,9 @@ function fromDesignFile(value: Record<string, unknown>): BannerDesign {
           : []
     const layers: BannerLayer[] = []
     for (const entry of rawLayers) {
+        // A banner cannot hold more layers than the survival limit, so reading
+        // further entries would only allocate what the game would drop.
+        if (layers.length >= MAX_BANNER_LAYERS) break
         if (!entry || typeof entry !== 'object') continue
         const record = entry as Record<string, unknown>
         const patternValue = record.pattern ?? record.Pattern
@@ -299,6 +312,8 @@ function readPatternList(tag: NbtTag | undefined): BannerLayer[] {
     if (!tag || !tag.isList()) return []
     const layers: BannerLayer[] = []
     for (const entry of tag.getItems()) {
+        // Stop at the layer limit instead of building a list the game would cut.
+        if (layers.length >= MAX_BANNER_LAYERS) break
         if (!entry.isCompound()) continue
         const patternTag = entry.get('pattern') ?? entry.get('Pattern')
         if (!patternTag) continue

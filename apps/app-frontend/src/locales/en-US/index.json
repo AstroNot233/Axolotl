@@ -4313,6 +4313,9 @@
   "app.lab.banner-designer.import.error.pattern": {
     "message": "Unknown banner pattern: {value}"
   },
+  "app.lab.banner-designer.import.error.too-large": {
+    "message": "This file is far larger than a banner design. Check that you picked the right one."
+  },
   "app.lab.banner-designer.import.error.unsupported": {
     "message": "This text is not a banner give command, item data or design file."
   },

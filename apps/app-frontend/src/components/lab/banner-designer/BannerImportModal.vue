@@ -3,10 +3,14 @@ import { DownloadIcon, FileArchiveIcon } from '@modrinth/assets'
 import { Button, defineMessages, NewModal, useVIntl } from '@modrinth/ui'
 import { isTauri } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { readTextFile } from '@tauri-apps/plugin-fs'
+import { readTextFile, stat } from '@tauri-apps/plugin-fs'
 import { computed, ref, useTemplateRef } from 'vue'
 
-import { BannerParseError, parseBannerText } from '@/lab/banner-designer/serialization.ts'
+import {
+    BannerParseError,
+    MAX_IMPORT_BYTES,
+    parseBannerText,
+} from '@/lab/banner-designer/serialization.ts'
 import type { BannerDesign } from '@/lab/banner-designer/types.ts'
 
 const emit = defineEmits<{
@@ -52,6 +56,11 @@ const messages = defineMessages({
         id: 'app.lab.banner-designer.import.error.data',
         defaultMessage: 'The item data could not be read. Check that it is complete.',
     },
+    errorTooLarge: {
+        id: 'app.lab.banner-designer.import.error.too-large',
+        defaultMessage:
+            'This file is far larger than a banner design. Check that you picked the right one.',
+    },
     fileFailed: {
         id: 'app.lab.banner-designer.import.error.file',
         defaultMessage: 'The file could not be read.',
@@ -79,6 +88,7 @@ function describeError(cause: unknown): string {
     }
     if (cause.code === 'empty') return formatMessage(messages.errorEmpty)
     if (cause.code === 'unsupported') return formatMessage(messages.errorUnsupported)
+    if (cause.code === 'too-large') return formatMessage(messages.errorTooLarge)
     if (cause.code === 'invalid-color') {
         return formatMessage(messages.errorColor, { value: cause.detail ?? '' })
     }
@@ -114,6 +124,13 @@ async function chooseFile() {
             filters: [{ name: 'Banner design', extensions: ['json', 'txt', 'snbt'] }],
         })
         if (typeof selected !== 'string' || request !== fileRequest) return
+        // Reject on the reported size so an oversized file is never read in.
+        const info = await stat(selected)
+        if (request !== fileRequest) return
+        if (info.size > MAX_IMPORT_BYTES) {
+            error.value = formatMessage(messages.errorTooLarge)
+            return
+        }
         const content = await readTextFile(selected)
         if (request !== fileRequest) return
         text.value = content

@@ -194,6 +194,9 @@
   "app.lab.banner-designer.import.error.pattern": {
     "message": "未知旗帜图案：{value}"
   },
+  "app.lab.banner-designer.import.error.too-large": {
+    "message": "这个文件远大于一份旗帜设计，请确认选对了文件。"
+  },
   "app.lab.banner-designer.import.error.unsupported": {
     "message": "这段文本不是旗帜 give 指令、物品数据或设计文件。"
   },
