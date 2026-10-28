@@ -15,6 +15,46 @@ static REQUESTS: LazyLock<DashMap<RequestId, CancellationToken>> =
 static EARLY_CANCELLATIONS: LazyLock<DashMap<RequestId, std::time::Instant>> =
     LazyLock::new(DashMap::new);
 
+/// A dependency analysis update as the page receives it: the request it
+/// belongs to, its place in that request's stream and, for a cart analysis,
+/// the selection revision it was computed for.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OperationProgressMessage {
+    request_id: RequestId,
+    sequence: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selection_revision: Option<u32>,
+    #[serde(flatten)]
+    progress: ResourceOperationProgress,
+}
+
+/// Forwards one request's analysis progress to its channel, numbering each
+/// message so the page can drop repeated or out-of-order ones.
+fn operation_progress<R: tauri::Runtime>(
+    webview: tauri::Webview<R>,
+    on_progress: Option<tauri::ipc::JavaScriptChannelId>,
+    request_id: &RequestId,
+    selection_revision: Option<u32>,
+) -> impl Fn(ResourceOperationProgress) + Send + Sync {
+    let channel = on_progress
+        .map(|id| id.channel_on::<_, OperationProgressMessage>(webview));
+    let request_id = request_id.clone();
+    let sequence = std::sync::atomic::AtomicU64::new(0);
+    move |progress| {
+        if let Some(channel) = &channel {
+            let _ = channel.send(OperationProgressMessage {
+                request_id: request_id.clone(),
+                sequence: sequence
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    + 1,
+                selection_revision,
+                progress,
+            });
+        }
+    }
+}
+
 struct RequestGuard(RequestId);
 impl Drop for RequestGuard {
     fn drop(&mut self) {
@@ -310,13 +350,7 @@ pub async fn resource_prepare_entry_operation<R: tauri::Runtime>(
     resolve_dependencies: Option<bool>,
 ) -> Result<ResourceOperationPlan> {
     let (_guard, cancel) = request(&request_id)?;
-    let on_progress = on_progress
-        .map(|id| id.channel_on::<_, ResourceOperationProgress>(webview));
-    let progress = move |value| {
-        if let Some(channel) = &on_progress {
-            let _ = channel.send(value);
-        }
-    };
+    let progress = operation_progress(webview, on_progress, &request_id, None);
     Ok(
         theseus::resources::installed::prepare_entries_with_progress(
             instance_id,
@@ -348,8 +382,6 @@ pub async fn resource_prepare_operation<R: tauri::Runtime>(
     selection_revision: Option<u32>,
 ) -> Result<ResourceOperationPlan> {
     let (_guard, cancel) = request(&request_id)?;
-    let on_progress = on_progress
-        .map(|id| id.channel_on::<_, ResourceOperationProgress>(webview));
     if let Some(locators) = locators {
         let resources = service().await?;
         for selection in &selections {
@@ -369,11 +401,12 @@ pub async fn resource_prepare_operation<R: tauri::Runtime>(
             }
         }
     }
-    let progress = move |value| {
-        if let Some(channel) = &on_progress {
-            let _ = channel.send(value);
-        }
-    };
+    let progress = operation_progress(
+        webview,
+        on_progress,
+        &request_id,
+        selection_revision,
+    );
     if let Some(id) = analysis_session_id {
         if intent != ResourceOperationIntent::Install
             || import_files.is_some()
@@ -439,13 +472,12 @@ pub async fn resource_analysis_update<R: tauri::Runtime>(
     on_progress: Option<tauri::ipc::JavaScriptChannelId>,
 ) -> Result<ResourceOperationPlan> {
     let (_guard, cancel) = request(&request_id)?;
-    let channel = on_progress
-        .map(|id| id.channel_on::<_, ResourceOperationProgress>(webview));
-    let progress = move |value| {
-        if let Some(channel) = &channel {
-            let _ = channel.send(value);
-        }
-    };
+    let progress = operation_progress(
+        webview,
+        on_progress,
+        &request_id,
+        Some(selection_revision),
+    );
     Ok(theseus::resources::plans::analysis::update(
         &session_id,
         selection_revision,
@@ -469,13 +501,7 @@ pub async fn resource_revise_plan<R: tauri::Runtime>(
     on_progress: Option<tauri::ipc::JavaScriptChannelId>,
 ) -> Result<ResourceOperationPlan> {
     let (_guard, cancel) = request(&request_id)?;
-    let on_progress = on_progress
-        .map(|id| id.channel_on::<_, ResourceOperationProgress>(webview));
-    let progress = move |value| {
-        if let Some(channel) = &on_progress {
-            let _ = channel.send(value);
-        }
-    };
+    let progress = operation_progress(webview, on_progress, &request_id, None);
     Ok(theseus::resources::plans::revise_with_progress(
         plan_id,
         revision,
@@ -967,5 +993,27 @@ mod tests {
         assert!(!token.is_cancelled());
         assert!(!EARLY_CANCELLATIONS.contains_key(&expired));
         drop(guard);
+    }
+
+    #[test]
+    fn progress_messages_put_the_request_and_sequence_beside_the_event() {
+        let message = OperationProgressMessage {
+            request_id: RequestId::new("request").unwrap(),
+            sequence: 2,
+            selection_revision: Some(3),
+            progress: ResourceOperationProgress::Phase {
+                phase: theseus::resources::plans::ResourceOperationPhase::Validating,
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(message).unwrap(),
+            serde_json::json!({
+                "requestId": "request",
+                "sequence": 2,
+                "selectionRevision": 3,
+                "kind": "phase",
+                "phase": "validating",
+            })
+        );
     }
 }

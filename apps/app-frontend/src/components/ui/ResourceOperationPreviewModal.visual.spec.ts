@@ -1053,6 +1053,7 @@ it('shows each parsed item while retaining the skeleton and locking every button
     const result = wrapper.vm.show(input)
     const emit = (value: ReturnType<typeof node>, title: string) =>
         progress({
+            kind: 'node',
             planId: 'plan',
             revision: 1,
             node: value,
@@ -1103,6 +1104,65 @@ it('shows each parsed item while retaining the skeleton and locking every button
     }
 })
 
+it('shows what the analysis is doing and drops nodes a later resolution round removed', async () => {
+    ready()
+    let progress!: (value: ResourceOperationProgress) => void
+    let complete!: (value: ResourceOperationPlan) => void
+    vi.mocked(resourcePrepareEntryOperation).mockImplementationOnce((...args) => {
+        progress = args[6]!
+        return new Promise((resolve) => {
+            complete = resolve
+        })
+    })
+    const wrapper = mount(ResourceOperationPreviewModal)
+    const result = wrapper.vm.show(input)
+    const stage = () => wrapper.get('[data-operation-phase]').text()
+    const update = (value: object) => progress(value as ResourceOperationProgress)
+    const emit = (value: ReturnType<typeof node>, title: string, round: number) =>
+        update({
+            kind: 'node',
+            planId: 'plan',
+            revision: 1,
+            round,
+            node: value,
+            metadata: { title, iconUrl: null, summary: '' },
+        })
+    try {
+        await flushPromises()
+        expect(stage()).toBe('Resolving releases and dependencies…')
+        update({ kind: 'phase', phase: 'collectingConstraints' })
+        await flushPromises()
+        expect(stage()).toBe('Collecting the version requirements of installed content…')
+
+        update({ kind: 'roundStarted', planId: 'plan', revision: 1, round: 0 })
+        await flushPromises()
+        expect(stage()).toBe('Resolving releases and dependencies…')
+        emit(root, 'Parsed root', 0)
+        emit(node('stale', 'install', { reference, fileName: 'Stale.jar' }), 'Stale dependency', 0)
+        await flushPromises()
+        expect(stage()).toBe('Resolving releases and dependencies…')
+        expect(wrapper.text()).toContain('Stale dependency')
+
+        update({ kind: 'roundStarted', planId: 'plan', revision: 1, round: 1 })
+        update({ kind: 'nodeRemoved', planId: 'plan', revision: 1, round: 1, nodeId: 'stale' })
+        await flushPromises()
+        expect(stage()).toBe('Resolving dependencies again to settle version conflicts…')
+        expect(wrapper.text()).not.toContain('Stale dependency')
+        expect(wrapper.text()).toContain('Parsed root')
+
+        update({ kind: 'phase', phase: 'validating' })
+        await flushPromises()
+        expect(stage()).toBe('Checking that the files can be written…')
+        complete({ ...plan(), nodes: [root] } as ResourceOperationPlan)
+        await flushPromises()
+        expect(wrapper.find('[data-operation-phase]').exists()).toBe(false)
+        await wrapper.vm.cancel()
+        expect(await result).toBeNull()
+    } finally {
+        wrapper.unmount()
+    }
+})
+
 it('discards partial revision items after failure and keeps the previously reviewed plan usable', async () => {
     ready()
     const wrapper = mount(ResourceOperationPreviewModal)
@@ -1122,6 +1182,7 @@ it('discards partial revision items after failure and keeps the previously revie
             .find((button) => button.text() === '＋')!
             .trigger('click')
         progress({
+            kind: 'node',
             planId: 'plan',
             revision: 2,
             node: node('partial', 'install'),
@@ -1485,6 +1546,7 @@ it('locks preparation controls except Cancel and cancels an obsolete session wit
         await flushPromises()
         resolveOld({ ...plan(9), actions: [] })
         oldProgress?.({
+            kind: 'node',
             planId: 'old',
             revision: 9,
             node: node('obsolete-progress', 'install'),

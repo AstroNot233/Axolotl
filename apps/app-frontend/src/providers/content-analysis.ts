@@ -26,6 +26,22 @@ export type ContentAnalysisReview = {
     ) => Promise<ResourceOperationPlan>
 }
 
+/**
+ * Keeps what a review opened later needs to catch up: the nodes still shown
+ * and the latest phase or round, which goes last so it replays last.
+ */
+function remember(
+    progress: Map<string, ResourceOperationProgress>,
+    value: ResourceOperationProgress,
+) {
+    if (value.kind === 'node') progress.set(`node:${value.node.id}`, value)
+    else if (value.kind === 'nodeRemoved') progress.delete(`node:${value.nodeId}`)
+    else {
+        progress.delete('status')
+        progress.set('status', value)
+    }
+}
+
 const selectionKey = (input: ContentAnalysisInput) =>
     JSON.stringify([input.instanceId, input.selections, input.installDependencies])
 
@@ -95,8 +111,9 @@ export function createContentAnalysis() {
                 input.installDependencies,
                 controller.signal,
                 (value) => {
-                    if (controller.signal.aborted) return
-                    progress.set(value.node.id, value)
+                    if (controller.signal.aborted || value.selectionRevision !== selectionRevision)
+                        return
+                    remember(progress, value)
                     for (const listener of listeners) listener(value)
                 },
             )

@@ -21,6 +21,7 @@ import {
     type ResourceDependencyNode,
     resourceGet,
     type ResourceOperationIntent,
+    type ResourceOperationPhase,
     type ResourceOperationPlan,
     type ResourceOperationProgress,
     type ResourcePlanDecision,
@@ -55,6 +56,30 @@ const messages = defineMessages({
     loading: {
         id: 'app.resources.operation.loading',
         defaultMessage: 'Resolving releases and dependencies…',
+    },
+    loadingCollectingConstraints: {
+        id: 'app.resources.operation.loading-collecting-constraints',
+        defaultMessage: 'Collecting the version requirements of installed content…',
+    },
+    loadingIdentifyingInstalled: {
+        id: 'app.resources.operation.loading-identifying-installed',
+        defaultMessage: 'Identifying installed content…',
+    },
+    loadingPrefetching: {
+        id: 'app.resources.operation.loading-prefetching',
+        defaultMessage: 'Fetching project details…',
+    },
+    loadingRefreshingContent: {
+        id: 'app.resources.operation.loading-refreshing-content',
+        defaultMessage: 'Checking installed files…',
+    },
+    loadingReresolving: {
+        id: 'app.resources.operation.loading-reresolving',
+        defaultMessage: 'Resolving dependencies again to settle version conflicts…',
+    },
+    loadingValidating: {
+        id: 'app.resources.operation.loading-validating',
+        defaultMessage: 'Checking that the files can be written…',
     },
     artifact: {
         id: 'app.resources.operation.artifact',
@@ -285,8 +310,28 @@ type OperationInput = {
 const modal = ref<InstanceType<typeof NewModal> | null>(null)
 const plan = ref<ResourceOperationPlan | null>(null)
 const progressNodes = shallowRef(new Map<string, ResourceDependencyNode>())
+/** Shown plan nodes the running analysis retracted; hidden until its plan arrives. */
+const removedNodes = shallowRef(new Set<string>())
+/** What the running analysis reports doing; null while it resolves nodes. */
+const progressPhase = ref<ResourceOperationPhase | null>(null)
+const progressRound = ref(0)
+const phaseMessages = {
+    collectingConstraints: messages.loadingCollectingConstraints,
+    identifyingInstalled: messages.loadingIdentifyingInstalled,
+    prefetching: messages.loadingPrefetching,
+    refreshingContent: messages.loadingRefreshingContent,
+    validating: messages.loadingValidating,
+} satisfies Record<ResourceOperationPhase, unknown>
+const progressMessage = computed(() =>
+    progressPhase.value
+        ? phaseMessages[progressPhase.value]
+        : progressRound.value > 0
+          ? messages.loadingReresolving
+          : messages.loading,
+)
 const displayedNodes = computed(() => {
     const nodes = new Map((plan.value?.nodes ?? []).map((node) => [node.id, node]))
+    for (const id of removedNodes.value) nodes.delete(id)
     for (const [id, node] of progressNodes.value) nodes.set(id, node)
     return [...nodes.values()]
 })
@@ -718,7 +763,7 @@ async function run(
     controller = new AbortController()
     const signal = controller.signal
     busy.value = true
-    progressNodes.value = new Map()
+    clearProgress()
     error.value = null
     errorSummary.value = null
     retryAction = () => run(action, ignoreDependencies)
@@ -726,15 +771,7 @@ async function run(
     try {
         const value = await action(signal, (progress) => {
             if (!acceptingProgress || current !== generation || signal.aborted) return
-            progressNodes.value.set(progress.node.id, progress.node)
-            triggerRef(progressNodes)
-            if (progress.metadata)
-                names.value[progress.node.id] = {
-                    title: progress.metadata.title,
-                    iconUrl: progress.metadata.iconUrl,
-                    summary:
-                        progress.node.state === 'satisfied' ? undefined : progress.metadata.summary,
-                }
+            applyProgress(progress)
         })
         if (current !== generation || signal.aborted) return
         plan.value = value
@@ -747,7 +784,43 @@ async function run(
         acceptingProgress = false
         if (current === generation && !signal.aborted) {
             busy.value = false
-            progressNodes.value = new Map()
+            clearProgress()
+        }
+    }
+}
+function clearProgress() {
+    progressNodes.value = new Map()
+    removedNodes.value = new Set()
+    progressPhase.value = null
+    progressRound.value = 0
+}
+function applyProgress(progress: ResourceOperationProgress) {
+    switch (progress.kind) {
+        case 'phase':
+            progressPhase.value = progress.phase
+            return
+        case 'roundStarted':
+            progressPhase.value = null
+            progressRound.value = progress.round
+            return
+        case 'nodeRemoved':
+            progressNodes.value.delete(progress.nodeId)
+            triggerRef(progressNodes)
+            removedNodes.value.add(progress.nodeId)
+            triggerRef(removedNodes)
+            return
+        case 'node': {
+            const { node, metadata } = progress
+            progressPhase.value = null
+            if (removedNodes.value.delete(node.id)) triggerRef(removedNodes)
+            progressNodes.value.set(node.id, node)
+            triggerRef(progressNodes)
+            if (metadata)
+                names.value[node.id] = {
+                    title: metadata.title,
+                    iconUrl: metadata.iconUrl,
+                    summary: node.state === 'satisfied' ? undefined : metadata.summary,
+                }
         }
     }
 }
@@ -1342,7 +1415,9 @@ defineExpose({ show, showInstall, showInstallSelection, cancel })
                 role="status"
                 data-operation-skeleton
             >
-                <span class="sr-only">{{ formatMessage(messages.loading) }}</span>
+                <p class="m-0 text-sm text-[var(--color-text-tertiary)]" data-operation-phase>
+                    {{ formatMessage(progressMessage) }}
+                </p>
                 <div
                     class="flex flex-col gap-2 rounded-lg border border-surface-4 bg-surface-2 p-3"
                     aria-hidden="true"

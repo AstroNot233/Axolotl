@@ -41,6 +41,40 @@ const tick = async () => {
     await Promise.resolve()
 }
 
+it('replays only the nodes still shown and the latest stage, and ignores an older selection', async () => {
+    vi.clearAllMocks()
+    let report!: (value: ResourceOperationProgress) => void
+    vi.mocked(resourceAnalysisUpdate).mockImplementationOnce((...args) => {
+        report = args[5]
+        return new Promise(() => {})
+    })
+    const cart = createContentAnalysis()
+    cart.update(input())
+    await tick()
+    const send = (value: object) =>
+        report({ selectionRevision: 1, ...value } as ResourceOperationProgress)
+    send({ kind: 'phase', phase: 'refreshingContent' })
+    send({ kind: 'node', node: { id: 'kept' } })
+    send({ kind: 'node', node: { id: 'removed' } })
+    send({ kind: 'nodeRemoved', nodeId: 'removed' })
+    send({ kind: 'phase', phase: 'prefetching' })
+    send({ kind: 'node', selectionRevision: 0, node: { id: 'older' } })
+    const onProgress = vi.fn()
+    const prepared = cart.review()!.prepare(new AbortController().signal, onProgress)
+    await tick()
+    expect(
+        onProgress.mock.calls.map(([value]: [ResourceOperationProgress]) =>
+            value.kind === 'node'
+                ? value.node.id
+                : value.kind === 'phase'
+                  ? value.phase
+                  : value.kind,
+        ),
+    ).toEqual(['kept', 'prefetching'])
+    cart.clear()
+    await expect(prepared).rejects.toMatchObject({ name: 'AbortError' })
+})
+
 it('starts on addition and review reuses the running analysis and its progress', async () => {
     vi.clearAllMocks()
     let finish!: (value: ResourceOperationPlan) => void
@@ -57,7 +91,11 @@ it('starts on addition and review reuses the running analysis and its progress',
     cart.update(value)
     await tick()
     expect(resourceAnalysisUpdate).toHaveBeenCalledTimes(1)
-    const progress = { node: { id: 'first' } } as ResourceOperationProgress
+    const progress = {
+        kind: 'node',
+        selectionRevision: 1,
+        node: { id: 'first' },
+    } as ResourceOperationProgress
     report(progress)
     const onProgress = vi.fn()
     const prepared = cart.review()!.prepare(new AbortController().signal, onProgress)

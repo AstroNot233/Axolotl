@@ -9482,6 +9482,24 @@
   "app.resources.operation.loading": {
     "message": "Resolving releases and dependencies…"
   },
+  "app.resources.operation.loading-collecting-constraints": {
+    "message": "Collecting the version requirements of installed content…"
+  },
+  "app.resources.operation.loading-identifying-installed": {
+    "message": "Identifying installed content…"
+  },
+  "app.resources.operation.loading-prefetching": {
+    "message": "Fetching project details…"
+  },
+  "app.resources.operation.loading-refreshing-content": {
+    "message": "Checking installed files…"
+  },
+  "app.resources.operation.loading-reresolving": {
+    "message": "Resolving dependencies again to settle version conflicts…"
+  },
+  "app.resources.operation.loading-validating": {
+    "message": "Checking that the files can be written…"
+  },
   "app.resources.operation.manual-download-summary": {
     "message": "This file requires a manual download."
   },
