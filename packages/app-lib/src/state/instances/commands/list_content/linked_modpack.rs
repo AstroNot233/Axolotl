@@ -702,12 +702,12 @@ pub(super) fn check_modpack_update(
 
 #[derive(Clone, Debug)]
 pub(super) struct ModpackIdentifiers {
-    hashes: HashSet<String>,
-    project_ids: HashSet<String>,
+    pub(super) hashes: HashSet<String>,
+    pub(super) project_ids: HashSet<String>,
 }
 
 impl ModpackIdentifiers {
-    fn is_modpack_file(
+    pub(super) fn is_modpack_file(
         &self,
         hash: &str,
         file: Option<&crate::state::ModrinthHashMatch>,

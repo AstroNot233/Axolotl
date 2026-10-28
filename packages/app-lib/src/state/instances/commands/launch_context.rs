@@ -36,7 +36,7 @@ pub(crate) async fn replace_instance_loader_components(
     content_sets::set_applied_loader_in_transaction(
         instance_id,
         loader,
-        loader_version,
+        loader_version.as_deref(),
         Utc::now().timestamp(),
         &mut tx,
     )

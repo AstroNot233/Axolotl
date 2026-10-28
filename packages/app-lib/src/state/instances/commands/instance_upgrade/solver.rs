@@ -3,15 +3,15 @@
 use super::*;
 
 pub(super) struct SolveOutcome {
-    solutions: Vec<SolverResult>,
-    issues: Vec<InstanceUpgradeIssue>,
-    canceled: bool,
+    pub(super) solutions: Vec<SolverResult>,
+    pub(super) issues: Vec<InstanceUpgradeIssue>,
+    pub(super) canceled: bool,
     #[cfg(test)]
-    visited_states: usize,
+    pub(super) visited_states: usize,
 }
 
 impl SolveOutcome {
-    fn canceled() -> Self {
+    pub(super) fn canceled() -> Self {
         Self {
             solutions: Vec::new(),
             issues: Vec::new(),
@@ -30,22 +30,22 @@ pub(super) enum SolveStrategy {
 
 #[derive(Clone, Debug)]
 pub(super) struct RootCandidateOptions {
-    content_id: String,
-    key: NodeKey,
-    current_release_id: String,
-    fixed: bool,
-    exploration_limited: bool,
-    candidates: Vec<Option<UpgradeCandidate>>,
+    pub(super) content_id: String,
+    pub(super) key: NodeKey,
+    pub(super) current_release_id: String,
+    pub(super) fixed: bool,
+    pub(super) exploration_limited: bool,
+    pub(super) candidates: Vec<Option<UpgradeCandidate>>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct FixedRootConstraints {
-    by_content_id: HashMap<String, (NodeKey, String)>,
-    versions_by_project: HashMap<NodeKey, HashSet<String>>,
+    pub(super) by_content_id: HashMap<String, (NodeKey, String)>,
+    pub(super) versions_by_project: HashMap<NodeKey, HashSet<String>>,
 }
 
 impl FixedRootConstraints {
-    fn from_constraints(
+    pub(super) fn from_constraints(
         constraints: &[InstanceUpgradeFixedConstraint],
     ) -> Self {
         let mut fixed = Self::default();
@@ -65,7 +65,7 @@ impl FixedRootConstraints {
     }
 
     #[cfg(test)]
-    fn from_project_versions(
+    pub(super) fn from_project_versions(
         roots: &[RootRequest],
         versions: &HashMap<NodeKey, String>,
     ) -> Self {
@@ -85,41 +85,47 @@ impl FixedRootConstraints {
         Self::from_constraints(&constraints)
     }
 
-    fn version_for_root<'a>(&'a self, root: &RootRequest) -> Option<&'a str> {
+    pub(super) fn version_for_root<'a>(
+        &'a self,
+        root: &RootRequest,
+    ) -> Option<&'a str> {
         self.by_content_id
             .get(&root.content_id)
             .filter(|(key, _)| key == &root.key)
             .map(|(_, version_id)| version_id.as_str())
     }
 
-    fn is_fixed_root(&self, root: &RootRequest) -> bool {
+    pub(super) fn is_fixed_root(&self, root: &RootRequest) -> bool {
         self.version_for_root(root).is_some()
     }
 
-    fn contains_content(&self, content_id: &str) -> bool {
+    pub(super) fn contains_content(&self, content_id: &str) -> bool {
         self.by_content_id.contains_key(content_id)
     }
 
-    fn versions_for_project(&self, key: &NodeKey) -> Option<&HashSet<String>> {
+    pub(super) fn versions_for_project(
+        &self,
+        key: &NodeKey,
+    ) -> Option<&HashSet<String>> {
         self.versions_by_project.get(key)
     }
 
-    fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.by_content_id.is_empty()
     }
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct ConflictSet {
-    involved_root_content_ids: HashSet<String>,
-    involved_parent_projects: HashSet<NodeKey>,
-    dependency_project: Option<NodeKey>,
-    reason: InstanceUpgradeIssueCode,
-    candidate_limit_roots: HashSet<String>,
+    pub(super) involved_root_content_ids: HashSet<String>,
+    pub(super) involved_parent_projects: HashSet<NodeKey>,
+    pub(super) dependency_project: Option<NodeKey>,
+    pub(super) reason: InstanceUpgradeIssueCode,
+    pub(super) candidate_limit_roots: HashSet<String>,
 }
 
 impl ConflictSet {
-    fn can_branch_root(&self, root: &RootCandidateOptions) -> bool {
+    pub(super) fn can_branch_root(&self, root: &RootCandidateOptions) -> bool {
         let relevant_reason = matches!(
             self.reason,
             InstanceUpgradeIssueCode::DependencyConflict
@@ -137,29 +143,29 @@ impl ConflictSet {
                 || self.involved_parent_projects.contains(&root.key))
     }
 
-    fn same_scope(&self, other: &Self) -> bool {
+    pub(super) fn same_scope(&self, other: &Self) -> bool {
         self.involved_root_content_ids == other.involved_root_content_ids
             && self.involved_parent_projects == other.involved_parent_projects
             && self.dependency_project == other.dependency_project
             && self.reason == other.reason
     }
 
-    fn merge_candidate_limit_evidence(&mut self, other: &Self) {
+    pub(super) fn merge_candidate_limit_evidence(&mut self, other: &Self) {
         if self.same_scope(other) {
             self.candidate_limit_roots
                 .extend(other.candidate_limit_roots.iter().cloned());
         }
     }
 
-    fn candidate_search_incomplete(&self) -> bool {
+    pub(super) fn candidate_search_incomplete(&self) -> bool {
         !self.candidate_limit_roots.is_empty()
     }
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct ConflictFailure {
-    issue: InstanceUpgradeIssue,
-    conflict: ConflictSet,
+    pub(super) issue: InstanceUpgradeIssue,
+    pub(super) conflict: ConflictSet,
 }
 
 pub(super) fn retain_best_failure(
@@ -186,18 +192,18 @@ pub(super) fn retain_best_failure(
 }
 
 pub(super) struct StrategySolveOutcome {
-    solution: Option<SolverResult>,
-    issue: Option<InstanceUpgradeIssue>,
-    canceled: bool,
+    pub(super) solution: Option<SolverResult>,
+    pub(super) issue: Option<InstanceUpgradeIssue>,
+    pub(super) canceled: bool,
     #[cfg(test)]
-    visited_states: usize,
+    pub(super) visited_states: usize,
 }
 
 #[derive(Eq, PartialEq)]
 pub(super) struct FrontierState {
-    selected: Vec<usize>,
-    primary_score: i64,
-    freshness_score: i64,
+    pub(super) selected: Vec<usize>,
+    pub(super) primary_score: i64,
+    pub(super) freshness_score: i64,
 }
 
 impl Ord for FrontierState {

@@ -382,6 +382,8 @@ pub(crate) async fn set_applied_protocol_version_in_transaction(
     modified: i64,
     tx: &mut Transaction<'_, Sqlite>,
 ) -> crate::Result<()> {
+    let protocol_version = protocol_version.map(i64::from);
+
     sqlx::query!(
         "
         UPDATE instance_content_sets
@@ -392,7 +394,7 @@ pub(crate) async fn set_applied_protocol_version_in_transaction(
             WHERE id = ?
         )
         ",
-        protocol_version.map(i64::from),
+        protocol_version,
         modified,
         instance_id,
     )

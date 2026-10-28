@@ -1929,13 +1929,15 @@ pub(crate) async fn set_install_stage(
     modified: i64,
     pool: &SqlitePool,
 ) -> crate::Result<()> {
+    let install_stage = install_stage.as_str();
+
     sqlx::query!(
         "
         UPDATE instances
         SET install_stage = ?, modified = ?
         WHERE id = ?
         ",
-        install_stage.as_str(),
+        install_stage,
         modified,
         instance_id,
     )
@@ -1952,13 +1954,15 @@ pub(crate) async fn set_last_played(
     modified: i64,
     pool: &SqlitePool,
 ) -> crate::Result<()> {
+    let last_played = last_played.timestamp();
+
     sqlx::query!(
         "
         UPDATE instances
         SET last_played = ?, modified = ?
         WHERE id = ?
         ",
-        last_played.timestamp(),
+        last_played,
         modified,
         instance_id,
     )

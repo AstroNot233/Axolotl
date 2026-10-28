@@ -772,11 +772,11 @@ pub(super) fn rollback_for_content_file(
 }
 
 pub(super) struct ResolvedMetadata {
-    projects: Vec<Project>,
-    versions: Vec<Version>,
-    versions_v3: Vec<VersionV3>,
-    teams: Vec<Vec<TeamMember>>,
-    organizations: Vec<Organization>,
+    pub(super) projects: Vec<Project>,
+    pub(super) versions: Vec<Version>,
+    pub(super) versions_v3: Vec<VersionV3>,
+    pub(super) teams: Vec<Vec<TeamMember>>,
+    pub(super) organizations: Vec<Organization>,
 }
 
 pub(super) async fn resolve_metadata(

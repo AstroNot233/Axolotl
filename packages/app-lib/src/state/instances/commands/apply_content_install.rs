@@ -3919,7 +3919,7 @@ async fn rollback_project_inner(
         &scope.content_set_id,
         &scope.instance.id,
         &final_relative_path,
-        &mut tx,
+        &mut *tx,
     )
     .await?;
     if let Some(entry_id) = entry_id {

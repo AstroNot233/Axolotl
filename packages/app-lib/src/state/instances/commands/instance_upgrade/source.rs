@@ -4,30 +4,30 @@ use super::*;
 
 #[derive(Clone)]
 pub(crate) struct ReadOnlyUpgradeSource {
-    snapshot: InstanceContentSnapshot,
-    source_files: Vec<InstanceUpgradeSourceFile>,
-    instance_path: String,
-    game_dir: std::path::PathBuf,
-    file_states: Vec<UpgradeSourceFileState>,
-    catalog: Option<UpgradeCatalog>,
+    pub(super) snapshot: InstanceContentSnapshot,
+    pub(super) source_files: Vec<InstanceUpgradeSourceFile>,
+    pub(super) instance_path: String,
+    pub(super) game_dir: std::path::PathBuf,
+    pub(super) file_states: Vec<UpgradeSourceFileState>,
+    pub(super) catalog: Option<UpgradeCatalog>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct UpgradeSourceFileState {
-    relative_path: String,
-    size: u64,
-    enabled: bool,
-    modified: Option<SystemTime>,
+    pub(super) relative_path: String,
+    pub(super) size: u64,
+    pub(super) enabled: bool,
+    pub(super) modified: Option<SystemTime>,
 }
 
 pub(crate) struct UpgradePlanRuntimeValidation {
-    source: ReadOnlyUpgradeSource,
-    watcher_epoch: Option<u64>,
-    validated_generation: Option<u64>,
+    pub(super) source: ReadOnlyUpgradeSource,
+    pub(super) watcher_epoch: Option<u64>,
+    pub(super) validated_generation: Option<u64>,
     #[cfg(test)]
-    full_hash_validations: usize,
+    pub(super) full_hash_validations: usize,
     #[cfg(test)]
-    incremental_hashes: usize,
+    pub(super) incremental_hashes: usize,
 }
 
 pub(super) async fn read_only_upgrade_source(
@@ -316,7 +316,7 @@ impl UpgradePlanRuntimeValidation {
         self.authoritative_validate(plan, state, observer).await
     }
 
-    async fn incremental_validate(
+    pub(super) async fn incremental_validate(
         &mut self,
         plan: &InstanceUpgradePlan,
         watch: Option<
@@ -394,7 +394,7 @@ impl UpgradePlanRuntimeValidation {
         Ok(())
     }
 
-    async fn authoritative_validate(
+    pub(super) async fn authoritative_validate(
         &mut self,
         plan: &InstanceUpgradePlan,
         state: &State,

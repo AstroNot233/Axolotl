@@ -3,7 +3,7 @@
 use super::values::{timestamp, unsigned};
 use crate::state::instances::InstanceFile;
 use chrono::Utc;
-use sqlx::{Executor, Sqlite, SqlitePool, Transaction};
+use sqlx::{Executor, Row, Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
 
 #[derive(Debug, sqlx::FromRow)]
