@@ -8,7 +8,7 @@ use crate::state::instances::commands::{
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::state::instances::adapters::sqlite::content_sets;
+use crate::state::instances::adapters::sqlite::{content_sets, files};
 
 async fn fixture() -> (tempfile::TempDir, Arc<State>, PathBuf, Vec<String>) {
     let temp = tempfile::tempdir().unwrap();

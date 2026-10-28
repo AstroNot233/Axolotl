@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::state::instances::adapters::sqlite::{content_sets, pack_members};
+use crate::state::instances::adapters::sqlite::content_sets;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct EditInstance {
