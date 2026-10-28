@@ -144,6 +144,8 @@ const tailRecent = computed(() => recent.value.slice(1))
 const drag = ref<{
     from: number
     to: number
+    /** The pointer that started the drag; every other pointer is ignored. */
+    pointerId: number
     pointer: { x: number; y: number }
     offset: { x: number; y: number }
     width: number
@@ -325,6 +327,8 @@ function handleShortcut(event: KeyboardEvent) {
  */
 function startDrag(displayIndex: number, event: PointerEvent) {
     if (!design.value || design.value.layers.length < 2) return
+    // A second finger must not take over a drag that is already running.
+    if (drag.value) return
     event.preventDefault()
     // Settle any running move animation first: the pointer offset must come from
     // the resting position of the card, not from a frame halfway through a slide.
@@ -335,6 +339,7 @@ function startDrag(displayIndex: number, event: PointerEvent) {
     drag.value = {
         from: displayIndex,
         to: displayIndex,
+        pointerId: event.pointerId,
         pointer: { x: event.clientX, y: event.clientY },
         offset: { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
         width: bounds.width,
@@ -362,6 +367,7 @@ function computeTarget(event: PointerEvent): number {
 }
 
 function trackPointer(event: PointerEvent) {
+    if (event.pointerId !== drag.value?.pointerId) return
     updateTarget(event)
 }
 
@@ -391,6 +397,7 @@ function resetDrag() {
 function endDrag(event?: PointerEvent) {
     const state = drag.value
     if (!state) return
+    if (event && event.pointerId !== state.pointerId) return
     const snapshot = state.from !== state.to ? captureLayout() : null
     resetDrag()
     if (state.from === state.to) return
@@ -403,9 +410,10 @@ function endDrag(event?: PointerEvent) {
  * gesture never completed: the list goes back to the order it started in
  * instead of applying the slot the pointer happened to be over.
  */
-function cancelDrag() {
+function cancelDrag(event?: PointerEvent) {
     const state = drag.value
     if (!state) return
+    if (event && event.pointerId !== state.pointerId) return
     const snapshot = state.from !== state.to ? captureLayout() : null
     resetDrag()
     if (snapshot) void nextTick(() => playLayout(snapshot))
