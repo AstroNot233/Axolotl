@@ -36,6 +36,9 @@ pub enum CachePolicy {
     /// Ignore positive, negative, and expired cache entries. A source error
     /// never becomes success by falling back to an old cached response.
     ForceRefresh,
+    /// Revalidate data from before this refresh round, reusing responses
+    /// already fetched during the round (including batched release aliases).
+    RefreshSince(i64),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -379,6 +382,8 @@ impl ResourceService {
                             .await
                             .map(|(value, fresh)| (Some(value), !fresh))
                             .unwrap_or((None, false))
+                    } else if let CachePolicy::RefreshSince(since) = policy {
+                        (self.cache.get_since(&cache_key, since).await, false)
                     } else if policy == CachePolicy::OnlyCached {
                         (self.cache.get_any(&cache_key).await, false)
                     } else {

@@ -27,6 +27,8 @@ export interface ContentPipelineConfig {
     modpackItems?: Ref<ContentItem[] | undefined>
     duplicateItems?: Ref<ContentItem[] | undefined>
     sortItems: (items: ContentItem[]) => ContentItem[]
+    /** An explicit sort/locale change starts a new order; enrichment keeps row positions. */
+    sortKey?: Ref<string> | ComputedRef<string>
     getItemId: (item: ContentItem) => string
     showTypeFilters?: boolean
     showUpdateFilter?: boolean
@@ -140,18 +142,40 @@ export function useContentPipeline(config: ContentPipelineConfig) {
         distance: 100,
     })
 
-    // ---- sorted items (computed because they only depend on items + sortMode) ----
+    function orderedItems(source: () => ContentItem[]) {
+        let previousKey: string | undefined
+        let order: string[] = []
+        return computed(() => {
+            const raw = source()
+            const key = config.sortKey?.value
+            if (key === undefined) return sortItems(raw)
+            const remaining = new Map(raw.map((item) => [getItemId(item), item]))
+            const next: ContentItem[] = []
+            if (key === previousKey) {
+                for (const id of order) {
+                    const item = remaining.get(id)
+                    if (!item) continue
+                    next.push(item)
+                    remaining.delete(id)
+                }
+            }
+            // Only new rows need sorting during enrichment. Always return the
+            // current row objects so updates and filters remain progressive.
+            if (remaining.size) next.push(...sortItems([...remaining.values()]))
+            previousKey = key
+            order = next.map(getItemId)
+            return next
+        })
+    }
 
-    const sortedItems = computed(() => sortItems(items.value))
+    const sortedItems = orderedItems(() => items.value)
 
-    const modpackItemsNoUpdate = computed(() => {
+    const modpackItemsNoUpdate = orderedItems(() => {
         const raw = modpackItems?.value ?? []
-        return sortItems(
-            raw.map((item) => ({
-                ...item,
-                update: null,
-            })),
-        )
+        return raw.map((item) => ({
+            ...item,
+            update: null,
+        }))
     })
 
     const filterValidationOptions = computed(() => {
@@ -373,7 +397,7 @@ export function useContentPipeline(config: ContentPipelineConfig) {
         [
             sortedItems,
             modpackItemsNoUpdate,
-            duplicateItems,
+            () => duplicateItems?.value,
             searchQuery,
             selectedTypeFilter,
             selectedStatusFilters,

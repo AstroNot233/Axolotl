@@ -355,6 +355,7 @@ impl RemoteProject {
     fn document(self) -> ResourceResult<ProjectDocument> {
         let protocol = Some(protocol_projection(serde_json::to_value(&self)?));
         Ok(ProjectDocument {
+            owner: None,
             protocol,
             metadata: SourceProjectMetadata {
                 environments: vec![],

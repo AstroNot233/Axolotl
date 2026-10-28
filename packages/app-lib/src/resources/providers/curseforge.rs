@@ -39,7 +39,7 @@ impl CurseForgeProvider {
         }
     }
     async fn request(&self, request: ProtocolRequest) -> ResourceResult<Value> {
-        tracing::debug!(source = "curseforge", path = %request.path, "Requesting content source");
+        tracing::debug!(source = "curseforge", path = %request.path, item_count = request.item_count(), "Requesting content source");
         self.transport
             .request(&SourceId::curseforge(), request)
             .await
@@ -117,6 +117,14 @@ impl CurseForgeProvider {
                                         index["modLoader"].as_u64()
                                             == Some(loader)
                                     })
+                                    && (target.channels.is_empty() || index["releaseType"].as_u64().is_some_and(|channel| {
+                                        target.channels.iter().any(|allowed| channel == match allowed {
+                                            ReleaseChannel::Release => 1,
+                                            ReleaseChannel::Beta => 2,
+                                            ReleaseChannel::Alpha => 3,
+                                            ReleaseChannel::Unknown => 0,
+                                        })
+                                    }))
                             })
                             .filter_map(|index| {
                                 index["fileId"]
@@ -801,7 +809,16 @@ impl RemoteProject {
             Some(6945) => vec![ResourceType::DataPack],
             _ => vec![],
         };
+        let owner = self.authors.first().and_then(|author| {
+            Some(ProjectOwner {
+                id: author["id"].as_u64()?.to_string(),
+                name: author["name"].as_str()?.into(),
+                avatar_url: author["avatarUrl"].as_str().and_then(public_url),
+                organization: false,
+            })
+        });
         Ok(ProjectDocument {
+            owner,
             protocol,
             metadata: SourceProjectMetadata {
                 environments: vec![],

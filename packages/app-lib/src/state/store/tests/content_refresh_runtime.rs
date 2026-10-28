@@ -158,6 +158,15 @@ impl ResourceProvider for Provider {
                 }
                 ProviderQuery::Project { id, .. } => {
                     Ok(ProviderValue::Project(ProjectDocument {
+                        owner: Some(ProjectOwner {
+                            id: "author000".into(),
+                            name: "ExampleAuthor".into(),
+                            avatar_url: Some(
+                                "https://cdn.modrinth.com/avatars/author.png"
+                                    .into(),
+                            ),
+                            organization: false,
+                        }),
                         metadata: SourceProjectMetadata {
                             project: reference(id.as_str(), "old").project,
                             environments: vec![],
@@ -175,7 +184,7 @@ impl ResourceProvider for Provider {
                                 ResourceType::Shader,
                                 ResourceType::DataPack,
                             ],
-                            authors: vec![],
+                            authors: vec!["ExampleAuthor".into()],
                             license: None,
                             downloads: None,
                             followers: None,
@@ -891,6 +900,49 @@ async fn repeat_requests_join_and_force_remote_bypasses_recent_success_without_r
     finished(&state).await;
     let before = provider.queries.load(Ordering::SeqCst);
     let hashes = state.file_fingerprints.read_count.load(Ordering::SeqCst);
+    let records = content_snapshot::get(&state.data, "instance")
+        .await
+        .unwrap();
+    assert!(records.presentations.values().all(|presentation| {
+        presentation.content.owner.as_ref().is_some_and(|owner| {
+            owner.name == "ExampleAuthor"
+                && owner.id == "author000"
+                && owner.avatar_url.as_deref()
+                    == Some("https://cdn.modrinth.com/avatars/author.png")
+        })
+    }));
+    let mut aged = records;
+    for (_, check) in &mut aged.checks {
+        check.last_success.as_mut().unwrap().checked_at -=
+            REMOTE_CACHE_SECONDS - 60;
+    }
+    for presentation in aged.presentations.values_mut() {
+        presentation.saved_at -= REMOTE_CACHE_SECONDS - 60;
+    }
+    assert!(
+        entry::work(&aged, ["fast", "slow"].into_iter(), RefreshMode::Normal)
+            .is_empty()
+    );
+    assert_eq!(
+        entry::work(
+            &aged,
+            ["fast", "slow"].into_iter(),
+            RefreshMode::ForceRemote
+        )
+        .len(),
+        2
+    );
+    for (_, check) in &mut aged.checks {
+        check.last_success.as_mut().unwrap().checked_at -= 120;
+    }
+    for presentation in aged.presentations.values_mut() {
+        presentation.saved_at -= 120;
+    }
+    assert_eq!(
+        entry::work(&aged, ["fast", "slow"].into_iter(), RefreshMode::Normal)
+            .len(),
+        2
+    );
     state
         .content_refresh
         .start(state.clone(), "instance".into(), RefreshMode::Normal)
@@ -1213,12 +1265,12 @@ async fn pack_failures_survive_reload_and_retry_preserves_success_until_recovere
     assert!(!pack_needs_refresh(
         Some(&restored),
         RefreshMode::Normal,
-        111
+        110 + REMOTE_CACHE_SECONDS - 1
     ));
     assert!(pack_needs_refresh(
         Some(&restored),
         RefreshMode::Normal,
-        140
+        110 + REMOTE_CACHE_SECONDS
     ));
     let recovered =
         pack_attempt(Some(restored), location, link, 120, &Ok(None));

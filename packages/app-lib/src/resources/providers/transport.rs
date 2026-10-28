@@ -14,6 +14,30 @@ pub struct ProtocolRequest {
 }
 
 impl ProtocolRequest {
+    pub(crate) fn item_count(&self) -> usize {
+        if let Some(count) = self.body.as_ref().and_then(|body| {
+            ["hashes", "modIds", "fileIds", "fingerprints"]
+                .iter()
+                .find_map(|key| {
+                    body.get(key).and_then(Value::as_array).map(Vec::len)
+                })
+        }) {
+            return count;
+        }
+        self.query
+            .iter()
+            .find_map(|(key, value)| {
+                (key == "ids")
+                    .then(|| {
+                        serde_json::from_str::<Vec<Value>>(value)
+                            .ok()
+                            .map(|ids| ids.len())
+                    })
+                    .flatten()
+            })
+            .unwrap_or(1)
+    }
+
     pub fn get(path: impl Into<String>) -> Self {
         Self {
             method: Method::GET,
@@ -143,6 +167,35 @@ impl ProtocolTransport for LauncherTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_counts_describe_actual_batch_payloads() {
+        let mut teams = ProtocolRequest::get("/teams");
+        teams
+            .query
+            .push(("ids".into(), "[\"team1\",\"team2\"]".into()));
+        assert_eq!(teams.item_count(), 2);
+        assert_eq!(
+            ProtocolRequest::post(
+                "/version_files/update",
+                serde_json::json!({"hashes":["a","b","c"]})
+            )
+            .item_count(),
+            3
+        );
+        assert_eq!(
+            ProtocolRequest::post(
+                "/v1/mods/files",
+                serde_json::json!({"fileIds":[1,2]})
+            )
+            .item_count(),
+            2
+        );
+        assert_eq!(
+            ProtocolRequest::get("/project/example/version").item_count(),
+            1
+        );
+    }
 
     #[tokio::test]
     async fn concurrent_requests_share_a_paced_start_budget() {

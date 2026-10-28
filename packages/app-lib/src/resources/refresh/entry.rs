@@ -113,13 +113,28 @@ pub(super) fn work<'a>(
                 due(previous.as_ref(), now, mode)
             };
             let presentation_due = mode == RefreshMode::ForceRemote
-                || records.presentations.get(&file.id).is_none_or(|record| {
-                    record.location_key != context.location_key
-                        || record.content.id != context.sha1
-                        || record.content.project.is_none()
-                        || record.content.version.is_none()
-                        || now.saturating_sub(record.saved_at) >= 300
-                });
+                || (check_due && mode == RefreshMode::RetryFailed)
+                || records.presentations.get(&file.id).map_or_else(
+                    || {
+                        previous.as_ref().is_none_or(|check| {
+                            check.attempt == CheckAttempt::Succeeded
+                                || now.saturating_sub(check.attempted_at)
+                                    >= REMOTE_CACHE_SECONDS
+                        })
+                    },
+                    |record| {
+                        record.location_key != context.location_key
+                            || record.content.id != context.sha1
+                            || (now.saturating_sub(record.saved_at)
+                                >= REMOTE_CACHE_SECONDS
+                                && previous.as_ref().is_none_or(|check| {
+                                    check.attempt != CheckAttempt::Failed
+                                        || now
+                                            .saturating_sub(check.attempted_at)
+                                            >= REMOTE_CACHE_SECONDS
+                                }))
+                    },
+                );
             if !check_due && !presentation_due {
                 return None;
             }
@@ -230,10 +245,12 @@ fn due(
     match previous {
         Some(check) if check.attempt == CheckAttempt::Succeeded => {
             check.last_success.as_ref().is_none_or(|success| {
-                now.saturating_sub(success.checked_at) >= 300
+                now.saturating_sub(success.checked_at) >= REMOTE_CACHE_SECONDS
             })
         }
-        Some(check) => now.saturating_sub(check.attempted_at) >= 30,
+        Some(check) => {
+            now.saturating_sub(check.attempted_at) >= REMOTE_CACHE_SECONDS
+        }
         None => true,
     }
 }
@@ -242,7 +259,7 @@ pub(super) async fn run(
     state: &crate::State,
     service: Arc<ResourceService>,
     mut work: EntryWork,
-    mode: RefreshMode,
+    policy: CachePolicy,
     cancel: &CancellationToken,
     tx: mpsc::Sender<RefreshWrite>,
 ) -> ResourceResult<()> {
@@ -262,11 +279,6 @@ pub(super) async fn run(
         &instance,
     )?;
     work.context.content_root = root.to_string_lossy().into_owned();
-    let policy = if mode != RefreshMode::Normal {
-        CachePolicy::ForceRefresh
-    } else {
-        CachePolicy::UseFresh
-    };
     let mut artifact_write = None;
     if work.entry.artifact.is_none() {
         let recognition =
@@ -332,15 +344,15 @@ pub(super) async fn run(
             return Ok(());
         }
         let project = async {
-            let project = service
+            let document = service
                 .project_document_with_policy(
                     &reference.release.project,
                     None,
                     cancel,
                     policy,
                 )
-                .await?
-                .metadata;
+                .await?;
+            let project = document.metadata;
             let mut content = work.content.clone();
             content.project = Some(crate::state::ContentItemProject {
                 id: project.project.project_id.as_str().into(),
@@ -349,6 +361,34 @@ pub(super) async fn run(
                 icon_url: project.icon_url,
                 license: None,
             });
+            content.owner = document
+                .owner
+                .map(|owner| crate::state::ContentItemOwner {
+                    id: owner.id,
+                    name: owner.name,
+                    avatar_url: owner.avatar_url,
+                    owner_type: if owner.organization {
+                        crate::state::OwnerType::Organization
+                    } else {
+                        crate::state::OwnerType::User
+                    },
+                })
+                .or_else(|| {
+                    project.authors.first().map(|author| {
+                        crate::state::ContentItemOwner {
+                            id: if project.project.source
+                                == SourceId::modrinth()
+                            {
+                                author.clone()
+                            } else {
+                                format!("local:{author}")
+                            },
+                            name: author.clone(),
+                            avatar_url: None,
+                            owner_type: crate::state::OwnerType::User,
+                        }
+                    })
+                });
             content.external = false;
             send(
                 &tx,
@@ -683,18 +723,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn successful_and_failed_checks_have_separate_expiries() {
+    fn automatic_checks_reuse_a_day_and_explicit_refresh_bypasses_it() {
         let mut check: RefreshCheckRecord = serde_json::from_value(serde_json::json!({
             "file_id": "file", "context": { "location_key": "location", "content_root": "root", "sha1": "a".repeat(40), "size": 1, "current_release": null,
                 "target": { "gameVersions": ["1.21"], "loaders": ["fabric"], "channels": [] }, "preferred_source": "modrinth" },
             "last_success": null, "attempted_at": 100, "attempt": "unrecognized", "error": null
         })).unwrap();
         check.succeeded(100, None);
-        assert!(!due(Some(&check), 399, RefreshMode::Normal));
-        assert!(due(Some(&check), 400, RefreshMode::Normal));
+        assert!(!due(
+            Some(&check),
+            100 + REMOTE_CACHE_SECONDS - 1,
+            RefreshMode::Normal
+        ));
+        assert!(due(
+            Some(&check),
+            100 + REMOTE_CACHE_SECONDS,
+            RefreshMode::Normal
+        ));
         check.failed(200, "offline".into());
-        assert!(!due(Some(&check), 229, RefreshMode::Normal));
-        assert!(due(Some(&check), 230, RefreshMode::Normal));
+        assert!(!due(
+            Some(&check),
+            200 + REMOTE_CACHE_SECONDS - 1,
+            RefreshMode::Normal
+        ));
+        assert!(due(
+            Some(&check),
+            200 + REMOTE_CACHE_SECONDS,
+            RefreshMode::Normal
+        ));
         assert!(due(Some(&check), 200, RefreshMode::ForceRemote));
+        assert!(due(Some(&check), 200, RefreshMode::RetryFailed));
     }
 }

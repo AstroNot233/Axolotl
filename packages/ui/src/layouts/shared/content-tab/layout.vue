@@ -225,6 +225,12 @@ const sortMode = ref<ContentSortMode>(
             ? (sortMemory.get(ctx.instanceId) ?? 'project-name-asc')
             : 'project-name-asc'),
 )
+const sortRevision = ref(0)
+
+function selectSort(mode: ContentSortMode) {
+    sortMode.value = mode
+    sortRevision.value += 1
+}
 
 watch(sortMode, (val) => {
     if (ctx.instanceId) sortMemory.set(ctx.instanceId, val)
@@ -278,6 +284,7 @@ const {
     modpackItems: ctx.modpackItems,
     duplicateItems: ctx.duplicateItems,
     sortItems,
+    sortKey: computed(() => JSON.stringify([sortMode.value, locale.value, sortRevision.value])),
     getItemId,
     showTypeFilters: true,
     showUpdateFilter: ctx.hasUpdateSupport,
@@ -412,7 +419,7 @@ function togglePinnedView() {
 }
 
 function resetView() {
-    sortMode.value = 'project-name-asc'
+    selectSort('project-name-asc')
     searchQuery.value = ''
     selectedTypeFilter.value = []
     selectedStatusFilters.value = []
@@ -1244,7 +1251,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
                                 formatMessage(messages.updateAll)
                             "
                             :is-bulk-operating="isBulkOperating"
-                            @select-sort="(mode) => (sortMode = mode)"
+                            @select-sort="selectSort"
                             @toggle-pin="togglePinnedView"
                             @reset-view="resetView"
                             @update-all="promptUpdateAll"

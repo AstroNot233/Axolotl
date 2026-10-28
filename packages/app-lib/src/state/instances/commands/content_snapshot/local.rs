@@ -146,7 +146,15 @@ pub(crate) fn project(records: SnapshotRecords) -> InstanceContentSnapshot {
                     date_published: None,
                 })
             }),
-            owner: None,
+            owner: local_mod
+                .as_ref()
+                .and_then(|metadata| metadata.authors.first())
+                .map(|author| crate::state::ContentItemOwner {
+                    id: format!("local:{author}"),
+                    name: author.clone(),
+                    avatar_url: None,
+                    owner_type: crate::state::OwnerType::User,
+                }),
             update: None,
             date_added: Some(file.modified_at.to_rfc3339()),
             provider_refs,
@@ -167,7 +175,7 @@ pub(crate) fn project(records: SnapshotRecords) -> InstanceContentSnapshot {
                 record.content.project.clone().or(content.project);
             content.version =
                 record.content.version.clone().or(content.version);
-            content.owner = record.content.owner.clone();
+            content.owner = record.content.owner.clone().or(content.owner);
             content.environment = record.content.environment.clone();
             content.loader = record.content.loader.clone().or(content.loader);
             content.external = record.content.external;
@@ -321,6 +329,7 @@ pub(crate) fn project(records: SnapshotRecords) -> InstanceContentSnapshot {
                 == PackMemberMaterializationState::Present;
         if let Some(error) = &check.error {
             warnings.push(InstanceContentWarning {
+                entry_id: item.entry_id.clone(),
                 code: "resource_update_unavailable".into(),
                 message: error.clone(),
                 provider: item.provider,

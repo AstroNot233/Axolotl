@@ -9,6 +9,7 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 import {
     get_content_snapshot,
     type InstanceContentSnapshot,
+    type InstanceContentSnapshotItem,
     type LinkedModpackInfo,
 } from '@/helpers/instance'
 import type { CacheBehaviour } from '@/helpers/types'
@@ -59,8 +60,11 @@ export async function loadInstanceContentData(
 export function normalizeInstanceContentSnapshot(
     path: string,
     snapshot: InstanceContentSnapshot,
+    itemCache?: WeakMap<InstanceContentSnapshotItem, ContentItem>,
 ): InstanceContentData {
     const normalizedItems: ContentItem[] = snapshot.items.map((item) => {
+        const cached = itemCache?.get(item)
+        if (cached) return cached
         const fileName = item.expectedRelativePath.split('/').pop() ?? item.expectedRelativePath
         const requiresManualDownload =
             item.ownershipKind === 'pack_managed' &&
@@ -148,7 +152,7 @@ export function normalizeInstanceContentSnapshot(
                 else providerRefs[index] = reference
             }
         }
-        return {
+        const normalized: ContentItem = {
             ...(item.content ?? fallbackContent),
             provider_refs: providerRefs,
             version:
@@ -182,6 +186,8 @@ export function normalizeInstanceContentSnapshot(
             pendingManualDownload: requiresManualDownload,
             dependency: item.dependency ?? null,
         }
+        itemCache?.set(item, normalized)
+        return normalized
     }) satisfies ContentItem[]
     const contentItems = normalizedItems.filter(
         (item) => item.instanceOwnershipKind !== 'pack_managed',

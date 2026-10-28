@@ -31,7 +31,12 @@ export type ContentRefreshPatch =
           sha1: string
           artifactRef?: ResourceArtifact['reference']
           presentation?: ContentItem
-          update?: { candidate: SourceReleaseRef | null; failed: boolean; unresolved: boolean }
+          update?: {
+              candidate: SourceReleaseRef | null
+              failed: boolean
+              unresolved: boolean
+              error?: string | null
+          }
       }
     | { kind: 'progress' }
 export type ContentRefreshEvent =
@@ -206,8 +211,35 @@ export function applyContentRefreshEvent(
     } else if (patch.kind === 'content') {
         if (patch.snapshot.revision >= snapshot.revision) snapshot = patch.snapshot
     } else if (patch.kind === 'entry') {
+        const matches = snapshot.items.some(
+            (item) =>
+                item.entryId === patch.entryId &&
+                item.fileId === patch.fileId &&
+                item.content?.id === patch.sha1,
+        )
+        if (!matches) return { snapshot, sequence: event.sequence, task: event.task }
+        let warnings = snapshot.warnings
+        if (patch.update && (!patch.update.failed || patch.update.error !== undefined)) {
+            warnings = warnings.filter(
+                (warning) =>
+                    warning.code !== 'resource_update_unavailable' ||
+                    warning.entryId !== patch.entryId,
+            )
+            if (patch.update.failed && patch.update.error) {
+                warnings = [
+                    ...warnings,
+                    {
+                        entryId: patch.entryId,
+                        code: 'resource_update_unavailable',
+                        message: patch.update.error,
+                        provider: null,
+                    },
+                ]
+            }
+        }
         snapshot = {
             ...snapshot,
+            warnings,
             items: snapshot.items.map((item) => {
                 if (
                     item.entryId !== patch.entryId ||
@@ -222,7 +254,7 @@ export function applyContentRefreshEvent(
                         ...next.content,
                         project: patch.presentation.project,
                         version: patch.presentation.version,
-                        owner: patch.presentation.owner,
+                        owner: patch.presentation.owner ?? next.content.owner,
                         environment: patch.presentation.environment,
                         loader: patch.presentation.loader,
                         external: patch.presentation.external,

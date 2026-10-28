@@ -129,6 +129,40 @@ function fixture(initial = state()) {
     }
 }
 
+it('reconciles only the matching entry warning as checks fail and recover', () => {
+    const initial = state()
+    initial.snapshot.warnings = [
+        { entryId: 'entry', code: 'resource_update_unavailable', message: 'old', provider: null },
+        { entryId: 'other', code: 'resource_update_unavailable', message: 'other', provider: null },
+        { code: 'resource_history_unavailable', message: 'history', provider: null },
+    ]
+    const patch = event(1)
+    const failed = {
+        ...patch,
+        patch: {
+            ...patch.patch,
+            kind: 'entry' as const,
+            entryId: 'entry',
+            fileId: 'file',
+            sha1: 'hash',
+            update: { candidate: null, failed: true, unresolved: false, error: 'offline' },
+        },
+    }
+    const updated = applyContentRefreshEvent(initial, failed)
+    expect(updated.snapshot.warnings.map((warning) => warning.message)).toEqual([
+        'other',
+        'history',
+        'offline',
+    ])
+    const recovered = applyContentRefreshEvent(updated, event(2))
+    expect(recovered.snapshot.warnings.map((warning) => warning.message)).toEqual([
+        'other',
+        'history',
+    ])
+    const stale = { ...failed, patch: { ...failed.patch, sha1: 'old-bytes' } }
+    expect(applyContentRefreshEvent(recovered, stale).snapshot).toBe(recovered.snapshot)
+})
+
 it('subscribes before reading and replays events arriving during the state request', async () => {
     const test = fixture()
     let resolve!: (state: ContentRefreshState) => void
@@ -195,11 +229,34 @@ it('metadata preserves candidates while an explicit null clears them and stale f
         presentation: {
             ...first.snapshot.items[0].content!,
             project: { id: 'project', title: 'Updated name', slug: 'project' },
+            owner: {
+                id: 'author',
+                name: 'ExampleAuthor',
+                type: 'user',
+                avatar_url: 'https://cdn.modrinth.com/avatars/author.png',
+            },
         },
     }
     const updated = applyContentRefreshEvent(first, metadata)
     expect(updated.snapshot.items[0].resourceUpdate?.releaseId).toBe('456')
     expect(updated.snapshot.items[0].content?.project?.title).toBe('Updated name')
+    expect(
+        normalizeInstanceContentSnapshot('instance', updated.snapshot).contentItems[0].owner?.name,
+    ).toBe('ExampleAuthor')
+    expect(
+        normalizeInstanceContentSnapshot('instance', updated.snapshot).contentItems[0].owner
+            ?.avatar_url,
+    ).toBe('https://cdn.modrinth.com/avatars/author.png')
+    const partial = {
+        ...metadata,
+        patch: {
+            ...metadata.patch,
+            presentation: { ...metadata.patch.presentation!, owner: null },
+        },
+    }
+    expect(applyContentRefreshEvent(updated, partial).snapshot.items[0].content?.owner?.name).toBe(
+        'ExampleAuthor',
+    )
     const stale = event(3)
     if (stale.patch.kind === 'entry') stale.patch.fileId = 'old-file'
     expect(applyContentRefreshEvent(updated, stale).snapshot.items[0]).toBe(

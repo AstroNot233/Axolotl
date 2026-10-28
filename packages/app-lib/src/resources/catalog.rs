@@ -271,7 +271,12 @@ impl ResourceService {
             Err(ResourceError::Canceled) => {
                 return Err(ResourceError::Canceled);
             }
-            Err(error) if policy == CachePolicy::ForceRefresh => {
+            Err(error)
+                if matches!(
+                    policy,
+                    CachePolicy::ForceRefresh | CachePolicy::RefreshSince(_)
+                ) =>
+            {
                 return Err(error);
             }
             Err(error) => self

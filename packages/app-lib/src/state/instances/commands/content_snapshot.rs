@@ -216,6 +216,7 @@ async fn get_content_snapshot_inner(
         };
         if let Err(error) = result {
             warnings.push(InstanceContentWarning {
+                entry_id: None,
                 code: "pack_membership_reconciliation_failed".to_string(),
                 message: error.to_string(),
                 provider: Some(ContentProvider::CurseForge),
@@ -569,6 +570,7 @@ async fn get_content_snapshot_inner(
                 }
             }
             Err(error) => warnings.push(InstanceContentWarning {
+                entry_id: None,
                 code: "provider_metadata_unavailable".to_string(),
                 message: error.to_string(),
                 provider: None,
@@ -588,6 +590,7 @@ async fn get_content_snapshot_inner(
             Ok(pack) => pack,
             Err(error) => {
                 warnings.push(InstanceContentWarning {
+                    entry_id: None,
                     code: "pack_metadata_unavailable".to_string(),
                     message: error.to_string(),
                     provider: pack_provider(&link),
@@ -654,6 +657,7 @@ async fn get_content_snapshot_inner(
         .await
     {
         warnings.push(InstanceContentWarning {
+            entry_id: None,
             code: "resource_history_unavailable".into(),
             message: error.to_string(),
             provider: None,

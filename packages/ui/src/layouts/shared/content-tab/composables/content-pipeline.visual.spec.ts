@@ -124,3 +124,65 @@ it('publishes counts during a continuous stream instead of waiting for a quiet p
         vi.useRealTimers()
     }
 })
+
+it('keeps enriched rows in place and sorts again only on an explicit sort change', async () => {
+    const items = ref<ContentItem[]>([
+        { id: 'a', file_name: 'a.jar', enabled: true, project_type: 'mod' },
+        { id: 'b', file_name: 'b.jar', enabled: true, project_type: 'mod' },
+    ])
+    const sortKey = ref('asc')
+    const sortItems = vi.fn((items: ContentItem[]) =>
+        [...items].sort((a, b) => {
+            const result = (a.project?.title ?? a.file_name).localeCompare(
+                b.project?.title ?? b.file_name,
+            )
+            return sortKey.value === 'asc' ? result : -result
+        }),
+    )
+    let pipeline!: ReturnType<typeof useContentPipeline>
+    const wrapper = mount(
+        defineComponent({
+            setup() {
+                pipeline = useContentPipeline({
+                    items,
+                    sortItems,
+                    sortKey,
+                    getItemId: (item) => item.id,
+                })
+                return () =>
+                    h(
+                        'div',
+                        pipeline.sortedItems.value.map((item) =>
+                            h('span', item.project?.title ?? item.file_name),
+                        ),
+                    )
+            },
+        }),
+    )
+    try {
+        expect(pipeline.sortedItems.value.map((item) => item.id)).toEqual(['a', 'b'])
+        items.value = [
+            { ...items.value[0], project: { id: 'project', title: 'Zebra' } },
+            items.value[1],
+        ]
+        await nextTick()
+        expect(pipeline.sortedItems.value.map((item) => item.id)).toEqual(['a', 'b'])
+        expect(wrapper.text()).toContain('Zebra')
+        expect(sortItems).toHaveBeenCalledTimes(1)
+        // Completion does not cause a final jump; a user's sort choice does.
+        sortKey.value = 'desc'
+        await nextTick()
+        expect(pipeline.sortedItems.value.map((item) => item.id)).toEqual(['a', 'b'])
+        sortKey.value = 'asc'
+        await nextTick()
+        expect(pipeline.sortedItems.value.map((item) => item.id)).toEqual(['b', 'a'])
+        items.value = [
+            items.value[1],
+            { id: 'new', file_name: '0.jar', enabled: true, project_type: 'mod' },
+        ]
+        await nextTick()
+        expect(pipeline.sortedItems.value.map((item) => item.id)).toEqual(['b', 'new'])
+    } finally {
+        wrapper.unmount()
+    }
+})

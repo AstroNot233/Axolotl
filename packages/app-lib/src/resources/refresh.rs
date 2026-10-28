@@ -2,6 +2,8 @@
 
 mod entry;
 
+const REMOTE_CACHE_SECONDS: i64 = 24 * 60 * 60;
+
 use super::*;
 use crate::state::store::{
     content_refresh::RefreshWrite, content_snapshot::SnapshotRecords,
@@ -79,6 +81,7 @@ pub struct RefreshUpdate {
     pub candidate: Option<SourceReleaseRef>,
     pub failed: bool,
     pub unresolved: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -333,6 +336,9 @@ impl RefreshCoordinator {
             tracing::debug!(instance_id, entry_id = %write.entry_id, update = write.check.is_some(), presentation = write.presentation.is_some(), "Saved content refresh result");
             let update = write.check.as_ref().map(|check| {
                 use crate::state::store::content_refresh_checks::CheckAttempt;
+                if let Some(error) = &check.error {
+                    tracing::warn!(instance_id, entry_id = %write.entry_id, error, "Content refresh entry failed");
+                }
                 if let Some(previous) =
                     slot.outcomes.insert(write.entry_id.clone(), check.attempt)
                 {
@@ -354,6 +360,7 @@ impl RefreshCoordinator {
                         .and_then(|success| success.candidate.clone()),
                     failed: check.attempt == CheckAttempt::Failed,
                     unresolved: check.attempt == CheckAttempt::Unrecognized,
+                    error: check.error.clone(),
                 }
             });
             self.publish(
@@ -401,6 +408,11 @@ async fn run_round(
         HashSet::new()
     };
     let started = std::time::Instant::now();
+    let policy = if mode == RefreshMode::Normal {
+        CachePolicy::UseFresh
+    } else {
+        CachePolicy::RefreshSince(chrono::Utc::now().timestamp_micros())
+    };
     let unsaved_entries = state
         .content_refresh
         .slots
@@ -410,6 +422,22 @@ async fn run_round(
         .map(|slot| slot.unsaved_entries.clone())
         .unwrap_or_default();
     let service = state.resources().await?.clone();
+    let initial =
+        crate::state::store::content_snapshot::get(&state.data, instance_id)
+            .await?;
+    let location = crate::state::store::content_refresh_checks::location_key(
+        &initial.instance,
+    );
+    let link = serde_json::to_string(&initial.link)?;
+    let pack_due =
+        !matches!(initial.link, crate::state::InstanceLink::Unmanaged)
+            && pack_needs_refresh(
+                initial.pack_presentation.as_ref().filter(|saved| {
+                    saved.location_key == location && saved.link_key == link
+                }),
+                mode,
+                chrono::Utc::now().timestamp(),
+            );
     let (scan_tx, mut scans) = mpsc::channel(8);
     let scan_state = state.clone();
     let scan_instance = instance_id.to_owned();
@@ -499,7 +527,7 @@ async fn run_round(
                         &worker_state,
                         worker_service,
                         item,
-                        mode,
+                        policy,
                         &worker_cancel,
                         worker_tx,
                     )
@@ -561,7 +589,9 @@ async fn run_round(
                 result.map_err(|error| ResourceError::InvalidRequest(error.to_string()))??; scan_done = true;
                 let retry_background = state.content_refresh.slots.lock().await
                     .get(instance_id).is_some_and(|slot| slot.background_failed);
-                if mode != RefreshMode::RetryFailed || retry_background {
+                if (mode != RefreshMode::RetryFailed || retry_background)
+                    && (mode != RefreshMode::Normal || !scheduled.is_empty() || pack_due)
+                {
                     let state = state.clone(); let instance_id = instance_id.to_owned(); let task_id = task_id.to_owned(); let cancel = scan_cancel.clone();
                     workers.push(tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
                         let result = crate::state::instances::commands::content_snapshot::refresh_background_metadata(&instance_id, &state, &cancel).await;
@@ -718,9 +748,9 @@ fn pack_needs_refresh(
         }
         RefreshMode::Normal => saved.is_none_or(|saved| {
             if saved.last_error.is_some() {
-                now.saturating_sub(saved.attempted_at) >= 30
+                now.saturating_sub(saved.attempted_at) >= REMOTE_CACHE_SECONDS
             } else {
-                now.saturating_sub(saved.saved_at) >= 300
+                now.saturating_sub(saved.saved_at) >= REMOTE_CACHE_SECONDS
             }
         }),
     }

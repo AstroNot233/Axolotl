@@ -14,7 +14,7 @@ impl ModrinthProvider {
     }
 
     async fn request(&self, request: ProtocolRequest) -> ResourceResult<Value> {
-        tracing::debug!(source = "modrinth", path = %request.path, "Requesting content source");
+        tracing::debug!(source = "modrinth", path = %request.path, item_count = request.item_count(), "Requesting content source");
         self.transport.request(&SourceId::modrinth(), request).await
     }
 
@@ -40,6 +40,7 @@ impl ModrinthProvider {
                 let key = serde_json::to_string(&(
                     target.game_versions.clone(),
                     target.loaders.clone(),
+                    target.channels.clone(),
                 ))?;
                 groups.entry(key).or_default().push((
                     index,
@@ -51,7 +52,17 @@ impl ModrinthProvider {
                 let target = &group[0].2;
                 let hashes =
                     group.iter().map(|(_, hash, _)| hash).collect::<Vec<_>>();
-                let response = self.request(ProtocolRequest::post("/version_files/update", json!({ "hashes": hashes, "algorithm": "sha1", "game_versions": target.game_versions, "loaders": target.loaders }))).await;
+                let mut body = json!({ "hashes": hashes, "algorithm": "sha1", "game_versions": target.game_versions, "loaders": target.loaders });
+                if !target.channels.is_empty() {
+                    body["version_types"] =
+                        serde_json::to_value(&target.channels)?;
+                }
+                let response = self
+                    .request(ProtocolRequest::post(
+                        "/version_files/update",
+                        body,
+                    ))
+                    .await;
                 let documents = response.and_then(|value| {
                     let releases: HashMap<String, RemoteRelease> =
                         serde_json::from_value(value)?;
@@ -146,7 +157,7 @@ impl ModrinthProvider {
                 .collect();
             teams.sort();
             teams.dedup();
-            let memberships: ResourceResult<HashMap<String, Vec<String>>> =
+            let memberships: ResourceResult<HashMap<String, Vec<Value>>> =
                 if teams.is_empty() {
                     Ok(HashMap::new())
                 } else {
@@ -160,10 +171,10 @@ impl ModrinthProvider {
                                 .map_err(Into::into)
                                 .map(|groups| {
                                     let mut authors =
-                                        HashMap::<String, Vec<String>>::new();
+                                        HashMap::<String, Vec<Value>>::new();
                                     for member in groups.into_iter().flatten() {
                                         if member["accepted"] == true
-                                            && let (Some(team), Some(name)) = (
+                                            && let (Some(team), Some(_)) = (
                                                 member["team_id"].as_str(),
                                                 member["user"]["username"]
                                                     .as_str(),
@@ -172,7 +183,7 @@ impl ModrinthProvider {
                                             authors
                                                 .entry(team.into())
                                                 .or_default()
-                                                .push(name.into());
+                                                .push(member);
                                         }
                                     }
                                     authors
@@ -181,6 +192,9 @@ impl ModrinthProvider {
                         Err(error) => Err(error),
                     }
                 };
+            if let Err(error) = &memberships {
+                tracing::warn!(error = %error, "Modrinth author lookup failed; retaining project metadata");
+            }
             let mut values = HashMap::new();
             for project in projects {
                 let id = project.id.clone();
@@ -189,20 +203,41 @@ impl ModrinthProvider {
                         "unexpected project in batch".into(),
                     ));
                 }
-                let authors = match &project.team {
+                let members = match &project.team {
                     Some(team) => memberships
                         .as_ref()
-                        .map(|members| {
-                            members.get(team).cloned().unwrap_or_default()
-                        })
-                        .map_err(Clone::clone),
-                    None => Ok(vec![]),
+                        .ok()
+                        .and_then(|members| members.get(team).cloned())
+                        .unwrap_or_default(),
+                    None => vec![],
                 };
-                let document = authors.and_then(|authors| {
-                    project.document().map(|mut document| {
-                        document.metadata.authors = authors;
-                        ProviderValue::Project(document)
+                let owner = members
+                    .iter()
+                    .find(|member| {
+                        member["is_owner"] == true || member["role"] == "Owner"
                     })
+                    .or_else(|| members.first())
+                    .and_then(|member| {
+                        let user = &member["user"];
+                        Some(ProjectOwner {
+                            id: user["id"].as_str()?.into(),
+                            name: user["username"].as_str()?.into(),
+                            avatar_url: user["avatar_url"]
+                                .as_str()
+                                .and_then(public_url),
+                            organization: false,
+                        })
+                    });
+                let authors = members
+                    .iter()
+                    .filter_map(|member| {
+                        member["user"]["username"].as_str().map(str::to_owned)
+                    })
+                    .collect();
+                let document = project.document().map(|mut document| {
+                    document.owner = owner;
+                    document.metadata.authors = authors;
+                    ProviderValue::Project(document)
                 });
                 if values.insert(id, document).is_some() {
                     return Err(ResourceError::InvalidResponse(
@@ -945,6 +980,7 @@ impl RemoteProject {
         let protocol = Some(protocol);
         let types = resource_types(&self.project_type, &self.loaders);
         Ok(ProjectDocument {
+            owner: None,
             protocol,
             metadata: SourceProjectMetadata {
                 environments: vec![],

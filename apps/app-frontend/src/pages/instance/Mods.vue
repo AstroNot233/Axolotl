@@ -193,20 +193,12 @@
             </div>
         </CollapsibleAdmonition>
         <div
-            v-if="
-                contentRefreshTask?.failed ||
-                (!contentRefreshTask?.running && contentRefreshTask?.unresolved)
-            "
+            v-if="contentRefreshTask?.failed"
             class="mb-3 flex flex-wrap items-center gap-3 text-sm text-[var(--color-text-tertiary)]"
             role="status"
         >
             <span v-if="contentRefreshTask.failed">{{
                 formatMessage(messages.contentCheckFailures, { count: contentRefreshTask.failed })
-            }}</span>
-            <span v-if="!contentRefreshTask.running && contentRefreshTask.unresolved">{{
-                formatMessage(messages.contentUnrecognized, {
-                    count: contentRefreshTask.unresolved,
-                })
             }}</span>
             <Button
                 v-if="contentRefreshTask.failed && !contentRefreshTask.running"
@@ -274,10 +266,7 @@
                 />
                 <ResourceOperationPreviewModal ref="resourceOperationPreview" />
                 <ResourceHistoryModal ref="resourceHistoryModal" />
-                <ResourceBackupsModal
-                    ref="resourceBackupsModal"
-                    @cleaned="refreshContentState('bypass')"
-                />
+                <ResourceBackupsModal ref="resourceBackupsModal" @cleaned="refreshContentState()" />
                 <ExportModal v-if="projects.length > 0" ref="exportModal" :instance="instance" />
                 <ContentUpdaterModal
                     v-if="updatingProject || updatingModpack"
@@ -369,7 +358,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import DependencyGraphModal from '@/components/instance/dependencies/DependencyGraphModal.vue'
@@ -397,7 +386,8 @@ import {
     type ContentRefreshTask,
     createContentRefreshSubscription,
 } from '@/helpers/content-refresh'
-import { lookupContentWikiIds, translateContentItemTitles } from '@/helpers/content-search'
+import { lookupContentWikiIds } from '@/helpers/content-search'
+import { createContentTitleEnrichment } from '@/helpers/content-title-enrichment'
 import { getCurseForgeImageUrl } from '@/helpers/curseforge'
 import {
     type CurseForgeManualDownloadItem,
@@ -449,11 +439,6 @@ const messages = defineMessages({
     contentCheckFailures: {
         id: 'app.instance.content.check-failures',
         defaultMessage: '{count, plural, one {# check failed} other {# checks failed}}',
-    },
-    contentUnrecognized: {
-        id: 'app.instance.content.unrecognized',
-        defaultMessage:
-            '{count, plural, one {# file could not be identified} other {# files could not be identified}}',
     },
     worldDatapacksFailed: {
         id: 'app.instance.content.world-datapacks-failed',
@@ -997,7 +982,7 @@ async function restoreMissingPackMember(item: InstanceContentSnapshotItem) {
     ])
     try {
         await restore_pack_member_default(props.instance.id, memberId)
-        await refreshContentState('bypass')
+        await refreshContentState()
     } catch (error) {
         handleError(error as Error)
     } finally {
@@ -1066,15 +1051,17 @@ const mergedProjects = computed<ContentItem[]>(() => {
     const displayProjects = projects.value
         .filter((project) => !isWorldSaveContentItem(project) && !isSnapshotWorldDatapack(project))
         .map((project) => {
-            const resolved = project.project?.icon_url
-                ? {
-                      ...project,
-                      project: {
-                          ...project.project,
-                          icon_url: displayContentIconUrl(project),
-                      },
-                  }
-                : project
+            const iconUrl = project.project?.icon_url ? displayContentIconUrl(project) : undefined
+            const resolved =
+                iconUrl && iconUrl !== project.project?.icon_url
+                    ? {
+                          ...project,
+                          project: {
+                              ...project.project,
+                              icon_url: iconUrl,
+                          },
+                      }
+                    : project
             return (resolved.project?.id && pendingProjectIds.has(resolved.project.id)) ||
                 hasGlobalContentChange(resolved)
                 ? { ...resolved, installing: true }
@@ -1208,8 +1195,8 @@ let suppressSyncedUntil = 0
 const contentEventRefresh = createContentEventRefresh({
     busy: () => isBulkOperating.value,
     revision: () => contentSnapshot.value?.revision,
-    refresh: (filesystem) => {
-        void initProjects(filesystem ? 'bypass' : undefined).catch(handleError)
+    refresh: () => {
+        void initProjects().catch(handleError)
     },
     delay: CONTENT_EVENT_DEBOUNCE_MS,
 })
@@ -1226,6 +1213,8 @@ const isPackUnlinkDisabled = computed(
         pendingContentChanges.value.length > 0,
 )
 let contentEnrichmentController: AbortController | undefined
+const contentTitleEnrichment = createContentTitleEnrichment()
+const appliedContentSources = new WeakMap<ContentItem, { source: ContentItem; locale: string }>()
 let contentRequestGeneration = 0
 let activeBypassRefresh: Promise<void> | null = null
 const contentRefreshTask = ref<ContentRefreshTask | null>(null)
@@ -1239,6 +1228,7 @@ async function connectContentRefresh() {
         return contentRefreshConnection
     contentRefreshSubscription?.dispose()
     subscribedInstanceId = instanceId
+    const itemCache = new WeakMap<InstanceContentSnapshotItem, ContentItem>()
     let snapshot: InstanceContentData['snapshot'] | undefined
     const subscription = createContentRefreshSubscription(
         instanceId,
@@ -1253,7 +1243,7 @@ async function connectContentRefresh() {
             loading.value = state.snapshot.items.length === 0 && (state.task?.running ?? true)
             if (snapshot === state.snapshot) return
             snapshot = state.snapshot
-            const data = normalizeInstanceContentSnapshot(instanceId, state.snapshot)
+            const data = normalizeInstanceContentSnapshot(instanceId, state.snapshot, itemCache)
             contentLoadError.value = null
             applyContentData(data)
             enrichContentData(data, contentRequestGeneration)
@@ -1294,6 +1284,17 @@ function isCurrentContentRequest(instanceId: string, generation: number) {
     )
 }
 
+watch(
+    () => i18n.global.locale.value,
+    () => {
+        const snapshot = contentSnapshot.value
+        if (!snapshot || props.instance.install_stage !== 'installed') return
+        const data = normalizeInstanceContentSnapshot(props.instance.id, toRaw(snapshot))
+        applyContentData(data)
+        enrichContentData(data, contentRequestGeneration)
+    },
+)
+
 function invalidateContentRequests(clearState = false) {
     contentEventRefresh.clear()
     contentRefreshSubscription?.dispose()
@@ -1302,6 +1303,7 @@ function invalidateContentRequests(clearState = false) {
     subscribedInstanceId = undefined
     contentEnrichmentController?.abort()
     contentRequestGeneration += 1
+    contentTitleEnrichment.clear()
     if (!clearState) return
     resetUpdateState()
 
@@ -1976,7 +1978,7 @@ async function restorePackDefault(item: ContentItem) {
     if (!operation) return
     try {
         await restore_pack_member_default(props.instance.id, memberId)
-        await refreshContentState('bypass')
+        await refreshContentState()
     } catch (error) {
         handleError(error as Error)
     } finally {
@@ -2214,7 +2216,7 @@ async function handleRollbackContent(mod: ContentItem) {
         handleError(err as Error)
     } finally {
         try {
-            if (changed) await refreshContentState('bypass')
+            if (changed) await refreshContentState()
         } finally {
             finishContentOperation(mod, operation)
         }
@@ -2255,7 +2257,7 @@ watch(
             handledRevision: handledInstallRevision.value,
         })
         handledInstallRevision.value = revision
-        await refreshContentState('bypass')
+        await refreshContentState()
     },
 )
 
@@ -2410,7 +2412,7 @@ async function unpairInstance() {
     linkedModpackUpdateVersionId.value = null
     localImportedModpackUnlinked.value = true
     linkedModpackContentItems.value = []
-    await initProjects('bypass')
+    await initProjects()
 }
 
 async function handleShareItems(
@@ -2581,26 +2583,40 @@ function enrichContentData(data: InstanceContentData, generation: number) {
     const isCurrent = () =>
         !controller.signal.aborted && isCurrentContentRequest(data.path, generation)
     const originals = [...data.contentItems, ...data.linkedContentItems]
-    void translateContentItemTitles(originals, i18n.global.locale.value)
+    const locale = i18n.global.locale.value
+    void contentTitleEnrichment
+        .enrich(originals, locale)
         .then((translated) => {
-            if (!isCurrent()) return
+            if (!isCurrent() || i18n.global.locale.value !== locale) return
             const byId = new Map(
-                translated.map((item, index) => [item.id, { item, original: originals[index] }]),
+                translated.map((item, index) => [
+                    getContentItemId(item),
+                    { item, original: originals[index] },
+                ]),
             )
-            const merge = (items: ContentItem[]) =>
-                items.map((item) => {
-                    const translated = byId.get(item.id)
+            const merge = (items: ContentItem[]) => {
+                const next = items.map((item) => {
+                    const translated = byId.get(getContentItemId(item))
                     if (
                         !translated?.item.project ||
                         hasContentOperation(item) ||
-                        item.project?.title !== translated.original.project?.title
+                        item.project?.title !== translated.original.project?.title ||
+                        item.project?.id !== translated.original.project?.id ||
+                        item.project?.slug !== translated.original.project?.slug ||
+                        item.origin_provider !== translated.original.origin_provider ||
+                        item.project?.title === translated.item.project.title
                     )
                         return item
-                    return {
+                    const updated = {
                         ...item,
                         project: { ...item.project, title: translated.item.project.title },
                     }
+                    const applied = appliedContentSources.get(toRaw(item))
+                    if (applied) appliedContentSources.set(updated, applied)
+                    return updated
                 })
+                return next.every((item, index) => item === items[index]) ? items : next
+            }
             projects.value = merge(projects.value)
             linkedModpackContentItems.value = merge(linkedModpackContentItems.value)
         })
@@ -2638,6 +2654,8 @@ function applyContentData(contentData: InstanceContentData) {
         (item) => !isWorldSaveContentItem(item),
     )
     const reconcile = (previous: ContentItem[], incoming: ContentItem[]) => {
+        const locale = i18n.global.locale.value
+        let changed = false
         const byId = new Map(incoming.map((item) => [getContentItemId(item), item]))
         const next: ContentItem[] = []
         for (const old of previous) {
@@ -2648,11 +2666,24 @@ function applyContentData(contentData: InstanceContentData) {
                 next.push(old)
                 continue
             }
-            Object.assign(old, item)
+            const applied = appliedContentSources.get(toRaw(old))
+            if (applied?.source !== item || applied.locale !== locale) {
+                Object.assign(old, contentTitleEnrichment.cached([item], locale)[0])
+                appliedContentSources.set(toRaw(old), { source: item, locale })
+                changed = true
+            }
             next.push(old)
         }
-        next.push(...byId.values())
-        return next
+        for (const source of byId.values()) {
+            const item = { ...contentTitleEnrichment.cached([source], locale)[0] }
+            appliedContentSources.set(item, { source, locale })
+            next.push(item)
+        }
+        return !changed &&
+            next.length === previous.length &&
+            next.every((item, index) => item === previous[index])
+            ? previous
+            : next
     }
     let contentItems = reconcile(projects.value, contentItemsFromSnapshot)
     let linkedContentItems = reconcile(linkedModpackContentItems.value, linkedItemsFromSnapshot)
@@ -3064,7 +3095,7 @@ watch(
     () => props.instance?.install_stage,
     async (newStage, oldStage) => {
         if (oldStage !== 'installed' && newStage === 'installed') {
-            await refreshContentState('bypass')
+            await refreshContentState()
         } else if (newStage !== 'installed') {
             invalidateContentRequests(true)
         }
@@ -3077,7 +3108,7 @@ watch(
         if (newId === oldId) return
         invalidateContentRequests(true)
         if (props.instance.install_stage === 'installed') {
-            await refreshContentState('bypass')
+            await refreshContentState()
         }
     },
 )
@@ -3086,7 +3117,7 @@ watch(
     () => props.instance?.link,
     async (newInstanceLink, oldInstanceLink) => {
         if (oldInstanceLink && !newInstanceLink) {
-            await initProjects('bypass')
+            await initProjects()
         }
     },
 )
@@ -3100,7 +3131,7 @@ watch(
     ],
     async (newValue, oldValue) => {
         if (newValue.some((value, index) => value !== oldValue[index])) {
-            await initProjects('bypass')
+            await initProjects()
         }
     },
 )

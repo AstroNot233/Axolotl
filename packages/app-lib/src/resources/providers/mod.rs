@@ -210,10 +210,21 @@ pub struct SourcePage<T> {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDocument {
+    #[serde(default)]
+    pub owner: Option<ProjectOwner>,
     pub metadata: SourceProjectMetadata,
     pub description: ResourceText,
     #[serde(default)]
     pub protocol: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectOwner {
+    pub id: String,
+    pub name: String,
+    pub avatar_url: Option<String>,
+    pub organization: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

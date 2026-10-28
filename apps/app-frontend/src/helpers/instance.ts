@@ -482,6 +482,7 @@ export interface InstanceContentSnapshot {
     items: InstanceContentSnapshotItem[]
     pendingManualDownloads: PendingManualDownload[]
     warnings: Array<{
+        entryId?: string
         code: string
         message: string
         provider: 'modrinth' | 'curseforge' | 'mcarchive' | null

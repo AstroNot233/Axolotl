@@ -46,6 +46,35 @@ it('loads the local snapshot without a second remote refresh', async () => {
     expect(get_content_snapshot).toHaveBeenCalledOnce()
 })
 
+it('normalizes only changed entries during incremental refresh', () => {
+    const initial = snapshot()
+    initial.items.push({
+        ...initial.items[0],
+        entryId: 'other',
+        fileId: 'other-file',
+        expectedRelativePath: 'mods/other.jar',
+    })
+    const cache = new WeakMap()
+    const first = normalizeInstanceContentSnapshot('instance', initial, cache)
+    const update = {
+        ...initial,
+        items: [
+            {
+                ...initial.items[0],
+                resourceUpdate: {
+                    project: { source: 'modrinth', projectId: 'project' },
+                    releaseId: 'next',
+                },
+            },
+            initial.items[1],
+        ],
+    }
+    const next = normalizeInstanceContentSnapshot('instance', update, cache)
+    expect(next.contentItems[0]).not.toBe(first.contentItems[0])
+    expect(next.contentItems[0].resourceUpdate?.releaseId).toBe('next')
+    expect(next.contentItems[1]).toBe(first.contentItems[1])
+})
+
 it('restores a source qualified saved candidate and honors explicit no update', () => {
     const value = snapshot()
     value.items[0].resourceUpdate = {

@@ -148,6 +148,66 @@ async fn local_projection_restores_success_after_failure_and_rejects_changed_con
 }
 
 #[tokio::test]
+async fn local_author_survives_an_older_presentation_without_an_owner() {
+    use crate::state::store::content_refresh_presentations::*;
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    seed(&pool).await;
+    let metadata =
+        serde_json::json!({"mod_id":"example", "authors":["LocalAuthor"]});
+    sqlx::query(
+        "UPDATE instance_files SET local_mod_data = ? WHERE id = 'file'",
+    )
+    .bind(metadata.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let handle = Handle::new(pool.clone());
+    let records = get(&handle, "instance").await.unwrap();
+    let location = location_key(&records.instance);
+    let mut snapshot =
+        crate::state::instances::commands::content_snapshot::local::project(
+            records,
+        );
+    let mut content = snapshot.items.remove(0).content.unwrap();
+    assert_eq!(content.owner.as_ref().unwrap().name, "LocalAuthor");
+    content.owner = None;
+    ContentRefreshPresentations::set(
+        &handle,
+        &PresentationKey {
+            instance_id: "instance".into(),
+            file_id: "file".into(),
+        },
+        Some(&PresentationRecord {
+            location_key: location,
+            saved_at: 123,
+            content,
+        }),
+    )
+    .await
+    .unwrap();
+    let snapshot =
+        crate::state::instances::commands::content_snapshot::local::project(
+            get(&handle, "instance").await.unwrap(),
+        );
+    assert_eq!(
+        snapshot.items[0]
+            .content
+            .as_ref()
+            .unwrap()
+            .owner
+            .as_ref()
+            .unwrap()
+            .name,
+        "LocalAuthor"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
 async fn presentation_is_restored_only_for_matching_bytes_and_location() {
     use crate::state::store::content_refresh_presentations::*;
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
