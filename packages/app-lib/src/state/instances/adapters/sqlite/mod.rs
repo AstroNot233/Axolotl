@@ -5,6 +5,7 @@ pub(crate) mod content_sets;
 pub(crate) mod files;
 pub(crate) mod instance_rows;
 pub(crate) mod loader_component_rows;
+pub(crate) mod pack_members;
 pub(crate) mod resource_rows;
 pub(crate) mod screenshot_rows;
 mod values;
