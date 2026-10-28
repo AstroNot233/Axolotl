@@ -2,13 +2,14 @@
 
 use super::values::{project_type_from_str, timestamp, unsigned};
 
+use super::content_sets::bump_content_set_revision_in_transaction;
 use crate::state::instances::{
     ContentOwnershipKind, ManualDownloadOperationKind, ManualDownloadState,
     PackMember, PackMemberMaterializationState, PackMemberOverrideKind,
     PendingManualDownload,
 };
 use crate::state::{ContentProvider, ProjectType};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 #[derive(Debug, sqlx::FromRow)]
@@ -523,6 +524,124 @@ pub(crate) async fn complete_pending_manual_download(
     .bind(provider_release_id)
     .execute(&mut **tx)
     .await?;
+
+    Ok(())
+}
+
+/// Detaches an instance's applied content set from the pack it came from: the
+/// pack's members go, its entries become user-added content, and the content
+/// set turns local.
+///
+/// Rejects a content set that belongs to another instance, and an instance
+/// whose install job is queued, running, canceling or waiting for the user.
+pub(crate) async fn unlink_pack_in_transaction(
+    instance_id: &str,
+    content_set_id: &str,
+    unlinked_at: DateTime<Utc>,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    let belongs: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM instance_content_sets WHERE id = ? AND instance_id = ?)",
+    )
+    .bind(content_set_id)
+    .bind(instance_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if belongs == 0 {
+        return Err(crate::ErrorKind::InputError(
+            "Applied content set does not belong to this instance".into(),
+        )
+        .into());
+    }
+
+    let busy: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM install_jobs WHERE instance_id = ? AND status IN ('queued', 'running', 'canceling', 'waiting_for_user'))",
+    )
+    .bind(instance_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if busy != 0 {
+        return Err(crate::ErrorKind::InputError(
+            "Wait for the active instance task before unlinking the pack"
+                .into(),
+        )
+        .into());
+    }
+
+    sqlx::query(
+        "INSERT INTO resource_pack_unlinks(instance_id, content_set_id, unlinked_at) VALUES (?, ?, ?) ON CONFLICT(instance_id) DO UPDATE SET content_set_id = excluded.content_set_id, unlinked_at = excluded.unlinked_at",
+    )
+    .bind(instance_id)
+    .bind(content_set_id)
+    .bind(unlinked_at.timestamp())
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE instance_content_sets SET source_kind = 'local', modified = ? WHERE id = ?",
+    )
+    .bind(unlinked_at.timestamp())
+    .bind(content_set_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE instance_content_entries SET source_kind = 'local', ownership_kind = 'user_added', modified_at = ? WHERE content_set_id = ? AND ownership_kind = 'pack_managed'",
+    )
+    .bind(unlinked_at.timestamp())
+    .bind(content_set_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query("DELETE FROM instance_pack_members WHERE content_set_id = ?")
+        .bind(content_set_id)
+        .execute(&mut **tx)
+        .await?;
+    bump_content_set_revision_in_transaction(content_set_id, tx).await?;
+
+    Ok(())
+}
+
+/// Drops the recorded pack unlink for an instance that is linked again.
+pub(crate) async fn relink_pack_in_transaction(
+    instance_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query("DELETE FROM resource_pack_unlinks WHERE instance_id = ?")
+        .bind(instance_id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+/// Re-applies a recorded pack unlink that a stale write left behind.
+///
+/// Acts only while the marker still names the applied content set of an
+/// unmanaged instance and that set still carries pack content; otherwise the
+/// instance has moved on and this does nothing.
+pub(crate) async fn reconcile_pack_unlink_in_transaction(
+    instance_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    let set: Option<String> = sqlx::query_scalar("SELECT marker.content_set_id FROM resource_pack_unlinks marker JOIN instances instance ON instance.id = marker.instance_id LEFT JOIN instance_links link ON link.instance_id = instance.id WHERE marker.instance_id = ? AND instance.applied_content_set_id = marker.content_set_id AND COALESCE(link.link_kind, 'unmanaged') = 'unmanaged' AND (EXISTS(SELECT 1 FROM instance_pack_members WHERE content_set_id = marker.content_set_id) OR EXISTS(SELECT 1 FROM instance_content_entries WHERE content_set_id = marker.content_set_id AND ownership_kind = 'pack_managed'))")
+        .bind(instance_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+    if let Some(set) = set {
+        sqlx::query("UPDATE instance_content_entries SET ownership_kind = 'user_added', source_kind = 'local' WHERE content_set_id = ? AND ownership_kind = 'pack_managed'")
+            .bind(&set)
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query(
+            "DELETE FROM instance_pack_members WHERE content_set_id = ?",
+        )
+        .bind(&set)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query("UPDATE instance_content_sets SET source_kind = 'local' WHERE id = ?")
+            .bind(&set)
+            .execute(&mut **tx)
+            .await?;
+        bump_content_set_revision_in_transaction(&set, tx).await?;
+    }
 
     Ok(())
 }
