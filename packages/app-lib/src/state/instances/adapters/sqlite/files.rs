@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::values::{timestamp, unsigned};
 use crate::state::instances::InstanceFile;
 use chrono::Utc;

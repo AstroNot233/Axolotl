@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::values::{project_type_from_str, timestamp};
 use crate::state::instances::{
     ContentDependencyEdge, ContentDependencyKind, ContentEntry,
@@ -159,31 +157,6 @@ pub(crate) async fn get_content_entry_by_id(
         ",
     )
     .bind(id)
-    .fetch_optional(pool)
-    .await?;
-
-    row.map(TryInto::try_into).transpose()
-}
-
-pub(crate) async fn get_content_entry_by_file(
-    content_set_id: &str,
-    file_id: &str,
-    pool: &SqlitePool,
-) -> crate::Result<Option<ContentEntry>> {
-    let row = sqlx::query_as::<_, ContentEntryRow>(
-        "
-        SELECT id, instance_id, content_set_id, file_id, project_type,
-            source_kind, ownership_kind, auto_dependency, server_requirement,
-            client_requirement, enabled,
-            added_at, modified_at
-        FROM instance_content_entries
-        WHERE content_set_id = ? AND file_id = ?
-        ORDER BY modified_at DESC
-        LIMIT 1
-        ",
-    )
-    .bind(content_set_id)
-    .bind(file_id)
     .fetch_optional(pool)
     .await?;
 
@@ -676,38 +649,6 @@ pub(crate) async fn get_content_entry_by_provider_ref(
     row.map(TryInto::try_into).transpose()
 }
 
-pub(crate) async fn get_content_entry_by_provider_project(
-    content_set_id: &str,
-    provider: ContentProvider,
-    project_id: &str,
-    pool: &SqlitePool,
-) -> crate::Result<Option<ContentEntry>> {
-    let row = sqlx::query_as::<_, ContentEntryRow>(
-        "
-        SELECT entry.id, entry.instance_id, entry.content_set_id, entry.file_id,
-            entry.project_type, entry.source_kind, entry.ownership_kind,
-            entry.auto_dependency, entry.server_requirement,
-            entry.client_requirement, entry.enabled,
-            entry.added_at, entry.modified_at
-        FROM instance_content_entries entry
-        INNER JOIN instance_content_provider_refs ref
-            ON ref.content_entry_id = entry.id
-        WHERE entry.content_set_id = ?
-            AND ref.provider = ?
-            AND ref.provider_project_id = ?
-        ORDER BY entry.modified_at DESC
-        LIMIT 1
-        ",
-    )
-    .bind(content_set_id)
-    .bind(provider.as_str())
-    .bind(project_id)
-    .fetch_optional(pool)
-    .await?;
-
-    row.map(TryInto::try_into).transpose()
-}
-
 pub(crate) async fn set_content_entry_auto_dependency(
     content_entry_id: &str,
     auto_dependency: bool,
@@ -908,62 +849,6 @@ pub(crate) async fn get_content_dependency_edges(
         .collect()
 }
 
-pub(crate) async fn get_orphaned_auto_dependencies(
-    content_set_id: &str,
-    pool: &SqlitePool,
-) -> crate::Result<Vec<ContentEntry>> {
-    let rows = sqlx::query_as::<_, ContentEntryRow>(
-        "
-        SELECT entry.id, entry.instance_id, entry.content_set_id, entry.file_id,
-            entry.project_type, entry.source_kind, entry.ownership_kind,
-            entry.auto_dependency, entry.server_requirement,
-            entry.client_requirement, entry.enabled,
-            entry.added_at, entry.modified_at
-        FROM instance_content_entries entry
-        WHERE entry.content_set_id = ?
-            AND entry.auto_dependency = 1
-            AND NOT EXISTS (
-                SELECT 1
-                FROM instance_content_dependencies edge
-                WHERE edge.child_entry_id = entry.id
-                    AND edge.content_set_id = entry.content_set_id
-            )
-        ORDER BY entry.added_at ASC
-        ",
-    )
-    .bind(content_set_id)
-    .fetch_all(pool)
-    .await?;
-
-    rows.into_iter().map(TryInto::try_into).collect()
-}
-
-pub(crate) async fn set_content_entry_enabled_for_file(
-    content_set_id: &str,
-    file_id: &str,
-    enabled: bool,
-    pool: &SqlitePool,
-) -> crate::Result<bool> {
-    let enabled = i64::from(enabled);
-    let modified_at = Utc::now().timestamp();
-
-    let result = sqlx::query!(
-        "
-        UPDATE instance_content_entries
-        SET enabled = ?, modified_at = ?
-        WHERE content_set_id = ? AND file_id = ?
-        ",
-        enabled,
-        modified_at,
-        content_set_id,
-        file_id,
-    )
-    .execute(pool)
-    .await?;
-
-    Ok(result.rows_affected() > 0)
-}
-
 pub(crate) async fn remove_content_entries_for_file(
     content_set_id: &str,
     file_id: &str,
@@ -1146,26 +1031,6 @@ pub(crate) async fn get_ownership_kind_for_path(
         .as_deref()
         .map(ContentOwnershipKind::from_str)
         .transpose()
-}
-
-/// Reads the newest entry that claims a path of the content set.
-pub(crate) async fn get_entry_id_by_relative_path<'e, E>(
-    content_set_id: &str,
-    relative_path: &str,
-    exec: E,
-) -> crate::Result<Option<String>>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    let id = sqlx::query_scalar::<_, String>(
-        "SELECT entry.id FROM instance_content_entries entry JOIN instance_files file ON file.id = entry.file_id WHERE entry.content_set_id = ? AND file.relative_path = ? ORDER BY entry.modified_at DESC LIMIT 1",
-    )
-    .bind(content_set_id)
-    .bind(relative_path)
-    .fetch_optional(exec)
-    .await?;
-
-    Ok(id)
 }
 
 /// Reads the newest Modrinth entry of the content set that names a release.

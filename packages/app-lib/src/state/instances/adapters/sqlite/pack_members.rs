@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::values::{project_type_from_str, timestamp, unsigned};
 
 use super::content_sets::bump_content_set_revision_in_transaction;

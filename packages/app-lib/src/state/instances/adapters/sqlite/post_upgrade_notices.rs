@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::state::InstancePostUpgradeNotice;
 use sqlx::{Row, SqliteConnection, SqlitePool};
 

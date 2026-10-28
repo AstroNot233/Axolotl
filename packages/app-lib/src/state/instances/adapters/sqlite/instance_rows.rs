@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::values::{optional_timestamp, timestamp, unsigned};
 use crate::state::instances::{
     ContentSet, ContentSetStatus, ContentSourceKind, Instance,
@@ -10,7 +8,6 @@ use crate::state::{
     InstanceInstallStage, LauncherFeatureVersion, ModLoader, ReleaseChannel,
 };
 use chrono::{DateTime, Utc};
-use serde::de::DeserializeOwned;
 use sqlx::{Executor, Sqlite, SqlitePool, Transaction};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -1111,28 +1108,6 @@ where
     }
 }
 
-pub(crate) async fn get_instance_groups<'e, E>(
-    instance_id: &str,
-    exec: E,
-) -> crate::Result<Vec<String>>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    let rows = sqlx::query_scalar!(
-        "
-        SELECT group_name
-        FROM instance_groups
-        WHERE instance_id = ?
-        ORDER BY group_name
-        ",
-        instance_id,
-    )
-    .fetch_all(exec)
-    .await?;
-
-    Ok(rows)
-}
-
 pub(crate) async fn get_instance_launch_overrides<'e, E>(
     instance_id: &str,
     exec: E,
@@ -1718,43 +1693,6 @@ fn parse_uuid(value: Option<String>, column: &str) -> crate::Result<Uuid> {
 
     value.parse().map_err(|err| {
         crate::ErrorKind::InputError(format!("Invalid {column}: {err}")).into()
-    })
-}
-
-fn parse_optional_uuid(
-    value: Option<String>,
-    column: &str,
-) -> crate::Result<Option<Uuid>> {
-    value
-        .map(|value| {
-            value.parse().map_err(|err| {
-                crate::ErrorKind::InputError(format!("Invalid {column}: {err}"))
-                    .into()
-            })
-        })
-        .transpose()
-}
-
-fn parse_optional_json<T>(
-    value: Option<String>,
-    column: &str,
-) -> crate::Result<Option<T>>
-where
-    T: DeserializeOwned,
-{
-    let Some(value) = value else {
-        return Ok(None);
-    };
-
-    if value == "null" {
-        return Ok(None);
-    }
-
-    serde_json::from_str(&value).map(Some).map_err(|err| {
-        crate::ErrorKind::InputError(format!(
-            "Invalid launch override JSON in {column}: {err}"
-        ))
-        .into()
     })
 }
 
