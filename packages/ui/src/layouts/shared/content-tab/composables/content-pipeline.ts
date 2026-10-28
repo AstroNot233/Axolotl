@@ -157,6 +157,7 @@ export function useContentPipeline(config: ContentPipelineConfig) {
     const filterValidationOptions = computed(() => {
         const type = new Set<string>()
         const status = new Set<string>()
+        if (showUpdateFilter) status.add('updates')
         const allItems = [...modpackItemsNoUpdate.value, ...sortedItems.value]
         const duplicateItemIds = new Set(
             (duplicateItems?.value ?? []).map((item) => getItemId(item)),
@@ -164,7 +165,6 @@ export function useContentPipeline(config: ContentPipelineConfig) {
 
         for (const item of allItems) {
             type.add(normalizeProjectType(item.project_type))
-            if (showUpdateFilter && hasContentUpdate(item)) status.add('updates')
             if (isEnabledContentItem(item)) status.add('enabled')
             if (isDisabledContentItem(item)) status.add('disabled')
         }
@@ -247,7 +247,7 @@ export function useContentPipeline(config: ContentPipelineConfig) {
         const hasEnabled = typeFiltered.some(isEnabledContentItem)
         const hasDisabled = typeFiltered.some(isDisabledContentItem)
         const availableStatusFilters = new Set<string>()
-        if (showUpdateFilter && typeFiltered.some((item) => hasContentUpdate(item))) {
+        if (showUpdateFilter) {
             availableStatusFilters.add('updates')
         }
         if (hasEnabled) availableStatusFilters.add('enabled')
@@ -314,7 +314,10 @@ export function useContentPipeline(config: ContentPipelineConfig) {
 
         // Step 6: Build row2FilterOptions from typeFiltered (same as old code)
         const row2: ContentFilterOption[] = []
-        if (showUpdateFilter && typeFiltered.some((m) => hasContentUpdate(m))) {
+        if (
+            showUpdateFilter &&
+            (statusFilters.includes('updates') || typeFiltered.some((m) => hasContentUpdate(m)))
+        ) {
             row2.push({ id: 'updates', label: formatMessage(filterMessages.updates) })
         }
         if (hasEnabled && hasDisabled) {

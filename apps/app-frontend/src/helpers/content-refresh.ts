@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event'
 import type { InstanceContentSnapshot } from './instance'
 import type { ResourceArtifact, SourceReleaseRef } from './resources'
 
-export type ContentRefreshMode = 'normal' | 'force_remote'
+export type ContentRefreshMode = 'normal' | 'force_remote' | 'retry_failed'
 export interface ContentRefreshTask {
     id: string
     mode: ContentRefreshMode
@@ -22,6 +22,7 @@ export interface ContentRefreshState {
     sequence: number
 }
 export type ContentRefreshPatch =
+    | { kind: 'pack'; pack: InstanceContentSnapshot['pack'] }
     | { kind: 'content'; snapshot: InstanceContentSnapshot }
     | {
           kind: 'entry'
@@ -91,6 +92,7 @@ export function createContentRefreshSubscription(
     let cancelFrame: (() => void) | undefined
     let pending: ContentRefreshEvent[] = []
     let reading: Promise<void> | undefined
+    let flushing = false
 
     async function reload() {
         if (reading) return reading
@@ -107,10 +109,17 @@ export function createContentRefreshSubscription(
     }
 
     function schedule() {
-        if (disposed || initializing || cancelFrame || !pending.length) return
+        if (disposed || initializing || flushing || cancelFrame || !pending.length) return
         cancelFrame = transport.schedule(() => {
             cancelFrame = undefined
-            void flush().catch(onError)
+            if (flushing) return
+            flushing = true
+            void flush()
+                .catch(onError)
+                .finally(() => {
+                    flushing = false
+                    schedule()
+                })
         })
     }
 
@@ -192,7 +201,9 @@ export function applyContentRefreshEvent(
 ): ContentRefreshState {
     let snapshot = state.snapshot
     const patch = event.patch
-    if (patch.kind === 'content') {
+    if (patch.kind === 'pack') {
+        snapshot = { ...snapshot, pack: patch.pack }
+    } else if (patch.kind === 'content') {
         if (patch.snapshot.revision >= snapshot.revision) snapshot = patch.snapshot
     } else if (patch.kind === 'entry') {
         snapshot = {

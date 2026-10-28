@@ -19705,5 +19705,14 @@
   },
   "app.lab.command-generator.arg.waypoint.value.desc": {
     "message": "颜色或样式"
+  },
+  "app.instance.content.checking": {
+    "message": "正在检查更新… 已检查 {count} 项"
+  },
+  "app.instance.content.check-failures": {
+    "message": "{count} 项检查失败"
+  },
+  "app.instance.content.unrecognized": {
+    "message": "{count} 个文件未能识别"
   }
 }

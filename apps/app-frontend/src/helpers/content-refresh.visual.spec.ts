@@ -7,6 +7,7 @@ import {
     type ContentRefreshTransport,
     createContentRefreshSubscription,
 } from './content-refresh'
+import { normalizeInstanceContentSnapshot } from './instance-content'
 
 function state(sequence = 0): ContentRefreshState {
     return {
@@ -209,4 +210,45 @@ it('metadata preserves candidates while an explicit null clears them and stale f
     expect(applyContentRefreshEvent(updated, clear).snapshot.items[0].capabilities.canUpdate).toBe(
         false,
     )
+})
+
+it('renders successive update counts and restores saved candidates when a new page subscribes', async () => {
+    const initial = state()
+    initial.snapshot.items.push({
+        ...initial.snapshot.items[0],
+        entryId: 'second',
+        fileId: 'second-file',
+        content: { ...initial.snapshot.items[0].content!, id: 'second-hash' },
+    })
+    const test = fixture(initial)
+    const counts: number[] = []
+    test.change.mockImplementation((value: ContentRefreshState) => {
+        const data = normalizeInstanceContentSnapshot('instance', value.snapshot)
+        counts.push(data.contentItems.filter((item) => !!item.resourceUpdate).length)
+    })
+    await test.subscription.connect()
+    test.receive(event(1))
+    await test.flush()
+    expect(counts).toEqual([0, 1])
+    const saved = test.change.mock.lastCall![0]
+    test.subscription.dispose()
+    const returned = fixture(saved)
+    await returned.subscription.connect()
+    expect(returned.change.mock.lastCall?.[0].snapshot.items[0].resourceUpdate?.releaseId).toBe(
+        '456',
+    )
+    const next = event(2)
+    if (next.patch.kind === 'entry') {
+        next.patch.entryId = 'second'
+        next.patch.fileId = 'second-file'
+        next.patch.sha1 = 'second-hash'
+    }
+    returned.receive(next)
+    await returned.flush()
+    const final = normalizeInstanceContentSnapshot(
+        'instance',
+        returned.change.mock.lastCall![0].snapshot,
+    )
+    expect(final.contentItems.filter((item) => !!item.resourceUpdate)).toHaveLength(2)
+    returned.subscription.dispose()
 })

@@ -20,6 +20,7 @@ use tokio_util::sync::CancellationToken;
 pub enum RefreshMode {
     Normal,
     ForceRemote,
+    RetryFailed,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -52,6 +53,9 @@ pub struct RefreshEvent {
     rename_all_fields = "camelCase"
 )]
 pub enum RefreshPatch {
+    Pack {
+        pack: Option<crate::state::InstanceContentPack>,
+    },
     Content {
         snapshot: crate::state::InstanceContentSnapshot,
     },
@@ -86,9 +90,13 @@ pub struct RefreshState {
 }
 
 struct Slot {
+    outcomes: HashMap<
+        String,
+        crate::state::store::content_refresh_checks::CheckAttempt,
+    >,
     task: RefreshTask,
     sequence: u64,
-    force_pending: bool,
+    pending_mode: Option<RefreshMode>,
     cancel: CancellationToken,
 }
 
@@ -113,7 +121,7 @@ impl Default for RefreshCoordinator {
 impl RefreshCoordinator {
     pub(crate) async fn invalidate(&self, instance_id: &str) {
         if let Some(slot) = self.slots.lock().await.get_mut(instance_id) {
-            slot.force_pending = false;
+            slot.pending_mode = None;
             slot.cancel.cancel();
         }
     }
@@ -151,10 +159,14 @@ impl RefreshCoordinator {
             && slot.task.running
             && !slot.cancel.is_cancelled()
         {
-            if mode == RefreshMode::ForceRemote
-                && slot.task.mode == RefreshMode::Normal
+            if (mode == RefreshMode::ForceRemote
+                && slot.task.mode != RefreshMode::ForceRemote)
+                || (mode == RefreshMode::RetryFailed
+                    && slot.task.mode == RefreshMode::Normal)
             {
-                slot.force_pending = true;
+                if slot.pending_mode != Some(RefreshMode::ForceRemote) {
+                    slot.pending_mode = Some(mode);
+                }
             }
             return Ok(slot.task.clone());
         }
@@ -173,9 +185,10 @@ impl RefreshCoordinator {
         slots.insert(
             instance_id.clone(),
             Slot {
+                outcomes: HashMap::new(),
                 task: task.clone(),
                 sequence,
-                force_pending: false,
+                pending_mode: None,
                 cancel: cancel.clone(),
             },
         );
@@ -199,15 +212,17 @@ impl RefreshCoordinator {
                     slot.task.errors.push(error.to_string());
                     slot.task.failed += 1;
                 }
-                if slot.force_pending && !cancel.is_cancelled() {
-                    slot.force_pending = false;
-                    slot.task.mode = RefreshMode::ForceRemote;
+                if let Some(next_mode) =
+                    slot.pending_mode.take().filter(|_| !cancel.is_cancelled())
+                {
+                    slot.task.mode = next_mode;
                     slot.task.scanned = 0;
                     slot.task.checked = 0;
                     slot.task.failed = 0;
                     slot.task.unresolved = 0;
                     slot.task.errors.clear();
-                    current_mode = RefreshMode::ForceRemote;
+                    slot.outcomes.clear();
+                    current_mode = next_mode;
                     continue;
                 }
                 slot.task.running = false;
@@ -286,7 +301,16 @@ impl RefreshCoordinator {
             tracing::debug!(instance_id, entry_id = %write.entry_id, update = write.check.is_some(), presentation = write.presentation.is_some(), "Saved content refresh result");
             let update = write.check.as_ref().map(|check| {
                 use crate::state::store::content_refresh_checks::CheckAttempt;
-                slot.task.checked += 1;
+                if let Some(previous) =
+                    slot.outcomes.insert(write.entry_id.clone(), check.attempt)
+                {
+                    slot.task.failed -=
+                        usize::from(previous == CheckAttempt::Failed);
+                    slot.task.unresolved -=
+                        usize::from(previous == CheckAttempt::Unrecognized);
+                } else {
+                    slot.task.checked += 1;
+                }
                 slot.task.failed +=
                     usize::from(check.attempt == CheckAttempt::Failed);
                 slot.task.unresolved +=
@@ -328,6 +352,22 @@ async fn run_round(
     mode: RefreshMode,
     cancel: &CancellationToken,
 ) -> ResourceResult<()> {
+    use crate::state::store::{
+        Collection as _,
+        content_refresh_scan_failures::ContentRefreshScanFailures,
+    };
+    let retry_scan_paths = if mode == RefreshMode::RetryFailed {
+        ContentRefreshScanFailures::get_scoped(
+            &state.data,
+            &instance_id.to_owned(),
+        )
+        .await?
+        .into_iter()
+        .map(|(key, _)| key.relative_path)
+        .collect::<HashSet<_>>()
+    } else {
+        HashSet::new()
+    };
     let started = std::time::Instant::now();
     let service = state.resources().await?.clone();
     let (scan_tx, mut scans) = mpsc::channel(8);
@@ -343,11 +383,24 @@ async fn run_round(
                 &scan_state,
                 &scan_tx,
                 &worker_cancel,
+                mode,
             )
             .await
         }));
     let (writes_tx, mut writes_rx) = mpsc::channel::<RefreshWrite>(64);
     let mut workers = FuturesUnordered::new();
+    {
+        let state = state.clone();
+        let instance_id = instance_id.to_owned();
+        let task_id = task_id.to_owned();
+        let cancel = scan_cancel.clone();
+        workers.push(tokio_util::task::AbortOnDropHandle::new(tokio::spawn(
+            async move {
+                refresh_pack(&state, &instance_id, &task_id, mode, &cancel)
+                    .await
+            },
+        )));
+    }
     let mut pending = VecDeque::new();
     let mut scheduled = HashSet::new();
     let mut buffered = Vec::new();
@@ -405,7 +458,9 @@ async fn run_round(
                     Some(crate::state::instances::commands::ScanProgress::Files(files)) => {
                         let mut slots = state.content_refresh.slots.lock().await;
                         let records = crate::state::store::content_snapshot::get(&state.data, instance_id).await?;
-                        let work = entry::work(&records, files.iter().filter(|file| !failed_paths.contains(&file.relative_path)).map(|file| file.id.as_str()), mode);
+                        let eligible = files.iter().filter(|file| !failed_paths.contains(&file.relative_path)).collect::<Vec<_>>();
+                        let mut work = entry::work(&records, eligible.iter().filter(|file| !retry_scan_paths.contains(&file.relative_path)).map(|file| file.id.as_str()), mode);
+                        work.extend(entry::work(&records, eligible.iter().filter(|file| retry_scan_paths.contains(&file.relative_path)).map(|file| file.id.as_str()), RefreshMode::Normal));
                         for item in work {
                             if scheduled.insert((item.entry.entry_id.clone(), item.context.sha1.clone())) {
                                 pending.push_back(item);
@@ -425,7 +480,21 @@ async fn run_round(
                     None => { scans_closed = true; }
                 }
             }
-            result = &mut scan, if !scan_done => { result.map_err(|error| ResourceError::InvalidRequest(error.to_string()))??; scan_done = true; }
+            result = &mut scan, if !scan_done => {
+                result.map_err(|error| ResourceError::InvalidRequest(error.to_string()))??; scan_done = true;
+                if mode != RefreshMode::RetryFailed {
+                    let state = state.clone(); let instance_id = instance_id.to_owned(); let task_id = task_id.to_owned(); let cancel = scan_cancel.clone();
+                    workers.push(tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+                        crate::state::instances::commands::content_snapshot::refresh_background_metadata(&instance_id, &state, &cancel).await?;
+                        let mut slots = state.content_refresh.slots.lock().await;
+                        if let Some(slot) = slots.get_mut(&instance_id).filter(|slot| slot.task.id == task_id && !slot.cancel.is_cancelled()) {
+                            let snapshot = crate::state::instances::commands::get_local_content_snapshot(&instance_id, &state).await?;
+                            state.content_refresh.publish(&instance_id, slot, RefreshPatch::Content { snapshot });
+                        }
+                        Ok(())
+                    })));
+                }
+            }
         }
         if scan_done
             && scans.is_empty()
@@ -473,6 +542,135 @@ pub async fn get_state(instance_id: String) -> ResourceResult<RefreshState> {
 
 pub async fn subscribe() -> ResourceResult<broadcast::Receiver<RefreshEvent>> {
     Ok(crate::State::get().await?.content_refresh.subscribe())
+}
+
+async fn refresh_pack(
+    state: &crate::State,
+    instance_id: &str,
+    task_id: &str,
+    mode: RefreshMode,
+    cancel: &CancellationToken,
+) -> ResourceResult<()> {
+    use crate::state::store::{Collection as _, content_refresh_pack::*};
+    let records =
+        crate::state::store::content_snapshot::get(&state.data, instance_id)
+            .await?;
+    if matches!(records.link, crate::state::InstanceLink::Unmanaged) {
+        return Ok(());
+    }
+    let location_key =
+        crate::state::store::content_refresh_checks::location_key(
+            &records.instance,
+        );
+    let link_key = serde_json::to_string(&records.link)?;
+    let saved = records.pack_presentation.filter(|saved| {
+        saved.location_key == location_key && saved.link_key == link_key
+    });
+    let now = chrono::Utc::now().timestamp();
+    if !pack_needs_refresh(saved.as_ref(), mode, now) {
+        return Ok(());
+    }
+    let metadata = tokio::select! { biased; _ = cancel.cancelled() => return Err(ResourceError::Canceled),
+        result = crate::state::instances::commands::get_linked_modpack_info(instance_id, None, Some(if mode == RefreshMode::ForceRemote { crate::state::CacheBehaviour::Bypass } else { crate::state::CacheBehaviour::MustRevalidate }), state) => result
+    };
+    let result = metadata.map(|metadata| {
+        let mut pack =
+            crate::state::instances::commands::content_snapshot::pack_snapshot(
+                &records.instance.name,
+                records.instance.icon_path.clone(),
+                &records.link,
+                &records.members,
+                metadata,
+            );
+        if let Some(pack) = &mut pack {
+            pack.resource_id = records.pack_resource;
+        }
+        pack
+    });
+    let mut slots = state.content_refresh.slots.lock().await;
+    let Some(slot) = slots
+        .get_mut(instance_id)
+        .filter(|slot| slot.task.id == task_id && !slot.cancel.is_cancelled())
+    else {
+        return Ok(());
+    };
+    let _lock = state.lock_instance_content_exclusive(instance_id).await;
+    let current =
+        crate::state::store::content_snapshot::get(&state.data, instance_id)
+            .await?;
+    if location_key
+        != crate::state::store::content_refresh_checks::location_key(
+            &current.instance,
+        )
+        || link_key != serde_json::to_string(&current.link)?
+    {
+        return Ok(());
+    }
+    let record = pack_attempt(saved, location_key, link_key, now, &result);
+    ContentRefreshPacks::set(
+        &state.data,
+        &PackKey {
+            instance_id: instance_id.into(),
+            content_set_id: current.content_set.id,
+        },
+        Some(&record),
+    )
+    .await?;
+    let pack = result?;
+    state.content_refresh.publish(
+        instance_id,
+        slot,
+        RefreshPatch::Pack { pack },
+    );
+    Ok(())
+}
+
+fn pack_needs_refresh(
+    saved: Option<&crate::state::store::content_refresh_pack::PackRecord>,
+    mode: RefreshMode,
+    now: i64,
+) -> bool {
+    match mode {
+        RefreshMode::ForceRemote => true,
+        RefreshMode::RetryFailed => {
+            saved.is_some_and(|saved| saved.last_error.is_some())
+        }
+        RefreshMode::Normal => saved.is_none_or(|saved| {
+            if saved.last_error.is_some() {
+                now.saturating_sub(saved.attempted_at) >= 30
+            } else {
+                now.saturating_sub(saved.saved_at) >= 300
+            }
+        }),
+    }
+}
+
+fn pack_attempt(
+    saved: Option<crate::state::store::content_refresh_pack::PackRecord>,
+    location_key: String,
+    link_key: String,
+    now: i64,
+    result: &crate::Result<Option<crate::state::InstanceContentPack>>,
+) -> crate::state::store::content_refresh_pack::PackRecord {
+    use crate::state::store::content_refresh_pack::PackRecord;
+    match result {
+        Ok(pack) => PackRecord {
+            location_key,
+            link_key,
+            saved_at: now,
+            pack: pack.clone(),
+            attempted_at: now,
+            last_error: None,
+        },
+        Err(error) => PackRecord {
+            location_key,
+            link_key,
+            saved_at: saved.as_ref().map_or(0, |saved| saved.saved_at),
+            pack: saved.and_then(|saved| saved.pack),
+            attempted_at: now,
+            last_error: Some(error.to_string()),
+        },
+    }
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ use sqlx::Row;
 use std::collections::HashMap;
 
 pub(crate) struct SnapshotRecords {
+    pub pack_presentation: Option<super::content_refresh_pack::PackRecord>,
     pub fingerprints: HashMap<
         String,
         super::content_file_fingerprints::FileFingerprintRecord,
@@ -228,8 +229,18 @@ where
         .collect();
     let presentations = super::content_refresh_presentations::ContentRefreshPresentations::read_scoped(&mut tx, &instance_id.to_owned()).await?
         .into_iter().map(|(key, record)| (key.file_id, record)).collect();
+    let pack_presentation =
+        super::content_refresh_pack::ContentRefreshPacks::read(
+            &mut tx,
+            &super::content_refresh_pack::PackKey {
+                instance_id: instance_id.into(),
+                content_set_id: content_set.id.clone(),
+            },
+        )
+        .await?;
     tx.commit().await?;
     Ok(SnapshotRecords {
+        pack_presentation,
         fingerprints,
         presentations,
         instance,

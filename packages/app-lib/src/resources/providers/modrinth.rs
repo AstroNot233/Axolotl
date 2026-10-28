@@ -14,6 +14,7 @@ impl ModrinthProvider {
     }
 
     async fn request(&self, request: ProtocolRequest) -> ResourceResult<Value> {
+        tracing::debug!(source = "modrinth", path = %request.path, "Requesting content source");
         self.transport.request(&SourceId::modrinth(), request).await
     }
 

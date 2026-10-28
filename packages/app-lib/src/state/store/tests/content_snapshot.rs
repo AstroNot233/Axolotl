@@ -244,3 +244,69 @@ async fn malformed_optional_cache_does_not_hide_the_local_file() {
     assert_eq!(records.files.len(), 1);
     pool.close().await;
 }
+
+#[tokio::test]
+async fn saved_pack_metadata_recovers_without_network_and_invalidates_on_unlink()
+ {
+    use crate::state::store::content_refresh_pack::*;
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    seed(&pool).await;
+    let handle = Handle::new(pool.clone());
+    let records = get(&handle, "instance").await.unwrap();
+    let key = PackKey {
+        instance_id: "instance".into(),
+        content_set_id: "set".into(),
+    };
+    let pack = crate::state::InstanceContentPack {
+        resource_id: None,
+        name: "Saved pack".into(),
+        icon_path: None,
+        provider: None,
+        project_id: None,
+        version_id: None,
+        reconciled: true,
+        can_update: false,
+        metadata: None,
+    };
+    ContentRefreshPacks::set(
+        &handle,
+        &key,
+        Some(&PackRecord {
+            location_key: location_key(&records.instance),
+            link_key: serde_json::to_string(&records.link).unwrap(),
+            saved_at: 10,
+            pack: Some(pack),
+            attempted_at: 10,
+            last_error: None,
+        }),
+    )
+    .await
+    .unwrap();
+    let snapshot =
+        crate::state::instances::commands::content_snapshot::local::project(
+            get(&handle, "instance").await.unwrap(),
+        );
+    assert_eq!(snapshot.pack.unwrap().name, "Saved pack");
+    sqlx::query("UPDATE instances SET game_dir_override = 'changed' WHERE id = 'instance'").execute(&pool).await.unwrap();
+    let snapshot =
+        crate::state::instances::commands::content_snapshot::local::project(
+            get(&handle, "instance").await.unwrap(),
+        );
+    assert!(snapshot.pack.is_none());
+    sqlx::query("UPDATE instances SET applied_content_set_id = NULL WHERE id = 'instance'").execute(&pool).await.unwrap();
+    sqlx::query("DELETE FROM instance_content_sets WHERE id = 'set'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        ContentRefreshPacks::get_all(&handle)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    pool.close().await;
+}

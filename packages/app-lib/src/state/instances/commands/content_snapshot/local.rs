@@ -23,6 +23,7 @@ pub(crate) async fn get(
 
 pub(crate) fn project(records: SnapshotRecords) -> InstanceContentSnapshot {
     let SnapshotRecords {
+        pack_presentation,
         fingerprints,
         presentations,
         instance,
@@ -333,6 +334,12 @@ pub(crate) fn project(records: SnapshotRecords) -> InstanceContentSnapshot {
         &members,
         None,
     );
+    if let Some(saved) = pack_presentation
+        && saved.location_key == location_key
+        && saved.link_key == serde_json::to_string(&link).unwrap_or_default()
+    {
+        pack = saved.pack.or(pack);
+    }
     if let Some(pack) = &mut pack {
         pack.resource_id = pack_resource;
     }

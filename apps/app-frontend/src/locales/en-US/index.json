@@ -16486,5 +16486,14 @@
   },
   "unknown-pack-warning-modal.warning.title": {
     "message": "Unknown file warning"
+  },
+  "app.instance.content.checking": {
+    "message": "Checking updates… {count} checked"
+  },
+  "app.instance.content.check-failures": {
+    "message": "{count, plural, one {# check failed} other {# checks failed}}"
+  },
+  "app.instance.content.unrecognized": {
+    "message": "{count, plural, one {# file could not be identified} other {# files could not be identified}}"
   }
 }

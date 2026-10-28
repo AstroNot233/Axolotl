@@ -1,4 +1,4 @@
-mod dependencies;
+pub(crate) mod dependencies;
 pub(crate) mod local;
 
 use dependencies::backfill_dependency_edges_from_metadata;
@@ -1356,7 +1356,7 @@ fn snapshot_materialization_state(
     }
 }
 
-fn pack_snapshot(
+pub(crate) fn pack_snapshot(
     instance_name: &str,
     icon_path: Option<String>,
     link: &InstanceLink,
@@ -1573,4 +1573,91 @@ mod tests {
         assert_eq!(item.provider_project_id.as_deref(), Some("AANobbMI"));
         assert_eq!(item.provider_release_id.as_deref(), Some("vf7UgZpC"));
     }
+}
+
+pub(crate) async fn refresh_background_metadata(
+    instance_id: &str,
+    state: &State,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> crate::Result<()> {
+    let records =
+        crate::state::store::content_snapshot::get(&state.data, instance_id)
+            .await?;
+    if let InstanceLink::CurseForgeModpack {
+        project_id,
+        version_id,
+    } = &records.link
+    {
+        let parsed = project_id
+            .parse::<u32>()
+            .ok()
+            .zip(version_id.parse::<u32>().ok());
+        if let Some((project, version)) = parsed {
+            let expected = tokio::select! { biased; _ = cancel.cancelled() => return Ok(()), result = crate::api::curseforge::get_modpack_expected_members(project, version) => result? };
+            if cancel.is_cancelled() {
+                return Ok(());
+            }
+            let current = crate::state::store::content_snapshot::get(
+                &state.data,
+                instance_id,
+            )
+            .await?;
+            if current.content_set.id != records.content_set.id
+                || serde_json::to_string(&current.link)?
+                    != serde_json::to_string(&records.link)?
+            {
+                return Ok(());
+            }
+            reconcile_curseforge_members(
+                instance_id,
+                &records.content_set.id,
+                &expected,
+                state,
+            )
+            .await?;
+            reconcile_curseforge_manual_downloads(
+                instance_id,
+                &records.content_set.id,
+                &expected.members,
+                state,
+            )
+            .await?;
+        }
+    }
+    let records =
+        crate::state::store::content_snapshot::get(&state.data, instance_id)
+            .await?;
+    let by_file = records
+        .entries
+        .iter()
+        .filter_map(|entry| Some((entry.file_id.as_deref()?, entry.id.clone())))
+        .collect::<HashMap<_, _>>();
+    let metadata = records
+        .files
+        .iter()
+        .filter_map(|file| {
+            Some((
+                by_file.get(file.id.as_str())?.clone(),
+                serde_json::from_str::<crate::mod_metadata::LocalModMetadata>(
+                    file.local_mod_data.as_deref()?,
+                )
+                .ok()?,
+            ))
+        })
+        .collect();
+    let backfill = tokio::select! { biased; _ = cancel.cancelled() => return Ok(()),
+        result = dependencies::backfill_dependency_edges_from_metadata(&records.entries, &records.references, &records.content_set, &metadata, state) => result?
+    };
+    if !backfill.is_empty() && !cancel.is_cancelled() {
+        let _lock = state.lock_instance_content_exclusive(instance_id).await;
+        crate::state::store::content_dependencies::set_backfill(
+            &state.data,
+            instance_id,
+            &records.content_set.id,
+            records.content_set.revision,
+            &backfill,
+        )
+        .await?;
+    }
+    Ok(())
 }

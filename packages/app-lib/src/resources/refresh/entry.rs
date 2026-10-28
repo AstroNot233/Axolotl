@@ -98,7 +98,20 @@ pub(super) fn work<'a>(
                             == context.preferred_source
                 })
                 .map(|check| (*check).clone());
-            let check_due = due(previous.as_ref(), now, mode);
+            if mode == RefreshMode::RetryFailed
+                && previous
+                    .as_ref()
+                    .is_none_or(|check| check.attempt != CheckAttempt::Failed)
+            {
+                return None;
+            }
+            let check_due = if mode == RefreshMode::RetryFailed {
+                previous
+                    .as_ref()
+                    .is_none_or(|check| check.attempt == CheckAttempt::Failed)
+            } else {
+                due(previous.as_ref(), now, mode)
+            };
             let presentation_due = mode == RefreshMode::ForceRemote
                 || records.presentations.get(&file.id).is_none_or(|record| {
                     record.location_key != context.location_key
@@ -209,7 +222,7 @@ fn due(
     now: i64,
     mode: RefreshMode,
 ) -> bool {
-    if mode == RefreshMode::ForceRemote {
+    if mode != RefreshMode::Normal {
         return true;
     }
     match previous {
@@ -247,7 +260,7 @@ pub(super) async fn run(
         &instance,
     )?;
     work.context.content_root = root.to_string_lossy().into_owned();
-    let policy = if mode == RefreshMode::ForceRemote {
+    let policy = if mode != RefreshMode::Normal {
         CachePolicy::ForceRefresh
     } else {
         CachePolicy::UseFresh
@@ -283,7 +296,7 @@ pub(super) async fn run(
     };
     let update = async {
         if !work.check_due {
-            return Ok(());
+            return Ok(None);
         }
         let outcome = updates::check_entry_with_policy(
             &service,
@@ -309,7 +322,8 @@ pub(super) async fn run(
                 check.failed(chrono::Utc::now().timestamp(), error.to_string())
             }
         }
-        send(&tx, &work, Some(check), None, None).await
+        send(&tx, &work, Some(check.clone()), None, None).await?;
+        Ok::<_, ResourceError>(Some(check))
     };
     let presentation = async {
         if !work.presentation_due {
@@ -379,9 +393,14 @@ pub(super) async fn run(
         release
     };
     let (update, presentation) = tokio::join!(update, presentation);
-    update?;
+    let check = update?;
     if let Err(error) = presentation {
-        tracing::debug!(entry_id = %work.entry.entry_id.as_str(), %error, "Content presentation refresh failed");
+        if error == ResourceError::Canceled {
+            return Err(error);
+        }
+        let mut check = check.unwrap_or_else(|| record(&work));
+        check.failed(chrono::Utc::now().timestamp(), error.to_string());
+        send(&tx, &work, Some(check), None, None).await?;
     }
     Ok(())
 }

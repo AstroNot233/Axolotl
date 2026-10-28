@@ -39,6 +39,7 @@ impl CurseForgeProvider {
         }
     }
     async fn request(&self, request: ProtocolRequest) -> ResourceResult<Value> {
+        tracing::debug!(source = "curseforge", path = %request.path, "Requesting content source");
         self.transport
             .request(&SourceId::curseforge(), request)
             .await

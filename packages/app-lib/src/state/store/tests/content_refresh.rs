@@ -384,6 +384,96 @@ fn fingerprint_attributes_require_precise_time_path_and_root() {
     ));
 }
 
+#[tokio::test]
+async fn pack_and_scan_failure_migrations_preserve_old_data_and_cascade() {
+    use crate::state::store::content_refresh_scan_failures::*;
+    for boundary in [20261028110000, 20261028120000] {
+        let migrations = sqlx::migrate!();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .in_memory(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .unwrap();
+        let previous = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                migrations
+                    .iter()
+                    .filter(|migration| migration.version < boundary)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        previous.run(&pool).await.unwrap();
+        seed(&pool).await;
+        migrations.run(&pool).await.unwrap();
+        let handle = Handle::new(pool);
+        let key = ScanFailureKey {
+            instance_id: "instance".into(),
+            location_key: "root".into(),
+            relative_path: "mods/new.jar".into(),
+        };
+        ContentRefreshScanFailures::set(
+            &handle,
+            &key,
+            Some(&ScanFailureRecord {
+                attempted_at: 42,
+                error: "locked".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            ContentRefreshScanFailures::get_scoped(&handle, &"instance".into())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            ContentRefreshScanFailures::get_scoped(&handle, &"other".into())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        sqlx::query("INSERT INTO content_refresh_scan_failures (instance_id, location_key, relative_path, payload) VALUES ('instance', 'root', 'mods/bad.jar', 'not json')").execute(handle.pool()).await.unwrap();
+        assert_eq!(
+            ContentRefreshScanFailures::get_all(&handle)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let files: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM instance_files")
+                .fetch_one(handle.pool())
+                .await
+                .unwrap();
+        assert_eq!(files, 1);
+        sqlx::query("DELETE FROM instances WHERE id = 'instance'")
+            .execute(handle.pool())
+            .await
+            .unwrap();
+        assert!(
+            ContentRefreshScanFailures::get_all(&handle)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let violations: Vec<(String, i64, String, i64)> =
+            sqlx::query_as("PRAGMA foreign_key_check")
+                .fetch_all(handle.pool())
+                .await
+                .unwrap();
+        assert!(violations.is_empty());
+        handle.pool().close().await;
+    }
+}
+
 #[test]
 fn checks_are_reused_only_for_the_same_file_and_selection_conditions() {
     let mut previous = check();

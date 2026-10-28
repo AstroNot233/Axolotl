@@ -181,6 +181,106 @@ impl ResourceProvider for Provider {
     }
 }
 
+#[tokio::test]
+async fn scan_failures_without_an_entry_survive_and_retry_without_rechecking_successful_files()
+ {
+    use crate::state::store::content_refresh_scan_failures::*;
+    let (_temp, state, provider) = fixture().await;
+    state
+        .content_refresh
+        .start(state.clone(), "instance".into(), RefreshMode::Normal)
+        .await
+        .unwrap();
+    finished(&state).await;
+    let successful =
+        ContentRefreshChecks::get_scoped(&state.data, &"instance".into())
+            .await
+            .unwrap();
+    let records = content_snapshot::get(&state.data, "instance")
+        .await
+        .unwrap();
+    let root = crate::state::instances::commands::instance_content_root(
+        &state.directories,
+        &records.instance,
+    )
+    .unwrap();
+    std::fs::write(root.join("resourcepacks/recovered.zip"), b"new").unwrap();
+    let key = ScanFailureKey {
+        instance_id: "instance".into(),
+        location_key: serde_json::to_string(&(
+            location_key(&records.instance),
+            root.to_string_lossy(),
+        ))
+        .unwrap(),
+        relative_path: "resourcepacks/recovered.zip".into(),
+    };
+    ContentRefreshScanFailures::set(
+        &state.data,
+        &key,
+        Some(&ScanFailureRecord {
+            attempted_at: chrono::Utc::now().timestamp(),
+            error: "file temporarily unavailable".into(),
+        }),
+    )
+    .await
+    .unwrap();
+    state
+        .content_refresh
+        .start(state.clone(), "instance".into(), RefreshMode::Normal)
+        .await
+        .unwrap();
+    finished(&state).await;
+    assert!(
+        ContentRefreshScanFailures::get(&state.data, &key)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        state
+            .content_refresh
+            .state(&state, "instance")
+            .await
+            .unwrap()
+            .task
+            .unwrap()
+            .failed,
+        1
+    );
+    provider.queries.store(0, Ordering::SeqCst);
+    state
+        .content_refresh
+        .start(state.clone(), "instance".into(), RefreshMode::RetryFailed)
+        .await
+        .unwrap();
+    finished(&state).await;
+    assert!(
+        ContentRefreshScanFailures::get(&state.data, &key)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let after =
+        ContentRefreshChecks::get_scoped(&state.data, &"instance".into())
+            .await
+            .unwrap();
+    assert_eq!(after.len(), successful.len() + 1);
+    for (key, record) in successful {
+        assert_eq!(
+            ContentRefreshChecks::get(&state.data, &key)
+                .await
+                .unwrap()
+                .unwrap(),
+            record
+        );
+    }
+    assert!(after.iter().any(|(_, check)| check.context.sha1
+        == sha1_smol::Sha1::from(b"new").hexdigest()));
+    assert_eq!(provider.queries.load(Ordering::SeqCst), 0);
+    state.content_refresh.shutdown().await;
+    state.pool.close().await;
+}
+
 async fn fixture() -> (tempfile::TempDir, Arc<crate::State>, Arc<Provider>) {
     let temp = tempfile::tempdir().unwrap();
     let directories = crate::state::DirectoryInfo {
@@ -504,6 +604,176 @@ async fn a_disk_edit_during_network_work_cannot_publish_a_candidate_for_the_old_
             .await
             .unwrap();
     assert!(!saved.iter().any(|(key, _)| key.entry_id == "slow"));
+    state.content_refresh.shutdown().await;
+    state.pool.close().await;
+}
+
+#[tokio::test]
+async fn retry_failed_entries_does_not_requery_successful_peers() {
+    let (_temp, state, provider) = fixture().await;
+    state
+        .content_refresh
+        .start(state.clone(), "instance".into(), RefreshMode::Normal)
+        .await
+        .unwrap();
+    finished(&state).await;
+    let fast = ContentRefreshChecks::get(
+        &state.data,
+        &RefreshCheckKey {
+            instance_id: "instance".into(),
+            entry_id: "fast".into(),
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let mut slow = ContentRefreshChecks::get(
+        &state.data,
+        &RefreshCheckKey {
+            instance_id: "instance".into(),
+            entry_id: "slow".into(),
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    slow.failed(chrono::Utc::now().timestamp(), "offline".into());
+    ContentRefreshChecks::set(
+        &state.data,
+        &RefreshCheckKey {
+            instance_id: "instance".into(),
+            entry_id: "slow".into(),
+        },
+        Some(&slow),
+    )
+    .await
+    .unwrap();
+    provider.queries.store(0, Ordering::SeqCst);
+    state
+        .content_refresh
+        .start(state.clone(), "instance".into(), RefreshMode::RetryFailed)
+        .await
+        .unwrap();
+    finished(&state).await;
+    assert_eq!(
+        ContentRefreshChecks::get(
+            &state.data,
+            &RefreshCheckKey {
+                instance_id: "instance".into(),
+                entry_id: "fast".into()
+            }
+        )
+        .await
+        .unwrap()
+        .unwrap(),
+        fast
+    );
+    assert_eq!(
+        ContentRefreshChecks::get(
+            &state.data,
+            &RefreshCheckKey {
+                instance_id: "instance".into(),
+                entry_id: "slow".into()
+            }
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .attempt,
+        CheckAttempt::Succeeded
+    );
+    assert!(provider.queries.load(Ordering::SeqCst) < 6);
+    state.content_refresh.shutdown().await;
+    state.pool.close().await;
+}
+
+#[tokio::test]
+async fn pack_failures_survive_reload_and_retry_preserves_success_until_recovered()
+ {
+    use crate::state::store::content_refresh_pack::*;
+    let (_temp, state, _) = fixture().await;
+    let records = content_snapshot::get(&state.data, "instance")
+        .await
+        .unwrap();
+    let location = location_key(&records.instance);
+    let link = serde_json::to_string(&records.link).unwrap();
+    let key = PackKey {
+        instance_id: "instance".into(),
+        content_set_id: "set".into(),
+    };
+    let pack = crate::state::InstanceContentPack {
+        resource_id: None,
+        name: "Saved pack".into(),
+        icon_path: None,
+        provider: None,
+        project_id: None,
+        version_id: None,
+        reconciled: true,
+        can_update: false,
+        metadata: None,
+    };
+    let success = pack_attempt(
+        None,
+        location.clone(),
+        link.clone(),
+        100,
+        &Ok(Some(pack)),
+    );
+    let failed = pack_attempt(
+        Some(success),
+        location.clone(),
+        link.clone(),
+        110,
+        &Err(crate::ErrorKind::InputError("offline".into()).into()),
+    );
+    ContentRefreshPacks::set(&state.data, &key, Some(&failed))
+        .await
+        .unwrap();
+    let restored = content_snapshot::get(&state.data, "instance")
+        .await
+        .unwrap()
+        .pack_presentation
+        .unwrap();
+    assert_eq!(restored.saved_at, 100);
+    assert_eq!(restored.pack.as_ref().unwrap().name, "Saved pack");
+    assert!(restored.last_error.is_some());
+    assert!(pack_needs_refresh(
+        Some(&restored),
+        RefreshMode::RetryFailed,
+        111
+    ));
+    assert!(!pack_needs_refresh(
+        Some(&restored),
+        RefreshMode::Normal,
+        111
+    ));
+    assert!(pack_needs_refresh(
+        Some(&restored),
+        RefreshMode::Normal,
+        140
+    ));
+    let recovered =
+        pack_attempt(Some(restored), location, link, 120, &Ok(None));
+    ContentRefreshPacks::set(&state.data, &key, Some(&recovered))
+        .await
+        .unwrap();
+    let restored = ContentRefreshPacks::get(&state.data, &key)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(restored.last_error.is_none());
+    assert!(restored.pack.is_none());
+    assert!(!pack_needs_refresh(
+        Some(&restored),
+        RefreshMode::RetryFailed,
+        121
+    ));
+    assert!(!pack_needs_refresh(None, RefreshMode::RetryFailed, 121));
+    assert!(pack_needs_refresh(
+        Some(&restored),
+        RefreshMode::ForceRemote,
+        121
+    ));
     state.content_refresh.shutdown().await;
     state.pool.close().await;
 }

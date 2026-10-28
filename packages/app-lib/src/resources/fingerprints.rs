@@ -302,6 +302,12 @@ fn hash_file(
     if cancel.is_cancelled() {
         return Err(ResourceError::Canceled);
     }
+    tracing::debug!(
+        path = %path.display(), bytes_read = size,
+        sha1_computed = sha1.is_some(), sha256_computed = sha256.is_some(),
+        sha512_computed = sha512.is_some(), curseforge_computed = true,
+        "Read content bytes for fingerprints"
+    );
     let mut murmur =
         crate::util::fingerprint::Murmur2Hasher::new(normalized.len() as u32);
     murmur.update(&normalized);
