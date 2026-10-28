@@ -37,10 +37,18 @@ describe('banner export', () => {
         )
     })
 
-    it('omits the component block for a plain banner', () => {
+    it('leaves a single space where a plain banner has no item data', () => {
         const plain: BannerDesign = { baseColor: 'blue', layers: [] }
         expect(toItemData(plain)).toBe('')
         expect(toGiveCommand(plain)).toBe('/give @p minecraft:blue_banner 1')
+        // Only the modern dialect can come out without item data; the older ones
+        // always carry the block entity tag, and 1.12 keeps it after the damage value.
+        expect(toGiveCommand(plain, { version: 'legacy' })).toBe(
+            '/give @p minecraft:blue_banner{BlockEntityTag:{Base:11b,Patterns:[]}} 1',
+        )
+        expect(toGiveCommand(plain, { version: 'classic' })).toBe(
+            '/give @p minecraft:banner 1 0 {BlockEntityTag:{Base:11b,Patterns:[]}}',
+        )
     })
 
     it('writes the pre-1.20.5 item NBT with short pattern codes', () => {
@@ -72,7 +80,7 @@ describe('banner export version support', () => {
         expect(unsupportedPatterns(newer, 'modern')).toEqual([])
     })
 
-    it('keeps the 1.13 pattern set and later 1.16 to 1.20 additions in legacy', () => {
+    it('keeps the 1.13 pattern set and the 1.14 to 1.20 additions in legacy', () => {
         const older: BannerDesign = {
             baseColor: 'white',
             layers: [
@@ -96,7 +104,7 @@ describe('banner export version support', () => {
         expect(unsupportedPatterns(repeated, 'legacy')).toEqual(['guster', 'flow'])
     })
 
-    it('allows 1.16 to 1.20 patterns in legacy but flags the 1.20.5 ones', () => {
+    it('allows 1.14 to 1.20 patterns in legacy but flags the 1.20.5 ones', () => {
         const mixed: BannerDesign = {
             baseColor: 'white',
             layers: [
@@ -146,7 +154,7 @@ describe('banner export version support', () => {
         )
     })
 
-    it('flags 1.16 and later patterns for the 1.12 target', () => {
+    it('flags 1.14 and later patterns for the 1.12 target', () => {
         const newer: BannerDesign = {
             baseColor: 'white',
             layers: [

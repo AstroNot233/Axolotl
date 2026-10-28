@@ -109,7 +109,8 @@ const BANNER_PATTERN_DEFINITIONS = [
         id: 'globe',
         category: 'icons',
         patternItem: 'minecraft:globe_banner_pattern',
-        since: '1.20',
+        // 19w11a, so it predates the 1.16 piglin pattern listed below it.
+        since: '1.14',
     },
     {
         id: 'piglin',
