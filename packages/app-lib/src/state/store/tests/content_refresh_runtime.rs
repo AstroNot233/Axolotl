@@ -281,6 +281,118 @@ async fn scan_failures_without_an_entry_survive_and_retry_without_rechecking_suc
     state.pool.close().await;
 }
 
+#[tokio::test]
+async fn verified_install_seeds_a_baseline_without_a_second_scan_read_and_rejects_changed_attributes()
+ {
+    use crate::state::store::content_file_fingerprints::ContentFileFingerprints;
+    let (temp, state, _) = fixture().await;
+    let records = content_snapshot::get(&state.data, "instance")
+        .await
+        .unwrap();
+    let root = crate::state::instances::commands::instance_content_root(
+        &state.directories,
+        &records.instance,
+    )
+    .unwrap();
+    let source = temp.path().join("verified.zip");
+    std::fs::write(&source, b"new").unwrap();
+    let sha1 = sha1_smol::Sha1::from(b"new").hexdigest();
+    let destination = root.join("resourcepacks/fast.zip");
+    let (_, modified) =
+        crate::state::materialize_verified_project_download_copy(
+            &source,
+            &destination,
+            3,
+            &sha1,
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE instance_files SET sha1=? WHERE id='fast'")
+        .bind(&sha1)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    let integrity = ArtifactIntegrity {
+        size: Some(3),
+        hashes: vec![ContentHash {
+            algorithm: HashAlgorithm::Sha1,
+            value: sha1.clone(),
+        }],
+    };
+    state
+        .file_fingerprints
+        .seed_verified(
+            &state,
+            "instance",
+            &root,
+            "resourcepacks/fast.zip",
+            integrity.clone(),
+            modified.clone(),
+        )
+        .await
+        .unwrap();
+    let saved = ContentFileFingerprints::get_current(
+        &state.data,
+        "instance",
+        "resourcepacks/fast.zip",
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let reads = state.file_fingerprints.read_count.load(Ordering::SeqCst);
+    let resolved = state
+        .file_fingerprints
+        .resolve_scan(
+            &root,
+            "resourcepacks/fast.zip",
+            Some(&saved),
+            false,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resolved.record.unwrap().sha1(), sha1);
+    assert_eq!(
+        state.file_fingerprints.read_count.load(Ordering::SeqCst),
+        reads
+    );
+    let file = std::fs::File::options()
+        .write(true)
+        .open(&destination)
+        .unwrap();
+    file.set_times(std::fs::FileTimes::new().set_modified(
+        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(100),
+    ))
+    .unwrap();
+    ContentFileFingerprints::set_scoped(&state.data, &"instance".into(), &[])
+        .await
+        .unwrap();
+    state
+        .file_fingerprints
+        .seed_verified(
+            &state,
+            "instance",
+            &root,
+            "resourcepacks/fast.zip",
+            integrity,
+            modified,
+        )
+        .await
+        .unwrap();
+    assert!(
+        ContentFileFingerprints::get_current(
+            &state.data,
+            "instance",
+            "resourcepacks/fast.zip"
+        )
+        .await
+        .unwrap()
+        .is_none()
+    );
+    state.content_refresh.shutdown().await;
+    state.pool.close().await;
+}
+
 async fn fixture() -> (tempfile::TempDir, Arc<crate::State>, Arc<Provider>) {
     let temp = tempfile::tempdir().unwrap();
     let directories = crate::state::DirectoryInfo {

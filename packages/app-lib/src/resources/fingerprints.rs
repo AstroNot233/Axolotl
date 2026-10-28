@@ -44,6 +44,58 @@ pub(crate) struct FingerprintResult {
 }
 
 impl FileFingerprints {
+    pub(crate) async fn seed_verified(
+        &self,
+        state: &crate::State,
+        instance_id: &str,
+        root: &Path,
+        relative_path: &str,
+        integrity: ArtifactIntegrity,
+        modified: Option<FileModifiedTime>,
+    ) -> ResourceResult<()> {
+        use crate::state::store::content_file_fingerprints::ContentFileFingerprints;
+        let Some(modified) = modified else {
+            return Ok(());
+        };
+        let root =
+            crate::util::io::canonicalize(root).map_err(crate::Error::from)?;
+        let path = super::execution::checked_path(&root, relative_path)?;
+        let (size, current) = attributes(&path).await?;
+        if integrity.size != Some(size) || current.as_ref() != Some(&modified) {
+            return Ok(());
+        }
+        if ContentFileFingerprints::get_current(
+            &state.data,
+            instance_id,
+            relative_path,
+        )
+        .await?
+        .is_some_and(|saved| {
+            saved.matches(
+                &root.to_string_lossy(),
+                relative_path,
+                size,
+                Some(&modified),
+            )
+        }) {
+            return Ok(());
+        }
+        ContentFileFingerprints::set_current(
+            &state.data,
+            instance_id,
+            &FileFingerprintRecord {
+                content_root: root.to_string_lossy().into_owned(),
+                relative_path: relative_path.into(),
+                size,
+                modified,
+                hashes: integrity.hashes,
+                curseforge_fingerprint: None,
+            },
+        )
+        .await?;
+        Ok(())
+    }
+
     pub(crate) async fn resolve_scan(
         &self,
         root: &Path,
