@@ -541,18 +541,18 @@ pub(crate) async fn execute(
             .any(|requirement| requirement.local_mod_id.is_some())
         {
             let bytes = bytes::Bytes::from(tokio::fs::read(path).await?);
-            Some(crate::mod_metadata::extract_mod_metadata(&bytes)
-                .ok_or_else(|| input("cannot verify the updated mod's dependency version"))?)
+            crate::mod_metadata::extract_mod_metadata(&bytes)
         } else {
             None
         };
         for requirement in requirements {
-            if let Some(id) = &requirement.local_mod_id {
-                let metadata = metadata.as_ref().unwrap();
+            if let Some(id) = &requirement.local_mod_id
+                && let Some(metadata) = &metadata
+            {
                 if &metadata.mod_id != id
                     || !requirement.version_constraint.as_ref().is_none_or(
                         |constraint| {
-                            metadata.version.as_ref().is_some_and(|version| {
+                            metadata.version.as_ref().is_none_or(|version| {
                                 plans::requirements::mod_version_matches(
                                     constraint, version,
                                 )

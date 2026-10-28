@@ -119,7 +119,7 @@ const node = (id: string, state: string, artifact: unknown = null) => ({
 const root = node('root', 'update', { reference, fileName: 'Root.jar' })
 const optional = node('optional', 'optionalCandidate')
 
-it('omits compatibility exceptions for local filename matches but keeps real unknown release warnings', async () => {
+it('keeps unknown compatibility visible and queues without requiring exceptions', async () => {
     ready()
     const local = node('local-file', 'satisfied')
     local.compatibility = { gameVersion: 'unknown', loader: 'unknown', reasons: [] }
@@ -129,6 +129,7 @@ it('omits compatibility exceptions for local filename matches but keeps real unk
         ...plan(),
         nodes: [local, remote],
     } as unknown as ResourceOperationPlan)
+    vi.mocked(resourceQueuePlan).mockResolvedValueOnce({ job_id: 'unknown-job' } as never)
     const wrapper = mount(ResourceOperationPreviewModal)
     const result = wrapper.vm.show(input)
     try {
@@ -141,18 +142,21 @@ it('omits compatibility exceptions for local filename matches but keeps real unk
             wrapper
                 .findAll('button')
                 .filter((button) => button.text() === 'Accept Minecraft compatibility exception'),
-        ).toHaveLength(1)
+        ).toHaveLength(0)
         expect(
             wrapper
                 .findAll('button')
                 .filter((button) => button.text() === 'Accept loader compatibility exception'),
-        ).toHaveLength(1)
+        ).toHaveLength(0)
         expect(wrapper.text()).toContain('Already satisfied')
         await wrapper
             .findAll('button')
-            .find((button) => button.text() === 'Cancel')!
+            .find((button) => button.text() === 'Queue changes')!
             .trigger('click')
-        expect(await result).toBeNull()
+        await flushPromises()
+        expect(resourceRevisePlan).not.toHaveBeenCalled()
+        expect(resourceQueuePlan).toHaveBeenCalledExactlyOnceWith('plan', 1)
+        expect(await result).toEqual({ job_id: 'unknown-job' })
     } finally {
         wrapper.unmount()
     }
@@ -791,7 +795,7 @@ it('accepts the selected release compatibility exceptions and queues it in the s
                     exception: {
                         selectionId: 'root',
                         release: reference.release,
-                        dimensions: ['gameVersion', 'loader'],
+                        dimensions: ['gameVersion'],
                     },
                 },
             ],
@@ -1274,7 +1278,7 @@ it('warns about unaccepted compatibility and binds manual exceptions to exactly 
         ...root,
         compatibility: {
             gameVersion: 'incompatible',
-            loader: 'unknown',
+            loader: 'incompatible',
             reasons: ['gameVersion', 'loader'],
         },
     }
@@ -1309,9 +1313,9 @@ it('warns about unaccepted compatibility and binds manual exceptions to exactly 
             issues: [
                 {
                     selectionId: 'root',
-                    code: 'compatibilityUnknown',
+                    code: 'compatibilityMismatch',
                     blocking: true,
-                    message: 'unknown loader',
+                    message: 'incompatible loader',
                 },
             ],
         } as ResourceOperationPlan)

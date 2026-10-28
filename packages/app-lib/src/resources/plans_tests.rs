@@ -1493,7 +1493,7 @@ fn target() -> ipc::ResourceTarget {
 }
 
 #[tokio::test]
-async fn connector_exact_releases_allow_hash_bound_unknown_sizes_but_require_compatibility_review()
+async fn connector_exact_releases_allow_hash_bound_unknown_sizes_and_compatibility()
  {
     let mut release = release("connector", "1", 'a');
     let source = SourceId::new("planet_minecraft").unwrap();
@@ -1529,8 +1529,15 @@ async fn connector_exact_releases_allow_hash_bound_unknown_sizes_but_require_com
         .await
         .unwrap();
     assert_eq!(draft.plan.actions.len(), 1);
-    assert!(draft.plan.issues.iter().any(|issue| issue.blocking
-        && issue.code == ResourceIssueCode::CompatibilityUnknown));
+    assert!(!draft.plan.issues.iter().any(|issue| issue.blocking));
+    assert_eq!(
+        draft.plan.nodes[0].compatibility.game_version,
+        CompatibilityState::Unknown
+    );
+    assert_eq!(
+        draft.plan.nodes[0].compatibility.loader,
+        CompatibilityState::Unknown
+    );
     assert!(draft.plan.actions[0].target.integrity.size.is_none());
 }
 async fn service(
@@ -1932,7 +1939,7 @@ async fn an_existing_root_does_not_swallow_a_different_exact_dependency_artifact
 }
 
 #[tokio::test]
-async fn disabled_unchanged_file_does_not_trigger_reinstall_and_unknown_requires_explicit_exception()
+async fn disabled_unchanged_file_does_not_trigger_reinstall_and_unknown_is_allowed()
  {
     let release = release("root0000", "1", 'a');
     let (_directory, service) = service(vec![release.clone()]).await;
@@ -1967,9 +1974,11 @@ async fn disabled_unchanged_file_does_not_trigger_reinstall_and_unknown_requires
         .await
         .unwrap()
         .plan;
-    assert!(plan.issues.iter().any(|issue| issue.code
-        == ResourceIssueCode::CompatibilityUnknown
-        && issue.blocking));
+    assert!(!plan.issues.iter().any(|issue| issue.blocking));
+    assert_eq!(
+        plan.nodes[0].compatibility.game_version,
+        CompatibilityState::Unknown
+    );
     service.cache().close().await;
 }
 

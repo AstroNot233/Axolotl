@@ -3009,8 +3009,8 @@ provideContentManager({
                 : null,
             compatibilityWarningTooltip:
                 item.compatibility &&
-                (item.compatibility.gameVersion !== 'compatible' ||
-                    item.compatibility.loader !== 'compatible')
+                (item.compatibility.gameVersion === 'incompatible' ||
+                    item.compatibility.loader === 'incompatible')
                     ? formatMessage(messages.compatibilityWarning, {
                           game: item.compatibility.gameVersion,
                           loader: item.compatibility.loader,

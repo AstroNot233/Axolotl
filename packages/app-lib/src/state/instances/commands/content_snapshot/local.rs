@@ -287,19 +287,41 @@ pub(crate) fn project(records: SnapshotRecords) -> InstanceContentSnapshot {
                     )
                 });
         }
-        if item.compatibility.is_none()
-            && let Some(declared) = item
-                .file_id
-                .as_ref()
-                .and_then(|id| local_declarations.get(id))
+        if let Some(declared) = item
+            .file_id
+            .as_ref()
+            .and_then(|id| local_declarations.get(id))
             && item.project_type == crate::state::ProjectType::Mod
         {
-            item.compatibility =
-                Some(crate::resources::assess_declared_compatibility(
-                    declared,
-                    &target,
-                    crate::resources::ResourceType::Mod,
-                ));
+            let local = crate::resources::assess_declared_compatibility(
+                declared,
+                &target,
+                crate::resources::ResourceType::Mod,
+            );
+            if let Some(compatibility) = &mut item.compatibility {
+                use crate::resources::CompatibilityState;
+                if compatibility.game_version == CompatibilityState::Unknown {
+                    compatibility.game_version = local.game_version;
+                }
+                if compatibility.loader == CompatibilityState::Unknown {
+                    compatibility.loader = local.loader;
+                }
+                compatibility
+                    .reasons
+                    .retain(|reason| match reason.as_str() {
+                        "gameVersion" => {
+                            compatibility.game_version
+                                != CompatibilityState::Compatible
+                        }
+                        "loader" => {
+                            compatibility.loader
+                                != CompatibilityState::Compatible
+                        }
+                        _ => true,
+                    });
+            } else {
+                item.compatibility = Some(local);
+            }
         }
         item.capabilities.can_update = false;
         let Some(check) = item.entry_id.as_ref().and_then(|id| checks.get(id))

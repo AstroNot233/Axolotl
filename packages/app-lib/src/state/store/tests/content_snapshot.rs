@@ -208,6 +208,61 @@ async fn local_author_survives_an_older_presentation_without_an_owner() {
 }
 
 #[tokio::test]
+async fn local_declarations_fill_remote_unknown_dimensions_without_overriding_mismatches()
+ {
+    use crate::resources::CompatibilityState::{
+        Compatible, Incompatible, Unknown,
+    };
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    seed(&pool).await;
+    sqlx::query("UPDATE instance_files SET local_mod_data = ? WHERE id = 'file'")
+        .bind(serde_json::json!({"mod_id":"example", "minecraft_version":"[1.21,)", "loader":"fabric"}).to_string())
+        .execute(&pool).await.unwrap();
+    let handle = Handle::new(pool.clone());
+    for (game_versions, loaders, expected_game, expected_loader) in [
+        (vec![], vec![], Compatible, Compatible),
+        (
+            vec!["opaque range"],
+            vec!["forge"],
+            Compatible,
+            Incompatible,
+        ),
+        (vec!["1.20"], vec![], Incompatible, Compatible),
+    ] {
+        let mut records = get(&handle, "instance").await.unwrap();
+        records.artifacts.insert("entry".into(), serde_json::from_value(serde_json::json!({
+            "reference": {"release": {"project": {"source":"modrinth", "projectId":"example1"}, "releaseId":"release1"}, "artifactId":"artifact1"},
+            "fileName":"a.jar", "role":"primary", "available":true,
+            "integrity":{"size":3,"hashes":[{"algorithm":"sha1","value":"a".repeat(40)}]},
+            "acquisition":{"kind":"publicDownload","urls":["https://example.com/a.jar"]},
+            "dependencies":[],
+            "declaredCompatibility":{"gameVersions":game_versions,"loaders":loaders}
+        })).unwrap());
+        let snapshot =
+            crate::state::instances::commands::content_snapshot::local::project(
+                records,
+            );
+        let assessment = snapshot.items[0].compatibility.as_ref().unwrap();
+        assert_eq!(assessment.game_version, expected_game);
+        assert_eq!(assessment.loader, expected_loader);
+        assert_eq!(
+            assessment.reasons.contains(&"gameVersion".into()),
+            expected_game != Compatible
+        );
+        assert_eq!(
+            assessment.reasons.contains(&"loader".into()),
+            expected_loader != Compatible
+        );
+        assert_ne!(assessment.game_version, Unknown);
+    }
+    pool.close().await;
+}
+
+#[tokio::test]
 async fn presentation_is_restored_only_for_matching_bytes_and_location() {
     use crate::state::store::content_refresh_presentations::*;
     let pool = sqlx::sqlite::SqlitePoolOptions::new()

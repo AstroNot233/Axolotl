@@ -920,7 +920,7 @@ async function submit(retryStale: boolean) {
                 if (!node.artifact || node.state === 'optionalCandidate') return []
                 const dimensions = (['gameVersion', 'loader'] as const).filter(
                     (dimension) =>
-                        node.compatibility[dimension] !== 'compatible' &&
+                        node.compatibility[dimension] === 'incompatible' &&
                         !selectedOnly.exceptions.some(
                             (exception) =>
                                 exception.selectionId === node.id &&
@@ -1267,7 +1267,7 @@ defineExpose({ show, showInstall, showInstallSelection, cancel })
                     >
                         <Button
                             v-if="
-                                node.compatibility[dimension] !== 'compatible' &&
+                                node.compatibility[dimension] === 'incompatible' &&
                                 !plan?.exceptions.some(
                                     (exception) =>
                                         exception.selectionId === node.id &&

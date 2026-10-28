@@ -653,8 +653,8 @@ impl ResourceService {
                     target,
                     selection.resource_type,
                 );
-                if assessment.game_version != CompatibilityState::Compatible
-                    || assessment.loader != CompatibilityState::Compatible
+                if assessment.game_version == CompatibilityState::Incompatible
+                    || assessment.loader == CompatibilityState::Incompatible
                     || !constraints.iter().all(|constraint| {
                         matches_release_constraint(constraint, &release.version)
                     })
@@ -1045,9 +1045,9 @@ impl ResourceService {
                                 requirements.iter().all(|requirement| {
                                     requirement.accepts(release)
                                 }) && compatibility.game_version
-                                    == CompatibilityState::Compatible
+                                    != CompatibilityState::Incompatible
                                     && compatibility.loader
-                                        == CompatibilityState::Compatible
+                                        != CompatibilityState::Incompatible
                                     && constraints.iter().all(|constraint| {
                                         matches_release_constraint(
                                             constraint,
@@ -2030,12 +2030,7 @@ impl ResourceService {
                 (CompatibilityDimension::GameVersion, assessment.game_version),
                 (CompatibilityDimension::Loader, assessment.loader),
             ] {
-                if value == CompatibilityState::Compatible {
-                    continue;
-                }
-                if locally_satisfied_dependency
-                    && value == CompatibilityState::Unknown
-                {
+                if value != CompatibilityState::Incompatible {
                     continue;
                 }
                 let accepted = draft.plan.exceptions.iter().any(|exception| {
@@ -2046,11 +2041,7 @@ impl ResourceService {
                 if !accepted {
                     issue(
                         &mut draft.plan,
-                        if value == CompatibilityState::Unknown {
-                            ResourceIssueCode::CompatibilityUnknown
-                        } else {
-                            ResourceIssueCode::CompatibilityMismatch
-                        },
+                        ResourceIssueCode::CompatibilityMismatch,
                         &selection.id,
                         true,
                         format!("{dimension:?}: {value:?}"),
@@ -2836,6 +2827,28 @@ impl ResourceService {
                                     .is_some_and(|node| edge.child == node.id))
                     })
                     .and_then(|edge| edge.version_constraint.clone());
+                let reference = active
+                    .and_then(|node| node.artifact.as_ref())
+                    .map(|artifact| &artifact.reference.release)
+                    .or_else(|| {
+                        installed_conflict
+                            .and_then(|entry| entry.artifact.as_ref())
+                            .map(|artifact| &artifact.release)
+                    });
+                let actual = if let Some(constraint) = &required {
+                    let Some(reference) = reference else {
+                        continue;
+                    };
+                    let release = self.release(reference, None, cancel).await?;
+                    if assess_release_constraint(constraint, &release.version)
+                        != CompatibilityState::Compatible
+                    {
+                        continue;
+                    }
+                    Some(release.version)
+                } else {
+                    None
+                };
                 conflict_issue(
                     &mut draft.plan,
                     &parent,
@@ -2846,7 +2859,7 @@ impl ResourceService {
                         subject: None,
                         related: Some(conflict_file),
                         required,
-                        actual: None,
+                        actual,
                     },
                 );
             }
