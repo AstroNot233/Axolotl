@@ -3,7 +3,7 @@ use crate::state::instances::{
     ContentSet, ContentSetStatus, ContentSourceKind, Instance,
     InstanceLaunchOverrides, InstanceLink, LoaderComponent,
     adapters::sqlite::{
-        config_sync_rows, content_rows, instance_rows, loader_component_rows,
+        config_sync_rows, instance_rows, loader_component_rows,
     },
     config_sync,
 };
@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tracing::{info, trace};
 use uuid::Uuid;
+
+use crate::state::instances::adapters::sqlite::content_sets;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateInstance {
@@ -141,7 +143,7 @@ pub(crate) async fn create_instance(
             &mut tx,
         )
         .await?;
-        content_rows::insert_content_set(&content_set, &mut tx).await?;
+        content_sets::insert_content_set(&content_set, &mut tx).await?;
         loader_component_rows::replace_loader_components(
             &instance_id,
             &loader_components,

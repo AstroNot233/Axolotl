@@ -56,7 +56,8 @@ async fn load_entry_maps(
     pool: &SqlitePool,
 ) -> crate::Result<EntryMaps> {
     let entries =
-        sqlite::content_rows::get_content_entries(content_set_id, pool).await?;
+        sqlite::content_entries::get_content_entries(content_set_id, pool)
+            .await?;
     let entries_by_file_id = entries
         .iter()
         .filter_map(|entry| {
@@ -116,7 +117,7 @@ pub(crate) async fn list_content_sets(
             crate::ErrorKind::InputError("Unknown instance".to_string())
         })?;
 
-    sqlite::content_rows::get_content_sets_for_instance(&instance.id, pool)
+    sqlite::content_sets::get_content_sets_for_instance(&instance.id, pool)
         .await
 }
 
@@ -368,14 +369,12 @@ pub(crate) async fn list_content_by_paths(
 
     let path_set = paths.iter().map(String::as_str).collect::<HashSet<_>>();
 
-    let files = sqlite::content_rows::get_instance_files(
-        &resolved.instance.id,
-        &state.pool,
-    )
-    .await?
-    .into_iter()
-    .filter(|file| path_set.contains(file.relative_path.as_str()))
-    .collect::<Vec<_>>();
+    let files =
+        sqlite::files::get_instance_files(&resolved.instance.id, &state.pool)
+            .await?
+            .into_iter()
+            .filter(|file| path_set.contains(file.relative_path.as_str()))
+            .collect::<Vec<_>>();
 
     let files = content_projects_for_files(
         &resolved,
@@ -509,7 +508,7 @@ async fn resolve_content_scope_with_instance(
     let content_set = match content_set_id {
         Some(content_set_id) => {
             let content_set =
-                sqlite::content_rows::get_content_set(content_set_id, pool)
+                sqlite::content_sets::get_content_set(content_set_id, pool)
                     .await?
                     .ok_or_else(|| {
                         crate::ErrorKind::InputError(format!(
@@ -528,7 +527,7 @@ async fn resolve_content_scope_with_instance(
             content_set
         }
         None => {
-            sqlite::content_rows::get_applied_content_set(&instance.id, pool)
+            sqlite::content_sets::get_applied_content_set(&instance.id, pool)
                 .await?
                 .ok_or_else(|| {
                     crate::ErrorKind::InputError(format!(
@@ -592,7 +591,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let content_set = sqlite::content_rows::get_applied_content_set(
+        let content_set = sqlite::content_sets::get_applied_content_set(
             &instance.id,
             &state.pool,
         )
@@ -630,7 +629,7 @@ mod tests {
             icon_path: None,
         };
         let mut tx = state.pool.begin().await.unwrap();
-        sqlite::content_rows::upsert_instance_file(&file, &mut tx)
+        sqlite::files::upsert_instance_file(&file, &mut tx)
             .await
             .unwrap();
         tx.commit().await.unwrap();
@@ -644,8 +643,8 @@ mod tests {
         enabled: bool,
     ) -> ContentEntry {
         let mut tx = state.pool.begin().await.unwrap();
-        let entry = sqlite::content_rows::upsert_content_entry_from_parts_in_transaction(
-            sqlite::content_rows::UpsertContentEntry {
+        let entry = sqlite::content_entries::upsert_content_entry_from_parts_in_transaction(
+            sqlite::content_entries::UpsertContentEntry {
                 instance_id: &resolved.instance.id,
                 content_set_id: &resolved.content_set.id,
                 file_id: Some(&file.id),
@@ -748,7 +747,7 @@ mod tests {
             let entry =
                 insert_test_entry(&resolved, &state, &file, enabled).await;
             let mut tx = state.pool.begin().await.unwrap();
-            sqlite::content_rows::upsert_content_provider_ref_in_transaction(
+            sqlite::content_entries::upsert_content_provider_ref_in_transaction(
                 &entry.id,
                 &provider_ref,
                 true,
@@ -787,7 +786,7 @@ mod tests {
                     .get(file_id)
                     .cloned()
                     .unwrap_or_default(),
-                sqlite::content_rows::get_content_provider_refs(
+                sqlite::content_entries::get_content_provider_refs(
                     &entry.id,
                     &state.pool
                 )
@@ -796,7 +795,7 @@ mod tests {
             );
             assert_eq!(
                 maps.origin_provider_by_file_id.get(file_id).copied(),
-                sqlite::content_rows::get_content_origin_provider(
+                sqlite::content_entries::get_content_origin_provider(
                     &entry.id,
                     &state.pool
                 )
@@ -856,7 +855,7 @@ mod tests {
             file_id: Some(crate::state::CurseForgeFileId::new(456).unwrap()),
         };
         let mut tx = state.pool.begin().await.unwrap();
-        sqlite::content_rows::upsert_content_provider_ref_in_transaction(
+        sqlite::content_entries::upsert_content_provider_ref_in_transaction(
             &entry.id,
             &curseforge_ref,
             true,
@@ -865,7 +864,7 @@ mod tests {
         .await
         .unwrap();
         tx.commit().await.unwrap();
-        let revision = sqlite::content_rows::get_applied_content_set(
+        let revision = sqlite::content_sets::get_applied_content_set(
             &resolved.instance.id,
             &state.pool,
         )
@@ -892,7 +891,7 @@ mod tests {
             .await
             .unwrap()
         );
-        let stored_entry = sqlite::content_rows::get_content_entries(
+        let stored_entry = sqlite::content_entries::get_content_entries(
             &resolved.content_set.id,
             &state.pool,
         )
@@ -911,12 +910,13 @@ mod tests {
             stored_entry.server_requirement,
             ContentRequirement::Optional
         );
-        let refs = sqlite::content_rows::get_content_provider_refs_with_origin(
-            &entry.id,
-            &state.pool,
-        )
-        .await
-        .unwrap();
+        let refs =
+            sqlite::content_entries::get_content_provider_refs_with_origin(
+                &entry.id,
+                &state.pool,
+            )
+            .await
+            .unwrap();
         assert_eq!(refs.len(), 2);
         assert!(refs.iter().any(|(reference, origin)| {
             reference == &curseforge_ref && *origin
@@ -931,7 +931,7 @@ mod tests {
                     && version_id.as_str() == "eKsF3BdO"
             ) && !origin
         }));
-        let bumped_revision = sqlite::content_rows::get_applied_content_set(
+        let bumped_revision = sqlite::content_sets::get_applied_content_set(
             &resolved.instance.id,
             &state.pool,
         )
@@ -952,7 +952,7 @@ mod tests {
             .unwrap()
         );
         assert_eq!(
-            sqlite::content_rows::get_applied_content_set(
+            sqlite::content_sets::get_applied_content_set(
                 &resolved.instance.id,
                 &state.pool,
             )
@@ -963,7 +963,7 @@ mod tests {
             bumped_revision
         );
         assert_eq!(
-            sqlite::content_rows::get_content_provider_refs_with_origin(
+            sqlite::content_entries::get_content_provider_refs_with_origin(
                 &entry.id,
                 &state.pool,
             )
@@ -1004,12 +1004,12 @@ mod tests {
             file_id: Some(crate::state::CurseForgeFileId::new(456).unwrap()),
         };
         let mut tx = state.pool.begin().await.unwrap();
-        sqlite::content_rows::upsert_content_provider_ref_in_transaction(
+        sqlite::content_entries::upsert_content_provider_ref_in_transaction(
             &entry.id, &modrinth, true, &mut tx,
         )
         .await
         .unwrap();
-        sqlite::content_rows::upsert_content_provider_ref_in_transaction(
+        sqlite::content_entries::upsert_content_provider_ref_in_transaction(
             &entry.id,
             &curseforge,
             false,
@@ -1020,7 +1020,7 @@ mod tests {
         tx.commit().await.unwrap();
         let mut tx = state.pool.begin().await.unwrap();
         assert!(
-            sqlite::content_rows::invalidate_exact_provider_refs_for_file_in_transaction(
+            sqlite::content_entries::invalidate_exact_provider_refs_for_file_in_transaction(
                 &resolved.content_set.id,
                 &file.id,
                 &mut tx,
@@ -1028,7 +1028,7 @@ mod tests {
             .await
             .unwrap()
         );
-        sqlite::content_rows::bump_content_set_revision_in_transaction(
+        sqlite::content_sets::bump_content_set_revision_in_transaction(
             &resolved.content_set.id,
             &mut tx,
         )
@@ -1036,12 +1036,13 @@ mod tests {
         .unwrap();
         tx.commit().await.unwrap();
 
-        let refs = sqlite::content_rows::get_content_provider_refs_with_origin(
-            &entry.id,
-            &state.pool,
-        )
-        .await
-        .unwrap();
+        let refs =
+            sqlite::content_entries::get_content_provider_refs_with_origin(
+                &entry.id,
+                &state.pool,
+            )
+            .await
+            .unwrap();
         assert_eq!(refs.len(), 2);
         assert!(refs.iter().any(|(reference, origin)| {
             *origin
@@ -1139,7 +1140,7 @@ mod tests {
             .await
             .unwrap()
         );
-        let entries = sqlite::content_rows::get_content_entries(
+        let entries = sqlite::content_entries::get_content_entries(
             &resolved.content_set.id,
             &state.pool,
         )
@@ -1153,7 +1154,7 @@ mod tests {
         assert!(!exact_entry.auto_dependency);
         assert!(!exact_entry.enabled);
         assert_eq!(
-            sqlite::content_rows::get_content_provider_refs_with_origin(
+            sqlite::content_entries::get_content_provider_refs_with_origin(
                 &exact_entry.id,
                 &state.pool,
             )
@@ -1201,7 +1202,7 @@ mod tests {
             item.file_id.as_deref() == Some(&file.id) && item.provider.is_none()
         }));
         assert!(
-            sqlite::content_rows::get_content_entries(
+            sqlite::content_entries::get_content_entries(
                 &resolved.content_set.id,
                 &state.pool,
             )
@@ -1210,7 +1211,7 @@ mod tests {
             .is_empty()
         );
         assert_eq!(
-            sqlite::content_rows::get_applied_content_set(
+            sqlite::content_sets::get_applied_content_set(
                 &resolved.instance.id,
                 &state.pool,
             )

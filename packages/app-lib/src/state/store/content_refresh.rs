@@ -9,7 +9,8 @@ use super::content_refresh_presentations::{
 };
 use super::{Collection as _, Handle, atom};
 use crate::resources::*;
-use crate::state::instances::adapters::sqlite::content_rows;
+
+use crate::state::instances::adapters::sqlite::content_sets;
 
 #[derive(Clone)]
 pub(crate) struct RefreshWrite {
@@ -46,7 +47,7 @@ pub(crate) async fn set_results(
         Err(error) => return Err(error),
     };
     let Some(content_set) =
-        content_rows::get_applied_content_set(instance_id, unit.connection())
+        content_sets::get_applied_content_set(instance_id, unit.connection())
             .await?
     else {
         return Ok(vec![]);

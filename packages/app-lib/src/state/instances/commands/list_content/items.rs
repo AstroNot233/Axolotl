@@ -121,11 +121,8 @@ pub(super) async fn content_projects_for_scope(
     _refresh_file_updates: bool,
 ) -> crate::Result<DashMap<String, ContentFile>> {
     let files = if cache_behaviour == Some(CacheBehaviour::CacheOnly) {
-        sqlite::content_rows::get_instance_files(
-            &resolved.instance.id,
-            &state.pool,
-        )
-        .await?
+        sqlite::files::get_instance_files(&resolved.instance.id, &state.pool)
+            .await?
     } else {
         sync_instance_content_files(&resolved.instance, state).await?
     };
@@ -329,7 +326,7 @@ pub(super) async fn reconcile_hash_matched_entries(
     }
 
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
-    sqlite::content_rows::ensure_content_write_parents(
+    sqlite::write_guards::ensure_content_write_parents(
         &resolved.instance.id,
         &resolved.content_set.id,
         &mut tx,
@@ -339,8 +336,8 @@ pub(super) async fn reconcile_hash_matched_entries(
         let entry_id = if let Some(entry) = existing_entry {
             entry.id.clone()
         } else {
-            sqlite::content_rows::upsert_content_entry_from_parts_in_transaction(
-                sqlite::content_rows::UpsertContentEntry {
+            sqlite::content_entries::upsert_content_entry_from_parts_in_transaction(
+                sqlite::content_entries::UpsertContentEntry {
                     instance_id: &resolved.instance.id,
                     content_set_id: &resolved.content_set.id,
                     file_id: Some(&file.id),
@@ -357,7 +354,7 @@ pub(super) async fn reconcile_hash_matched_entries(
             .await?
             .id
         };
-        sqlite::content_rows::upsert_content_provider_ref_in_transaction(
+        sqlite::content_entries::upsert_content_provider_ref_in_transaction(
             &entry_id,
             provider_ref,
             false,
@@ -365,7 +362,7 @@ pub(super) async fn reconcile_hash_matched_entries(
         )
         .await?;
     }
-    sqlite::content_rows::bump_content_set_revision_in_transaction(
+    sqlite::content_sets::bump_content_set_revision_in_transaction(
         &resolved.content_set.id,
         &mut tx,
     )

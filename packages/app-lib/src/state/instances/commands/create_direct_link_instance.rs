@@ -6,7 +6,7 @@ use crate::launcher::ExternalGameDirMode;
 use crate::state::instances::{
     ContentSet, ContentSetStatus, ContentSourceKind, Instance,
     InstanceLaunchOverrides, InstanceLink, LoaderComponent,
-    adapters::sqlite::{content_rows, instance_rows, loader_component_rows},
+    adapters::sqlite::{instance_rows, loader_component_rows},
 };
 use crate::state::{
     InstanceInstallStage, LauncherFeatureVersion, ReleaseChannel, State,
@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::info;
 use uuid::Uuid;
+
+use crate::state::instances::adapters::sqlite::{content_sets, files};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateDirectLinkInstance {
@@ -146,7 +148,7 @@ pub(crate) async fn create_direct_link_instance(
         &mut tx,
     )
     .await?;
-    content_rows::insert_content_set(&content_set, &mut tx).await?;
+    content_sets::insert_content_set(&content_set, &mut tx).await?;
     loader_component_rows::replace_loader_components(
         &instance_id,
         &LoaderComponent::from_legacy_projection(
@@ -204,6 +206,8 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
     use tempfile::TempDir;
+
+    use crate::state::instances::adapters::sqlite::{content_sets, files};
 
     fn write_version(
         root: &Path,

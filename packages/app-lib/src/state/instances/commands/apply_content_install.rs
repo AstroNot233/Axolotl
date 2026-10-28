@@ -9,9 +9,7 @@ use crate::state::instances::{
     PackMemberOverrideKind,
     adapters::{
         filesystem::project_type_from_relative_path,
-        sqlite::{
-            content_entries, content_rows, files, instance_rows, pack_members,
-        },
+        sqlite::{content_entries, files, instance_rows, pack_members},
     },
 };
 use crate::state::{
@@ -41,6 +39,8 @@ use std::path::{Path, PathBuf};
 use tracing::warn;
 use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
+
+use crate::state::instances::adapters::sqlite::{content_sets, write_guards};
 
 pub(crate) struct ContentScope {
     pub instance: Instance,
@@ -265,7 +265,7 @@ async fn resolve_install_plan_with_cache(
     state: &State,
 ) -> crate::Result<ResolveContentPlan> {
     let content_set =
-        content_rows::get_applied_content_set(instance_id, &state.pool)
+        content_sets::get_applied_content_set(instance_id, &state.pool)
             .await?
             .ok_or_else(|| {
                 crate::ErrorKind::InputError(format!(
@@ -1007,15 +1007,16 @@ async fn add_resolved_content_with_progress(
     .await?;
     if auto_dependency {
         let scope = resolve_content_scope(instance_id, None, state).await?;
-        if let Some(entry) = content_rows::get_content_entry_by_relative_path(
-            &scope.content_set_id,
-            &path,
-            &state.pool,
-        )
-        .await?
+        if let Some(entry) =
+            content_entries::get_content_entry_by_relative_path(
+                &scope.content_set_id,
+                &path,
+                &state.pool,
+            )
+            .await?
         {
             let _database_permit = state.acquire_install_db_permit().await?;
-            content_rows::set_content_entry_auto_dependency(
+            content_entries::set_content_entry_auto_dependency(
                 &entry.id,
                 true,
                 &state.pool,
@@ -1082,7 +1083,7 @@ pub(crate) async fn persist_resolved_plan_dependency_edges(
             continue;
         };
         let Some(parent_entry) =
-            content_rows::get_content_entry_by_relative_path(
+            content_entries::get_content_entry_by_relative_path(
                 &scope.content_set_id,
                 parent_path,
                 &state.pool,
@@ -1092,7 +1093,7 @@ pub(crate) async fn persist_resolved_plan_dependency_edges(
             continue;
         };
         let Some(child_entry) =
-            content_rows::get_content_entry_by_relative_path(
+            content_entries::get_content_entry_by_relative_path(
                 &scope.content_set_id,
                 &paths[index + 1],
                 &state.pool,
@@ -1102,7 +1103,7 @@ pub(crate) async fn persist_resolved_plan_dependency_edges(
             continue;
         };
         let now = chrono::Utc::now();
-        content_rows::upsert_content_dependency_edge_in_transaction(
+        content_entries::upsert_content_dependency_edge_in_transaction(
             &crate::state::instances::ContentDependencyEdge {
                 id: format!("content-dependency:{}", uuid::Uuid::new_v4()),
                 content_set_id: scope.content_set_id.clone(),
@@ -1150,7 +1151,7 @@ pub(crate) async fn persist_resolved_plan_dependency_edges(
             continue;
         };
         let Some(parent_entry) =
-            content_rows::get_content_entry_by_relative_path(
+            content_entries::get_content_entry_by_relative_path(
                 &scope.content_set_id,
                 parent_path,
                 &state.pool,
@@ -1163,7 +1164,7 @@ pub(crate) async fn persist_resolved_plan_dependency_edges(
             continue;
         };
         let Some(child_entry) =
-            content_rows::get_content_entry_by_provider_ref(
+            content_entries::get_content_entry_by_provider_ref(
                 &scope.content_set_id,
                 crate::state::ContentProvider::Modrinth,
                 &skipped.project_id,
@@ -1175,7 +1176,7 @@ pub(crate) async fn persist_resolved_plan_dependency_edges(
             continue;
         };
         let now = chrono::Utc::now();
-        content_rows::upsert_content_dependency_edge_in_transaction(
+        content_entries::upsert_content_dependency_edge_in_transaction(
             &crate::state::instances::ContentDependencyEdge {
                 id: format!("content-dependency:{}", uuid::Uuid::new_v4()),
                 content_set_id: scope.content_set_id.clone(),
@@ -1499,7 +1500,7 @@ pub(crate) async fn prepare_version_download(
 ) -> crate::Result<PreparedVersionDownload> {
     let scope = resolve_content_scope(instance_id, None, state).await?;
     let content_set =
-        content_rows::get_content_set(&scope.content_set_id, &state.pool)
+        content_sets::get_content_set(&scope.content_set_id, &state.pool)
             .await?
             .ok_or_else(|| {
                 crate::ErrorKind::InputError(format!(
@@ -1582,7 +1583,7 @@ pub(crate) async fn resolve_content_install_relative_path(
     localized_candidate: Option<String>,
     state: &State,
 ) -> crate::Result<String> {
-    if content_rows::get_instance_file_by_relative_path(
+    if files::get_instance_file_by_relative_path(
         instance_id,
         &original_relative_path,
         &state.pool,
@@ -1595,7 +1596,7 @@ pub(crate) async fn resolve_content_install_relative_path(
     let Some(localized_candidate) = localized_candidate else {
         return Ok(original_relative_path);
     };
-    if content_rows::get_instance_file_by_relative_path(
+    if files::get_instance_file_by_relative_path(
         instance_id,
         &localized_candidate,
         &state.pool,
@@ -2537,8 +2538,8 @@ async fn add_project_bytes_with_provider(
         None
     };
 
-    let file = content_rows::upsert_instance_file_from_parts(
-        content_rows::UpsertInstanceFile {
+    let file = files::upsert_instance_file_from_parts(
+        files::UpsertInstanceFile {
             instance_id: &scope.instance.id,
             relative_path: &relative_path,
             file_name: &file_name,
@@ -2926,7 +2927,7 @@ async fn record_project_files_transaction(
 
     let scope = resolve_content_scope(instance_id, None, state).await?;
     let mut tx = begin_content_write(&state.pool).await?;
-    content_rows::ensure_content_write_parents(
+    write_guards::ensure_content_write_parents(
         &scope.instance.id,
         &scope.content_set_id,
         &mut tx,
@@ -2939,25 +2940,24 @@ async fn record_project_files_transaction(
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
-        let file =
-            content_rows::upsert_instance_file_from_parts_in_transaction(
-                content_rows::UpsertInstanceFile {
-                    instance_id: &scope.instance.id,
-                    relative_path: &record.relative_path,
-                    file_name: &file_name,
-                    enabled: !record.relative_path.ends_with(".disabled"),
-                    sha1: &record.sha1,
-                    size: record.size,
-                    missing: false,
-                    local_mod_data: None,
-                    icon_path: None,
-                },
-                &mut tx,
-            )
-            .await?;
+        let file = files::upsert_instance_file_from_parts_in_transaction(
+            files::UpsertInstanceFile {
+                instance_id: &scope.instance.id,
+                relative_path: &record.relative_path,
+                file_name: &file_name,
+                enabled: !record.relative_path.ends_with(".disabled"),
+                sha1: &record.sha1,
+                size: record.size,
+                missing: false,
+                local_mod_data: None,
+                icon_path: None,
+            },
+            &mut tx,
+        )
+        .await?;
         let entry =
-            content_rows::upsert_content_entry_from_parts_in_transaction(
-                content_rows::UpsertContentEntry {
+            content_entries::upsert_content_entry_from_parts_in_transaction(
+                content_entries::UpsertContentEntry {
                     instance_id: &scope.instance.id,
                     content_set_id: &scope.content_set_id,
                     file_id: Some(&file.id),
@@ -2973,7 +2973,7 @@ async fn record_project_files_transaction(
             )
             .await?;
         if let Some(provider_ref) = record.provider_ref.as_ref() {
-            content_rows::upsert_content_provider_ref_in_transaction(
+            content_entries::upsert_content_provider_ref_in_transaction(
                 &entry.id,
                 provider_ref,
                 record.origin,
@@ -3016,7 +3016,7 @@ async fn record_project_files_transaction(
                     )
                 },
             );
-            content_rows::upsert_pack_member_in_transaction(
+            pack_members::upsert_pack_member_in_transaction(
                 &PackMember {
                     id: format!("pack-member:{}", entry.id),
                     content_set_id: scope.content_set_id.clone(),
@@ -3071,7 +3071,7 @@ async fn record_project_files_transaction(
                     .then_some((*project_id, *file_id))
             })
         {
-            content_rows::complete_pending_manual_download(
+            pack_members::complete_pending_manual_download(
                 instance_id,
                 &project_id.get().to_string(),
                 &file_id.get().to_string(),
@@ -3109,7 +3109,7 @@ async fn record_project_files_transaction(
         )
         .await?;
     }
-    content_rows::bump_content_set_revision_in_transaction(
+    content_sets::bump_content_set_revision_in_transaction(
         &scope.content_set_id,
         &mut tx,
     )
@@ -3139,7 +3139,7 @@ async fn record_resolved_plan_edges(
         );
     }
     for id in ids.iter().skip(1) {
-        content_rows::set_content_entry_auto_dependency_in_transaction(
+        content_entries::set_content_entry_auto_dependency_in_transaction(
             id, true, tx,
         )
         .await?;
@@ -3196,7 +3196,7 @@ async fn record_resolved_plan_edges(
     }
     for (parent, child, project, version) in edges {
         let now = chrono::Utc::now();
-        content_rows::upsert_content_dependency_edge_in_transaction(
+        content_entries::upsert_content_dependency_edge_in_transaction(
             &crate::state::instances::ContentDependencyEdge {
                 id: format!("content-dependency:{}", uuid::Uuid::new_v4()),
                 content_set_id: content_set_id.to_string(),
@@ -3295,7 +3295,7 @@ pub(crate) async fn toggle_content_entries(
         if !seen_ids.insert(content_id.as_str()) {
             continue;
         }
-        let target = content_rows::get_content_mutation_target(
+        let target = pack_members::get_content_mutation_target(
             instance_id,
             content_id,
             &state.pool,
@@ -3327,7 +3327,7 @@ pub(crate) async fn toggle_content_entries(
     }
 
     let indexed_paths =
-        content_rows::get_instance_files(&scope.instance.id, &state.pool)
+        files::get_instance_files(&scope.instance.id, &state.pool)
             .await?
             .into_iter()
             .map(|file| file.relative_path)
@@ -3392,7 +3392,7 @@ pub(crate) async fn toggle_content_entries(
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            let file = content_rows::rename_instance_file_in_transaction(
+            let file = files::rename_instance_file_in_transaction(
                 &scope.instance.id,
                 &operation.current_path,
                 &operation.new_path,
@@ -3417,8 +3417,8 @@ pub(crate) async fn toggle_content_entries(
                 )
                 .await?;
             if updated_entries == 0 {
-                content_rows::upsert_content_entry_from_parts_in_transaction(
-                    content_rows::UpsertContentEntry {
+                content_entries::upsert_content_entry_from_parts_in_transaction(
+                    content_entries::UpsertContentEntry {
                         instance_id: &scope.instance.id,
                         content_set_id: &scope.content_set_id,
                         file_id: Some(&file.id),
@@ -3453,7 +3453,7 @@ pub(crate) async fn toggle_content_entries(
             });
         }
 
-        content_rows::bump_content_set_revision_in_transaction(
+        content_sets::bump_content_set_revision_in_transaction(
             &scope.content_set_id,
             &mut tx,
         )
@@ -3534,7 +3534,7 @@ async fn rename_indexed_file(
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let file = match content_rows::rename_instance_file(
+    let file = match files::rename_instance_file(
         &scope.instance.id,
         current_path,
         new_path,
@@ -3546,7 +3546,7 @@ async fn rename_indexed_file(
     {
         Some(file) => file,
         None if current_path != project_path => {
-            match content_rows::rename_instance_file(
+            match files::rename_instance_file(
                 &scope.instance.id,
                 project_path,
                 new_path,
@@ -3580,7 +3580,7 @@ pub(crate) async fn remove_project(
     let scope = resolve_content_scope(instance_id, None, state).await?;
     let base = instance_full_path(state, &scope.instance);
     content_file_operations::recover(state, instance_id, &base).await?;
-    let file = content_rows::get_instance_file_by_relative_path(
+    let file = files::get_instance_file_by_relative_path(
         &scope.instance.id,
         project_path,
         &state.pool,
@@ -3634,7 +3634,7 @@ pub(crate) async fn remove_project(
             )
             .await?;
         }
-        content_rows::bump_content_set_revision_in_transaction(
+        content_sets::bump_content_set_revision_in_transaction(
             &scope.content_set_id,
             &mut tx,
         )
@@ -3701,20 +3701,20 @@ pub(crate) async fn archive_project_file(
     io::rename_or_move(&full_old, &full_backup).await?;
     touch_file_modified_time(&full_backup);
 
-    if let Some(file) = content_rows::get_instance_file_by_relative_path(
+    if let Some(file) = files::get_instance_file_by_relative_path(
         &scope.instance.id,
         old_path,
         &state.pool,
     )
     .await?
     {
-        content_rows::remove_content_entries_for_file(
+        content_entries::remove_content_entries_for_file(
             &scope.content_set_id,
             &file.id,
             &state.pool,
         )
         .await?;
-        content_rows::remove_instance_file_by_relative_path(
+        files::remove_instance_file_by_relative_path(
             &scope.instance.id,
             old_path,
             &state.pool,
@@ -3751,7 +3751,7 @@ async fn rollback_project_inner(
     let scope = resolve_content_scope(instance_id, None, state).await?;
     let base = instance_content_root(&state.directories, &scope.instance)?;
     recover_legacy_rollback_for_instance(instance_id, &base, state).await?;
-    content_rows::get_instance_file_by_relative_path(
+    files::get_instance_file_by_relative_path(
         &scope.instance.id,
         project_path,
         &state.pool,
@@ -3899,8 +3899,8 @@ async fn rollback_project_inner(
         &mut tx,
     )
     .await?;
-    content_rows::upsert_instance_file_from_parts_in_transaction(
-        content_rows::UpsertInstanceFile {
+    files::upsert_instance_file_from_parts_in_transaction(
+        files::UpsertInstanceFile {
             instance_id: &scope.instance.id,
             relative_path: &final_relative_path,
             file_name: &final_name,
@@ -3960,7 +3960,7 @@ async fn rollback_project_inner(
     })
     .get_entry();
     CachedEntry::upsert_many(&[hash_cache], &mut *tx).await?;
-    content_rows::bump_content_set_revision_in_transaction(
+    content_sets::bump_content_set_revision_in_transaction(
         &scope.content_set_id,
         &mut tx,
     )
@@ -4140,15 +4140,16 @@ pub(crate) async fn list_project_files(
     state: &State,
 ) -> crate::Result<Vec<InstalledContentFile>> {
     let scope = resolve_content_scope(instance_id, None, state).await?;
-    let entries =
-        content_rows::get_content_entries(&scope.content_set_id, &state.pool)
-            .await?;
-    let files =
-        content_rows::get_instance_files(&scope.instance.id, &state.pool)
-            .await?
-            .into_iter()
-            .map(|file| (file.id.clone(), file))
-            .collect::<std::collections::HashMap<_, _>>();
+    let entries = content_entries::get_content_entries(
+        &scope.content_set_id,
+        &state.pool,
+    )
+    .await?;
+    let files = files::get_instance_files(&scope.instance.id, &state.pool)
+        .await?
+        .into_iter()
+        .map(|file| (file.id.clone(), file))
+        .collect::<std::collections::HashMap<_, _>>();
 
     let mut output = Vec::new();
     for entry in entries {
@@ -4160,7 +4161,7 @@ pub(crate) async fn list_project_files(
         };
         output.push(InstalledContentFile {
             relative_path: file.relative_path.clone(),
-            provider_refs: content_rows::get_content_provider_refs(
+            provider_refs: content_entries::get_content_provider_refs(
                 &entry.id,
                 &state.pool,
             )
@@ -4244,8 +4245,8 @@ async fn index_existing_file(
     let _instance_lock = state.lock_instance_content(&scope.instance.id).await;
     let scope = resolve_content_scope(&scope.instance.id, None, state).await?;
 
-    let file = content_rows::upsert_instance_file_from_parts(
-        content_rows::UpsertInstanceFile {
+    let file = files::upsert_instance_file_from_parts(
+        files::UpsertInstanceFile {
             instance_id: &scope.instance.id,
             relative_path,
             file_name: &file_name,
@@ -4290,8 +4291,8 @@ async fn upsert_entry_for_file(
     let scope = resolve_content_scope(&scope.instance.id, None, state).await?;
     let pool = &state.pool;
 
-    let entry = content_rows::upsert_content_entry_from_parts(
-        content_rows::UpsertContentEntry {
+    let entry = content_entries::upsert_content_entry_from_parts(
+        content_entries::UpsertContentEntry {
             instance_id: &scope.instance.id,
             content_set_id: &scope.content_set_id,
             file_id: Some(&file.id),
@@ -4308,7 +4309,7 @@ async fn upsert_entry_for_file(
     .await?;
 
     if let Some(provider_ref) = provider_ref {
-        content_rows::upsert_content_provider_ref(
+        content_entries::upsert_content_provider_ref(
             &entry.id,
             provider_ref,
             origin,
@@ -4524,6 +4525,10 @@ mod tests {
 
     fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
         use std::io::Write as _;
+
+        use crate::state::instances::adapters::sqlite::{
+            content_entries, content_sets, pack_members, write_guards,
+        };
         let mut buf = std::io::Cursor::new(Vec::new());
         {
             let mut zip = zip::ZipWriter::new(&mut buf);

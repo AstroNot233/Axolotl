@@ -2,8 +2,7 @@ use crate::state::instances::{
     ContentSourceKind, Instance, InstanceLaunchOverrides, InstanceLink,
     LoaderComponent,
     adapters::sqlite::{
-        config_sync_rows, content_rows, instance_rows, loader_component_rows,
-        pack_members,
+        config_sync_rows, instance_rows, loader_component_rows, pack_members,
     },
     config_sync,
 };
@@ -14,6 +13,8 @@ use crate::state::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+
+use crate::state::instances::adapters::sqlite::{content_sets, pack_members};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct EditInstance {
@@ -154,7 +155,7 @@ pub(crate) async fn edit_instance(
     let mut content_set = match patch.content_set_patch {
         Some(content_set_patch) => {
             let applied_content_set =
-                content_rows::get_applied_content_set(&instance.id, pool)
+                content_sets::get_applied_content_set(&instance.id, pool)
                     .await?
                     .ok_or_else(|| {
                         crate::ErrorKind::InputError(format!(
@@ -189,7 +190,7 @@ pub(crate) async fn edit_instance(
     instance_rows::update_instance(&instance, &mut tx).await?;
 
     if let Some(content_set) = content_set.as_mut() {
-        content_rows::update_content_set(content_set, &mut tx).await?;
+        content_sets::update_content_set(content_set, &mut tx).await?;
         if loader_projection_changed {
             let components = LoaderComponent::from_legacy_projection(
                 instance.id.clone(),
@@ -256,7 +257,7 @@ pub(crate) async fn restore_instance_metadata(
     let launch_overrides = metadata.launch_overrides.clone();
 
     instance_rows::update_instance(&instance, &mut tx).await?;
-    content_rows::update_content_set(&content_set, &mut tx).await?;
+    content_sets::update_content_set(&content_set, &mut tx).await?;
     loader_component_rows::replace_loader_components(
         &instance.id,
         &metadata.loader_components,

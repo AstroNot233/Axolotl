@@ -1,6 +1,5 @@
 pub(crate) mod config_sync_rows;
 pub(crate) mod content_entries;
-pub(crate) mod content_rows;
 pub(crate) mod content_sets;
 pub(crate) mod files;
 pub(crate) mod instance_rows;

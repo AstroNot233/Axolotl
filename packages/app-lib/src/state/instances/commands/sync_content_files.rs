@@ -1415,10 +1415,9 @@ mod tests {
     async fn repeatedly_changing_scan_leaves_database_untouched_and_is_retryable()
      {
         let (_temp, state, instance, root) = isolated_scan_fixture().await;
-        let before =
-            sqlite::content_rows::get_instance_files("instance", &state.pool)
-                .await
-                .unwrap();
+        let before = sqlite::files::get_instance_files("instance", &state.pool)
+            .await
+            .unwrap();
         let mut count = 0;
         let result = sync_with_retry(&instance, &state, false, || {
             count += 1;
@@ -1429,10 +1428,9 @@ mod tests {
         .await;
         assert!(result.is_err());
         assert_eq!(count, 3);
-        let after =
-            sqlite::content_rows::get_instance_files("instance", &state.pool)
-                .await
-                .unwrap();
+        let after = sqlite::files::get_instance_files("instance", &state.pool)
+            .await
+            .unwrap();
         assert_eq!(after[0].sha1, before[0].sha1);
         let retried = sync_instance_content_files(&instance, &state)
             .await

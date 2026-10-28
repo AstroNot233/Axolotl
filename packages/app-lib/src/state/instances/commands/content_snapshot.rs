@@ -11,8 +11,7 @@ use crate::State;
 use crate::state::instances::adapters::{
     filesystem,
     sqlite::{
-        content_entries, content_rows, content_sets, files, instance_rows,
-        pack_members,
+        content_entries, content_sets, files, instance_rows, pack_members,
     },
 };
 use crate::state::instances::{
@@ -69,7 +68,7 @@ async fn get_content_snapshot_inner(
             crate::ErrorKind::InputError("Unknown instance".to_string())
         })?;
     let content_set =
-        content_rows::get_applied_content_set(instance_id, &state.pool)
+        content_sets::get_applied_content_set(instance_id, &state.pool)
             .await?
             .ok_or_else(|| {
                 crate::ErrorKind::InputError(
@@ -84,7 +83,7 @@ async fn get_content_snapshot_inner(
     // directory. Later loads reuse the populated rows unless explicitly
     // refreshed.
     let cached_files =
-        content_rows::get_instance_files(&instance.id, &state.pool).await?;
+        files::get_instance_files(&instance.id, &state.pool).await?;
     let files = if refresh_remote
         || (sync_direct_instance
             && instance.is_direct_linked()
@@ -108,14 +107,14 @@ async fn get_content_snapshot_inner(
         };
         refreshed
             .map_err(|error| crate::ErrorKind::OtherError(error.to_string()))?;
-        content_rows::get_instance_files(&instance.id, &state.pool).await?
+        files::get_instance_files(&instance.id, &state.pool).await?
     } else {
         cached_files
     };
     let content_set = if refresh_remote
         || sync_direct_instance && instance.is_direct_linked()
     {
-        content_rows::get_applied_content_set(instance_id, &state.pool)
+        content_sets::get_applied_content_set(instance_id, &state.pool)
             .await?
             .ok_or_else(|| {
                 crate::ErrorKind::InputError(
@@ -206,11 +205,12 @@ async fn get_content_snapshot_inner(
     }
 
     let entries =
-        content_rows::get_content_entries(&content_set.id, &state.pool).await?;
+        content_entries::get_content_entries(&content_set.id, &state.pool)
+            .await?;
     let members =
-        content_rows::get_pack_members(&content_set.id, &state.pool).await?;
+        pack_members::get_pack_members(&content_set.id, &state.pool).await?;
     let pending_manual_downloads =
-        content_rows::get_pending_manual_downloads(instance_id, &state.pool)
+        pack_members::get_pending_manual_downloads(instance_id, &state.pool)
             .await?;
 
     let mut refs_by_entry = HashMap::new();
@@ -453,7 +453,7 @@ async fn get_content_snapshot_inner(
                 return;
             }
             let revision =
-                match content_rows::bump_content_set_revision_in_transaction(
+                match content_sets::bump_content_set_revision_in_transaction(
                     &content_set.id,
                     &mut tx,
                 )
@@ -755,7 +755,7 @@ pub(crate) async fn reconcile_curseforge_members(
         let member_id = existing
             .map(|(id, _, _, _)| id)
             .unwrap_or_else(|| format!("pack-member:{}", uuid::Uuid::new_v4()));
-        content_rows::upsert_pack_member_in_transaction(
+        pack_members::upsert_pack_member_in_transaction(
             &crate::state::instances::PackMember {
                 id: member_id.clone(),
                 content_set_id: content_set_id.to_string(),
@@ -810,7 +810,7 @@ pub(crate) async fn reconcile_curseforge_members(
         &mut tx,
     )
     .await?;
-    content_rows::repair_pack_members_in_transaction(content_set_id, &mut tx)
+    pack_members::repair_pack_members_in_transaction(content_set_id, &mut tx)
         .await?;
     let override_paths: HashSet<_> = expected
         .overrides
@@ -828,7 +828,7 @@ pub(crate) async fn reconcile_curseforge_members(
             .await?;
         }
     }
-    content_rows::bump_content_set_revision_in_transaction(
+    content_sets::bump_content_set_revision_in_transaction(
         content_set_id,
         &mut tx,
     )
@@ -878,8 +878,8 @@ async fn reconcile_curseforge_override_entries_in_transaction(
             continue;
         };
         let is_pack_override = override_content.is_some();
-        content_rows::upsert_content_entry_from_parts_in_transaction(
-            content_rows::UpsertContentEntry {
+        content_entries::upsert_content_entry_from_parts_in_transaction(
+            content_entries::UpsertContentEntry {
                 instance_id,
                 content_set_id,
                 file_id: Some(&file_id),
@@ -970,7 +970,7 @@ async fn reconcile_curseforge_manual_downloads(
             manual_download.operation_kind =
                 ManualDownloadOperationKind::PackInstall;
             let now = chrono::Utc::now();
-            content_rows::upsert_pending_manual_download_in_transaction(
+            pack_members::upsert_pending_manual_download_in_transaction(
                 &PendingManualDownload {
                     id: format!("manual-download:{}", uuid::Uuid::new_v4()),
                     instance_id: instance_id.to_string(),
@@ -1005,7 +1005,7 @@ async fn reconcile_curseforge_manual_downloads(
         if *materialization_state
             != PackMemberMaterializationState::PendingManual
         {
-            content_rows::set_pack_member_override_in_transaction(
+            pack_members::set_pack_member_override_in_transaction(
                 member_id,
                 PackMemberMaterializationState::PendingManual,
                 *override_kind,
@@ -1017,7 +1017,7 @@ async fn reconcile_curseforge_manual_downloads(
     }
 
     if changed {
-        content_rows::bump_content_set_revision_in_transaction(
+        content_sets::bump_content_set_revision_in_transaction(
             content_set_id,
             &mut tx,
         )
@@ -1039,9 +1039,11 @@ async fn attach_dependency_info(
     content_set_id: &str,
     state: &State,
 ) -> crate::Result<()> {
-    let edges =
-        content_rows::get_content_dependency_edges(content_set_id, &state.pool)
-            .await?;
+    let edges = content_entries::get_content_dependency_edges(
+        content_set_id,
+        &state.pool,
+    )
+    .await?;
     let mut required_by: HashMap<String, Vec<ContentDependencyRef>> =
         HashMap::new();
     let mut requires: HashMap<String, Vec<ContentDependencyRef>> =
@@ -1266,6 +1268,10 @@ fn pack_provider(link: &InstanceLink) -> Option<ContentProvider> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::state::instances::adapters::sqlite::{
+        content_entries, content_sets, pack_members,
+    };
 
     fn content_with_refs(
         provider_refs: Vec<ContentProviderRef>,
