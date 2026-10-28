@@ -295,8 +295,9 @@ const PROVIDERS: &[AiProviderDefinition] = &[
         true,
         ["account_id"]
     ),
-    // Sponsored listing; kept out of LobeHub syncs by
-    // scripts/axolotl/sync-lobehub-models.mjs. See SPONSORED_PROVIDERS.
+    // Sponsored listing; scripts/axolotl/sync-lobehub-models.mjs syncs its
+    // models from CodeFlow's public pricing API instead of LobeHub. See
+    // SPONSORED_PROVIDERS.
     provider!(
         "codeflow",
         "CodeFlow",
