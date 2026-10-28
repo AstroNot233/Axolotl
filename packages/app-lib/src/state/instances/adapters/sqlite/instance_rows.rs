@@ -2043,6 +2043,7 @@ pub(crate) async fn insert_default_sync_preferences_in_transaction(
 
 /// One row of the install-candidate query: the instance and whether the
 /// project is already installed in it.
+#[derive(sqlx::FromRow)]
 pub(crate) struct InstanceInstallCandidateRow {
     pub id: String,
     pub name: String,

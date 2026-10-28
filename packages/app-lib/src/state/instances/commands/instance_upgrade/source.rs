@@ -36,7 +36,7 @@ pub(super) async fn read_only_upgrade_source(
     observer: &UpgradePlanningObserver,
 ) -> crate::Result<ReadOnlyUpgradeSource> {
     let mut snapshot =
-        super::get_cached_content_snapshot(instance_id, state).await?;
+        super::super::get_cached_content_snapshot(instance_id, state).await?;
     let instance = crate::state::instances::adapters::sqlite::instance_rows::get_instance_by_id(
         instance_id,
         &state.pool,

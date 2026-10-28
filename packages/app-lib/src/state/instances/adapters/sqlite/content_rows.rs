@@ -1,13 +1,10 @@
 // Call sites still name `content_rows`; these paths outlive the split.
 pub(crate) use super::content_entries::{
-    ContentEntryRow, ContentUpdateCheckRow, UpsertContentEntry,
-    get_content_dependency_edges, get_content_entries,
-    get_content_entry_by_file, get_content_entry_by_id,
-    get_content_entry_by_provider_project, get_content_entry_by_provider_ref,
+    UpsertContentEntry, get_content_dependency_edges, get_content_entries,
+    get_content_entry_by_id, get_content_entry_by_provider_ref,
     get_content_entry_by_relative_path, get_content_origin_provider,
     get_content_provider_refs, get_content_provider_refs_with_origin,
     get_content_update_check, get_dependency_backfilled_entry_ids,
-    get_orphaned_auto_dependencies,
     invalidate_exact_provider_refs_for_file_in_transaction,
     remove_content_entries_for_file,
     replace_content_dependency_edges_for_parent,
@@ -16,21 +13,18 @@ pub(crate) use super::content_entries::{
     set_content_entry_auto_dependency,
     set_content_entry_auto_dependency_in_transaction,
     set_content_entry_dependency_backfilled_in_transaction,
-    set_content_entry_enabled_for_file,
     upsert_content_dependency_edge_in_transaction,
     upsert_content_entry_from_parts,
     upsert_content_entry_from_parts_in_transaction,
     upsert_content_provider_ref, upsert_content_provider_ref_in_transaction,
-    upsert_content_update_check,
 };
 pub(crate) use super::content_sets::{
-    ContentSetRemoteRefRow, ContentSetRow, ContentSetSyncStateRow,
     bump_content_set_revision_in_transaction, get_applied_content_set,
-    get_content_set, get_content_set_remote_refs, get_content_set_sync_state,
-    get_content_sets_for_instance, insert_content_set, update_content_set,
+    get_content_set, get_content_sets_for_instance, insert_content_set,
+    update_content_set,
 };
 pub(crate) use super::files::{
-    InstanceFileRow, UpsertInstanceFile, adopt_untracked_file_in_transaction,
+    UpsertInstanceFile, adopt_untracked_file_in_transaction,
     get_instance_file_by_relative_path, get_instance_files,
     mark_instance_files_missing, move_instance_file_in_transaction,
     remove_instance_file_by_relative_path, rename_instance_file,

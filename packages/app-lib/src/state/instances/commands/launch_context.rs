@@ -271,7 +271,7 @@ mod tests {
     use super::{
         get_daily_playtime, set_instance_pinned, split_daily_playtime,
     };
-    use crate::state::instances::adapters::sqlite::playtime::upsert_daily_playtime;
+    use crate::state::instances::adapters::sqlite::playtime;
 
     fn to_utc(
         year: i32,

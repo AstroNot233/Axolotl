@@ -10,7 +10,7 @@ use crate::state::instances::{
 };
 use crate::state::{ContentProvider, ProjectType};
 use chrono::{DateTime, Utc};
-use sqlx::{Row, Sqlite, SqlitePool, Transaction};
+use sqlx::{Executor, Row, Sqlite, SqlitePool, Transaction};
 
 #[derive(Debug, sqlx::FromRow)]
 pub(crate) struct PackMemberRow {

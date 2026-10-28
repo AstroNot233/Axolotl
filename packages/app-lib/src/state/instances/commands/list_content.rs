@@ -178,7 +178,8 @@ pub(crate) async fn get_instance_install_candidates(
     targets: &[InstanceInstallTarget],
     pool: &SqlitePool,
 ) -> crate::Result<Vec<InstanceInstallCandidate>> {
-    let rows = instance_rows::get_install_candidates(project_id, pool).await?;
+    let rows =
+        sqlite::instance_rows::get_install_candidates(project_id, pool).await?;
 
     rows.into_iter()
         .map(|row| -> crate::Result<_> {
