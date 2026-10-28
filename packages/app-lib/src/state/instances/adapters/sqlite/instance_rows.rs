@@ -1919,3 +1919,108 @@ mod tests {
         assert_eq!(launch.applied_content_set.revision, 5);
     }
 }
+
+/// Marks the install stage an instance reached.
+///
+/// An unknown instance is a no-op: the launch flow may race a deletion.
+pub(crate) async fn set_install_stage(
+    instance_id: &str,
+    install_stage: InstanceInstallStage,
+    modified: i64,
+    pool: &SqlitePool,
+) -> crate::Result<()> {
+    sqlx::query!(
+        "
+        UPDATE instances
+        SET install_stage = ?, modified = ?
+        WHERE id = ?
+        ",
+        install_stage.as_str(),
+        modified,
+        instance_id,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Records when an instance was last launched.
+pub(crate) async fn set_last_played(
+    instance_id: &str,
+    last_played: DateTime<Utc>,
+    modified: i64,
+    pool: &SqlitePool,
+) -> crate::Result<()> {
+    sqlx::query!(
+        "
+        UPDATE instances
+        SET last_played = ?, modified = ?
+        WHERE id = ?
+        ",
+        last_played.timestamp(),
+        modified,
+        instance_id,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Pins an instance to the top of the list, or unpins it.
+///
+/// Rejects an unknown instance.
+pub(crate) async fn set_pinned(
+    instance_id: &str,
+    pinned_at: Option<i64>,
+    modified: i64,
+    pool: &SqlitePool,
+) -> crate::Result<()> {
+    let result = sqlx::query!(
+        "
+        UPDATE instances
+        SET pinned_at = ?, modified = ?
+        WHERE id = ?
+        ",
+        pinned_at,
+        modified,
+        instance_id,
+    )
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(crate::ErrorKind::InputError(
+            "Unknown instance".to_string(),
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
+/// Narrows an instance to its display name.
+///
+/// Rejects an unknown instance.
+pub(crate) async fn get_instance_name<'e, E>(
+    instance_id: &str,
+    exec: E,
+) -> crate::Result<String>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_scalar!(
+        "
+        SELECT name
+        FROM instances
+        WHERE id = ?
+        ",
+        instance_id,
+    )
+    .fetch_optional(exec)
+    .await?
+    .ok_or_else(|| {
+        crate::ErrorKind::InputError("Unknown instance".to_string()).into()
+    })
+}

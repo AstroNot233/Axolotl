@@ -321,3 +321,83 @@ pub(crate) async fn bump_content_set_revision_in_transaction(
     .await?;
     unsigned(revision, "instance_content_sets.revision")
 }
+
+/// Records the loader the instance's components project onto its applied
+/// content set.
+pub(crate) async fn set_applied_loader_in_transaction(
+    instance_id: &str,
+    loader: ModLoader,
+    loader_version: Option<&str>,
+    modified: i64,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "UPDATE instance_content_sets
+         SET loader = ?, loader_version = ?, modified = ?
+         WHERE id = (
+            SELECT applied_content_set_id FROM instances WHERE id = ?
+         )",
+    )
+    .bind(loader.as_str())
+    .bind(loader_version)
+    .bind(modified)
+    .bind(instance_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Records the loader version an instance launches with.
+pub(crate) async fn set_applied_loader_version_in_transaction(
+    instance_id: &str,
+    loader_version: Option<&str>,
+    modified: i64,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query!(
+        "
+        UPDATE instance_content_sets
+        SET loader_version = ?, modified = ?
+        WHERE id = (
+            SELECT applied_content_set_id
+            FROM instances
+            WHERE id = ?
+        )
+        ",
+        loader_version,
+        modified,
+        instance_id,
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Records the protocol version an instance's content set speaks.
+pub(crate) async fn set_applied_protocol_version_in_transaction(
+    instance_id: &str,
+    protocol_version: Option<u32>,
+    modified: i64,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query!(
+        "
+        UPDATE instance_content_sets
+        SET protocol_version = ?, modified = ?
+        WHERE id = (
+            SELECT applied_content_set_id
+            FROM instances
+            WHERE id = ?
+        )
+        ",
+        protocol_version.map(i64::from),
+        modified,
+        instance_id,
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
