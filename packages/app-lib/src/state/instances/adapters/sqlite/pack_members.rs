@@ -570,20 +570,52 @@ pub(crate) async fn unlink_pack_in_transaction(
     .bind(unlinked_at.timestamp())
     .execute(&mut **tx)
     .await?;
-    sqlx::query(
-        "UPDATE instance_content_sets SET source_kind = 'local', modified = ? WHERE id = ?",
+    detach_pack_content_in_transaction(
+        content_set_id,
+        Some(unlinked_at.timestamp()),
+        tx,
     )
-    .bind(unlinked_at.timestamp())
-    .bind(content_set_id)
-    .execute(&mut **tx)
-    .await?;
-    sqlx::query(
-        "UPDATE instance_content_entries SET source_kind = 'local', ownership_kind = 'user_added', modified_at = ? WHERE content_set_id = ? AND ownership_kind = 'pack_managed'",
-    )
-    .bind(unlinked_at.timestamp())
-    .bind(content_set_id)
-    .execute(&mut **tx)
-    .await?;
+    .await
+}
+
+/// Turns a content set local: its entries become user-added content, its pack
+/// members go, and the revision advances.
+///
+/// A fresh unlink stamps `modified` and `modified_at`; replaying one from a
+/// marker has no clock of its own and leaves those columns alone.
+async fn detach_pack_content_in_transaction(
+    content_set_id: &str,
+    modified: Option<i64>,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    match modified {
+        Some(modified) => {
+            sqlx::query(
+                "UPDATE instance_content_sets SET source_kind = 'local', modified = ? WHERE id = ?",
+            )
+            .bind(modified)
+            .bind(content_set_id)
+            .execute(&mut **tx)
+            .await?;
+            sqlx::query(
+                "UPDATE instance_content_entries SET source_kind = 'local', ownership_kind = 'user_added', modified_at = ? WHERE content_set_id = ? AND ownership_kind = 'pack_managed'",
+            )
+            .bind(modified)
+            .bind(content_set_id)
+            .execute(&mut **tx)
+            .await?;
+        }
+        None => {
+            sqlx::query("UPDATE instance_content_entries SET ownership_kind = 'user_added', source_kind = 'local' WHERE content_set_id = ? AND ownership_kind = 'pack_managed'")
+                .bind(content_set_id)
+                .execute(&mut **tx)
+                .await?;
+            sqlx::query("UPDATE instance_content_sets SET source_kind = 'local' WHERE id = ?")
+                .bind(content_set_id)
+                .execute(&mut **tx)
+                .await?;
+        }
+    }
     sqlx::query("DELETE FROM instance_pack_members WHERE content_set_id = ?")
         .bind(content_set_id)
         .execute(&mut **tx)
@@ -620,21 +652,7 @@ pub(crate) async fn reconcile_pack_unlink_in_transaction(
         .fetch_optional(&mut **tx)
         .await?;
     if let Some(set) = set {
-        sqlx::query("UPDATE instance_content_entries SET ownership_kind = 'user_added', source_kind = 'local' WHERE content_set_id = ? AND ownership_kind = 'pack_managed'")
-            .bind(&set)
-            .execute(&mut **tx)
-            .await?;
-        sqlx::query(
-            "DELETE FROM instance_pack_members WHERE content_set_id = ?",
-        )
-        .bind(&set)
-        .execute(&mut **tx)
-        .await?;
-        sqlx::query("UPDATE instance_content_sets SET source_kind = 'local' WHERE id = ?")
-            .bind(&set)
-            .execute(&mut **tx)
-            .await?;
-        bump_content_set_revision_in_transaction(&set, tx).await?;
+        detach_pack_content_in_transaction(&set, None, tx).await?;
     }
 
     Ok(())
