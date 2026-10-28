@@ -1319,3 +1319,127 @@ where
 
     Ok(id)
 }
+
+/// Reads the provider references of a content set's entries, keyed by the file
+/// each entry claims, with the provider that marks it as the origin.
+pub(crate) async fn get_provider_refs_by_file_for_content_set(
+    content_set_id: &str,
+    pool: &SqlitePool,
+) -> crate::Result<Vec<(String, ContentProviderRef, Option<ContentProvider>)>> {
+    let rows = sqlx::query(
+        "SELECT entry.file_id, ref.provider, ref.provider_project_id,
+            ref.provider_release_id, ref.provider_file_id, ref.is_origin
+         FROM instance_content_entries entry
+         JOIN instance_content_provider_refs ref ON ref.content_entry_id = entry.id
+         WHERE entry.content_set_id = ? AND entry.file_id IS NOT NULL
+         ORDER BY entry.id, ref.is_origin DESC, ref.provider, ref.provider_project_id,
+            ref.provider_release_id IS NULL, ref.provider_release_id",
+    )
+    .bind(content_set_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut references = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(file_id) = row.try_get::<Option<String>, _>("file_id")? else {
+            continue;
+        };
+        let provider = row.try_get::<String, _>("provider")?;
+        let project_id = row.try_get::<String, _>("provider_project_id")?;
+        let release_id =
+            row.try_get::<Option<String>, _>("provider_release_id")?;
+        let file_id_ref =
+            row.try_get::<Option<String>, _>("provider_file_id")?;
+        let reference = ContentProviderRef::from_database(
+            &provider,
+            &project_id,
+            release_id.as_deref(),
+            file_id_ref.as_deref(),
+        )?;
+        let origin = (row.try_get::<i64, _>("is_origin")? != 0)
+            .then(|| reference.provider());
+        references.push((file_id, reference, origin));
+    }
+
+    Ok(references)
+}
+
+/// Reads the provider references of an instance's files, keyed by relative
+/// path, with the origin provider and the source kind of the claiming entry.
+pub(crate) async fn get_provider_refs_by_path(
+    instance_id: &str,
+    pool: &SqlitePool,
+) -> crate::Result<
+    Vec<(
+        String,
+        ContentProviderRef,
+        Option<ContentProvider>,
+        Option<ContentSourceKind>,
+    )>,
+> {
+    let rows = sqlx::query(
+        "SELECT file.relative_path, ref.provider, ref.provider_project_id,
+                ref.provider_release_id, ref.provider_file_id, ref.is_origin, entry.source_kind
+         FROM instance_files file
+         INNER JOIN instance_content_entries entry ON entry.file_id = file.id
+         INNER JOIN instance_content_provider_refs ref
+            ON ref.content_entry_id = entry.id
+         WHERE file.instance_id = ?
+         ORDER BY file.relative_path, ref.is_origin DESC, ref.provider,
+            ref.provider_project_id, ref.provider_release_id IS NULL,
+            ref.provider_release_id",
+    )
+    .bind(instance_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut references = Vec::with_capacity(rows.len());
+    for row in rows {
+        let provider = ContentProvider::from_str(row.try_get("provider")?)?;
+        let path = row.try_get::<String, _>("relative_path")?;
+        let provenance = ContentProviderRef::from_database(
+            provider.as_str(),
+            row.try_get("provider_project_id")?,
+            row.try_get::<Option<String>, _>("provider_release_id")?
+                .as_deref(),
+            row.try_get::<Option<String>, _>("provider_file_id")?
+                .as_deref(),
+        )?;
+        let origin =
+            (row.try_get::<i64, _>("is_origin")? != 0).then_some(provider);
+        let source_kind = row
+            .try_get::<Option<String>, _>("source_kind")?
+            .and_then(|value| ContentSourceKind::from_str(&value).ok());
+        references.push((path, provenance, origin, source_kind));
+    }
+
+    Ok(references)
+}
+
+/// Reads the provider and project id of every provider reference behind the
+/// content set's present files.
+pub(crate) async fn get_provider_project_keys_for_present_files(
+    content_set_id: &str,
+    pool: &SqlitePool,
+) -> crate::Result<Vec<(String, String)>> {
+    let rows = sqlx::query(
+        "SELECT DISTINCT ref.provider, ref.provider_project_id
+         FROM instance_content_entries entry
+         INNER JOIN instance_files file ON file.id = entry.file_id
+         INNER JOIN instance_content_provider_refs ref
+            ON ref.content_entry_id = entry.id
+         WHERE entry.content_set_id = ? AND file.missing = 0",
+    )
+    .bind(content_set_id)
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<String, _>("provider")?,
+                row.try_get::<String, _>("provider_project_id")?,
+            ))
+        })
+        .collect()
+}

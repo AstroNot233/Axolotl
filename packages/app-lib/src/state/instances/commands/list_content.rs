@@ -25,7 +25,7 @@ use crate::util::fetch::{
 };
 use async_zip::tokio::read::fs::ZipFileReader;
 use dashmap::DashMap;
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path};
 
@@ -58,37 +58,15 @@ async fn load_entry_maps(
         .collect::<HashMap<_, _>>();
     let mut provider_refs_by_file_id = HashMap::new();
     let mut origin_provider_by_file_id = HashMap::new();
-    let rows = sqlx::query(
-        "SELECT entry.file_id, ref.provider, ref.provider_project_id,
-            ref.provider_release_id, ref.provider_file_id, ref.is_origin
-         FROM instance_content_entries entry
-         JOIN instance_content_provider_refs ref ON ref.content_entry_id = entry.id
-         WHERE entry.content_set_id = ? AND entry.file_id IS NOT NULL
-         ORDER BY entry.id, ref.is_origin DESC, ref.provider, ref.provider_project_id,
-            ref.provider_release_id IS NULL, ref.provider_release_id",
-    )
-    .bind(content_set_id)
-    .fetch_all(pool)
-    .await?;
-    for row in rows {
-        let Some(file_id) = row.try_get::<Option<String>, _>("file_id")? else {
-            continue;
-        };
-        let provider = row.try_get::<String, _>("provider")?;
-        let project_id = row.try_get::<String, _>("provider_project_id")?;
-        let release_id =
-            row.try_get::<Option<String>, _>("provider_release_id")?;
-        let file_id_ref =
-            row.try_get::<Option<String>, _>("provider_file_id")?;
-        let reference = ContentProviderRef::from_database(
-            &provider,
-            &project_id,
-            release_id.as_deref(),
-            file_id_ref.as_deref(),
-        )?;
-        if row.try_get::<i64, _>("is_origin")? != 0 {
-            origin_provider_by_file_id
-                .insert(file_id.clone(), reference.provider());
+    for (file_id, reference, origin) in
+        sqlite::content_entries::get_provider_refs_by_file_for_content_set(
+            content_set_id,
+            pool,
+        )
+        .await?
+    {
+        if let Some(provider) = origin {
+            origin_provider_by_file_id.insert(file_id.clone(), provider);
         }
         provider_refs_by_file_id
             .entry(file_id)
@@ -167,20 +145,13 @@ pub(crate) async fn get_installed_project_ids_for_instance(
     )
     .await?;
     let mut project_ids = HashSet::new();
-    let provider_rows = sqlx::query(
-        "SELECT DISTINCT ref.provider, ref.provider_project_id
-         FROM instance_content_entries entry
-         INNER JOIN instance_files file ON file.id = entry.file_id
-         INNER JOIN instance_content_provider_refs ref
-            ON ref.content_entry_id = entry.id
-         WHERE entry.content_set_id = ? AND file.missing = 0",
-    )
-    .bind(&resolved.content_set.id)
-    .fetch_all(&state.pool)
-    .await?;
-    for row in provider_rows {
-        let provider = row.try_get::<String, _>("provider")?;
-        let project_id = row.try_get::<String, _>("provider_project_id")?;
+    for (provider, project_id) in
+        sqlite::content_entries::get_provider_project_keys_for_present_files(
+            &resolved.content_set.id,
+            &state.pool,
+        )
+        .await?
+    {
         if provider == "curseforge" {
             project_ids.insert(format!("curseforge:{project_id}"));
         } else {
@@ -191,73 +162,13 @@ pub(crate) async fn get_installed_project_ids_for_instance(
     Ok(project_ids.into_iter().collect())
 }
 
-#[derive(sqlx::FromRow)]
-struct InstanceInstallCandidateRow {
-    id: String,
-    name: String,
-    icon_path: Option<String>,
-    game_version: String,
-    loader: String,
-    installed: i64,
-}
-
 pub(crate) async fn get_instance_install_candidates(
     project_id: &str,
     project_type: ProjectType,
     targets: &[InstanceInstallTarget],
     pool: &SqlitePool,
 ) -> crate::Result<Vec<InstanceInstallCandidate>> {
-    let rows = sqlx::query_as::<_, InstanceInstallCandidateRow>(
-        r#"
-        SELECT
-            i.id,
-            i.name,
-            i.icon_path,
-            cs.game_version,
-            cs.loader,
-            CASE
-                WHEN EXISTS (
-                    SELECT 1
-                    FROM instance_content_entries entry
-                    INNER JOIN instance_files file
-                        ON file.id = entry.file_id
-                    WHERE entry.content_set_id = cs.id
-                        AND EXISTS (
-                            SELECT 1
-                            FROM instance_content_provider_refs ref
-                            WHERE ref.content_entry_id = entry.id
-                                AND ref.provider = CASE
-                                    WHEN ? LIKE 'curseforge:%' THEN 'curseforge'
-                                    ELSE 'modrinth'
-                                END
-                                AND ref.provider_project_id = CASE
-                                    WHEN ? LIKE 'curseforge:%' THEN substr(?, 12)
-                                    ELSE ?
-                                    END
-                        )
-                        AND file.missing = 0
-                )
-                    THEN 1
-                ELSE 0
-            END AS installed
-        FROM instances i
-        INNER JOIN instance_content_sets cs
-            ON cs.id = i.applied_content_set_id
-        LEFT JOIN instance_links link
-            ON link.instance_id = i.id
-        WHERE COALESCE(link.link_kind, 'unmanaged') NOT IN (
-            'server_project',
-            'server_project_modpack'
-        )
-        ORDER BY i.name ASC
-        "#,
-    )
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
+    let rows = instance_rows::get_install_candidates(project_id, pool).await?;
 
     rows.into_iter()
         .map(|row| -> crate::Result<_> {
@@ -1586,44 +1497,22 @@ async fn content_files_to_content_items(
         HashMap::<String, Vec<ContentProviderRef>>::new();
     let mut origin_provider_by_path = HashMap::<String, ContentProvider>::new();
     let mut source_kind_by_path = HashMap::<String, ContentSourceKind>::new();
-    let provider_rows = sqlx::query(
-        "SELECT file.relative_path, ref.provider, ref.provider_project_id,
-                ref.provider_release_id, ref.provider_file_id, ref.is_origin, entry.source_kind
-         FROM instance_files file
-         INNER JOIN instance_content_entries entry ON entry.file_id = file.id
-         INNER JOIN instance_content_provider_refs ref
-            ON ref.content_entry_id = entry.id
-         WHERE file.instance_id = ?
-         ORDER BY file.relative_path, ref.is_origin DESC, ref.provider,
-            ref.provider_project_id, ref.provider_release_id IS NULL,
-            ref.provider_release_id",
-    )
-    .bind(&instance.id)
-    .fetch_all(&state.pool)
-    .await?;
-    for row in provider_rows {
-        let provider = ContentProvider::from_str(row.try_get("provider")?)?;
+    for (path, reference, origin, source_kind) in
+        sqlite::content_entries::get_provider_refs_by_path(
+            &instance.id,
+            &state.pool,
+        )
+        .await?
+    {
         provider_refs_by_path
-            .entry(row.try_get("relative_path")?)
+            .entry(path.clone())
             .or_default()
-            .push(ContentProviderRef::from_database(
-                provider.as_str(),
-                row.try_get("provider_project_id")?,
-                row.try_get::<Option<String>, _>("provider_release_id")?
-                    .as_deref(),
-                row.try_get::<Option<String>, _>("provider_file_id")?
-                    .as_deref(),
-            )?);
-        if row.try_get::<i64, _>("is_origin")? != 0 {
-            origin_provider_by_path
-                .insert(row.try_get("relative_path")?, provider);
+            .push(reference);
+        if let Some(provider) = origin {
+            origin_provider_by_path.insert(path.clone(), provider);
         }
-        if let Some(source_kind) =
-            row.try_get::<Option<String>, _>("source_kind")?
-            && let Ok(source_kind) = ContentSourceKind::from_str(&source_kind)
-        {
-            source_kind_by_path
-                .insert(row.try_get("relative_path")?, source_kind);
+        if let Some(source_kind) = source_kind {
+            source_kind_by_path.insert(path, source_kind);
         }
     }
     let curseforge_project_ids = provider_refs_by_path
