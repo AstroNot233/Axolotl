@@ -54,6 +54,11 @@ impl McArchiveProvider {
         query: &ProviderQuery,
     ) -> ResourceResult<ProviderValue> {
         match query {
+            ProviderQuery::UpdateCandidates { .. } => {
+                Err(ResourceError::Unsupported(
+                    "MCArchive has no batch update index".into(),
+                ))
+            }
             ProviderQuery::ProjectProtocol { .. }
             | ProviderQuery::ReleaseProtocol { .. }
             | ProviderQuery::ReleasesProtocol { .. }

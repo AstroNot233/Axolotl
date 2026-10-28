@@ -4,10 +4,9 @@ use crate::state::instances::{Instance, InstanceFile};
 use crate::state::store::content_file_fingerprints::ContentFileFingerprints;
 use crate::state::store::{Collection as _, instance_content_files};
 use crate::state::{
-    CacheBehaviour, CachedEntry, CachedFileUpdate, ContentProvider,
     ContentProviderRef, DirectoryInfo, ModrinthVersionId, ProjectType,
 };
-use crate::util::fetch::{self, FetchSemaphore};
+use crate::util::fetch;
 use crate::util::io;
 use chrono::Utc;
 use std::collections::{HashMap, HashSet};
@@ -767,67 +766,6 @@ pub(crate) fn installed_modrinth_version_id(
     })
 }
 
-pub(crate) async fn fetch_content_file_updates(
-    update_key_refs: &[&str],
-    cache_behaviour: Option<CacheBehaviour>,
-    refresh: bool,
-    pool: &sqlx::SqlitePool,
-    fetch_semaphore: &FetchSemaphore,
-) -> crate::Result<Vec<CachedFileUpdate>> {
-    let update_behaviour = if refresh {
-        Some(CacheBehaviour::Bypass)
-    } else {
-        cache_behaviour
-    };
-
-    match CachedEntry::get_file_update_many(
-        update_key_refs,
-        update_behaviour,
-        pool,
-        fetch_semaphore,
-    )
-    .await
-    {
-        Ok(updates) => Ok(updates),
-        Err(error) if refresh => {
-            tracing::warn!(
-                "Content update refresh failed, using cached update data: {error}"
-            );
-            CachedEntry::get_file_update_many(
-                update_key_refs,
-                Some(CacheBehaviour::CacheOnly),
-                pool,
-                fetch_semaphore,
-            )
-            .await
-        }
-        Err(error) => Err(error),
-    }
-}
-
-/// Whether a file may receive Modrinth update suggestions.
-///
-/// Files installed from Modrinth (origin `Modrinth`) always qualify. Untracked
-/// or locally recorded files (no origin) qualify as long as no CurseForge
-/// reference ties them to a different provider; CurseForge-origin files are
-/// handled by the CurseForge update path instead.
-pub(crate) fn modrinth_update_enabled(
-    origin_provider: Option<ContentProvider>,
-    provider_refs: &[ContentProviderRef],
-) -> bool {
-    match origin_provider {
-        Some(ContentProvider::Modrinth) => true,
-        Some(
-            ContentProvider::CurseForge
-            | ContentProvider::McArchive
-            | ContentProvider::Local,
-        ) => false,
-        None => provider_refs.iter().all(|reference| {
-            matches!(reference, ContentProviderRef::Modrinth { .. })
-        }),
-    }
-}
-
 fn instance_file_id() -> String {
     format!("instance-file:{}", Uuid::new_v4())
 }
@@ -922,49 +860,8 @@ fn mergeable_tracked_file<'a>(
 mod tests {
     use super::*;
     use crate::state::instances::adapters::sqlite;
-    use crate::state::{
-        CurseForgeFileId, CurseForgeProjectId, ModrinthProjectId,
-        ModrinthVersionId,
-    };
     use std::fs;
     use std::sync::Arc;
-
-    fn modrinth_ref() -> ContentProviderRef {
-        ContentProviderRef::Modrinth {
-            project_id: ModrinthProjectId::new("project").unwrap(),
-            version_id: Some(ModrinthVersionId::new("version").unwrap()),
-        }
-    }
-
-    fn curseforge_ref() -> ContentProviderRef {
-        ContentProviderRef::CurseForge {
-            project_id: CurseForgeProjectId::new(42).unwrap(),
-            file_id: Some(CurseForgeFileId::new(7).unwrap()),
-        }
-    }
-
-    #[test]
-    fn untracked_files_qualify_for_modrinth_updates() {
-        assert!(modrinth_update_enabled(None, &[]));
-        assert!(modrinth_update_enabled(None, &[modrinth_ref()]));
-    }
-
-    #[test]
-    fn curseforge_tracked_files_do_not_qualify_for_modrinth_updates() {
-        assert!(!modrinth_update_enabled(
-            Some(ContentProvider::CurseForge),
-            &[curseforge_ref()],
-        ));
-        assert!(!modrinth_update_enabled(None, &[curseforge_ref()]));
-    }
-
-    #[test]
-    fn modrinth_origin_always_qualifies() {
-        assert!(modrinth_update_enabled(
-            Some(ContentProvider::Modrinth),
-            &[curseforge_ref(), modrinth_ref()],
-        ));
-    }
 
     #[test]
     fn content_scan_preserves_install_temporary_files() {

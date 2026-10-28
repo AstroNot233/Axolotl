@@ -22,6 +22,73 @@ impl ModrinthProvider {
         queries: &[ProviderQuery],
     ) -> ResourceResult<Vec<ResourceResult<ProviderValue>>> {
         if queries.iter().all(|query| {
+            matches!(query, ProviderQuery::UpdateCandidates { .. })
+        }) {
+            let mut groups =
+                HashMap::<String, Vec<(usize, String, ResourceTarget)>>::new();
+            let mut results = vec![
+                Ok(ProviderValue::UpdateCandidates(vec![]));
+                queries.len()
+            ];
+            for (index, query) in queries.iter().enumerate() {
+                let ProviderQuery::UpdateCandidates { sha1, target, .. } =
+                    query
+                else {
+                    unreachable!()
+                };
+                let key = serde_json::to_string(&(
+                    target.game_versions.clone(),
+                    target.loaders.clone(),
+                ))?;
+                groups.entry(key).or_default().push((
+                    index,
+                    sha1.clone(),
+                    target.clone(),
+                ));
+            }
+            for group in groups.into_values() {
+                let target = &group[0].2;
+                let hashes =
+                    group.iter().map(|(_, hash, _)| hash).collect::<Vec<_>>();
+                let response = self.request(ProtocolRequest::post("/version_files/update", json!({ "hashes": hashes, "algorithm": "sha1", "game_versions": target.game_versions, "loaders": target.loaders }))).await;
+                let documents = response.and_then(|value| {
+                    let releases: HashMap<String, RemoteRelease> =
+                        serde_json::from_value(value)?;
+                    let mut documents = HashMap::new();
+                    for (hash, release) in releases {
+                        if !hashes.iter().any(|expected| {
+                            expected.eq_ignore_ascii_case(&hash)
+                        }) {
+                            return Err(ResourceError::InvalidResponse(
+                                "unexpected update hash".into(),
+                            ));
+                        }
+                        if documents
+                            .insert(
+                                hash.to_ascii_lowercase(),
+                                release.document()?,
+                            )
+                            .is_some()
+                        {
+                            return Err(ResourceError::InvalidResponse(
+                                "duplicate update hash".into(),
+                            ));
+                        }
+                    }
+                    Ok(documents)
+                });
+                for (index, hash, _) in group {
+                    results[index] = match &documents {
+                        Ok(documents) => Ok(ProviderValue::UpdateCandidates(
+                            documents.get(&hash).cloned().into_iter().collect(),
+                        )),
+                        Err(error) => Err(error.clone()),
+                    };
+                }
+            }
+            return Ok(results);
+        }
+        if queries.iter().all(|query| {
             matches!(query, ProviderQuery::ReleaseProtocol { version, .. } if version == "v3")
         }) {
             let ids: Vec<_> = queries.iter().filter_map(|query| {
@@ -697,6 +764,9 @@ impl ResourceProvider for ModrinthProvider {
         "modrinth-v2-dates".into()
     }
     fn batch_limit(&self, query: &ProviderQuery) -> usize {
+        if matches!(query, ProviderQuery::UpdateCandidates { .. }) {
+            return 100;
+        }
         if matches!(
             query,
             ProviderQuery::ProjectProtocol { .. }
@@ -719,6 +789,12 @@ impl ResourceProvider for ModrinthProvider {
             }
         };
         match query {
+            ProviderQuery::UpdateCandidates {
+                project_id, sha1, ..
+            } => {
+                valid_id(project_id.as_str())?;
+                hashes([(HashAlgorithm::Sha1, sha1.clone())])?;
+            }
             ProviderQuery::ReleaseProtocol {
                 release_id,
                 version,

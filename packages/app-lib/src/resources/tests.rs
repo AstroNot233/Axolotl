@@ -145,6 +145,9 @@ async fn presentation_failure_uses_expired_metadata_without_masking_force_refres
 #[path = "../../../content-management/tests/fixtures/mod.rs"]
 mod fixtures;
 
+#[path = "update_batches.rs"]
+mod update_batches;
+
 #[tokio::test]
 async fn presentation_keeps_incomplete_protocol_cache_when_offline_without_retrying_twice()
  {
