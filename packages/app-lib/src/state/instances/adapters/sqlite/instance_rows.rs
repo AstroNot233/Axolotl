@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use super::values::{optional_timestamp, timestamp, unsigned};
 use crate::state::instances::{
     ContentSet, ContentSetStatus, ContentSourceKind, Instance,
     InstanceLaunchContext, InstanceLaunchOverrides,
@@ -8,7 +9,7 @@ use crate::state::instances::{
 use crate::state::{
     InstanceInstallStage, LauncherFeatureVersion, ModLoader, ReleaseChannel,
 };
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use sqlx::{Executor, Sqlite, SqlitePool, Transaction};
 use std::collections::HashMap;
@@ -1755,27 +1756,6 @@ where
         ))
         .into()
     })
-}
-
-fn timestamp(value: i64) -> DateTime<Utc> {
-    Utc.timestamp_opt(value, 0)
-        .single()
-        .unwrap_or_else(Utc::now)
-}
-
-fn optional_timestamp(value: i64) -> Option<DateTime<Utc>> {
-    Utc.timestamp_opt(value, 0).single()
-}
-
-fn unsigned(value: i64, column: &str) -> crate::Result<u64> {
-    if value < 0 {
-        return Err(crate::ErrorKind::InputError(format!(
-            "Expected {column} to be non-negative"
-        ))
-        .into());
-    }
-
-    Ok(value as u64)
 }
 
 #[cfg(test)]
