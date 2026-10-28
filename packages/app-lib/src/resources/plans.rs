@@ -1043,6 +1043,36 @@ impl ResourceService {
         ResourceArtifact,
         ReleaseSelectionBasis,
     )> {
+        self.selected_release_with_requirements_policy(
+            selection,
+            target,
+            preferred,
+            cancel,
+            current,
+            constraints,
+            requirements,
+            CachePolicy::UseFresh,
+            false,
+        )
+        .await
+    }
+
+    pub(crate) async fn selected_release_with_requirements_policy(
+        self: &Arc<Self>,
+        selection: &ResourceSelection,
+        target: &ResourceTarget,
+        preferred: &SourceId,
+        cancel: &CancellationToken,
+        current: Option<&ResourceRelease>,
+        constraints: &[String],
+        requirements: &[RetainedRequirement],
+        policy: CachePolicy,
+        require_complete: bool,
+    ) -> ResourceResult<(
+        ResourceRelease,
+        ResourceArtifact,
+        ReleaseSelectionBasis,
+    )> {
         let mut dependency_target;
         let target = if selection.id.as_str().starts_with("dependency:") {
             dependency_target = target.clone();
@@ -1058,7 +1088,8 @@ impl ResourceService {
                     return Err(invalid("release belongs to another resource"));
                 }
                 (
-                    self.release(reference, None, cancel).await?,
+                    self.release_with_policy(reference, None, cancel, policy)
+                        .await?,
                     ReleaseSelectionBasis::FixedByUser,
                 )
             }
@@ -1069,7 +1100,13 @@ impl ResourceService {
                     ));
                 }
                 (
-                    self.release(&reference.release, None, cancel).await?,
+                    self.release_with_policy(
+                        &reference.release,
+                        None,
+                        cancel,
+                        policy,
+                    )
+                    .await?,
                     ReleaseSelectionBasis::FixedByUser,
                 )
             }
@@ -1108,7 +1145,7 @@ impl ResourceService {
                                     cursor: cursor.clone(),
                                     page_size: 50,
                                 },
-                                CachePolicy::UseFresh,
+                                policy,
                                 cancel,
                             )
                             .await;
@@ -1172,6 +1209,12 @@ impl ResourceService {
                             }
                         }
                     }
+                }
+                if require_complete && !failures.is_empty() {
+                    return Err(invalid(format!(
+                        "Update discovery is incomplete: {}",
+                        failures.join("; ")
+                    )));
                 }
                 let preferred_channels: Vec<_> = releases
                     .iter()

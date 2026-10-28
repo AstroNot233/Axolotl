@@ -33,7 +33,7 @@ pub(crate) use self::list_content::{
     list_content_sets, list_linked_modpack_content,
 };
 
-mod content_snapshot;
+pub(crate) mod content_snapshot;
 pub(crate) use self::content_snapshot::{
     get_cached_content_snapshot, get_content_snapshot,
     get_local_content_snapshot, reconcile_curseforge_members,
@@ -48,6 +48,9 @@ pub(crate) use self::refresh_instances::*;
 mod sync_content_files;
 pub(crate) use self::sync_content_files::{
     instance_content_root, sync_content_files, sync_content_files_for_operation,
+};
+pub(crate) use sync_content_files::{
+    ScanProgress, sync_content_files_progressively,
 };
 
 mod launch_context;

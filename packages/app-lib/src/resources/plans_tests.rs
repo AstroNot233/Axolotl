@@ -2625,8 +2625,9 @@ async fn whole_instance_update_checks_run_concurrently_with_source_limits() {
         fn namespace(&self) -> String {
             self.inner.namespace()
         }
-        fn batch_limit(&self, query: &ProviderQuery) -> usize {
-            self.inner.batch_limit(query)
+        fn batch_limit(&self, _query: &ProviderQuery) -> usize {
+            // Exercise source concurrency independently of batch aggregation.
+            1
         }
         async fn fetch_many(
             &self,

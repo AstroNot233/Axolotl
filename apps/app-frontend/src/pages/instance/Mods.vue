@@ -192,6 +192,22 @@
                 }}</Button>
             </div>
         </CollapsibleAdmonition>
+        <div
+            v-if="contentRefreshTask?.failed"
+            class="mb-3 flex flex-wrap items-center gap-3 text-sm text-[var(--color-text-tertiary)]"
+            role="status"
+        >
+            <span v-if="contentRefreshTask.failed">{{
+                formatMessage(messages.contentCheckFailures, { count: contentRefreshTask.failed })
+            }}</span>
+            <Button
+                v-if="contentRefreshTask.failed && !contentRefreshTask.running"
+                size="2xs"
+                type="outlined"
+                @click="retryFailedContent"
+                >{{ formatMessage(commonMessages.retryButton) }}</Button
+            >
+        </div>
         <ContentPageLayout>
             <template #toolbar-actions>
                 <Button
@@ -250,10 +266,7 @@
                 />
                 <ResourceOperationPreviewModal ref="resourceOperationPreview" />
                 <ResourceHistoryModal ref="resourceHistoryModal" />
-                <ResourceBackupsModal
-                    ref="resourceBackupsModal"
-                    @cleaned="refreshContentState('bypass')"
-                />
+                <ResourceBackupsModal ref="resourceBackupsModal" @cleaned="refreshContentState()" />
                 <ExportModal v-if="projects.length > 0" ref="exportModal" :instance="instance" />
                 <ContentUpdaterModal
                     v-if="updatingProject || updatingModpack"
@@ -345,7 +358,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import DependencyGraphModal from '@/components/instance/dependencies/DependencyGraphModal.vue'
@@ -367,13 +380,15 @@ import {
     pendingContentChangeAffectsItem,
 } from '@/helpers/content-change-jobs'
 import { createContentEventRefresh } from '@/helpers/content-event-refresh'
-import { isUnresolvedContentProject, isUnresolvedProjectId } from '@/helpers/content-identity'
-import { mergeContentItemMetadata } from '@/helpers/content-item-metadata'
+import { isUnresolvedProjectId } from '@/helpers/content-identity'
 import { applyContentItemUpdates, matchesContentItem } from '@/helpers/content-item-state'
-import { drainContentMetadata } from '@/helpers/content-metadata-refresh'
 import { contentProjectUrl } from '@/helpers/content-project-links'
-import { lookupContentWikiIds, translateContentItemTitles } from '@/helpers/content-search'
-import { createContentUpdateScanner } from '@/helpers/content-update-scanner'
+import {
+    type ContentRefreshTask,
+    createContentRefreshSubscription,
+} from '@/helpers/content-refresh'
+import { lookupContentWikiIds } from '@/helpers/content-search'
+import { createContentTitleEnrichment } from '@/helpers/content-title-enrichment'
 import { getCurseForgeImageUrl } from '@/helpers/curseforge'
 import {
     type CurseForgeManualDownloadItem,
@@ -387,7 +402,6 @@ import {
     apply_content_update_plan,
     dismiss_post_upgrade_notice,
     edit,
-    get_content_items_by_paths,
     type InstanceContentSnapshotItem,
     list,
     plan_content_updates,
@@ -401,10 +415,8 @@ import { readInstanceCache, writeInstanceCache } from '@/helpers/instance-cache'
 import {
     type InstanceContentData,
     isWorldSaveContentItem,
-    loadInstanceContentInStages,
     localContentIconUrl,
-    preserveContentUpdateState,
-    updateCheckEntryIds,
+    normalizeInstanceContentSnapshot,
 } from '@/helpers/instance-content'
 import { postUpgradeWarningForContent } from '@/helpers/post-upgrade-notice'
 import {
@@ -412,11 +424,7 @@ import {
     duplicateGroupUpdateEntries,
     reviewResourceEntryChanges,
 } from '@/helpers/resource-update-selection'
-import {
-    resourceCheckUpdates,
-    resourceListHistory,
-    type SourceReleaseRef,
-} from '@/helpers/resources'
+import { resourceListHistory, type SourceReleaseRef } from '@/helpers/resources'
 import type { CacheBehaviour, GameInstance } from '@/helpers/types'
 import { highlightModInInstance } from '@/helpers/utils.js'
 import i18n from '@/i18n.config'
@@ -425,13 +433,17 @@ import { injectDownloadManager } from '@/providers/download-manager'
 import { useTheming } from '@/store/state'
 
 const messages = defineMessages({
+    checkingContent: {
+        id: 'app.instance.content.checking',
+        defaultMessage: 'Refreshing… {current}/{total}',
+    },
+    contentCheckFailures: {
+        id: 'app.instance.content.check-failures',
+        defaultMessage: '{count, plural, one {# check failed} other {# checks failed}}',
+    },
     worldDatapacksFailed: {
         id: 'app.instance.content.world-datapacks-failed',
         defaultMessage: 'Could not read some world datapacks',
-    },
-    loadingOnlineInformation: {
-        id: 'app.instance.mods.loading-online-information',
-        defaultMessage: 'Loading online information, please wait',
     },
     versionsFailed: {
         id: 'app.instance.content.versions-failed',
@@ -669,7 +681,7 @@ defineEmits<{
 }>()
 
 function hasPreloadedContent(contentData: InstanceContentData | null | undefined) {
-    return contentData?.path === props.instance.id
+    return contentData?.path === props.instance.id && contentData.snapshot.items.length > 0
 }
 
 const loading = ref(!hasPreloadedContent(props.preloadedContent))
@@ -677,25 +689,7 @@ const contentLoadError = ref<Error | null>(null)
 const contentSnapshot = ref<InstanceContentData['snapshot'] | null>(null)
 const projects = ref<ContentItem[]>([])
 const linkedModpackContentItems = ref<ContentItem[]>([])
-const contentItemsByEntryId = computed(
-    () =>
-        new Map(
-            [...projects.value, ...linkedModpackContentItems.value]
-                .filter((item) => item.instanceEntryId)
-                .map((item) => [item.instanceEntryId!, item]),
-        ),
-)
 const mcmodUrls = ref(new Map<string, string>())
-/** Paths whose metadata this generation has already requested, so a second pass does not re-ask. */
-const visibleMetadataRequestedPaths = new Set<string>()
-/**
- * Titles as they arrived from the backend, before any bilingual rewrite. The
- * wiki dictionary only produces `中文名 (English)`, and the translation helper
- * returns items untouched outside zh-CN, so switching away from Chinese needs
- * the pre-translation title to restore. Session-only; never persisted.
- */
-const originalContentTitles = new Map<string, string>()
-
 let mcmodLookupVersion = 0
 let isUnmounted = false
 const contentWarnings = computed(() => contentSnapshot.value?.warnings ?? [])
@@ -731,7 +725,6 @@ const localImportedModpackUnlinked = ref(false)
 
 const installingBuffer = ref<ContentItem[]>([])
 const handledInstallRevision = ref(0)
-const curseForgeReconciliationAttempts = new Set<string>()
 
 watch(
     () => installingItems.value.get(props.instance.id),
@@ -990,7 +983,7 @@ async function restoreMissingPackMember(item: InstanceContentSnapshotItem) {
     ])
     try {
         await restore_pack_member_default(props.instance.id, memberId)
-        await refreshContentState('bypass')
+        await refreshContentState()
     } catch (error) {
         handleError(error as Error)
     } finally {
@@ -1001,13 +994,46 @@ async function restoreMissingPackMember(item: InstanceContentSnapshotItem) {
 }
 
 const {
-    worldDatapackItems,
+    worldDatapackItems: localWorldDatapackItems,
     worldDatapackErrors,
     isWorldDatapackItem,
     loadWorldDatapacks,
     deleteWorldDatapackItem,
     toggleWorldDatapackItem,
 } = useWorldDatapacks(() => props.instance.id)
+
+const worldDatapackItems = computed(() => {
+    const saved = new Map(
+        [...projects.value, ...linkedModpackContentItems.value]
+            .filter(
+                (item) =>
+                    item.file_path?.startsWith('saves/') && item.file_path.includes('/datapacks/'),
+            )
+            .map((item) => [item.file_path, item]),
+    )
+    return localWorldDatapackItems.value.map((local) => {
+        const remote = saved.get(local.file_path)
+        if (!remote) return local
+        return {
+            ...remote,
+            enabled: local.enabled,
+            groupMeta: local.groupMeta,
+            source_kind: local.source_kind,
+            instanceCapabilities: {
+                ...remote.instanceCapabilities!,
+                canToggle: local.instanceCapabilities?.canToggle ?? false,
+            },
+            project:
+                remote.project && !remote.project.id.startsWith('local:')
+                    ? remote.project
+                    : local.project,
+        }
+    })
+})
+
+function isSnapshotWorldDatapack(item: ContentItem) {
+    return item.file_path?.startsWith('saves/') && item.file_path.includes('/datapacks/')
+}
 
 function displayContentIconUrl(item: Pick<ContentItem, 'project'>): string | undefined {
     const iconUrl = item.project?.icon_url
@@ -1024,17 +1050,19 @@ const mergedProjects = computed<ContentItem[]>(() => {
     const pending = active ?? installingBuffer.value
     const pendingProjectIds = new Set(pending.map((p) => p.project?.id).filter(Boolean))
     const displayProjects = projects.value
-        .filter((project) => !isWorldSaveContentItem(project))
+        .filter((project) => !isWorldSaveContentItem(project) && !isSnapshotWorldDatapack(project))
         .map((project) => {
-            const resolved = project.project?.icon_url
-                ? {
-                      ...project,
-                      project: {
-                          ...project.project,
-                          icon_url: displayContentIconUrl(project),
-                      },
-                  }
-                : project
+            const iconUrl = project.project?.icon_url ? displayContentIconUrl(project) : undefined
+            const resolved =
+                iconUrl && iconUrl !== project.project?.icon_url
+                    ? {
+                          ...project,
+                          project: {
+                              ...project.project,
+                              icon_url: iconUrl,
+                          },
+                      }
+                    : project
             return (resolved.project?.id && pendingProjectIds.has(resolved.project.id)) ||
                 hasGlobalContentChange(resolved)
                 ? { ...resolved, installing: true }
@@ -1048,9 +1076,9 @@ const mergedProjects = computed<ContentItem[]>(() => {
 })
 
 const displayedLinkedModpackContentItems = computed(() => [
-    ...linkedModpackContentItems.value.map((item) =>
-        hasGlobalContentChange(item) ? { ...item, installing: true } : item,
-    ),
+    ...linkedModpackContentItems.value
+        .filter((item) => !isSnapshotWorldDatapack(item))
+        .map((item) => (hasGlobalContentChange(item) ? { ...item, installing: true } : item)),
     ...manualPendingItems.value,
 ])
 
@@ -1168,8 +1196,8 @@ let suppressSyncedUntil = 0
 const contentEventRefresh = createContentEventRefresh({
     busy: () => isBulkOperating.value,
     revision: () => contentSnapshot.value?.revision,
-    refresh: (filesystem) => {
-        void initProjects(filesystem ? 'bypass' : undefined).catch(handleError)
+    refresh: () => {
+        void initProjects().catch(handleError)
     },
     delay: CONTENT_EVENT_DEBOUNCE_MS,
 })
@@ -1186,52 +1214,65 @@ const isPackUnlinkDisabled = computed(
         pendingContentChanges.value.length > 0,
 )
 let contentEnrichmentController: AbortController | undefined
+const contentTitleEnrichment = createContentTitleEnrichment()
+const appliedContentSources = new WeakMap<ContentItem, { source: ContentItem; locale: string }>()
 let contentRequestGeneration = 0
 let activeBypassRefresh: Promise<void> | null = null
-const updateCheckProgress = ref<{ checked: number; total: number } | null>(null)
-let bulkUpdateCheck: AbortController | undefined
-function isShownSnapshot(instanceId: string, revision: number) {
-    return (
-        !isUnmounted &&
-        props.instance.id === instanceId &&
-        props.instance.install_stage === 'installed' &&
-        contentSnapshot.value?.revision === revision
+const contentRefreshTask = ref<ContentRefreshTask | null>(null)
+let contentRefreshSubscription: ReturnType<typeof createContentRefreshSubscription> | undefined
+let contentRefreshConnection: Promise<void> | undefined
+let subscribedInstanceId: string | undefined
+
+async function connectContentRefresh() {
+    const instanceId = props.instance.id
+    if (subscribedInstanceId === instanceId && contentRefreshConnection)
+        return contentRefreshConnection
+    contentRefreshSubscription?.dispose()
+    subscribedInstanceId = instanceId
+    const itemCache = new WeakMap<InstanceContentSnapshotItem, ContentItem>()
+    let snapshot: InstanceContentData['snapshot'] | undefined
+    const subscription = createContentRefreshSubscription(
+        instanceId,
+        (state) => {
+            if (
+                isUnmounted ||
+                props.instance.id !== instanceId ||
+                props.instance.install_stage !== 'installed'
+            )
+                return
+            contentRefreshTask.value = state.task
+            loading.value = state.snapshot.items.length === 0 && (state.task?.running ?? true)
+            if (snapshot === state.snapshot) return
+            snapshot = state.snapshot
+            const data = normalizeInstanceContentSnapshot(instanceId, state.snapshot, itemCache)
+            contentLoadError.value = null
+            applyContentData(data)
+            enrichContentData(data, contentRequestGeneration)
+        },
+        (error) => {
+            if (isUnmounted || props.instance.id !== instanceId) return
+            handleError(error as Error)
+        },
     )
+    contentRefreshSubscription = subscription
+    const pending = subscription.connect().catch((error) => {
+        subscription.dispose()
+        if (contentRefreshSubscription === subscription) {
+            contentRefreshSubscription = undefined
+            contentRefreshConnection = undefined
+            subscribedInstanceId = undefined
+        }
+        throw error
+    })
+    contentRefreshConnection = pending
+    return pending
 }
-const contentUpdateScanner = createContentUpdateScanner(
-    (updated) => {
-        if (!isShownSnapshot(updated.path, updated.snapshot.revision)) return
-        updateCheckProgress.value = null
-        commitContentUpdates(updated)
-    },
-    (entry) => {
-        // Each entry shows its update as soon as it is checked; failures are
-        // reported once the whole scan has finished.
-        if (!isShownSnapshot(entry.instanceId, entry.revision)) return
-        updateCheckProgress.value =
-            entry.checked < entry.total ? { checked: entry.checked, total: entry.total } : null
-        const { entryId, release, failed, unresolved } = entry.progress
-        const current = contentItemsByEntryId.value.get(entryId)
-        if (current && !failed && !unresolved)
-            mergeContentUpdate({ ...current, resourceUpdate: release ?? null })
-    },
-)
-function commitContentUpdates(updated: InstanceContentData) {
-    if (!contentSnapshot.value) return
-    const failed = new Set(updated.updateCheckFailedEntries)
-    for (const item of [...updated.contentItems, ...updated.linkedContentItems]) {
-        if (item.instanceEntryId && !failed.has(item.instanceEntryId)) mergeContentUpdate(item)
-    }
-    contentSnapshot.value = {
-        ...contentSnapshot.value,
-        warnings: [
-            ...contentSnapshot.value.warnings.filter(
-                (warning) => warning.code !== 'resource_update_unavailable',
-            ),
-            ...updated.snapshot.warnings.filter(
-                (warning) => warning.code === 'resource_update_unavailable',
-            ),
-        ],
+
+async function retryFailedContent() {
+    try {
+        await contentRefreshSubscription?.start('retry_failed')
+    } catch (error) {
+        handleError(error as Error)
     }
 }
 
@@ -1244,16 +1285,29 @@ function isCurrentContentRequest(instanceId: string, generation: number) {
     )
 }
 
+watch(
+    () => i18n.global.locale.value,
+    () => {
+        const snapshot = contentSnapshot.value
+        if (!snapshot || props.instance.install_stage !== 'installed') return
+        const data = normalizeInstanceContentSnapshot(props.instance.id, toRaw(snapshot))
+        applyContentData(data)
+        enrichContentData(data, contentRequestGeneration)
+    },
+)
+
 function invalidateContentRequests(clearState = false) {
     contentEventRefresh.clear()
-    contentUpdateScanner.cancel()
-    updateCheckProgress.value = null
+    contentRefreshSubscription?.dispose()
+    contentRefreshSubscription = undefined
+    contentRefreshConnection = undefined
+    subscribedInstanceId = undefined
     contentEnrichmentController?.abort()
     contentRequestGeneration += 1
+    contentTitleEnrichment.clear()
     if (!clearState) return
     resetUpdateState()
 
-    originalContentTitles.clear()
     contentSnapshot.value = null
     projects.value = []
     linkedModpackContentItems.value = []
@@ -1264,6 +1318,7 @@ function invalidateContentRequests(clearState = false) {
     linkedModpackCategories.value = []
     linkedModpackHasUpdate.value = false
     linkedModpackUpdateVersionId.value = null
+    contentRefreshTask.value = null
     loading.value = false
 }
 const isPackLocked = computed(
@@ -1387,140 +1442,6 @@ function getContentItemId(item: ContentItem | null | undefined) {
         item?.id ??
         ''
     )
-}
-
-function mergeRefreshedMetadataItems(
-    refreshedItems: ContentItem[],
-    originals: Map<string, ContentItem>,
-) {
-    const refreshedByPath = new Map(
-        refreshedItems.filter((item) => !!item.file_path).map((item) => [item.file_path!, item]),
-    )
-
-    const mergeItems = (items: ContentItem[]) =>
-        items.map((item) => {
-            const refreshed = item.file_path ? refreshedByPath.get(item.file_path) : undefined
-
-            const original = item.file_path ? originals.get(item.file_path) : undefined
-            if (
-                !refreshed ||
-                !original ||
-                original.id !== item.id ||
-                original.instanceEntryId !== item.instanceEntryId ||
-                hasContentOperation(item)
-            )
-                return item
-
-            return mergeContentItemMetadata(item, refreshed)
-        })
-
-    projects.value = mergeItems(projects.value)
-    linkedModpackContentItems.value = mergeItems(linkedModpackContentItems.value)
-
-    dependencyGraphModal.value?.setItems(allDependencyGraphItems())
-}
-
-function mergeContentUpdate(item: ContentItem) {
-    if (!item.instanceEntryId) return
-    const current = contentItemsByEntryId.value.get(item.instanceEntryId)
-    if (!current || current.file_path !== item.file_path || hasContentOperation(current)) return
-    current.resourceUpdate = item.resourceUpdate
-    if (current.instanceCapabilities) {
-        current.instanceCapabilities = {
-            ...current.instanceCapabilities,
-            canUpdate: !!item.resourceUpdate && current.instanceMaterializationState === 'present',
-        }
-    }
-}
-
-function allContentItems() {
-    return [...projects.value, ...linkedModpackContentItems.value]
-}
-
-/**
- * Remembers the pre-translation title so a locale switch away from Chinese can
- * undo the rewrite. Called on every snapshot, so a title the backend actually
- * changed replaces the remembered one instead of restoring a stale name.
- */
-function recordOriginalContentTitles(items: ContentItem[]) {
-    for (const item of items) {
-        const key = item.instanceEntryId ?? item.id
-        if (!key || item.project?.title === undefined) continue
-        originalContentTitles.set(key, item.project.title)
-    }
-}
-
-function restoreOriginalContentTitles() {
-    const restore = (items: ContentItem[]) =>
-        items.map((item) => {
-            const originalTitle = originalContentTitles.get(item.instanceEntryId ?? item.id)
-            if (
-                originalTitle === undefined ||
-                !item.project ||
-                item.project.title === originalTitle ||
-                hasContentOperation(item)
-            )
-                return item
-            return { ...item, project: { ...item.project, title: originalTitle } }
-        })
-
-    projects.value = restore(projects.value)
-    linkedModpackContentItems.value = restore(linkedModpackContentItems.value)
-}
-
-/** Fetches the backend metadata for one chunk of paths. */
-async function fetchContentMetadataChunk(instanceId: string, paths: string[]) {
-    return await get_content_items_by_paths(instanceId, paths)
-}
-
-/** Rewrites titles through the bundled wiki dictionary for the active locale. */
-async function translateContentMetadataItems(items: ContentItem[]) {
-    return await translateContentItemTitles(items, i18n.global.locale.value).catch(() => items)
-}
-
-/**
- * Resolves metadata for every item whose project is still the `local:`
- * placeholder, in the order the list currently shows them.
- *
- * This replaces a viewport-scoped refresh: the list sorts on
- * `project.title`, which this pass rewrites, so completing only the visible
- * rows made the order depend on the scroll position and re-triggered itself on
- * every pass. Draining the whole set in bounded chunks lets the order settle
- * once instead.
- */
-async function refreshAllContentMetadata(generation: number) {
-    if (isUnmounted || props.instance.install_stage !== 'installed') return
-
-    const paths: string[] = []
-    for (const item of allContentItems()) {
-        const path = item.file_path
-        if (!path || !isUnresolvedContentProject(item)) continue
-        if (visibleMetadataRequestedPaths.has(path)) continue
-        visibleMetadataRequestedPaths.add(path)
-        paths.push(path)
-    }
-    if (!paths.length) return
-
-    const instanceId = props.instance.id
-    const isCurrent = () => isCurrentContentRequest(instanceId, generation)
-
-    await drainContentMetadata({
-        paths,
-        fetchChunk: (chunk) => fetchContentMetadataChunk(instanceId, chunk),
-        translate: translateContentMetadataItems,
-        originalsForChunk: (chunk) => {
-            const wanted = new Set(chunk)
-            return allContentItems().filter(
-                (item) => !!item.file_path && wanted.has(item.file_path),
-            )
-        },
-        merge: (items, originals) => mergeRefreshedMetadataItems(items, originals),
-        isCurrent,
-    }).catch((error) => {
-        if (!isCurrent()) return
-        for (const path of paths) visibleMetadataRequestedPaths.delete(path)
-        debugState('content metadata refresh failed', { instanceId, paths, error })
-    })
 }
 
 function getStableContentId(item: ContentItem) {
@@ -2058,7 +1979,7 @@ async function restorePackDefault(item: ContentItem) {
     if (!operation) return
     try {
         await restore_pack_member_default(props.instance.id, memberId)
-        await refreshContentState('bypass')
+        await refreshContentState()
     } catch (error) {
         handleError(error as Error)
     } finally {
@@ -2197,55 +2118,30 @@ async function reviewResourceChanges(entryIds: string[], release: SourceReleaseR
 
 async function bulkUpdateAllProjects() {
     if (
-        bulkUpdateCheck ||
+        localBulkOperating.value ||
         pendingContentChanges.value.length > 0 ||
         activeContentChangeJobs.value.length > 0
     )
         return false
     localBulkOperating.value = true
-    const instanceId = props.instance.id
-    const snapshot = contentSnapshot.value
-    const controller = new AbortController()
-    bulkUpdateCheck = controller
     try {
-        // The batch covers the finished scan of the snapshot on screen; a scan
-        // still running is awaited instead of starting a second full check.
-        const scanned = snapshot
-            ? await contentUpdateScanner.settled({ path: instanceId, snapshot })
-            : undefined
-        if (controller.signal.aborted || props.instance.id !== instanceId) return false
-        let entries: string[]
-        if (scanned) {
-            // An entry whose check failed keeps its earlier update only for display.
-            const failed = new Set(scanned.updateCheckFailedEntries)
-            entries = [...scanned.contentItems, ...scanned.linkedContentItems]
-                .filter(
-                    (item) =>
-                        item.resourceUpdate &&
-                        item.instanceEntryId &&
-                        !failed.has(item.instanceEntryId),
-                )
-                .map((item) => item.instanceEntryId!)
-        } else {
-            const result = await resourceCheckUpdates(instanceId, controller.signal)
-            if (result.failures.length) handleError(new Error(result.failures.join('\n')))
-            entries = result.entries
-        }
-        if (controller.signal.aborted || props.instance.id !== instanceId) return false
-        const ids = entries.filter((id) =>
-            contentSnapshot.value?.items.some(
-                (item) => item.entryId === id && item.ownershipKind === 'user_added',
-            ),
+        // An entry whose latest check failed still shows its last found update;
+        // Update all leaves it out until a check succeeds.
+        const failed = new Set(
+            (contentSnapshot.value?.warnings ?? [])
+                .filter((warning) => warning.code === 'resource_update_unavailable')
+                .map((warning) => warning.entryId),
         )
+        const ids = [...projects.value, ...linkedModpackContentItems.value]
+            .filter((item) => item.instanceOwnershipKind === 'user_added' && !!item.resourceUpdate)
+            .map((item) => item.instanceEntryId)
+            .filter((id): id is string => !!id && !failed.has(id))
         return ids.length ? await reviewResourceChanges(ids) : false
     } catch (err) {
-        if (!controller.signal.aborted) handleError(err as Error)
+        handleError(err as Error)
         return false
     } finally {
-        if (bulkUpdateCheck === controller) {
-            bulkUpdateCheck = undefined
-            localBulkOperating.value = false
-        }
+        localBulkOperating.value = false
     }
 }
 
@@ -2332,7 +2228,7 @@ async function handleRollbackContent(mod: ContentItem) {
         handleError(err as Error)
     } finally {
         try {
-            if (changed) await refreshContentState('bypass')
+            if (changed) await refreshContentState()
         } finally {
             finishContentOperation(mod, operation)
         }
@@ -2373,7 +2269,7 @@ watch(
             handledRevision: handledInstallRevision.value,
         })
         handledInstallRevision.value = revision
-        await refreshContentState('bypass')
+        await refreshContentState()
     },
 )
 
@@ -2546,7 +2442,7 @@ async function unpairInstance() {
     linkedModpackUpdateVersionId.value = null
     localImportedModpackUnlinked.value = true
     linkedModpackContentItems.value = []
-    await initProjects('bypass')
+    await initProjects()
 }
 
 async function handleShareItems(
@@ -2687,55 +2583,28 @@ async function initProjectsInternal(cacheBehaviour?: CacheBehaviour) {
         invalidateContentRequests(true)
         return
     }
-
     const instanceId = props.instance.id
-    if (cacheBehaviour === 'bypass' || cacheBehaviour === 'must_revalidate')
-        contentUpdateScanner.cancel()
+    const generation = ++contentRequestGeneration
     contentEnrichmentController?.abort()
     contentEnrichmentController = new AbortController()
-    const generation = ++contentRequestGeneration
-    visibleMetadataRequestedPaths.clear()
-    debugState('initProjects start', { instanceId, cacheBehaviour, generation })
-    let contentData: InstanceContentData | null
     try {
-        contentData = await loadInstanceContentInStages(instanceId, cacheBehaviour, (local) => {
-            if (!isCurrentContentRequest(instanceId, generation)) return false
-            if (projects.value.length || linkedModpackContentItems.value.length) return true
-            if (
-                !local.contentItems.length &&
-                !local.linkedContentItems.length &&
-                (props.instance.linked_dot_minecraft || props.instance.symlink_target)
-            )
-                return true
-            return applyContentData(local)
-        })
+        const alreadyConnected = subscribedInstanceId === instanceId && contentRefreshConnection
+        await connectContentRefresh()
+        if (!isCurrentContentRequest(instanceId, generation)) return
+        if (alreadyConnected) await contentRefreshSubscription?.reload()
+        await contentRefreshSubscription?.start(
+            cacheBehaviour === 'bypass' || cacheBehaviour === 'must_revalidate'
+                ? 'force_remote'
+                : 'normal',
+        )
     } catch (error) {
-        if (isCurrentContentRequest(instanceId, generation)) {
-            handleError(error as Error)
-            if (!projects.value.length && !linkedModpackContentItems.value.length)
-                contentLoadError.value = error instanceof Error ? error : new Error(String(error))
-            loading.value = false
-        }
-        return
-    }
-    if (!contentData) {
-        if (isCurrentContentRequest(instanceId, generation)) loading.value = false
-        return
-    }
-    if (!isCurrentContentRequest(instanceId, generation)) return
-    contentLoadError.value = null
-    try {
-        if (applyContentData(contentData)) {
-            enrichContentData(contentData, generation)
-            void refreshAllContentMetadata(generation)
-        }
-    } catch (error) {
-        if (isCurrentContentRequest(instanceId, generation)) handleError(error as Error)
+        if (!isCurrentContentRequest(instanceId, generation)) return
+        handleError(error as Error)
+        if (!projects.value.length && !linkedModpackContentItems.value.length)
+            contentLoadError.value = error instanceof Error ? error : new Error(String(error))
     } finally {
-        if (isCurrentContentRequest(instanceId, generation)) loading.value = false
-    }
-    if (cacheBehaviour !== 'bypass' && beginLegacyCurseForgeReconciliation(contentData)) {
-        await initProjects('bypass')
+        if (isCurrentContentRequest(instanceId, generation) && contentLoadError.value)
+            loading.value = false
     }
 }
 
@@ -2744,44 +2613,46 @@ function enrichContentData(data: InstanceContentData, generation: number) {
     const isCurrent = () =>
         !controller.signal.aborted && isCurrentContentRequest(data.path, generation)
     const originals = [...data.contentItems, ...data.linkedContentItems]
-    void translateContentItemTitles(originals, i18n.global.locale.value)
+    const locale = i18n.global.locale.value
+    void contentTitleEnrichment
+        .enrich(originals, locale)
         .then((translated) => {
-            if (!isCurrent()) return
+            if (!isCurrent() || i18n.global.locale.value !== locale) return
             const byId = new Map(
-                translated.map((item, index) => [item.id, { item, original: originals[index] }]),
+                translated.map((item, index) => [
+                    getContentItemId(item),
+                    { item, original: originals[index] },
+                ]),
             )
-            const merge = (items: ContentItem[]) =>
-                items.map((item) => {
-                    const translated = byId.get(item.id)
+            const merge = (items: ContentItem[]) => {
+                const next = items.map((item) => {
+                    const translated = byId.get(getContentItemId(item))
                     if (
                         !translated?.item.project ||
                         hasContentOperation(item) ||
-                        item.project?.title !== translated.original.project?.title
+                        item.project?.title !== translated.original.project?.title ||
+                        item.project?.id !== translated.original.project?.id ||
+                        item.project?.slug !== translated.original.project?.slug ||
+                        item.origin_provider !== translated.original.origin_provider ||
+                        item.project?.title === translated.item.project.title
                     )
                         return item
-                    return {
+                    const updated = {
                         ...item,
                         project: { ...item.project, title: translated.item.project.title },
                     }
+                    const applied = appliedContentSources.get(toRaw(item))
+                    if (applied) appliedContentSources.set(updated, applied)
+                    return updated
                 })
+                return next.every((item, index) => item === items[index]) ? items : next
+            }
             projects.value = merge(projects.value)
             linkedModpackContentItems.value = merge(linkedModpackContentItems.value)
         })
         .catch((error) => {
             if (isCurrent()) handleError(error as Error)
         })
-}
-
-function beginLegacyCurseForgeReconciliation(contentData: InstanceContentData) {
-    if (
-        props.instance.link?.type !== 'curseforge_modpack' ||
-        curseForgeReconciliationAttempts.has(props.instance.id) ||
-        !contentData.snapshot.items.some((item) => item.ownershipKind === 'local_discovered')
-    ) {
-        return false
-    }
-    curseForgeReconciliationAttempts.add(props.instance.id)
-    return true
 }
 
 function applyContentData(contentData: InstanceContentData) {
@@ -2806,34 +2677,52 @@ function applyContentData(contentData: InstanceContentData) {
         paths: contentData.contentItems.map((c) => c.file_name).slice(0, 20),
     })
     contentSnapshot.value = contentData.snapshot
-    const previousItems = new Map(
-        [...projects.value, ...linkedModpackContentItems.value]
-            .filter((item) => item.instanceEntryId)
-            .map((item) => [item.instanceEntryId, item]),
+    const contentItemsFromSnapshot = contentData.contentItems.filter(
+        (item) => !isWorldSaveContentItem(item),
     )
-    const preserveUpdateState = (item: ContentItem) => {
-        const previous = item.instanceEntryId ? previousItems.get(item.instanceEntryId) : undefined
-        if (
-            !previous ||
-            previous.file_path !== item.file_path ||
-            previous.version?.id !== item.version?.id
-        )
-            return item
-        return hasContentOperation(previous) ? item : preserveContentUpdateState(previous, item)
+    const linkedItemsFromSnapshot = contentData.linkedContentItems.filter(
+        (item) => !isWorldSaveContentItem(item),
+    )
+    const reconcile = (previous: ContentItem[], incoming: ContentItem[]) => {
+        const locale = i18n.global.locale.value
+        let changed = false
+        const byId = new Map(incoming.map((item) => [getContentItemId(item), item]))
+        const next: ContentItem[] = []
+        for (const old of previous) {
+            const item = byId.get(getContentItemId(old))
+            if (!item) continue
+            byId.delete(getContentItemId(old))
+            if (hasContentOperation(old)) {
+                next.push(old)
+                continue
+            }
+            const applied = appliedContentSources.get(toRaw(old))
+            if (applied?.source !== item || applied.locale !== locale) {
+                Object.assign(old, contentTitleEnrichment.cached([item], locale)[0])
+                appliedContentSources.set(toRaw(old), { source: item, locale })
+                changed = true
+            }
+            next.push(old)
+        }
+        for (const source of byId.values()) {
+            const item = { ...contentTitleEnrichment.cached([source], locale)[0] }
+            appliedContentSources.set(item, { source, locale })
+            next.push(item)
+        }
+        return !changed &&
+            next.length === previous.length &&
+            next.every((item, index) => item === previous[index])
+            ? previous
+            : next
     }
-    let contentItems = contentData.contentItems
-        .filter((item) => !isWorldSaveContentItem(item))
-        .map(preserveUpdateState)
-    let linkedContentItems = contentData.linkedContentItems
-        .filter((item) => !isWorldSaveContentItem(item))
-        .map(preserveUpdateState)
+    let contentItems = reconcile(projects.value, contentItemsFromSnapshot)
+    let linkedContentItems = reconcile(linkedModpackContentItems.value, linkedItemsFromSnapshot)
     if (!contentData.modpack && !isPackLocked.value && linkedContentItems.length > 0) {
         contentItems = [...contentItems, ...linkedContentItems]
         linkedContentItems = []
     }
     projects.value = contentItems
     linkedModpackContentItems.value = linkedContentItems
-    recordOriginalContentTitles([...contentItems, ...linkedContentItems])
     if (updatingProject.value) {
         const entryId = updatingProject.value.instanceEntryId
         const refreshed = [...contentItems, ...linkedContentItems].find((item) =>
@@ -2863,34 +2752,6 @@ function applyContentData(contentData: InstanceContentData) {
         linkedModpackCategories.value = []
         linkedModpackHasUpdate.value = false
         linkedModpackUpdateVersionId.value = null
-    }
-
-    const scanData = {
-        ...contentData,
-        contentItems: projects.value,
-        linkedContentItems: linkedModpackContentItems.value,
-    }
-    const scanTotal = updateCheckEntryIds(scanData).length
-    updateCheckProgress.value = scanTotal ? { checked: 0, total: scanTotal } : null
-    void contentUpdateScanner.scan(scanData).catch(handleError)
-    loading.value = false
-
-    const hasContent = contentItems.length > 0 || linkedContentItems.length > 0
-    if (hasContent) {
-        writeInstanceCache(props.instance.id, {
-            contentItems,
-            linkedContentItems,
-            modpack: contentData.modpack
-                ? {
-                      project: contentData.modpack.project,
-                      version: contentData.modpack.version,
-                      owner: contentData.modpack.owner,
-                      categories: [],
-                      hasUpdate: contentData.modpack.hasUpdate,
-                      updateVersionId: contentData.modpack.updateVersionId,
-                  }
-                : null,
-        })
     }
 
     return true
@@ -2933,6 +2794,7 @@ provideContentManager({
     filterOptionsReady: computed(
         () =>
             !loading.value &&
+            !contentRefreshTask.value?.running &&
             mergedProjects.value.length + displayedLinkedModpackContentItems.value.length > 0,
     ),
     modpackItems: displayedLinkedModpackContentItems,
@@ -3035,13 +2897,20 @@ provideContentManager({
     },
     getDeleteDependencyWarning,
     refresh: () => refreshContentState('bypass'),
+    refreshStatus: computed(() =>
+        contentRefreshTask.value?.running
+            ? formatMessage(messages.checkingContent, {
+                  current: contentRefreshTask.value.checked,
+                  total: contentRefreshTask.value.scanned,
+              })
+            : null,
+    ),
     browse: handleBrowseContent,
     uploadFiles: handleUploadFiles,
     hasUpdateSupport: true,
     updateItem: handleUpdate,
     rollbackItem: handleRollbackContent,
     bulkUpdateAll: bulkUpdateAllProjects,
-    updateCheckProgress,
     bulkUpdateAllLabel: formatMessage(messages.updateAddedContent),
     bulkUpdateAllDescription: formatMessage(messages.updateAddedContentDescription),
     bulkUpdateIncludesModpack: false,
@@ -3218,58 +3087,8 @@ async function loadInitialContent(): Promise<void> {
         invalidateContentRequests(true)
         return
     }
-    const installRevision = getInstallRevision()
-    const cached = readInstanceCache(props.instance.id)
-
-    // 优先使用缓存快速渲染，后台再刷新
-    const hasCachedContent =
-        (cached?.contentItems?.length ?? 0) > 0 || (cached?.linkedContentItems?.length ?? 0) > 0
-    if (hasCachedContent) {
-        debugState('loadInitialContent: restoring from localStorage cache', {
-            instanceId: props.instance.id,
-            contentItems: cached.contentItems.length,
-            linkedItems: cached.linkedContentItems.length,
-        })
-        let cachedContentItems = cached.contentItems.filter((item) => !isWorldSaveContentItem(item))
-        let cachedLinkedItems = cached.linkedContentItems.filter(
-            (item) => !isWorldSaveContentItem(item),
-        )
-        if (!cached.modpack && !isPackLocked.value && cachedLinkedItems.length > 0) {
-            cachedContentItems = [...cachedContentItems, ...cachedLinkedItems]
-            cachedLinkedItems = []
-        }
-        projects.value = cachedContentItems
-        linkedModpackContentItems.value = cachedLinkedItems
-        if (cached.modpack) {
-            linkedModpackProject.value = cached.modpack.project
-            linkedModpackVersion.value = cached.modpack.version
-            linkedModpackOwner.value = cached.modpack.owner
-            linkedModpackCategories.value = cached.modpack.categories
-            linkedModpackHasUpdate.value = cached.modpack.hasUpdate
-            linkedModpackUpdateVersionId.value = cached.modpack.updateVersionId
-        }
-        loading.value = false
-    }
-
-    if (installRevision > handledInstallRevision.value) {
-        handledInstallRevision.value = installRevision
-        await initProjects()
-        return
-    }
-
-    if (props.preloadedContent && applyContentData(props.preloadedContent)) {
-        enrichContentData(props.preloadedContent, ++contentRequestGeneration)
-        if (beginLegacyCurseForgeReconciliation(props.preloadedContent)) {
-            await initProjects('bypass')
-        }
-        return
-    }
-
-    if (hasCachedContent) {
-        initProjects().catch(handleError)
-        return
-    }
-
+    handledInstallRevision.value = getInstallRevision()
+    if (props.preloadedContent) applyContentData(props.preloadedContent)
     await initProjects()
 }
 
@@ -3307,34 +3126,10 @@ onMounted(() => {
 })
 
 watch(
-    () => i18n.global.locale.value,
-    async (locale) => {
-        if (isUnmounted || props.instance.install_stage !== 'installed') return
-        const instanceId = props.instance.id
-        const generation = contentRequestGeneration
-
-        // Leaving Chinese drops the bilingual prefix; the dictionary only ever
-        // produces `中文名 (English)` and the helper is a no-op elsewhere.
-        if (locale !== 'zh-CN') restoreOriginalContentTitles()
-
-        const originals = new Map(
-            allContentItems()
-                .filter((item) => item.file_path)
-                .map((item) => [item.file_path!, item]),
-        )
-        const translated = await translateContentItemTitles(allContentItems(), locale).catch(
-            () => null,
-        )
-        if (!translated || !isCurrentContentRequest(instanceId, generation)) return
-        mergeRefreshedMetadataItems(translated, originals)
-    },
-)
-
-watch(
     () => props.instance?.install_stage,
     async (newStage, oldStage) => {
         if (oldStage !== 'installed' && newStage === 'installed') {
-            await refreshContentState('bypass')
+            await refreshContentState()
         } else if (newStage !== 'installed') {
             invalidateContentRequests(true)
         }
@@ -3347,7 +3142,7 @@ watch(
         if (newId === oldId) return
         invalidateContentRequests(true)
         if (props.instance.install_stage === 'installed') {
-            await refreshContentState('bypass')
+            await refreshContentState()
         }
     },
 )
@@ -3356,23 +3151,27 @@ watch(
     () => props.instance?.link,
     async (newInstanceLink, oldInstanceLink) => {
         if (oldInstanceLink && !newInstanceLink) {
-            await initProjects('bypass')
+            await initProjects()
         }
     },
 )
 
 watch(
-    () => props.instance?.update_channel,
+    () => [
+        props.instance?.update_channel,
+        props.instance?.game_version,
+        props.instance?.loader,
+        props.instance?.game_dir_override,
+    ],
     async (newValue, oldValue) => {
-        if (newValue !== oldValue) {
-            await initProjects('bypass')
+        if (newValue.some((value, index) => value !== oldValue[index])) {
+            await initProjects()
         }
     },
 )
 
 onUnmounted(() => {
     isUnmounted = true
-    bulkUpdateCheck?.abort()
     contentVersions.reset()
     contentEventRefresh.clear()
     invalidateContentRequests()

@@ -20,10 +20,6 @@ import type { ContentSortMode } from '../composables'
 const { formatMessage } = useVIntl()
 const messages = defineMessages({
     updateAll: { id: 'content.actions.update-all', defaultMessage: 'Update all' },
-    checkingUpdates: {
-        id: 'content.actions.checking-updates',
-        defaultMessage: 'Checking for updates {checked}/{total}',
-    },
 })
 
 export interface ContentSortOption {
@@ -44,14 +40,12 @@ const props = withDefaults(
         hasOutdatedProjects?: boolean
         bulkUpdateTooltip?: string
         isBulkOperating?: boolean
-        updateCheckProgress?: { checked: number; total: number } | null
     }>(),
     {
         hasBulkUpdateSupport: false,
         hasOutdatedProjects: false,
         bulkUpdateTooltip: undefined,
         isBulkOperating: false,
-        updateCheckProgress: null,
     },
 )
 
@@ -65,12 +59,6 @@ const emit = defineEmits<{
 
 <template>
     <div class="flex items-center justify-end gap-2">
-        <span
-            v-if="props.updateCheckProgress"
-            class="text-sm tabular-nums text-[var(--color-text-tertiary)]"
-            role="status"
-            >{{ formatMessage(messages.checkingUpdates, props.updateCheckProgress) }}</span
-        >
         <PopoutMenu :tooltip="props.sortLabel" placement="bottom-end">
             <Button type="quiet" circular icon-only :aria-label="props.sortLabel"
                 ><ArrowUpZAIcon

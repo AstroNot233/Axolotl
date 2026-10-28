@@ -1,7 +1,4 @@
 {
-  "content.actions.checking-updates": {
-    "message": "正在检查更新 {checked}/{total}"
-  },
   "drop.instance-import.title": {
     "defaultMessage": "导入实例"
   },

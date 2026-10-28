@@ -760,6 +760,7 @@ pub(crate) async fn execute(
     canceled(&cancel)?;
     sqlx::query("INSERT INTO resource_execution_journals(plan_id, payload) VALUES (?, ?) ON CONFLICT(plan_id) DO UPDATE SET payload = excluded.payload").bind(plan.id.as_str()).bind(serde_json::to_string(&journal)?).execute(&state.pool).await?;
     let _critical = crate::install::critical_section::enter();
+    let mut installed_fingerprints = Vec::new();
     let result: crate::Result<()> = async {
         for ((file, (source, _, size, sha1, _)), _) in
             journal.iter().zip(&downloads).zip(&plan.actions)
@@ -775,13 +776,19 @@ pub(crate) async fn execute(
                 )
                 .await?;
             }
-            materialize_verified_project_download_copy(
+            let (_, modified) = materialize_verified_project_download_copy(
                 source,
                 &destination,
                 *size,
                 sha1,
             )
             .await?;
+            installed_fingerprints.push((
+                file.path.clone(),
+                *size,
+                sha1.clone(),
+                modified,
+            ));
         }
         persist_plan(
             &state.pool,
@@ -811,6 +818,28 @@ pub(crate) async fn execute(
             }
         }
         return Err(error);
+    }
+    for (path, size, sha1, modified) in installed_fingerprints {
+        if let Err(error) = state
+            .file_fingerprints
+            .seed_verified(
+                state,
+                &plan.instance_id,
+                &root,
+                &path,
+                ArtifactIntegrity {
+                    size: Some(size),
+                    hashes: vec![ContentHash {
+                        algorithm: HashAlgorithm::Sha1,
+                        value: sha1,
+                    }],
+                },
+                modified,
+            )
+            .await
+        {
+            tracing::warn!(%error, "Could not save verified installed fingerprint");
+        }
     }
     drop(_critical);
     drop(_lock);
