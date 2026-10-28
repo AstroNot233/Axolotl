@@ -3437,8 +3437,12 @@ async fn initialize_operation(
             )
             .await?;
         } else {
-            super::installed::refresh_snapshot(&state, &instance_id, cancel)
-                .await?;
+            super::installed::refresh_operation_snapshot(
+                &state,
+                &instance_id,
+                cancel,
+            )
+            .await?;
         }
     }
     let revision = instance_revision(&state.pool, &instance_id).await?;
