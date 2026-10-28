@@ -33,7 +33,7 @@ pub(crate) use self::list_content::{
     list_content_sets, list_linked_modpack_content,
 };
 
-mod content_snapshot;
+pub(crate) mod content_snapshot;
 pub(crate) use self::content_snapshot::{
     get_cached_content_snapshot, get_content_snapshot,
     get_local_content_snapshot, reconcile_curseforge_members,

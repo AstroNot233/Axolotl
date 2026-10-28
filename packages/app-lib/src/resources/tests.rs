@@ -400,6 +400,7 @@ async fn installed_compatibility_uses_cached_exact_bytes_without_network_or_name
             .await
             .unwrap();
         items.push(crate::state::InstanceContentSnapshotItem {
+            resource_update: None,
             artifact_ref: None,
             resource_id: None,
             pack_resource_id: None,

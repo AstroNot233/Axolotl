@@ -16,12 +16,30 @@ pub(crate) struct RefreshCheckKey {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RefreshCheckContext {
+    pub location_key: String,
     pub content_root: String,
     pub sha1: String,
     pub size: u64,
     pub current_release: Option<SourceReleaseRef>,
     pub target: ResourceTarget,
     pub preferred_source: SourceId,
+}
+
+pub(crate) fn location_key(
+    instance: &crate::state::instances::Instance,
+) -> String {
+    serde_json::json!([
+        instance.path,
+        instance.applied_content_set_id,
+        instance.game_dir_override,
+        instance.linked_launcher,
+        instance.linked_launcher_root,
+        instance.linked_dot_minecraft,
+        instance.linked_version_id,
+        instance.linked_version_json_path,
+        instance.linked_game_dir_mode,
+    ])
+    .to_string()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +110,7 @@ impl RefreshCheckRecord {
 
     fn valid(&self) -> bool {
         !self.file_id.is_empty()
+            && !self.context.location_key.is_empty()
             && !self.context.content_root.is_empty()
             && self.context.sha1.len() == 40
             && self

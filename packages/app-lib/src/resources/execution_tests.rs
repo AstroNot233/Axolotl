@@ -1893,6 +1893,7 @@ async fn exact_cross_source_replace_and_rollback_preserve_entry_disabled_path_an
     assert!(!changed.enabled);
     assert_eq!(changed.artifact, Some(target.reference));
     let mut snapshot = vec![crate::state::InstanceContentSnapshotItem {
+        resource_update: None,
         artifact_ref: None,
         compatibility: None,
         resource_id: None,

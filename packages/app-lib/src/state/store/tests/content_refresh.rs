@@ -15,11 +15,11 @@ async fn seed(pool: &sqlx::SqlitePool) {
     support::add_instance(pool, "other").await;
     sqlx::raw_sql(
         "INSERT INTO instance_content_sets (id, instance_id, name, source_kind, status, game_version, loader, created, modified)
-         VALUES ('set', 'instance', 'Main', 'user', 'applied', '1.21', 'fabric', 1, 1);
+         VALUES ('set', 'instance', 'Main', 'local', 'available', '1.21', 'fabric', 1, 1);
          INSERT INTO instance_files (id, instance_id, relative_path, file_name, enabled, sha1, size, added_at, modified_at)
          VALUES ('file', 'instance', 'mods/a.jar', 'a.jar', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 3, 1, 1);
          INSERT INTO instance_content_entries (id, instance_id, content_set_id, file_id, project_type, source_kind, server_requirement, client_requirement, added_at, modified_at)
-         VALUES ('entry', 'instance', 'set', 'file', 'mod', 'user', 'optional', 'optional', 1, 1);"
+         VALUES ('entry', 'instance', 'set', 'file', 'mod', 'local', 'optional', 'optional', 1, 1);"
     ).execute(pool).await.unwrap();
 }
 
@@ -64,6 +64,7 @@ fn check() -> RefreshCheckRecord {
     RefreshCheckRecord {
         file_id: "file".into(),
         context: RefreshCheckContext {
+            location_key: "location".into(),
             content_root: "E:/instances/main".into(),
             sha1: "a".repeat(40),
             size: 3,

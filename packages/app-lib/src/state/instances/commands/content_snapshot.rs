@@ -1,4 +1,5 @@
 mod dependencies;
+pub(crate) mod local;
 
 use dependencies::backfill_dependency_edges_from_metadata;
 
@@ -32,6 +33,9 @@ pub(crate) async fn get_content_snapshot(
     refresh_remote: bool,
     state: &State,
 ) -> crate::Result<InstanceContentSnapshot> {
+    if !refresh_remote {
+        return local::get(instance_id, state).await;
+    }
     get_content_snapshot_inner(instance_id, refresh_remote, true, true, state)
         .await
 }
@@ -40,14 +44,14 @@ pub(crate) async fn get_cached_content_snapshot(
     instance_id: &str,
     state: &State,
 ) -> crate::Result<InstanceContentSnapshot> {
-    get_content_snapshot_inner(instance_id, false, false, true, state).await
+    local::get(instance_id, state).await
 }
 
 pub(crate) async fn get_local_content_snapshot(
     instance_id: &str,
     state: &State,
 ) -> crate::Result<InstanceContentSnapshot> {
-    get_content_snapshot_inner(instance_id, false, true, false, state).await
+    local::get(instance_id, state).await
 }
 
 async fn get_content_snapshot_inner(
@@ -664,12 +668,7 @@ async fn get_content_snapshot_inner(
 
     Ok(InstanceContentSnapshot {
         instance_id: instance_id.to_string(),
-        revision: content_rows::get_applied_content_set(
-            instance_id,
-            &state.pool,
-        )
-        .await?
-        .map_or(content_set.revision, |set| set.revision),
+        revision: content_set.revision,
         pack,
         items,
         pending_manual_downloads,
@@ -1300,6 +1299,7 @@ fn snapshot_item(
         .is_some_and(|content| !content.provider_refs.is_empty());
 
     InstanceContentSnapshotItem {
+        resource_update: None,
         artifact_ref: None,
         compatibility: None,
         resource_id: None,
