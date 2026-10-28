@@ -110,6 +110,11 @@ export default defineConfig({
                     // bundled structure asset (the ancient city catalogue alone takes
                     // ~40s). The ceiling keeps those cases passing; no assertion changes.
                     testTimeout: 120_000,
+                    // `testTimeout` does not cover hooks, and one suite starts a Vite dev
+                    // server in `beforeAll`. Its 10s default is enough when that file runs
+                    // alone and not under a full parallel run, which is what made the
+                    // failure look intermittent.
+                    hookTimeout: 120_000,
                 },
             },
             {
