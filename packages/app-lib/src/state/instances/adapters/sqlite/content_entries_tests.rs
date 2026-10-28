@@ -1,27 +1,9 @@
 use super::*;
+use crate::state::instances::adapters::sqlite::test_support::test_pool;
 use crate::state::{
     ContentProvider, ContentProviderRef, ModrinthProjectId, ModrinthVersionId,
     ReleaseChannel,
 };
-use sqlx::SqlitePool;
-use sqlx::sqlite::SqlitePoolOptions;
-
-async fn test_pool() -> SqlitePool {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("in-memory SQLite pool");
-    sqlx::query("CREATE TABLE instances (id TEXT PRIMARY KEY)")
-        .execute(&pool)
-        .await
-        .expect("instances table");
-    sqlx::query("CREATE TABLE instance_content_sets (id TEXT PRIMARY KEY)")
-        .execute(&pool)
-        .await
-        .expect("instance_content_sets table");
-    pool
-}
 
 #[tokio::test]
 async fn in_place_upgrade_lists_new_origin_release_before_old_ref() {
