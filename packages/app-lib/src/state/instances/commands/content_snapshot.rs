@@ -717,33 +717,17 @@ pub(crate) async fn reconcile_curseforge_members(
             ))
         })
         .collect::<crate::Result<HashMap<_, _>>>()?;
-    let pending_rows = sqlx::query(
-        "SELECT provider_project_id, provider_release_id
-         FROM instance_pending_manual_downloads
-         WHERE instance_id = ? AND provider = 'curseforge'
-            AND state IN ('waiting', 'matched', 'error')",
-    )
-    .bind(instance_id)
-    .fetch_all(&mut *tx)
-    .await?;
-    let pending = pending_rows
-        .into_iter()
-        .map(|row| {
-            Ok((
-                row.try_get::<String, _>("provider_project_id")?,
-                row.try_get::<String, _>("provider_release_id")?,
-            ))
-        })
-        .collect::<crate::Result<HashSet<_>>>()?;
+    let pending: HashSet<(String, String)> =
+        pack_members::get_curseforge_pending_downloads(instance_id, &mut *tx)
+            .await?
+            .into_iter()
+            .collect();
 
-    sqlx::query(
-        "UPDATE instance_content_entries
-         SET ownership_kind = 'user_added', modified_at = ?
-         WHERE content_set_id = ? AND ownership_kind = 'pack_managed'",
+    content_entries::release_pack_managed_entries_in_transaction(
+        content_set_id,
+        Utc::now().timestamp(),
+        &mut tx,
     )
-    .bind(Utc::now().timestamp())
-    .bind(content_set_id)
-    .execute(&mut *tx)
     .await?;
 
     let mut claimed_entries = HashSet::new();
@@ -777,14 +761,11 @@ pub(crate) async fn reconcile_curseforge_members(
             });
         if let Some(candidate) = candidate {
             claimed_entries.insert(candidate.entry_id.clone());
-            sqlx::query(
-                "UPDATE instance_content_entries
-                 SET ownership_kind = 'pack_managed', modified_at = ?
-                 WHERE id = ?",
+            content_entries::claim_entry_for_pack_in_transaction(
+                &candidate.entry_id,
+                Utc::now().timestamp(),
+                &mut tx,
             )
-            .bind(Utc::now().timestamp())
-            .bind(&candidate.entry_id)
-            .execute(&mut *tx)
             .await?;
         }
 
@@ -855,13 +836,11 @@ pub(crate) async fn reconcile_curseforge_members(
             &mut tx,
         )
         .await?;
-        sqlx::query(
-            "UPDATE instance_pack_members
-             SET required = ?, reconciled = 1 WHERE id = ?",
+        pack_members::set_pack_member_required_in_transaction(
+            &member_id,
+            expected_member.required,
+            &mut tx,
         )
-        .bind(i64::from(expected_member.required))
-        .bind(member_id)
-        .execute(&mut *tx)
         .await?;
     }
 
@@ -875,9 +854,7 @@ pub(crate) async fn reconcile_curseforge_members(
         });
     }
     for (_, (member_id, _, _, _)) in existing_members {
-        sqlx::query("DELETE FROM instance_pack_members WHERE id = ?")
-            .bind(member_id)
-            .execute(&mut *tx)
+        pack_members::delete_pack_member_in_transaction(&member_id, &mut tx)
             .await?;
     }
     reconcile_curseforge_override_entries_in_transaction(
@@ -894,20 +871,14 @@ pub(crate) async fn reconcile_curseforge_members(
         .iter()
         .map(|item| normalized_content_path(&item.expected_relative_path))
         .collect();
-    let unreconciled: Vec<(String, String)> = sqlx::query_as(
-        "SELECT id, expected_relative_path FROM instance_pack_members
-         WHERE content_set_id = ? AND provider IS NULL AND reconciled = 0",
-    )
-    .bind(content_set_id)
-    .fetch_all(&mut *tx)
-    .await?;
+    let unreconciled =
+        pack_members::get_unreconciled_local_members(content_set_id, &mut *tx)
+            .await?;
     for (member_id, path) in unreconciled {
         if override_paths.contains(&normalized_content_path(&path)) {
-            sqlx::query(
-                "UPDATE instance_pack_members SET reconciled = 1 WHERE id = ?",
+            pack_members::mark_pack_member_reconciled_in_transaction(
+                &member_id, &mut tx,
             )
-            .bind(member_id)
-            .execute(&mut *tx)
             .await?;
         }
     }
@@ -1050,24 +1021,11 @@ async fn reconcile_curseforge_manual_downloads(
             ))
         })
         .collect::<crate::Result<HashMap<_, _>>>()?;
-    let pending_rows = sqlx::query(
-        "SELECT provider_project_id, provider_release_id
-         FROM instance_pending_manual_downloads
-         WHERE instance_id = ? AND provider = 'curseforge'
-            AND state IN ('waiting', 'matched', 'error')",
-    )
-    .bind(instance_id)
-    .fetch_all(&mut *tx)
-    .await?;
-    let mut pending = pending_rows
-        .into_iter()
-        .map(|row| {
-            Ok((
-                row.try_get::<String, _>("provider_project_id")?,
-                row.try_get::<String, _>("provider_release_id")?,
-            ))
-        })
-        .collect::<crate::Result<HashSet<_>>>()?;
+    let mut pending: HashSet<(String, String)> =
+        pack_members::get_curseforge_pending_downloads(instance_id, &mut *tx)
+            .await?
+            .into_iter()
+            .collect();
     let mut changed = false;
 
     for expected_member in restricted {

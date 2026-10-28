@@ -685,3 +685,95 @@ pub(crate) async fn has_missing_required_curseforge_member(
 
     Ok(missing != 0)
 }
+
+/// Reads the CurseForge downloads the instance is still waiting on.
+pub(crate) async fn get_curseforge_pending_downloads<'e, E>(
+    instance_id: &str,
+    exec: E,
+) -> crate::Result<Vec<(String, String)>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let rows = sqlx::query(
+        "SELECT provider_project_id, provider_release_id
+         FROM instance_pending_manual_downloads
+         WHERE instance_id = ? AND provider = 'curseforge'
+            AND state IN ('waiting', 'matched', 'error')",
+    )
+    .bind(instance_id)
+    .fetch_all(exec)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<String, _>("provider_project_id")?,
+                row.try_get::<String, _>("provider_release_id")?,
+            ))
+        })
+        .collect()
+}
+
+/// Records whether the pack requires a member, once reconciliation placed it.
+pub(crate) async fn set_pack_member_required_in_transaction(
+    member_id: &str,
+    required: bool,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "UPDATE instance_pack_members
+         SET required = ?, reconciled = 1 WHERE id = ?",
+    )
+    .bind(i64::from(required))
+    .bind(member_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Drops a member the current pack no longer contains.
+pub(crate) async fn delete_pack_member_in_transaction(
+    member_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query("DELETE FROM instance_pack_members WHERE id = ?")
+        .bind(member_id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+/// Reads the local members the pack snapshot has not reconciled yet, as their
+/// id and expected path.
+pub(crate) async fn get_unreconciled_local_members<'e, E>(
+    content_set_id: &str,
+    exec: E,
+) -> crate::Result<Vec<(String, String)>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let rows = sqlx::query_as(
+        "SELECT id, expected_relative_path FROM instance_pack_members
+         WHERE content_set_id = ? AND provider IS NULL AND reconciled = 0",
+    )
+    .bind(content_set_id)
+    .fetch_all(exec)
+    .await?;
+
+    Ok(rows)
+}
+
+/// Marks one local member as reconciled.
+pub(crate) async fn mark_pack_member_reconciled_in_transaction(
+    member_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query("UPDATE instance_pack_members SET reconciled = 1 WHERE id = ?")
+        .bind(member_id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}

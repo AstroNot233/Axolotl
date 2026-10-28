@@ -1081,3 +1081,41 @@ pub(crate) async fn get_provider_refs_with_origin_for_content_set(
 
     Ok(references)
 }
+
+/// Releases every pack-managed entry of the set as user-added content.
+pub(crate) async fn release_pack_managed_entries_in_transaction(
+    content_set_id: &str,
+    modified_at: i64,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "UPDATE instance_content_entries
+         SET ownership_kind = 'user_added', modified_at = ?
+         WHERE content_set_id = ? AND ownership_kind = 'pack_managed'",
+    )
+    .bind(modified_at)
+    .bind(content_set_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Hands an entry back to the pack that just claimed it.
+pub(crate) async fn claim_entry_for_pack_in_transaction(
+    entry_id: &str,
+    modified_at: i64,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "UPDATE instance_content_entries
+         SET ownership_kind = 'pack_managed', modified_at = ?
+         WHERE id = ?",
+    )
+    .bind(modified_at)
+    .bind(entry_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
