@@ -62,6 +62,10 @@ const messages = defineMessages({
     },
     copy: { id: 'app.lab.banner-designer.export.copy', defaultMessage: 'Copy' },
     copied: { id: 'app.lab.banner-designer.export.copied', defaultMessage: 'Copied' },
+    copyFailed: {
+        id: 'app.lab.banner-designer.export.copy-failed',
+        defaultMessage: 'The text could not be copied. Select it and copy it by hand.',
+    },
     saveFile: { id: 'app.lab.banner-designer.export.save-file', defaultMessage: 'Save to file' },
     saved: { id: 'app.lab.banner-designer.export.saved', defaultMessage: 'Saved' },
     saveFailed: {
@@ -92,6 +96,7 @@ const preference = loadExportPreference()
 const format = ref<BannerExportFormat | null>(preference?.format ?? 'give')
 const version = ref<BannerGameVersion | null>(preference?.version ?? 'modern')
 const copied = ref(false)
+const copyError = ref<string | null>(null)
 const saved = ref(false)
 const saveError = ref<string | null>(null)
 let copyTimer: ReturnType<typeof setTimeout> | undefined
@@ -115,6 +120,7 @@ const missingPatternNames = computed(() =>
 watch([activeFormat, activeVersion], ([nextFormat, nextVersion]) => {
     // A failure belongs to the text that was on screen when it happened.
     saveError.value = null
+    copyError.value = null
     saveExportPreference({ format: nextFormat, version: nextVersion })
 })
 
@@ -157,6 +163,7 @@ function itemName(item: string) {
 async function copy() {
     try {
         await navigator.clipboard.writeText(code.value)
+        copyError.value = null
         copied.value = true
         clearTimeout(copyTimer)
         copyTimer = setTimeout(() => {
@@ -164,6 +171,7 @@ async function copy() {
         }, 1500)
     } catch {
         copied.value = false
+        copyError.value = formatMessage(messages.copyFailed)
     }
 }
 
@@ -191,6 +199,7 @@ async function saveToFile() {
 
 function show() {
     copied.value = false
+    copyError.value = null
     saved.value = false
     saveError.value = null
     modal.value?.show()
@@ -249,6 +258,10 @@ defineExpose({ show })
                         <ClipboardCopyIcon v-else />
                     </Button>
                 </div>
+
+                <p v-if="copyError" class="m-0 text-xs text-brand-red" role="alert">
+                    {{ copyError }}
+                </p>
 
                 <p v-if="showVersion" class="m-0 text-xs text-[var(--color-text-tertiary)]">
                     {{ formatMessage(versionHint) }}

@@ -110,6 +110,9 @@
   "app.lab.banner-designer.export.copy": {
     "message": "复制"
   },
+  "app.lab.banner-designer.export.copy-failed": {
+    "message": "无法复制这段内容，请手动选中后复制。"
+  },
   "app.lab.banner-designer.export.data": {
     "message": "物品数据"
   },

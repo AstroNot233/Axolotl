@@ -4229,6 +4229,9 @@
   "app.lab.banner-designer.export.copy": {
     "message": "Copy"
   },
+  "app.lab.banner-designer.export.copy-failed": {
+    "message": "The text could not be copied. Select it and copy it by hand."
+  },
   "app.lab.banner-designer.export.data": {
     "message": "Item data"
   },
