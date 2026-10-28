@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::state::instances::adapters::sqlite::{content_sets, files, links};
+use crate::state::instances::adapters::sqlite::{content_sets, links};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateDirectLinkInstance {

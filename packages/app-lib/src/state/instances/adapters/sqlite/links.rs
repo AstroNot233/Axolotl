@@ -1,4 +1,4 @@
-use super::instance_rows::{InstanceLinkRow, instance_link_columns};
+use super::instance_rows::InstanceLinkRow;
 use crate::state::InstanceLink;
 use sqlx::{Executor, Sqlite, Transaction};
 
@@ -120,4 +120,150 @@ pub(crate) async fn upsert_instance_link(
     .await?;
 
     Ok(())
+}
+
+struct InstanceLinkColumns {
+    link_kind: &'static str,
+    modrinth_project_id: Option<String>,
+    modrinth_version_id: Option<String>,
+    server_project_id: Option<String>,
+    content_project_id: Option<String>,
+    content_version_id: Option<String>,
+    hosting_server_id: Option<String>,
+    hosting_instance_ids: Option<String>,
+    hosting_active_instance_id: Option<String>,
+    shared_instance_id: Option<String>,
+    imported_name: Option<String>,
+    imported_version_number: Option<String>,
+    imported_filename: Option<String>,
+}
+
+fn instance_link_columns(
+    link: &InstanceLink,
+) -> crate::Result<InstanceLinkColumns> {
+    match link {
+        InstanceLink::Unmanaged => Ok(InstanceLinkColumns {
+            link_kind: "unmanaged",
+            modrinth_project_id: None,
+            modrinth_version_id: None,
+            server_project_id: None,
+            content_project_id: None,
+            content_version_id: None,
+            hosting_server_id: None,
+            hosting_instance_ids: None,
+            hosting_active_instance_id: None,
+            shared_instance_id: None,
+            imported_name: None,
+            imported_version_number: None,
+            imported_filename: None,
+        }),
+        InstanceLink::ModrinthModpack {
+            project_id,
+            version_id,
+        } => Ok(InstanceLinkColumns {
+            link_kind: "modrinth_modpack",
+            modrinth_project_id: Some(project_id.clone()),
+            modrinth_version_id: Some(version_id.clone()),
+            server_project_id: None,
+            content_project_id: None,
+            content_version_id: None,
+            hosting_server_id: None,
+            hosting_instance_ids: None,
+            hosting_active_instance_id: None,
+            shared_instance_id: None,
+            imported_name: None,
+            imported_version_number: None,
+            imported_filename: None,
+        }),
+        InstanceLink::CurseForgeModpack {
+            project_id,
+            version_id,
+        } => Ok(InstanceLinkColumns {
+            link_kind: "curseforge_modpack",
+            modrinth_project_id: Some(project_id.clone()),
+            modrinth_version_id: Some(version_id.clone()),
+            server_project_id: None,
+            content_project_id: None,
+            content_version_id: None,
+            hosting_server_id: None,
+            hosting_instance_ids: None,
+            hosting_active_instance_id: None,
+            shared_instance_id: None,
+            imported_name: None,
+            imported_version_number: None,
+            imported_filename: None,
+        }),
+        InstanceLink::ServerProject { project_id } => Ok(InstanceLinkColumns {
+            link_kind: "server_project",
+            modrinth_project_id: None,
+            modrinth_version_id: None,
+            server_project_id: Some(project_id.clone()),
+            content_project_id: None,
+            content_version_id: None,
+            hosting_server_id: None,
+            hosting_instance_ids: None,
+            hosting_active_instance_id: None,
+            shared_instance_id: None,
+            imported_name: None,
+            imported_version_number: None,
+            imported_filename: None,
+        }),
+        InstanceLink::ServerProjectModpack {
+            server_project_id,
+            content_project_id,
+            content_version_id,
+        } => Ok(InstanceLinkColumns {
+            link_kind: "server_project_modpack",
+            modrinth_project_id: None,
+            modrinth_version_id: None,
+            server_project_id: Some(server_project_id.clone()),
+            content_project_id: Some(content_project_id.clone()),
+            content_version_id: Some(content_version_id.clone()),
+            hosting_server_id: None,
+            hosting_instance_ids: None,
+            hosting_active_instance_id: None,
+            shared_instance_id: None,
+            imported_name: None,
+            imported_version_number: None,
+            imported_filename: None,
+        }),
+        InstanceLink::ImportedModpack {
+            project_id,
+            version_id,
+            name,
+            version_number,
+            filename,
+        } => Ok(InstanceLinkColumns {
+            link_kind: "imported_modpack",
+            modrinth_project_id: project_id.clone(),
+            modrinth_version_id: version_id.clone(),
+            server_project_id: None,
+            content_project_id: None,
+            content_version_id: None,
+            hosting_server_id: None,
+            hosting_instance_ids: None,
+            hosting_active_instance_id: None,
+            shared_instance_id: None,
+            imported_name: name.clone(),
+            imported_version_number: version_number.clone(),
+            imported_filename: filename.clone(),
+        }),
+        InstanceLink::SharedInstance { shared_instance_id } => {
+            Ok(InstanceLinkColumns {
+                link_kind: "shared_instance",
+                modrinth_project_id: None,
+                modrinth_version_id: None,
+                server_project_id: None,
+                content_project_id: None,
+                content_version_id: None,
+                hosting_server_id: None,
+                hosting_instance_ids: None,
+                hosting_active_instance_id: None,
+                shared_instance_id: Some(shared_instance_id.to_string()),
+                imported_name: None,
+                imported_version_number: None,
+                imported_filename: None,
+            })
+        }
+    }
 }

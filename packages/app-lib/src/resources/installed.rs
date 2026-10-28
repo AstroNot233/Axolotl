@@ -1,8 +1,6 @@
 use super::{identity::LocalArtifactIdentity, *};
 use tokio_util::sync::CancellationToken;
 
-use crate::state::instances::adapters::sqlite::files;
-
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InstalledArtifactRecord {
@@ -497,7 +495,6 @@ pub(super) async fn installed_file_identity(
 ) -> ResourceResult<LocalArtifactIdentity> {
     use crate::state::store::content_file_fingerprints::ContentFileFingerprints;
 
-    use crate::state::instances::adapters::sqlite::files;
     let previous = ContentFileFingerprints::get_current(
         &state.data,
         instance_id,
