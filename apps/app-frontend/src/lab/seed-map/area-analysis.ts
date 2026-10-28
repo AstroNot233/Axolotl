@@ -172,7 +172,10 @@ export async function analyzeAreaOres(
             for (let offset = 0; offset < chunks.length; offset += 4) {
                 checkCanceled(signal)
                 const batch = chunks.slice(offset, offset + 4)
-                const results = await scan({ ...context, ores: [ore], chunks: batch.flat() })
+                const results = await scan(
+                    { ...context, ores: [ore], chunks: batch.flat() },
+                    signal,
+                )
                 checkCanceled(signal)
                 for (const result of results) {
                     truncated ||= result.truncated

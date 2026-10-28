@@ -220,6 +220,18 @@ fn curseforge_runtime_handlers_match_the_build_manifest() {
 }
 
 #[test]
+fn seed_map_runtime_handlers_match_the_build_manifest() {
+    let runtime = runtime_commands(include_str!("../src/api/seed_map.rs"));
+    let manifest = manifest_commands(include_str!("../build.rs"), "seed-map");
+    assert_eq!(
+        runtime, manifest,
+        "seed map commands must be identical in the runtime handler and the \
+         build-time manifest"
+    );
+    assert!(runtime.contains("seed_map_cancel_ore_scan"));
+}
+
+#[test]
 fn mod_translation_runtime_handlers_match_the_build_manifest() {
     let runtime =
         runtime_commands(include_str!("../src/api/mod_translation.rs"));

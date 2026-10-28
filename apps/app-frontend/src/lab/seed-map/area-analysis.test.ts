@@ -371,6 +371,7 @@ it('loot discovery resets progress before details and advances while reading che
 it('mineral counts are published after each batch and the last ones survive a cancel', async () => {
     const controller = new AbortController()
     const partials: number[] = []
+    const signals: (AbortSignal | undefined)[] = []
     let calls = 0
     await expect(
         analyzeAreaOres(
@@ -381,7 +382,8 @@ it('mineral counts are published after each batch and the last ones survive a ca
             320,
             controller.signal,
             progress,
-            async (request) => {
+            async (request, signal) => {
+                signals.push(signal)
                 calls++
                 if (calls === 2) controller.abort()
                 return [
@@ -407,6 +409,8 @@ it('mineral counts are published after each batch and the last ones survive a ca
         ),
     ).rejects.toMatchObject({ name: 'AbortError' })
     expect(partials).toEqual([1])
+    // Each native scan gets the signal, so a cancel stops the batch in flight.
+    expect(signals).toEqual([controller.signal, controller.signal])
 })
 
 it('loot matches are published after each searched structure', async () => {

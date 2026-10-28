@@ -865,6 +865,7 @@ fn main() {
                         "seed_map_spawn",
                         "seed_map_biome_at",
                         "seed_map_scan_ores",
+                        "seed_map_cancel_ore_scan",
                         "seed_map_read_level_dat",
                         "seed_map_structure_details",
                         "seed_map_container_loot",
