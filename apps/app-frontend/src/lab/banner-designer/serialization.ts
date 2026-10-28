@@ -352,6 +352,26 @@ function readBalanced(text: string, open: string, close: string): string {
     throw new BannerParseError('invalid-data', 'unbalanced brackets')
 }
 
+/**
+ * Reads the dye a give command's item stands for. 1.13 split the banner into one
+ * item per dye; before that the single `minecraft:banner` carried its color in
+ * the damage value instead. Anything that is not a banner is rejected here, so a
+ * command for a diamond is not silently imported as a plain white banner.
+ */
+function itemColorFromId(itemId: string, damage: number): DyeColor {
+    const normalized = itemId.replace(/^minecraft:/i, '').toLowerCase()
+    if (normalized === 'banner') {
+        const color = dyeColorFromLegacyIndex(damage)
+        if (!color) throw new BannerParseError('invalid-color', String(damage))
+        return color
+    }
+    const color = normalized.endsWith('_banner')
+        ? normalizeDyeColor(normalized.slice(0, -'_banner'.length))
+        : null
+    if (!color) throw new BannerParseError('unsupported', itemId)
+    return color
+}
+
 function parseGiveCommand(command: string): BannerDesign {
     let rest = command.replace(/^\/\s*/, '').replace(/^give\s+/i, '')
     const target = /^\S+\s+/.exec(rest)
@@ -364,11 +384,14 @@ function parseGiveCommand(command: string): BannerDesign {
     rest = rest.slice(itemId.length)
 
     let data: string | null = null
+    let damage = 0
     if (rest.startsWith('[') || rest.startsWith('{')) {
         data = rest.startsWith('[') ? readBalanced(rest, '[', ']') : readBalanced(rest, '{', '}')
     } else {
         // 1.12 and older order the arguments as count, damage value, then data.
         const start = rest.search(/[[{]/)
+        const numbers = (start >= 0 ? rest.slice(0, start) : rest).match(/\d+/g) ?? []
+        if (numbers.length > 1) damage = Number.parseInt(numbers[1], 10)
         if (start >= 0) {
             const tail = rest.slice(start)
             data = tail.startsWith('[')
@@ -377,8 +400,7 @@ function parseGiveCommand(command: string): BannerDesign {
         }
     }
 
-    const itemColor =
-        normalizeDyeColor(itemId.replace(/^minecraft:/i, '').replace(/_banner$/i, '')) ?? 'white'
+    const itemColor = itemColorFromId(itemId, damage)
 
     if (!data) return { baseColor: itemColor, layers: [] }
     if (data.startsWith('[')) return fromComponentData(data, itemColor)

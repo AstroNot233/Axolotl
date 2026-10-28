@@ -179,6 +179,17 @@ describe('banner import', () => {
         assert.equal(parsed.layers[0].color, 'red')
     })
 
+    it('rejects give commands for items that are not banners', () => {
+        assert.equal(
+            codes(() => parseBannerText('/give @p minecraft:diamond')),
+            'unsupported',
+        )
+        assert.equal(
+            codes(() => parseBannerText('/give @p minecraft:red_dye 1')),
+            'unsupported',
+        )
+    })
+
     it('rejects unknown patterns and colors', () => {
         assert.equal(
             codes(() => parseBannerText('')),
