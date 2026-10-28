@@ -514,9 +514,14 @@ pub(crate) async fn execute(
         )
         .await?;
     }
-    let service = state.resources().await?;
     let mut retained_parents = HashMap::new();
-    for (action, (path, kind, _, _, _)) in plan.actions.iter().zip(&downloads) {
+    for (action, (path, kind, _, _, _)) in plan
+        .actions
+        .iter()
+        .zip(&downloads)
+        .filter(|_| draft.resolve_dependencies)
+    {
+        let service = state.resources().await?;
         let node = plan
             .nodes
             .iter()

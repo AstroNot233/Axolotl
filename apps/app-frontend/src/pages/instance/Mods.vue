@@ -422,6 +422,7 @@ import { postUpgradeWarningForContent } from '@/helpers/post-upgrade-notice'
 import {
     confirmedContentGroupKey,
     duplicateGroupUpdateEntries,
+    queueResourceEntryUpdates,
     reviewResourceEntryChanges,
 } from '@/helpers/resource-update-selection'
 import { resourceListHistory, type SourceReleaseRef } from '@/helpers/resources'
@@ -2101,6 +2102,13 @@ async function getDeleteDependencyWarning(items: ContentItem[]) {
 }
 
 async function reviewResourceChanges(entryIds: string[], release: SourceReleaseRef | null = null) {
+    if (!release)
+        return queueResourceEntryUpdates(
+            props.instance.id,
+            entryIds,
+            (job) => downloadManager.trackJob(job),
+            formatMessage,
+        )
     const preview = resourceOperationPreview.value
     if (!preview) return false
     return reviewResourceEntryChanges(

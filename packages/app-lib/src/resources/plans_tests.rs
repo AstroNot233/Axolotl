@@ -620,6 +620,124 @@ async fn entry_changes_can_skip_dependency_resolution_without_skipping_artifact_
 }
 
 #[tokio::test]
+async fn direct_update_ignores_dependencies_declared_by_both_updated_and_retained_mods()
+ {
+    let old = release("root0000", "1", 'a');
+    let mut new = release("root0000", "2", 'b');
+    let absent = release("missing0", "1", 'c');
+    let mut parent = release("parent00", "1", 'd');
+    requires(&mut parent, &old, ResourceDependencyKind::Required);
+    requires(&mut new, &absent, ResourceDependencyKind::Required);
+    let (_temp, service) = service(vec![old.clone(), new.clone()]).await;
+    let mut request = draft(
+        vec![selection("root", &new, Some("entry"))],
+        ResourceOperationIntent::Update,
+    );
+    request.resolve_dependencies = false;
+    let built = service
+        .build_operation(
+            request,
+            &target(),
+            &[
+                installed(&old, "entry", "mods/custom.jar.disabled"),
+                installed(&parent, "parent", "mods/parent.jar"),
+            ],
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(built.plan.issues.is_empty(), "{:?}", built.plan.issues);
+    assert!(built.retained_requirements.is_empty());
+    assert!(built.plan.edges.is_empty());
+    assert_eq!(built.plan.nodes.len(), 1);
+    assert_eq!(built.plan.actions.len(), 1);
+    assert_eq!(built.plan.actions[0].kind, ResourceActionKind::Replace);
+    assert_eq!(
+        built.plan.actions[0].target_relative_path,
+        "mods/custom.jar.disabled"
+    );
+    service.cache().close().await;
+}
+
+#[tokio::test]
+async fn switching_an_explicit_entry_replaces_its_own_path_but_cannot_overwrite_other_files()
+ {
+    let old = release("root0000", "1", 'a');
+    let mut new = release("root0000", "2", 'b');
+    new.artifacts[0].file_name = Some("custom.jar".into());
+    let foreign = release("foreign0", "1", 'c');
+    let (_temp, service) =
+        service(vec![old.clone(), new.clone(), foreign.clone()]).await;
+    for disabled in [false, true] {
+        let path = if disabled {
+            "mods/custom.jar.disabled"
+        } else {
+            "mods/custom.jar"
+        };
+        let current = installed(&old, "entry", path);
+        let mut request = draft(
+            vec![selection("root", &new, Some("entry"))],
+            ResourceOperationIntent::SwitchVersion,
+        );
+        request.resolve_dependencies = false;
+        let mut built = service
+            .build_operation(
+                request.clone(),
+                &target(),
+                &[current.clone()],
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(built.plan.issues.is_empty(), "{:?}", built.plan.issues);
+        assert_eq!(built.plan.actions.len(), 1);
+        assert_eq!(built.plan.actions[0].kind, ResourceActionKind::Replace);
+        assert_eq!(
+            built.plan.actions[0].current.as_ref().unwrap().entry_id,
+            current.entry_id
+        );
+        assert_eq!(built.plan.actions[0].target_relative_path, path);
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir(directory.path().join("mods")).unwrap();
+        std::fs::write(directory.path().join(path), b"current bytes").unwrap();
+        super::write_access::review_at_root(&mut built, directory.path())
+            .unwrap();
+        assert!(built.plan.issues.is_empty(), "{:?}", built.plan.issues);
+        let occupied = installed(&foreign, "foreign", path);
+        let blocked = service
+            .build_operation(
+                request.clone(),
+                &target(),
+                &[current, occupied],
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(blocked.plan.actions.is_empty());
+        assert!(blocked.plan.issues.iter().any(|issue| issue.blocking
+            && issue.code == ResourceIssueCode::InvalidPath));
+        request.plan.selections[0].resource = ResourceRef::Source {
+            project: foreign.reference.project.clone(),
+        };
+        request.plan.selections[0].release = ReleaseSelection::Artifact {
+            reference: foreign.artifacts[0].reference.clone(),
+        };
+        let rejected = service
+            .build_operation(
+                request,
+                &target(),
+                &[installed(&old, "entry", path)],
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(rejected.plan.issues.iter().any(|issue| issue.blocking
+            && issue.code == ResourceIssueCode::ArtifactMismatch));
+    }
+    service.cache().close().await;
+}
+
+#[tokio::test]
 async fn operation_progress_reports_each_node_before_resolving_its_children() {
     let mut root = release("root0000", "1", 'a');
     let required = release("required", "1", 'b');

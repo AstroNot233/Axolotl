@@ -3284,8 +3284,11 @@ async fn initialize_operation(
         .map(|selection| selection.id.clone())
         .collect();
     let draft = OperationDraft {
-        local_metadata: requirements::local_metadata(&state.pool, &instance_id)
-            .await?,
+        local_metadata: if resolve_dependencies {
+            requirements::local_metadata(&state.pool, &instance_id).await?
+        } else {
+            HashMap::new()
+        },
         retained_requirements: Vec::new(),
         resolve_dependencies,
         skip_unwritable_files: false,
