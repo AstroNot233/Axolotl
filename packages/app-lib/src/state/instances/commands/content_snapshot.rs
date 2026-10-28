@@ -1,4 +1,5 @@
-mod dependencies;
+pub(crate) mod dependencies;
+pub(crate) mod local;
 
 use dependencies::backfill_dependency_edges_from_metadata;
 
@@ -24,7 +25,7 @@ use crate::state::instances::{
 use crate::state::{
     CacheBehaviour, CachedEntry, ContentItem, ContentItemProject,
     ContentItemVersion, ContentProvider, ContentProviderRef,
-    ContentRequirement, ContentSourceKind,
+    ContentRequirement, ContentSourceKind, local_id,
 };
 
 pub(crate) async fn get_content_snapshot(
@@ -32,6 +33,9 @@ pub(crate) async fn get_content_snapshot(
     refresh_remote: bool,
     state: &State,
 ) -> crate::Result<InstanceContentSnapshot> {
+    if !refresh_remote {
+        return local::get(instance_id, state).await;
+    }
     get_content_snapshot_inner(instance_id, refresh_remote, true, true, state)
         .await
 }
@@ -40,14 +44,14 @@ pub(crate) async fn get_cached_content_snapshot(
     instance_id: &str,
     state: &State,
 ) -> crate::Result<InstanceContentSnapshot> {
-    get_content_snapshot_inner(instance_id, false, false, true, state).await
+    local::get(instance_id, state).await
 }
 
 pub(crate) async fn get_local_content_snapshot(
     instance_id: &str,
     state: &State,
 ) -> crate::Result<InstanceContentSnapshot> {
-    get_content_snapshot_inner(instance_id, false, true, false, state).await
+    local::get(instance_id, state).await
 }
 
 async fn get_content_snapshot_inner(
@@ -212,6 +216,7 @@ async fn get_content_snapshot_inner(
         };
         if let Err(error) = result {
             warnings.push(InstanceContentWarning {
+                entry_id: None,
                 code: "pack_membership_reconciliation_failed".to_string(),
                 message: error.to_string(),
                 provider: Some(ContentProvider::CurseForge),
@@ -349,8 +354,10 @@ async fn get_content_snapshot_inner(
             project: Some(ContentItemProject {
                 id: local_mod
                     .as_ref()
-                    .map(|metadata| format!("local:{}", metadata.mod_id))
-                    .unwrap_or_else(|| format!("local:file:{}", file.sha1)),
+                    .map(|metadata| local_id(&metadata.mod_id))
+                    .unwrap_or_else(|| {
+                        local_id(format_args!("file:{}", file.sha1))
+                    }),
                 slug: local_mod
                     .as_ref()
                     .map(|metadata| metadata.mod_id.clone()),
@@ -360,7 +367,7 @@ async fn get_content_snapshot_inner(
             }),
             version: local_mod.as_ref().and_then(|metadata| {
                 metadata.version.clone().map(|version| ContentItemVersion {
-                    id: format!("local:{}", metadata.mod_id),
+                    id: local_id(&metadata.mod_id),
                     version_number: version,
                     file_name: file.file_name.clone(),
                     date_published: None,
@@ -565,6 +572,7 @@ async fn get_content_snapshot_inner(
                 }
             }
             Err(error) => warnings.push(InstanceContentWarning {
+                entry_id: None,
                 code: "provider_metadata_unavailable".to_string(),
                 message: error.to_string(),
                 provider: None,
@@ -584,6 +592,7 @@ async fn get_content_snapshot_inner(
             Ok(pack) => pack,
             Err(error) => {
                 warnings.push(InstanceContentWarning {
+                    entry_id: None,
                     code: "pack_metadata_unavailable".to_string(),
                     message: error.to_string(),
                     provider: pack_provider(&link),
@@ -650,6 +659,7 @@ async fn get_content_snapshot_inner(
         .await
     {
         warnings.push(InstanceContentWarning {
+            entry_id: None,
             code: "resource_history_unavailable".into(),
             message: error.to_string(),
             provider: None,
@@ -664,12 +674,7 @@ async fn get_content_snapshot_inner(
 
     Ok(InstanceContentSnapshot {
         instance_id: instance_id.to_string(),
-        revision: content_rows::get_applied_content_set(
-            instance_id,
-            &state.pool,
-        )
-        .await?
-        .map_or(content_set.revision, |set| set.revision),
+        revision: content_set.revision,
         pack,
         items,
         pending_manual_downloads,
@@ -1300,6 +1305,7 @@ fn snapshot_item(
         .is_some_and(|content| !content.provider_refs.is_empty());
 
     InstanceContentSnapshotItem {
+        resource_update: None,
         artifact_ref: None,
         compatibility: None,
         resource_id: None,
@@ -1356,7 +1362,7 @@ fn snapshot_materialization_state(
     }
 }
 
-fn pack_snapshot(
+pub(crate) fn pack_snapshot(
     instance_name: &str,
     icon_path: Option<String>,
     link: &InstanceLink,
@@ -1573,4 +1579,91 @@ mod tests {
         assert_eq!(item.provider_project_id.as_deref(), Some("AANobbMI"));
         assert_eq!(item.provider_release_id.as_deref(), Some("vf7UgZpC"));
     }
+}
+
+pub(crate) async fn refresh_background_metadata(
+    instance_id: &str,
+    state: &State,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> crate::Result<()> {
+    let records =
+        crate::state::store::content_snapshot::get(&state.data, instance_id)
+            .await?;
+    if let InstanceLink::CurseForgeModpack {
+        project_id,
+        version_id,
+    } = &records.link
+    {
+        let parsed = project_id
+            .parse::<u32>()
+            .ok()
+            .zip(version_id.parse::<u32>().ok());
+        if let Some((project, version)) = parsed {
+            let expected = tokio::select! { biased; _ = cancel.cancelled() => return Ok(()), result = crate::api::curseforge::get_modpack_expected_members(project, version) => result? };
+            if cancel.is_cancelled() {
+                return Ok(());
+            }
+            let current = crate::state::store::content_snapshot::get(
+                &state.data,
+                instance_id,
+            )
+            .await?;
+            if current.content_set.id != records.content_set.id
+                || serde_json::to_string(&current.link)?
+                    != serde_json::to_string(&records.link)?
+            {
+                return Ok(());
+            }
+            reconcile_curseforge_members(
+                instance_id,
+                &records.content_set.id,
+                &expected,
+                state,
+            )
+            .await?;
+            reconcile_curseforge_manual_downloads(
+                instance_id,
+                &records.content_set.id,
+                &expected.members,
+                state,
+            )
+            .await?;
+        }
+    }
+    let records =
+        crate::state::store::content_snapshot::get(&state.data, instance_id)
+            .await?;
+    let by_file = records
+        .entries
+        .iter()
+        .filter_map(|entry| Some((entry.file_id.as_deref()?, entry.id.clone())))
+        .collect::<HashMap<_, _>>();
+    let metadata = records
+        .files
+        .iter()
+        .filter_map(|file| {
+            Some((
+                by_file.get(file.id.as_str())?.clone(),
+                serde_json::from_str::<crate::mod_metadata::LocalModMetadata>(
+                    file.local_mod_data.as_deref()?,
+                )
+                .ok()?,
+            ))
+        })
+        .collect();
+    let backfill = tokio::select! { biased; _ = cancel.cancelled() => return Ok(()),
+        result = dependencies::backfill_dependency_edges_from_metadata(&records.entries, &records.references, &records.content_set, &metadata, state) => result?
+    };
+    if !backfill.is_empty() && !cancel.is_cancelled() {
+        let _lock = state.lock_instance_content_exclusive(instance_id).await;
+        crate::state::store::content_dependencies::set_backfill(
+            &state.data,
+            instance_id,
+            &records.content_set.id,
+            records.content_set.revision,
+            &backfill,
+        )
+        .await?;
+    }
+    Ok(())
 }

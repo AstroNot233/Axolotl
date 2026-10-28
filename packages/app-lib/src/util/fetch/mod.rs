@@ -100,6 +100,11 @@ use super::download::route_health::{
     ROUTE_HEALTH, ResourceFamily, RouteHealth,
 };
 
+#[cfg(test)]
+pub(crate) use self::tests::fixtures::{
+    download_benchmark_fixture, download_endpoint_fixture,
+};
+
 /// Set while a benchmark runs, so the client and the segment scheduler skip
 /// deadline enforcement the measured path would never meet.
 #[cfg(test)]
