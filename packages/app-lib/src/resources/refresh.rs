@@ -90,6 +90,7 @@ pub struct RefreshState {
 }
 
 struct Slot {
+    background_failed: bool,
     outcomes: HashMap<
         String,
         crate::state::store::content_refresh_checks::CheckAttempt,
@@ -171,6 +172,9 @@ impl RefreshCoordinator {
             return Ok(slot.task.clone());
         }
         let sequence = slots.get(&instance_id).map_or(0, |slot| slot.sequence);
+        let background_failed = slots
+            .get(&instance_id)
+            .is_some_and(|slot| slot.background_failed);
         let task = RefreshTask {
             id: uuid::Uuid::new_v4().to_string(),
             mode,
@@ -185,6 +189,7 @@ impl RefreshCoordinator {
         slots.insert(
             instance_id.clone(),
             Slot {
+                background_failed,
                 outcomes: HashMap::new(),
                 task: task.clone(),
                 sequence,
@@ -482,12 +487,16 @@ async fn run_round(
             }
             result = &mut scan, if !scan_done => {
                 result.map_err(|error| ResourceError::InvalidRequest(error.to_string()))??; scan_done = true;
-                if mode != RefreshMode::RetryFailed {
+                let retry_background = state.content_refresh.slots.lock().await
+                    .get(instance_id).is_some_and(|slot| slot.background_failed);
+                if mode != RefreshMode::RetryFailed || retry_background {
                     let state = state.clone(); let instance_id = instance_id.to_owned(); let task_id = task_id.to_owned(); let cancel = scan_cancel.clone();
                     workers.push(tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
-                        crate::state::instances::commands::content_snapshot::refresh_background_metadata(&instance_id, &state, &cancel).await?;
+                        let result = crate::state::instances::commands::content_snapshot::refresh_background_metadata(&instance_id, &state, &cancel).await;
                         let mut slots = state.content_refresh.slots.lock().await;
                         if let Some(slot) = slots.get_mut(&instance_id).filter(|slot| slot.task.id == task_id && !slot.cancel.is_cancelled()) {
+                            slot.background_failed = result.is_err();
+                            result?;
                             let snapshot = crate::state::instances::commands::get_local_content_snapshot(&instance_id, &state).await?;
                             state.content_refresh.publish(&instance_id, slot, RefreshPatch::Content { snapshot });
                         }

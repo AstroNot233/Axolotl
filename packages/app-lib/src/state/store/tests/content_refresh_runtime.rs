@@ -15,6 +15,7 @@ struct Provider {
     hold_slow: AtomicBool,
     fail: AtomicBool,
     queries: AtomicUsize,
+    identify_queries: AtomicUsize,
 }
 
 fn reference(project: &str, version: &str) -> SourceReleaseRef {
@@ -65,7 +66,7 @@ fn release(project: &str, version: &str) -> ResourceRelease {
         ),
         compatibility: ReleaseCompatibility {
             game_versions: vec!["1.21".into()],
-            loaders: vec![],
+            loaders: vec!["fabric".into()],
         },
         artifacts: vec![artifact(
             project,
@@ -85,10 +86,16 @@ impl ResourceProvider for Provider {
     fn source(&self) -> ResourceSource {
         ResourceSource {
             id: SourceId::modrinth(),
-            types: vec![ResourceType::ResourcePack],
+            types: vec![
+                ResourceType::Mod,
+                ResourceType::ResourcePack,
+                ResourceType::Shader,
+                ResourceType::DataPack,
+            ],
             capabilities: vec![
                 SourceCapability::Project,
                 SourceCapability::Releases,
+                SourceCapability::IdentifyHash,
             ],
             available: true,
             supported_search_sorts: vec![],
@@ -111,6 +118,9 @@ impl ResourceProvider for Provider {
         let mut results = Vec::new();
         for query in queries {
             self.queries.fetch_add(1, Ordering::SeqCst);
+            if matches!(query, ProviderQuery::Identify { .. }) {
+                self.identify_queries.fetch_add(1, Ordering::SeqCst);
+            }
             if self.fail.load(Ordering::SeqCst) {
                 results.push(Err(ResourceError::Unavailable));
                 continue;
@@ -154,7 +164,12 @@ impl ResourceProvider for Provider {
                             title: format!("Title {}", id.as_str()),
                             summary: String::new(),
                             icon_url: None,
-                            types: vec![ResourceType::ResourcePack],
+                            types: vec![
+                                ResourceType::Mod,
+                                ResourceType::ResourcePack,
+                                ResourceType::Shader,
+                                ResourceType::DataPack,
+                            ],
                             authors: vec![],
                             license: None,
                             downloads: None,
@@ -276,7 +291,7 @@ async fn scan_failures_without_an_entry_survive_and_retry_without_rechecking_suc
     }
     assert!(after.iter().any(|(_, check)| check.context.sha1
         == sha1_smol::Sha1::from(b"new").hexdigest()));
-    assert_eq!(provider.queries.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.queries.load(Ordering::SeqCst), 1);
     state.content_refresh.shutdown().await;
     state.pool.close().await;
 }
@@ -393,6 +408,172 @@ async fn verified_install_seeds_a_baseline_without_a_second_scan_read_and_reject
     state.pool.close().await;
 }
 
+#[tokio::test]
+async fn exact_saved_provider_references_skip_unnecessary_hash_identification()
+{
+    let (_temp, state, provider) = fixture().await;
+    sqlx::query("DELETE FROM resource_installed_artifacts")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    for project in ["fast", "slow"] {
+        sqlx::query("INSERT INTO instance_content_provider_refs(content_entry_id,provider,provider_project_id,provider_release_id,is_origin) VALUES (?,'modrinth',?,'old',1)")
+            .bind(project).bind(project).execute(&state.pool).await.unwrap();
+    }
+    state
+        .content_refresh
+        .start(state.clone(), "instance".into(), RefreshMode::Normal)
+        .await
+        .unwrap();
+    finished(&state).await;
+    let checks =
+        ContentRefreshChecks::get_scoped(&state.data, &"instance".into())
+            .await
+            .unwrap();
+    assert_eq!(checks.len(), 2);
+    assert!(
+        checks
+            .iter()
+            .all(|(_, check)| check.attempt == CheckAttempt::Succeeded
+                && check.last_success.as_ref().unwrap().candidate.is_some())
+    );
+    assert_eq!(provider.identify_queries.load(Ordering::SeqCst), 0);
+    state.content_refresh.shutdown().await;
+    state.pool.close().await;
+}
+
+#[tokio::test]
+async fn all_refresh_content_kinds_recover_candidates_and_reuse_hashes() {
+    for (folder, extension, kind) in [
+        ("mods", "jar", "mod"),
+        ("resourcepacks", "zip", "resourcepack"),
+        ("shaderpacks", "zip", "shaderpack"),
+        ("saves/Test World/datapacks", "zip", "datapack"),
+    ] {
+        let (_temp, state, _) = fixture().await;
+        let records = content_snapshot::get(&state.data, "instance")
+            .await
+            .unwrap();
+        let root = crate::state::instances::commands::instance_content_root(
+            &state.directories,
+            &records.instance,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(folder)).unwrap();
+        if folder != "resourcepacks" {
+            for project in ["fast", "slow"] {
+                let path = format!("{folder}/{project}.{extension}");
+                std::fs::rename(
+                    root.join(format!("resourcepacks/{project}.zip")),
+                    root.join(&path),
+                )
+                .unwrap();
+                sqlx::query("UPDATE instance_files SET relative_path=?,file_name=? WHERE id=?").bind(&path).bind(format!("{project}.{extension}")).bind(project).execute(&state.pool).await.unwrap();
+                sqlx::query("UPDATE instance_content_entries SET project_type=? WHERE id=?").bind(kind).bind(project).execute(&state.pool).await.unwrap();
+            }
+        }
+        sqlx::query("DELETE FROM resource_installed_artifacts")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        for project in ["fast", "slow"] {
+            sqlx::query("INSERT INTO instance_content_provider_refs(content_entry_id,provider,provider_project_id,provider_release_id,is_origin) VALUES (?,'modrinth',?,'old',1)")
+                .bind(project).bind(project).execute(&state.pool).await.unwrap();
+        }
+        state
+            .content_refresh
+            .start(state.clone(), "instance".into(), RefreshMode::Normal)
+            .await
+            .unwrap();
+        finished(&state).await;
+        let recovered = state
+            .content_refresh
+            .state(&state, "instance")
+            .await
+            .unwrap();
+        assert_eq!(recovered.snapshot.items.len(), 2, "{folder}");
+        assert_eq!(
+            recovered
+                .snapshot
+                .items
+                .iter()
+                .filter(|item| item.resource_update.is_some())
+                .count(),
+            2,
+            "{folder}"
+        );
+        let reads = state.file_fingerprints.read_count.load(Ordering::SeqCst);
+        if folder.starts_with("saves/") {
+            let scope: String = sqlx::query_scalar("SELECT scope FROM resource_installed_artifacts WHERE entry_id='fast'").fetch_one(&state.pool).await.unwrap();
+            assert_eq!(
+                serde_json::from_str::<InstallScope>(&scope).unwrap(),
+                InstallScope::World {
+                    relative_path: "saves/Test World".into()
+                }
+            );
+        }
+        for _ in 0..10 {
+            state
+                .content_refresh
+                .start(
+                    state.clone(),
+                    "instance".into(),
+                    RefreshMode::ForceRemote,
+                )
+                .await
+                .unwrap();
+            finished(&state).await;
+        }
+        assert_eq!(
+            state.file_fingerprints.read_count.load(Ordering::SeqCst),
+            reads,
+            "{folder}"
+        );
+        state
+            .content_refresh
+            .slots
+            .lock()
+            .await
+            .get_mut("instance")
+            .unwrap()
+            .background_failed = true;
+        state
+            .content_refresh
+            .start(state.clone(), "instance".into(), RefreshMode::RetryFailed)
+            .await
+            .unwrap();
+        finished(&state).await;
+        assert!(
+            !state
+                .content_refresh
+                .slots
+                .lock()
+                .await
+                .get("instance")
+                .unwrap()
+                .background_failed
+        );
+        let checks =
+            ContentRefreshChecks::get_scoped(&state.data, &"instance".into())
+                .await
+                .unwrap();
+        assert_eq!(checks.len(), 2);
+        assert_eq!(
+            state
+                .content_refresh
+                .state(&state, "instance")
+                .await
+                .unwrap()
+                .task
+                .unwrap()
+                .checked,
+            0
+        );
+        state.content_refresh.shutdown().await;
+        state.pool.close().await;
+    }
+}
+
 async fn fixture() -> (tempfile::TempDir, Arc<crate::State>, Arc<Provider>) {
     let temp = tempfile::tempdir().unwrap();
     let directories = crate::state::DirectoryInfo {
@@ -431,6 +612,7 @@ async fn fixture() -> (tempfile::TempDir, Arc<crate::State>, Arc<Provider>) {
         hold_slow: AtomicBool::new(false),
         fail: AtomicBool::new(false),
         queries: AtomicUsize::new(0),
+        identify_queries: AtomicUsize::new(0),
     });
     let cache = Arc::new(
         crate::resources::cache::ResourceCache::open(

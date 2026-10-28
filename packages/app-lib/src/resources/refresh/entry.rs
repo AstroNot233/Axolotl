@@ -123,7 +123,9 @@ pub(super) fn work<'a>(
             if !check_due && !presentation_due {
                 return None;
             }
-            let scope = if kind == ResourceType::DataPack {
+            let scope = if kind == ResourceType::DataPack
+                && file.relative_path.starts_with("saves/")
+            {
                 InstallScope::World {
                     relative_path: file
                         .relative_path
@@ -508,12 +510,12 @@ async fn recognize(
         })
         .map(|source| source.id)
         .collect::<Vec<_>>();
-    let mut recognition = service
-        .identify_many(&sources, std::slice::from_ref(&local), policy, cancel)
-        .await
-        .into_iter()
-        .next()
-        .ok_or(ResourceError::Unavailable)?;
+    let mut recognition = identity::FileRecognition {
+        matches: vec![],
+        unresolved_sources: vec![],
+        failures: vec![],
+        ambiguous: false,
+    };
     for reference in &work.content.provider_refs {
         let Some(release_id) = reference.database_release_id() else {
             continue;
@@ -527,13 +529,6 @@ async fn recognize(
             },
             release_id: SourceReleaseId::new(release_id)?,
         };
-        if recognition
-            .matches
-            .iter()
-            .any(|artifact| artifact.reference.release == reference)
-        {
-            continue;
-        }
         if let Ok(release) = service
             .release_with_policy(&reference, None, cancel, policy)
             .await
@@ -549,6 +544,45 @@ async fn recognize(
                 }));
         }
     }
+    let origin_verified = work.origin.as_ref().is_some_and(|origin| {
+        recognition.matches.iter().any(|artifact| {
+            &artifact.reference.release.project.source == origin
+        })
+    });
+    if recognition.matches.is_empty()
+        || (work.origin.is_some() && !origin_verified)
+    {
+        let known = recognition.matches;
+        recognition = service
+            .identify_many(
+                &sources,
+                std::slice::from_ref(&local),
+                policy,
+                cancel,
+            )
+            .await
+            .into_iter()
+            .next()
+            .ok_or(ResourceError::Unavailable)?;
+        for artifact in known {
+            if !recognition
+                .matches
+                .iter()
+                .any(|found| found.reference == artifact.reference)
+            {
+                recognition.matches.push(artifact);
+            }
+        }
+    }
+    let mut projects = HashMap::<SourceId, HashSet<SourceProjectId>>::new();
+    for artifact in &recognition.matches {
+        projects
+            .entry(artifact.reference.release.project.source.clone())
+            .or_default()
+            .insert(artifact.reference.release.project.project_id.clone());
+    }
+    recognition.ambiguous |=
+        projects.values().any(|projects| projects.len() > 1);
     let selected = if let Some(origin) = &work.origin {
         let matches = recognition
             .matches
