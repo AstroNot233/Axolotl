@@ -215,7 +215,9 @@ function clearRecent() {
 
 function showLayerEditor(layer: BannerLayer | null) {
     editingLayer.value = layer
-    layerEditor.value?.show()
+    // Pass the layer along: the prop reaches the dialog a tick later, and its
+    // `show` would seed the editor from the layer it still has.
+    layerEditor.value?.show(layer)
 }
 
 /** Replaces the design and remembers the state it replaced, so it can be undone. */

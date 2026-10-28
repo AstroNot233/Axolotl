@@ -104,9 +104,14 @@ function tileDesign(id: BannerPatternId): BannerDesign {
     }
 }
 
-function show() {
-    color.value = props.layer?.color ?? 'black'
-    pattern.value = props.layer?.pattern ?? 'stripe_bottom'
+/**
+ * Opens the dialog for `layer`, or for a new layer when it is null. The layer is
+ * handed over explicitly: the `layer` prop only catches up on the next render,
+ * so reading it here would open the previously edited layer.
+ */
+function show(layer: BannerLayer | null = props.layer ?? null) {
+    color.value = layer?.color ?? 'black'
+    pattern.value = layer?.pattern ?? 'stripe_bottom'
     search.value = ''
     modal.value?.show()
 }
