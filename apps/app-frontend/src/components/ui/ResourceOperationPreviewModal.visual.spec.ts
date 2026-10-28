@@ -1153,11 +1153,35 @@ it('shows what the analysis is doing and drops nodes a later resolution round re
         update({ kind: 'phase', phase: 'validating' })
         await flushPromises()
         expect(stage()).toBe('Checking that the files can be written…')
-        complete({ ...plan(), nodes: [root] } as ResourceOperationPlan)
-        await flushPromises()
-        expect(wrapper.find('[data-operation-phase]').exists()).toBe(false)
-        await wrapper.vm.cancel()
+        // Closing the window releases the run without going through cancel().
+        await (wrapper.vm as unknown as { modal: { hide: () => Promise<void> } }).modal.hide()
         expect(await result).toBeNull()
+        complete({ ...plan(), nodes: [root] } as ResourceOperationPlan)
+
+        // A data pack preview waits for the world list before it analyzes; its
+        // skeleton starts from the default text, not the closed run's stage.
+        vi.mocked(get_instance_worlds).mockReturnValueOnce(new Promise(() => {}))
+        const next = wrapper.vm.showInstall({
+            instanceId: 'instance',
+            instanceName: 'Example',
+            installDependencies: true,
+            selections: [
+                {
+                    id: 'pack',
+                    resourceType: 'dataPack',
+                    scope: { kind: 'instance' },
+                    release: { kind: 'automatic' },
+                    resource: {
+                        kind: 'source',
+                        project: { source: 'modrinth', projectId: 'pack0000' },
+                    },
+                },
+            ],
+        })
+        await flushPromises()
+        expect(stage()).toBe('Resolving releases and dependencies…')
+        await wrapper.vm.cancel()
+        expect(await next).toBeNull()
     } finally {
         wrapper.unmount()
     }

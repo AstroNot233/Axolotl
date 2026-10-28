@@ -75,6 +75,35 @@ it('replays only the nodes still shown and the latest stage, and ignores an olde
     await expect(prepared).rejects.toMatchObject({ name: 'AbortError' })
 })
 
+it('replays the current round first and keeps names a re-sent node lacks', async () => {
+    vi.clearAllMocks()
+    let report!: (value: ResourceOperationProgress) => void
+    vi.mocked(resourceAnalysisUpdate).mockImplementationOnce((...args) => {
+        report = args[5]
+        return new Promise(() => {})
+    })
+    const cart = createContentAnalysis()
+    cart.update(input())
+    await tick()
+    const send = (value: object) =>
+        report({ selectionRevision: 1, ...value } as ResourceOperationProgress)
+    const metadata = { title: 'Named', iconUrl: null, summary: '' }
+    send({ kind: 'roundStarted', round: 0 })
+    send({ kind: 'node', node: { id: 'merged' }, metadata })
+    send({ kind: 'roundStarted', round: 1 })
+    send({ kind: 'phase', phase: 'prefetching' })
+    send({ kind: 'node', node: { id: 'merged', state: 'conflict' }, metadata: null })
+    const onProgress = vi.fn()
+    const prepared = cart.review()!.prepare(new AbortController().signal, onProgress)
+    await tick()
+    expect(onProgress.mock.calls.map(([value]) => value)).toMatchObject([
+        { kind: 'roundStarted', round: 1 },
+        { kind: 'node', node: { id: 'merged', state: 'conflict' }, metadata },
+    ])
+    cart.clear()
+    await expect(prepared).rejects.toMatchObject({ name: 'AbortError' })
+})
+
 it('starts on addition and review reuses the running analysis and its progress', async () => {
     vi.clearAllMocks()
     let finish!: (value: ResourceOperationPlan) => void

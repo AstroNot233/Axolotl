@@ -26,20 +26,42 @@ export type ContentAnalysisReview = {
     ) => Promise<ResourceOperationPlan>
 }
 
-/**
- * Keeps what a review opened later needs to catch up: the nodes still shown
- * and the latest phase or round, which goes last so it replays last.
- */
-function remember(
-    progress: Map<string, ResourceOperationProgress>,
-    value: ResourceOperationProgress,
-) {
-    if (value.kind === 'node') progress.set(`node:${value.node.id}`, value)
-    else if (value.kind === 'nodeRemoved') progress.delete(`node:${value.nodeId}`)
-    else {
-        progress.delete('status')
-        progress.set('status', value)
+/** What a review opened later needs to catch up with a running analysis. */
+type ProgressReplay = {
+    round: ResourceOperationProgress | null
+    nodes: Map<string, Extract<ResourceOperationProgress, { kind: 'node' }>>
+    /** A stage reported after the last node; a node event ends it. */
+    phase: ResourceOperationProgress | null
+}
+
+function remember(replay: ProgressReplay, value: ResourceOperationProgress) {
+    switch (value.kind) {
+        case 'roundStarted':
+            replay.round = value
+            replay.phase = null
+            return
+        case 'phase':
+            replay.phase = value
+            return
+        case 'nodeRemoved':
+            replay.nodes.delete(value.nodeId)
+            return
+        case 'node': {
+            // A node sent again after a merge carries no metadata; keep its name.
+            const previous = replay.nodes.get(value.node.id)
+            replay.nodes.set(
+                value.node.id,
+                value.metadata || !previous ? value : { ...value, metadata: previous.metadata },
+            )
+            replay.phase = null
+        }
     }
+}
+
+function* replayed(replay: ProgressReplay) {
+    if (replay.round) yield replay.round
+    yield* replay.nodes.values()
+    if (replay.phase) yield replay.phase
 }
 
 const selectionKey = (input: ContentAnalysisInput) =>
@@ -59,7 +81,7 @@ export function createContentAnalysis() {
         pending: Promise<ResourceOperationPlan>
         settled: boolean
         revision: number
-        progress: Map<string, ResourceOperationProgress>
+        progress: ProgressReplay
         listeners: Set<(progress: ResourceOperationProgress) => void>
     } | null = null
     let session: { context: string; id: Promise<string> } | null = null
@@ -99,7 +121,7 @@ export function createContentAnalysis() {
         }
         const id = session!.id
         const controller = new AbortController()
-        const progress = new Map<string, ResourceOperationProgress>()
+        const progress: ProgressReplay = { round: null, nodes: new Map(), phase: null }
         const listeners = new Set<(progress: ResourceOperationProgress) => void>()
         const selectionRevision = ++revision
         const pending = id.then((sessionId) => {
@@ -161,7 +183,7 @@ export function createContentAnalysis() {
             async prepare(signal, onProgress, selections) {
                 signal.throwIfAborted()
                 analysis.controller.signal.throwIfAborted()
-                for (const value of analysis.progress.values()) onProgress(value)
+                for (const value of replayed(analysis.progress)) onProgress(value)
                 analysis.listeners.add(onProgress)
                 let stopWaiting = () => {}
                 const canceled = new Promise<never>((_, reject) => {

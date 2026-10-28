@@ -858,7 +858,7 @@ function show(value: OperationInput): Promise<InstallJobSnapshot | null> {
     release()
     input.value = value
     plan.value = null
-    progressNodes.value = new Map()
+    clearProgress()
     submittedRoots.value = []
     names.value = {}
     error.value = null
@@ -1187,7 +1187,7 @@ async function cancel() {
     const current = generation
     plan.value = null
     input.value = null
-    progressNodes.value = new Map()
+    clearProgress()
     await nextTick()
     if (generation !== current) return
     await modal.value?.hide()
