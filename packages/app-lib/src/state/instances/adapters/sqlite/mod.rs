@@ -5,3 +5,4 @@ pub(crate) mod loader_component_rows;
 pub(crate) mod resource_rows;
 pub(crate) mod screenshot_rows;
 mod values;
+pub(crate) mod write_guards;

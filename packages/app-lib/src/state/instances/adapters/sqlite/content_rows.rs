@@ -15,59 +15,14 @@ use crate::state::instances::{
 use crate::state::{
     ContentProvider, ContentProviderRef, ModLoader, ProjectType, ReleaseChannel,
 };
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use sqlx::{Executor, Row, Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
 
-/// Ensures the instance a content write is about to reference still exists.
-///
-/// Runs inside the write transaction so a concurrent instance deletion that
-/// already committed is reported as a clean error instead of a raw SQLite
-/// foreign-key violation (`SQLITE_CONSTRAINT_FOREIGNKEY`, code 787).
-pub(crate) async fn ensure_instance_exists(
-    instance_id: &str,
-    tx: &mut Transaction<'_, Sqlite>,
-) -> crate::Result<()> {
-    let instance_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM instances WHERE id = ?)",
-    )
-    .bind(instance_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    if !instance_exists {
-        return Err(crate::ErrorKind::InputError(
-            "This instance has been deleted".to_string(),
-        )
-        .into());
-    }
-
-    Ok(())
-}
-
-/// Ensures the instance and content set a content write is about to reference
-/// still exist, returning a clean error instead of a foreign-key violation.
-pub(crate) async fn ensure_content_write_parents(
-    instance_id: &str,
-    content_set_id: &str,
-    tx: &mut Transaction<'_, Sqlite>,
-) -> crate::Result<()> {
-    ensure_instance_exists(instance_id, tx).await?;
-
-    let content_set_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM instance_content_sets WHERE id = ?)",
-    )
-    .bind(content_set_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    if !content_set_exists {
-        return Err(crate::ErrorKind::InputError(
-            "The content set for this instance has been deleted".to_string(),
-        )
-        .into());
-    }
-
-    Ok(())
-}
+// Call sites still name `content_rows`; these paths outlive the split.
+pub(crate) use super::write_guards::{
+    ensure_content_write_parents, ensure_instance_exists,
+};
 
 #[derive(Debug, sqlx::FromRow)]
 pub(crate) struct ContentSetRow {
@@ -2596,20 +2551,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn instance_existence_check_passes_for_existing_rows() {
-        let pool = test_pool().await;
-        sqlx::query("INSERT INTO instances (id) VALUES ('instance')")
-            .execute(&pool)
-            .await
-            .expect("insert instance");
-        let mut tx = pool.begin().await.expect("begin transaction");
-
-        ensure_instance_exists("instance", &mut tx)
-            .await
-            .expect("existing instance passes");
-    }
-
-    #[tokio::test]
     async fn in_place_upgrade_lists_new_origin_release_before_old_ref() {
         let pool = test_pool().await;
         sqlx::raw_sql(
@@ -2664,80 +2605,6 @@ mod tests {
                 .unwrap(),
             vec![(target, true), (old, false)]
         );
-    }
-
-    #[tokio::test]
-    async fn instance_existence_check_reports_deleted_instances() {
-        let pool = test_pool().await;
-        let mut tx = pool.begin().await.expect("begin transaction");
-
-        let error = ensure_instance_exists("missing", &mut tx)
-            .await
-            .expect_err("missing instance must fail");
-        assert!(
-            error.to_string().contains("This instance has been deleted"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[tokio::test]
-    async fn content_write_parents_check_requires_instance_and_set() {
-        let pool = test_pool().await;
-        sqlx::query("INSERT INTO instances (id) VALUES ('instance')")
-            .execute(&pool)
-            .await
-            .expect("insert instance");
-        sqlx::query("INSERT INTO instance_content_sets (id) VALUES ('set')")
-            .execute(&pool)
-            .await
-            .expect("insert set");
-        let mut tx = pool.begin().await.expect("begin transaction");
-
-        ensure_content_write_parents("instance", "set", &mut tx)
-            .await
-            .expect("existing parents pass");
-
-        let missing_set =
-            ensure_content_write_parents("instance", "gone", &mut tx)
-                .await
-                .expect_err("missing content set must fail");
-        assert!(
-            missing_set
-                .to_string()
-                .contains("content set for this instance has been deleted"),
-            "unexpected error: {missing_set}"
-        );
-
-        let missing_instance =
-            ensure_content_write_parents("gone", "set", &mut tx)
-                .await
-                .expect_err("missing instance must fail");
-        assert!(
-            missing_instance
-                .to_string()
-                .contains("This instance has been deleted"),
-            "unexpected error: {missing_instance}"
-        );
-    }
-
-    #[tokio::test]
-    async fn checks_run_inside_transactions() {
-        let pool = test_pool().await;
-        let mut tx = pool.begin().await.expect("begin transaction");
-
-        ensure_instance_exists("instance", &mut tx)
-            .await
-            .expect_err("missing instance must fail inside a transaction");
-        tx.rollback().await.expect("rollback transaction");
-
-        sqlx::query("INSERT INTO instances (id) VALUES ('instance')")
-            .execute(&pool)
-            .await
-            .expect("insert instance in transaction");
-        let mut tx = pool.begin().await.expect("begin transaction");
-        ensure_instance_exists("instance", &mut tx)
-            .await
-            .expect("existing instance passes inside a transaction");
     }
 
     async fn mutation_target_pool() -> SqlitePool {
