@@ -554,13 +554,9 @@ pub(crate) async fn unlink_pack_in_transaction(
         .into());
     }
 
-    let busy: i64 = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM install_jobs WHERE instance_id = ? AND status IN ('queued', 'running', 'canceling', 'waiting_for_user'))",
-    )
-    .bind(instance_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    if busy != 0 {
+    if crate::install::store::has_unfinished_job_in_transaction(instance_id, tx)
+        .await?
+    {
         return Err(crate::ErrorKind::InputError(
             "Wait for the active instance task before unlinking the pack"
                 .into(),

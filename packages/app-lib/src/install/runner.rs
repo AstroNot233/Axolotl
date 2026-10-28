@@ -93,13 +93,7 @@ pub(crate) async fn interactive_content_guard(
         (job.instance_id.as_deref() == Some(instance_id)
             || admission::request_instance(&job.state.request).as_deref()
                 == Some(instance_id))
-            && matches!(
-                job.status,
-                InstallJobStatus::Queued
-                    | InstallJobStatus::Running
-                    | InstallJobStatus::Canceling
-                    | InstallJobStatus::WaitingForUser
-            )
+            && !job.status.is_finished()
     }) {
         return Err(ErrorKind::InputError(
             "Another task is changing this instance; retry when it finishes"
@@ -356,8 +350,9 @@ pub async fn queue_resource_plan(
         )
         .into());
     }
-    let overlapping: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM install_jobs WHERE instance_id = ? AND status IN ('queued', 'running', 'canceling', 'waiting_for_user')").bind(&plan.instance_id).fetch_one(&mut *tx).await?;
-    if overlapping != 0 {
+    if store::has_unfinished_job_in_transaction(&plan.instance_id, &mut tx)
+        .await?
+    {
         return Err(crate::ErrorKind::InputError(
             "another task is changing this instance".into(),
         )
