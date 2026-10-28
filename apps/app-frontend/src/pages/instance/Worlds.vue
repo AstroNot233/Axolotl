@@ -105,6 +105,7 @@
                     :highlighted="highlightedWorld === getWorldIdentifier(world)"
                     :supports-server-quick-play="supportsServerQuickPlay"
                     :supports-world-quick-play="supportsWorldQuickPlay"
+                    :quick-play-pending="!gameVersionsReady"
                     :current-protocol="protocolVersion"
                     :playing-instance="playing"
                     :playing-world="worldsMatch(world, worldPlaying)"
@@ -390,6 +391,7 @@ const protocolVersion = ref<ProtocolVersion | null>(null)
 const protocolVersionReady = ref(false)
 
 const gameVersions = ref<GameVersion[]>([])
+const gameVersionsReady = ref(false)
 const supportsServerQuickPlay = computed(() =>
     hasServerQuickPlaySupport(gameVersions.value, instance.value.game_version),
 )
@@ -403,9 +405,14 @@ watch(
         if (data) {
             worlds.value = [...data]
             hadNoWorlds.value = worlds.value.length === 0
-            if (!refreshingAll.value && !hasInitialRefreshed.value && protocolVersionReady.value) {
-                hasInitialRefreshed.value = true
-                void refreshServers(worlds.value, serverData.value, protocolVersion.value)
+            if (!refreshingAll.value && !hasInitialRefreshed.value) {
+                if (protocolVersionReady.value) {
+                    hasInitialRefreshed.value = true
+                    void refreshServers(worlds.value, serverData.value, protocolVersion.value)
+                } else {
+                    // Shown as refreshing until the protocol arrives and they are pinged.
+                    void refreshServers(worlds.value, serverData.value, null, false)
+                }
             }
         }
     },
@@ -520,6 +527,7 @@ async function loadServerContext() {
 
     protocolVersion.value = resolvedProtocolVersion
     gameVersions.value = resolvedGameVersions
+    gameVersionsReady.value = true
     protocolVersionReady.value = true
 
     if (worlds.value.length > 0) {
