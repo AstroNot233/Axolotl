@@ -380,6 +380,7 @@ import {
     pendingContentChangeAffectsItem,
 } from '@/helpers/content-change-jobs'
 import { createContentEventRefresh } from '@/helpers/content-event-refresh'
+import { isUnresolvedProjectId } from '@/helpers/content-identity'
 import { applyContentItemUpdates, matchesContentItem } from '@/helpers/content-item-state'
 import { contentProjectUrl } from '@/helpers/content-project-links'
 import {
@@ -2923,7 +2924,7 @@ provideContentManager({
                       path: `/resource/${encodeURIComponent(item.instanceResourceId)}`,
                       query: instanceContentProjectQuery.value,
                   }
-                : effectiveProvider && item.project?.id && !item.project.id.startsWith('local:')
+                : effectiveProvider && item.project?.id && !isUnresolvedProjectId(item.project.id)
                   ? {
                         path:
                             effectiveProvider === 'curseforge' && curseForgeProjectId
@@ -2938,7 +2939,7 @@ provideContentManager({
         const versionLink =
             effectiveProvider === 'modrinth' &&
             item.project?.id &&
-            !item.project.id.startsWith('local:') &&
+            !isUnresolvedProjectId(item.project.id) &&
             item.version?.id
                 ? {
                       path: `/project/${item.project.id}/version/${item.version.id}`,
@@ -2950,6 +2951,10 @@ provideContentManager({
             ? {
                   ...item.owner,
                   link:
+                      // The author id's `local:` prefix means the author is
+                      // self-declared by a local mod file. That is a different
+                      // concept from an unresolved project id: keep the two
+                      // checks separate rather than sharing one predicate.
                       effectiveProvider !== 'modrinth' || item.owner.id.startsWith('local:')
                           ? undefined
                           : () =>

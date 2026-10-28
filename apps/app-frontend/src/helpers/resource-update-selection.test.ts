@@ -1,7 +1,5 @@
-import assert from 'node:assert/strict'
-import test from 'node:test'
-
 import type { ContentItem } from '@modrinth/ui'
+import { expect, it } from 'vitest'
 
 import type { InstallJobSnapshot } from './install.ts'
 import {
@@ -24,7 +22,7 @@ function item(entry: string, overrides: Partial<ContentItem> = {}): ContentItem 
     } as ContentItem
 }
 
-test('duplicate group update includes every actual updatable entry across sources and versions', () => {
+it('duplicate group update includes every actual updatable entry across sources and versions', () => {
     const anchor = item('a')
     const copies = [
         anchor,
@@ -34,25 +32,24 @@ test('duplicate group update includes every actual updatable entry across source
         item('missing', { instanceMaterializationState: 'missing' }),
         item('other', { instanceResourceId: 'another' }),
     ]
-    assert.deepEqual(duplicateGroupUpdateEntries(copies, anchor), ['a', 'b'])
-    assert.equal(
-        confirmedContentGroupKey(item('unverified', { instanceResourceId: undefined })),
+    expect(duplicateGroupUpdateEntries(copies, anchor)).toEqual(['a', 'b'])
+    expect(confirmedContentGroupKey(item('unverified', { instanceResourceId: undefined }))).toBe(
         null,
     )
 })
 
-test('world scopes and content types stay independent', () => {
+it('world scopes and content types stay independent', () => {
     const a = item('a', { project_type: 'datapack', file_path: 'saves/one/datapacks/a.zip' })
     const b = item('b', { project_type: 'datapack', file_path: 'saves/two/datapacks/b.zip' })
     const c = item('c', {
         project_type: 'datapack',
         file_path: 'saves/one/datapacks/c.zip.disabled',
     })
-    assert.deepEqual(duplicateGroupUpdateEntries([a, b, c, item('mod')], a), ['a', 'c'])
-    assert.equal(confirmedContentGroupKey(item('invalid', { project_type: 'datapack' })), null)
+    expect(duplicateGroupUpdateEntries([a, b, c, item('mod')], a)).toEqual(['a', 'c'])
+    expect(confirmedContentGroupKey(item('invalid', { project_type: 'datapack' }))).toBe(null)
 })
 
-test('single, selected, all and duplicate updates retain exact entries and dependency preferences for review', async () => {
+it('single, selected, all and duplicate updates retain exact entries and dependency preferences for review', async () => {
     for (const entryIds of [
         ['single'],
         ['a', 'b'],
@@ -72,23 +69,23 @@ test('single, selected, all and duplicate updates retain exact entries and depen
                 },
                 async (input) => {
                     reviewed = input
-                    assert.deepEqual(tracked, [])
+                    expect(tracked).toEqual([])
                     return { job_id: 'reviewed' } as InstallJobSnapshot
                 },
                 (job) => {
                     tracked.push(job.job_id)
                 },
             )
-            assert.equal(result, true)
-            assert.deepEqual(reviewed?.entryIds, [...new Set(entryIds)])
-            assert.equal(reviewed?.installDependencies, installDependencies)
-            assert.equal(reviewed?.intent, 'update')
-            assert.deepEqual(tracked, ['reviewed'])
+            expect(result).toBe(true)
+            expect(reviewed?.entryIds).toEqual([...new Set(entryIds)])
+            expect(reviewed?.installDependencies).toBe(installDependencies)
+            expect(reviewed?.intent).toBe('update')
+            expect(tracked).toEqual(['reviewed'])
         }
     }
 })
 
-test('cancelled and failed previews do not track a job or alter selected entries', async () => {
+it('cancelled and failed previews do not track a job or alter selected entries', async () => {
     const input = {
         instanceId: 'instance',
         instanceName: 'Example',
@@ -100,8 +97,8 @@ test('cancelled and failed previews do not track a job or alter selected entries
     const track = () => {
         tracked = true
     }
-    assert.equal(await reviewResourceEntryChanges(input, async () => null, track), false)
-    await assert.rejects(
+    expect(await reviewResourceEntryChanges(input, async () => null, track)).toBe(false)
+    await expect(
         reviewResourceEntryChanges(
             input,
             async () => {
@@ -109,7 +106,7 @@ test('cancelled and failed previews do not track a job or alter selected entries
             },
             track,
         ),
-    )
-    assert.equal(tracked, false)
-    assert.deepEqual(input.entryIds, ['entry'])
+    ).rejects.toThrow()
+    expect(tracked).toBe(false)
+    expect(input.entryIds).toEqual(['entry'])
 })

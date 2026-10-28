@@ -262,7 +262,7 @@ fn local_endpoint(
     } else {
         (
             ContentProvider::Local,
-            format!("local:{}", metadata.mod_id),
+            local_id(&metadata.mod_id),
             metadata.version.clone().unwrap_or_default(),
         )
     }

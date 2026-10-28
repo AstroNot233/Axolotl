@@ -145,7 +145,6 @@ pub async fn list_java_distribution_versions(
                 None,
                 None,
                 &state.api_semaphore,
-                &state.pool,
             )
             .await?;
             let mut versions: Vec<u32> = packages
@@ -989,7 +988,6 @@ async fn install_mojang_runtime(
         None,
         None,
         &state.api_semaphore,
-        &state.pool,
     )
     .await?;
     let Some(release) = index
@@ -1041,7 +1039,6 @@ async fn install_mojang_runtime(
         request,
         &manifest_path,
         &state.download_semaphore,
-        &state.pool,
         None,
     )
     .await?;
@@ -1209,7 +1206,6 @@ async fn install_mojang_runtime(
                         request,
                         &path,
                         &state.download_semaphore,
-                        &state.pool,
                         Some(&mut progress as &mut FetchProgressFn<'_>),
                     )
                     .await?;
@@ -1330,7 +1326,6 @@ async fn install_azul_runtime(
         None,
         None,
         &state.api_semaphore,
-        &state.pool,
     )
     .await?;
     let summary = packages.first().ok_or_else(|| {
@@ -1352,7 +1347,6 @@ async fn install_azul_runtime(
         None,
         None,
         &state.api_semaphore,
-        &state.pool,
     )
     .await?;
     validate_archive_file_name(&download.name)?;
@@ -1444,7 +1438,6 @@ async fn install_azul_runtime(
         request,
         &archive_path,
         &state.download_semaphore,
-        &state.pool,
         Some(&mut progress as &mut FetchProgressFn<'_>),
     )
     .await?;
@@ -1836,7 +1829,6 @@ async fn download_java_from_feed_inner(
         request,
         &archive_path,
         &state.download_semaphore,
-        &state.pool,
         Some(&mut progress as &mut FetchProgressFn<'_>),
     )
     .await

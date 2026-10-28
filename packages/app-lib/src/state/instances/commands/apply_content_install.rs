@@ -1430,7 +1430,6 @@ async fn download_project_version_with_reporting(
         request,
         &prepared.path,
         &state.download_semaphore,
-        &state.pool,
         progress,
     )
     .await?;

@@ -2302,7 +2302,6 @@ impl CachedEntry {
                     None,
                     uri_path,
                     fetch_semaphore,
-                    pool,
                 )
             }))
             .await?;
@@ -2382,7 +2381,6 @@ impl CachedEntry {
                             None,
                             $uri_path,
                             &fetch_semaphore,
-                            pool,
                         )
                         .await?,
                     )
@@ -2544,7 +2542,6 @@ impl CachedEntry {
                             game_version.as_deref(),
                             url,
                             fetch_semaphore,
-                            pool,
                             force_refresh,
                         )
                     },
@@ -2576,7 +2573,6 @@ impl CachedEntry {
                         None,
                         None,
                         fetch_semaphore,
-                        pool,
                     ),
                 )
                 .await;
@@ -2595,7 +2591,6 @@ impl CachedEntry {
                             None,
                             None,
                             fetch_semaphore,
-                            pool,
                         )
                         .await?
                     }
@@ -2611,7 +2606,6 @@ impl CachedEntry {
                             None,
                             None,
                             fetch_semaphore,
-                            pool,
                         )
                         .await?
                     }

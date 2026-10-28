@@ -1,6 +1,7 @@
 import type { ContentItem } from '@modrinth/ui'
 import { ref, shallowRef } from 'vue'
 
+import { isUnresolvedProjectId } from '@/helpers/content-identity'
 import type { InstanceContentSnapshotItem } from '@/helpers/instance'
 import {
     type ResourceRelease,
@@ -33,7 +34,7 @@ export function contentVersionContext(item: ContentItem, entry?: InstanceContent
         exact?.release.project ??
         (entry?.provider && entry.providerProjectId
             ? { source: entry.provider, projectId: entry.providerProjectId }
-            : item.project?.id && !item.project.id.startsWith('local:')
+            : item.project?.id && !isUnresolvedProjectId(item.project.id)
               ? {
                     source: item.origin_provider ?? 'modrinth',
                     projectId: item.project.id.replace(/^curseforge:/, ''),

@@ -10,6 +10,7 @@ use crate::state::instances::{
 };
 use crate::state::{
     InstanceInstallStage, LauncherFeatureVersion, ReleaseChannel, State,
+    local_id,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -68,7 +69,7 @@ pub(crate) async fn create_direct_link_instance(
             .await?;
 
     let now = Utc::now();
-    let instance_id = format!("local:{}", Uuid::new_v4());
+    let instance_id = local_id(Uuid::new_v4());
     let content_set_id = format!("content-set:{}", Uuid::new_v4());
     let instance = Instance {
         id: instance_id.clone(),

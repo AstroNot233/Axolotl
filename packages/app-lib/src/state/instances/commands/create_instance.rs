@@ -9,7 +9,7 @@ use crate::state::instances::{
 };
 use crate::state::{
     InstanceInstallStage, LauncherFeatureVersion, ModLoader, ReleaseChannel,
-    State,
+    State, local_id,
 };
 use crate::util::fetch::{self, write_cached_icon};
 use crate::util::io;
@@ -86,7 +86,7 @@ pub(crate) async fn create_instance(
         let icon_path =
             resolve_icon_path(input.icon_path.as_deref(), state).await?;
         let now = Utc::now();
-        let instance_id = format!("local:{}", Uuid::new_v4());
+        let instance_id = local_id(Uuid::new_v4());
         let content_set_id = format!("content-set:{}", Uuid::new_v4());
         let instance = Instance {
             id: instance_id.clone(),
@@ -311,15 +311,7 @@ async fn fetch_icon_bytes(
         return Ok(response.bytes().await?);
     }
 
-    fetch::fetch(
-        icon_url,
-        None,
-        None,
-        None,
-        &state.fetch_semaphore,
-        &state.pool,
-    )
-    .await
+    fetch::fetch(icon_url, None, None, None, &state.fetch_semaphore).await
 }
 
 fn is_direct_cdn_icon_url(url: &str) -> bool {

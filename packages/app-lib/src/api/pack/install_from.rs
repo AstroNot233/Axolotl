@@ -432,7 +432,6 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
             ),
         &pack_path,
         &state.download_semaphore,
-        &state.pool,
         progress,
     )
     .await?;
@@ -477,15 +476,9 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
                         .build(),
                 )
                 .await?;
-            let icon_bytes = fetch(
-                &icon_url,
-                None,
-                None,
-                None,
-                &state.fetch_semaphore,
-                &state.pool,
-            )
-            .await?;
+            let icon_bytes =
+                fetch(&icon_url, None, None, None, &state.fetch_semaphore)
+                    .await?;
 
             let filename = icon_url.rsplit('/').next();
 

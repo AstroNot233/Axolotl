@@ -1,16 +1,15 @@
-import assert from 'node:assert/strict'
-import test from 'node:test'
+import { expect, it } from 'vitest'
 
 import { isCurrentUpgradeSelectPlanning } from './planning-navigation.ts'
 
-test('planner continuation navigates only while same Select request remains current', () => {
-    assert.equal(isCurrentUpgradeSelectPlanning(false, 1, 1, 'InstanceUpgrade', 'a', 'a'), true)
-    assert.equal(isCurrentUpgradeSelectPlanning(false, 1, 1, 'InstanceContent', 'a', 'a'), false)
-    assert.equal(isCurrentUpgradeSelectPlanning(false, 1, 2, 'InstanceUpgrade', 'a', 'a'), false)
-    assert.equal(isCurrentUpgradeSelectPlanning(true, 1, 1, 'InstanceUpgrade', 'a', 'a'), false)
+it('planner continuation navigates only while same Select request remains current', () => {
+    expect(isCurrentUpgradeSelectPlanning(false, 1, 1, 'InstanceUpgrade', 'a', 'a')).toBe(true)
+    expect(isCurrentUpgradeSelectPlanning(false, 1, 1, 'InstanceContent', 'a', 'a')).toBe(false)
+    expect(isCurrentUpgradeSelectPlanning(false, 1, 2, 'InstanceUpgrade', 'a', 'a')).toBe(false)
+    expect(isCurrentUpgradeSelectPlanning(true, 1, 1, 'InstanceUpgrade', 'a', 'a')).toBe(false)
 })
 
-test('pending planner completion does not navigate after route changes', async () => {
+it('pending planner completion does not navigate after route changes', async () => {
     let resolvePlanner!: () => void
     const planner = new Promise<void>((resolve) => {
         resolvePlanner = resolve
@@ -25,10 +24,10 @@ test('pending planner completion does not navigate after route changes', async (
     resolvePlanner()
     await continuation
 
-    assert.equal(navigations, 0)
+    expect(navigations).toBe(0)
 })
 
-test('pending planner completion navigates once while Select remains current', async () => {
+it('pending planner completion navigates once while Select remains current', async () => {
     let resolvePlanner!: () => void
     const planner = new Promise<void>((resolve) => {
         resolvePlanner = resolve
@@ -43,5 +42,5 @@ test('pending planner completion navigates once while Select remains current', a
     resolvePlanner()
     await continuation
 
-    assert.equal(navigations, 1)
+    expect(navigations).toBe(1)
 })

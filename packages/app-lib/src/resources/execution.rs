@@ -454,7 +454,6 @@ pub(crate) async fn execute(
                 request,
                 &path,
                 &state.download_semaphore,
-                &state.pool,
                 None,
             )
             .await?;
