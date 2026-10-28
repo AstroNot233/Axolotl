@@ -199,7 +199,7 @@ function closeDesign() {
     design.value = null
     editingLayer.value = null
     history.value = emptyHistory()
-    endDrag()
+    cancelDrag()
 }
 
 function openRecent(record: RecentBanner) {
@@ -343,7 +343,7 @@ function startDrag(displayIndex: number, event: PointerEvent) {
     document.body.style.userSelect = 'none'
     window.addEventListener('pointermove', trackPointer)
     window.addEventListener('pointerup', endDrag)
-    window.addEventListener('pointercancel', endDrag)
+    window.addEventListener('pointercancel', cancelDrag)
     // The dragged card only leaves the list on the next frame; measure after that.
     void nextTick(() => updateTarget(event, snapshot))
 }
@@ -379,17 +379,35 @@ function updateTarget(event: PointerEvent, snapshot?: FlipSnapshot) {
     void nextTick(() => playLayout(before))
 }
 
-function endDrag() {
-    const state = drag.value
-    if (!state) return
-    const snapshot = state.from !== state.to ? captureLayout() : null
+/** Drops the drag state along with the listeners that follow it. */
+function resetDrag() {
     drag.value = null
     document.body.style.userSelect = ''
     window.removeEventListener('pointermove', trackPointer)
     window.removeEventListener('pointerup', endDrag)
-    window.removeEventListener('pointercancel', endDrag)
+    window.removeEventListener('pointercancel', cancelDrag)
+}
+
+function endDrag(event?: PointerEvent) {
+    const state = drag.value
+    if (!state) return
+    const snapshot = state.from !== state.to ? captureLayout() : null
+    resetDrag()
     if (state.from === state.to) return
     reorder(state.from, state.to)
+    if (snapshot) void nextTick(() => playLayout(snapshot))
+}
+
+/**
+ * `pointercancel` means the browser took the pointer away mid-move, so the
+ * gesture never completed: the list goes back to the order it started in
+ * instead of applying the slot the pointer happened to be over.
+ */
+function cancelDrag() {
+    const state = drag.value
+    if (!state) return
+    const snapshot = state.from !== state.to ? captureLayout() : null
+    resetDrag()
     if (snapshot) void nextTick(() => playLayout(snapshot))
 }
 
@@ -510,7 +528,7 @@ onBeforeUnmount(() => {
     document.body.style.userSelect = ''
     window.removeEventListener('pointermove', trackPointer)
     window.removeEventListener('pointerup', endDrag)
-    window.removeEventListener('pointercancel', endDrag)
+    window.removeEventListener('pointercancel', cancelDrag)
 })
 </script>
 
