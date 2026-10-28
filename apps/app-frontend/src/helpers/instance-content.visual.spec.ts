@@ -4,7 +4,8 @@ import { contentProjectUrl } from './content-project-links'
 import { get_content_snapshot, type InstanceContentSnapshot } from './instance'
 import { loadInstanceContentData, normalizeInstanceContentSnapshot } from './instance-content'
 vi.mock('./instance', () => ({ get_content_snapshot: vi.fn() }))
-vi.mock('@tauri-apps/api/core', () => ({ convertFileSrc: (path: string) => path }))
+// content-project-links reaches content-identity, which imports invoke.
+vi.mock('@tauri-apps/api/core', () => ({ convertFileSrc: (path: string) => path, invoke: vi.fn() }))
 beforeEach(() => vi.resetAllMocks())
 const snapshot = (): InstanceContentSnapshot => ({
     instanceId: 'instance',
