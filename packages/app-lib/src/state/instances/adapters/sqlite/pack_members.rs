@@ -777,3 +777,140 @@ pub(crate) async fn mark_pack_member_reconciled_in_transaction(
 
     Ok(())
 }
+
+/// A content entry the pack snapshot may claim.
+pub(crate) struct CurseForgeReconciliationCandidate {
+    pub entry_id: String,
+    pub relative_path: String,
+    pub enabled: bool,
+    pub missing: bool,
+    pub provider_project_id: Option<String>,
+    pub provider_release_id: Option<String>,
+}
+
+/// Reads the entries of a content set with their CurseForge reference, newest
+/// first, as the candidates a pack snapshot may claim.
+pub(crate) async fn get_curseforge_reconciliation_candidates<'e, E>(
+    content_set_id: &str,
+    exec: E,
+) -> crate::Result<Vec<CurseForgeReconciliationCandidate>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let rows = sqlx::query(
+        "SELECT entry.id AS entry_id, file.relative_path, entry.enabled,
+            file.missing, ref.provider_project_id, ref.provider_release_id
+         FROM instance_content_entries entry
+         INNER JOIN instance_files file ON file.id = entry.file_id
+         LEFT JOIN instance_content_provider_refs ref
+            ON ref.content_entry_id = entry.id AND ref.provider = 'curseforge'
+         WHERE entry.content_set_id = ?
+         ORDER BY entry.modified_at DESC",
+    )
+    .bind(content_set_id)
+    .fetch_all(exec)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(CurseForgeReconciliationCandidate {
+                entry_id: row.try_get("entry_id")?,
+                relative_path: row.try_get("relative_path")?,
+                enabled: row.try_get::<i64, _>("enabled")? != 0,
+                missing: row.try_get::<i64, _>("missing")? != 0,
+                provider_project_id: row.try_get("provider_project_id")?,
+                provider_release_id: row.try_get("provider_release_id")?,
+            })
+        })
+        .collect()
+}
+
+/// Reads the members of a content set as reconciliation sees them: keyed by
+/// their member key, with the override path of local ones.
+pub(crate) async fn get_reconciliation_members<'e, E>(
+    content_set_id: &str,
+    exec: E,
+) -> crate::Result<
+    Vec<(
+        String,
+        String,
+        PackMemberOverrideKind,
+        PackMemberMaterializationState,
+        Option<String>,
+    )>,
+>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let rows = sqlx::query(
+        "SELECT id, member_key, override_kind, materialization_state,
+            CASE WHEN provider IS NULL THEN expected_relative_path END AS override_path
+         FROM instance_pack_members WHERE content_set_id = ?",
+    )
+    .bind(content_set_id)
+    .fetch_all(exec)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<String, _>("member_key")?,
+                row.try_get::<String, _>("id")?,
+                PackMemberOverrideKind::from_str(
+                    &row.try_get::<String, _>("override_kind")?,
+                )?,
+                PackMemberMaterializationState::from_str(
+                    &row.try_get::<String, _>("materialization_state")?,
+                )?,
+                row.try_get::<Option<String>, _>("override_path")?,
+            ))
+        })
+        .collect()
+}
+
+/// Reads the CurseForge members of a content set as the manual download pass
+/// needs them, keyed by their provider ids.
+pub(crate) async fn get_curseforge_member_rows<'e, E>(
+    content_set_id: &str,
+    exec: E,
+) -> crate::Result<
+    Vec<(
+        (Option<String>, Option<String>),
+        String,
+        Option<String>,
+        PackMemberMaterializationState,
+        PackMemberOverrideKind,
+    )>,
+>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let rows = sqlx::query(
+        "SELECT id, content_entry_id, provider_project_id,
+                provider_release_id, materialization_state, override_kind
+         FROM instance_pack_members
+         WHERE content_set_id = ? AND provider = 'curseforge'",
+    )
+    .bind(content_set_id)
+    .fetch_all(exec)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok((
+                (
+                    row.try_get::<Option<String>, _>("provider_project_id")?,
+                    row.try_get::<Option<String>, _>("provider_release_id")?,
+                ),
+                row.try_get::<String, _>("id")?,
+                row.try_get::<Option<String>, _>("content_entry_id")?,
+                PackMemberMaterializationState::from_str(
+                    &row.try_get::<String, _>("materialization_state")?,
+                )?,
+                PackMemberOverrideKind::from_str(
+                    &row.try_get::<String, _>("override_kind")?,
+                )?,
+            ))
+        })
+        .collect()
+}

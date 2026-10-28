@@ -564,3 +564,42 @@ pub(crate) async fn has_unclassified_present_file(
 
     Ok(unclassified != 0)
 }
+
+/// Reads the instance's present files with the entry that already claims each
+/// of them, as the pack snapshot needs them to classify overrides.
+pub(crate) async fn get_present_files_with_entry<'e, E>(
+    instance_id: &str,
+    content_set_id: &str,
+    exec: E,
+) -> crate::Result<Vec<(String, String, bool, Option<String>)>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let rows = sqlx::query(
+        "SELECT file.id AS file_id, file.relative_path, file.enabled,
+            (
+                SELECT entry.id
+                FROM instance_content_entries entry
+                WHERE entry.content_set_id = ? AND entry.file_id = file.id
+                ORDER BY entry.modified_at DESC
+                LIMIT 1
+            ) AS entry_id
+         FROM instance_files file
+         WHERE file.instance_id = ? AND file.missing = 0",
+    )
+    .bind(content_set_id)
+    .bind(instance_id)
+    .fetch_all(exec)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<String, _>("relative_path")?,
+                row.try_get::<String, _>("file_id")?,
+                row.try_get::<i64, _>("enabled")? != 0,
+                row.try_get::<Option<String>, _>("entry_id")?,
+            ))
+        })
+        .collect()
+}

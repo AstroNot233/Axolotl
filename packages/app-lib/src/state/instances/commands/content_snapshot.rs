@@ -5,8 +5,6 @@ use dependencies::backfill_dependency_edges_from_metadata;
 
 use std::collections::{HashMap, HashSet};
 
-use sqlx::Row;
-
 use super::list_content::list_all_content_from_files;
 use super::sync_content_files::project_type_for_file;
 use crate::State;
@@ -644,16 +642,6 @@ async fn get_content_snapshot_inner(
     })
 }
 
-#[derive(Clone)]
-struct CurseForgeReconciliationCandidate {
-    entry_id: String,
-    relative_path: String,
-    enabled: bool,
-    missing: bool,
-    provider_project_id: Option<String>,
-    provider_release_id: Option<String>,
-}
-
 pub(crate) async fn reconcile_curseforge_members(
     instance_id: &str,
     content_set_id: &str,
@@ -664,59 +652,17 @@ pub(crate) async fn reconcile_curseforge_members(
 
     let _instance_lock = state.lock_instance_content(instance_id).await;
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
-    let rows = sqlx::query(
-        "SELECT entry.id AS entry_id, file.relative_path, entry.enabled,
-            file.missing, ref.provider_project_id, ref.provider_release_id
-         FROM instance_content_entries entry
-         INNER JOIN instance_files file ON file.id = entry.file_id
-         LEFT JOIN instance_content_provider_refs ref
-            ON ref.content_entry_id = entry.id AND ref.provider = 'curseforge'
-         WHERE entry.content_set_id = ?
-         ORDER BY entry.modified_at DESC",
+    let candidates = pack_members::get_curseforge_reconciliation_candidates(
+        content_set_id,
+        &mut *tx,
     )
-    .bind(content_set_id)
-    .fetch_all(&mut *tx)
     .await?;
-    let candidates = rows
-        .into_iter()
-        .map(|row| {
-            Ok(CurseForgeReconciliationCandidate {
-                entry_id: row.try_get("entry_id")?,
-                relative_path: row.try_get("relative_path")?,
-                enabled: row.try_get::<i64, _>("enabled")? != 0,
-                missing: row.try_get::<i64, _>("missing")? != 0,
-                provider_project_id: row.try_get("provider_project_id")?,
-                provider_release_id: row.try_get("provider_release_id")?,
-            })
-        })
-        .collect::<crate::Result<Vec<_>>>()?;
-    let member_rows = sqlx::query(
-        "SELECT id, member_key, override_kind, materialization_state,
-            CASE WHEN provider IS NULL THEN expected_relative_path END AS override_path
-         FROM instance_pack_members WHERE content_set_id = ?",
-    )
-    .bind(content_set_id)
-    .fetch_all(&mut *tx)
-    .await?;
-    let mut existing_members = member_rows
-        .into_iter()
-        .map(|row| {
-            let key = row.try_get::<String, _>("member_key")?;
-            Ok((
-                key,
-                (
-                    row.try_get::<String, _>("id")?,
-                    PackMemberOverrideKind::from_str(
-                        &row.try_get::<String, _>("override_kind")?,
-                    )?,
-                    PackMemberMaterializationState::from_str(
-                        &row.try_get::<String, _>("materialization_state")?,
-                    )?,
-                    row.try_get::<Option<String>, _>("override_path")?,
-                ),
-            ))
-        })
-        .collect::<crate::Result<HashMap<_, _>>>()?;
+    let mut existing_members =
+        pack_members::get_reconciliation_members(content_set_id, &mut *tx)
+            .await?
+            .into_iter()
+            .map(|(key, id, kind, state, path)| (key, (id, kind, state, path)))
+            .collect::<HashMap<_, _>>();
     let pending: HashSet<(String, String)> =
         pack_members::get_curseforge_pending_downloads(instance_id, &mut *tx)
             .await?
@@ -897,36 +843,21 @@ async fn reconcile_curseforge_override_entries_in_transaction(
     expected: &[crate::api::curseforge::CurseForgePackExpectedOverride],
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
 ) -> crate::Result<()> {
-    let rows = sqlx::query(
-        "SELECT file.id AS file_id, file.relative_path, file.enabled,
-            (
-                SELECT entry.id
-                FROM instance_content_entries entry
-                WHERE entry.content_set_id = ? AND entry.file_id = file.id
-                ORDER BY entry.modified_at DESC
-                LIMIT 1
-            ) AS entry_id
-         FROM instance_files file
-         WHERE file.instance_id = ? AND file.missing = 0",
+    let rows = files::get_present_files_with_entry(
+        instance_id,
+        content_set_id,
+        &mut **tx,
     )
-    .bind(content_set_id)
-    .bind(instance_id)
-    .fetch_all(&mut **tx)
     .await?;
     let files = rows
         .into_iter()
-        .map(|row| {
-            let relative_path = row.try_get::<String, _>("relative_path")?;
-            Ok((
+        .map(|(relative_path, file_id, enabled, entry_id)| {
+            (
                 normalized_content_path(&relative_path),
-                (
-                    row.try_get::<String, _>("file_id")?,
-                    row.try_get::<i64, _>("enabled")? != 0,
-                    row.try_get::<Option<String>, _>("entry_id")?,
-                ),
-            ))
+                (file_id, enabled, entry_id),
+            )
         })
-        .collect::<crate::Result<HashMap<_, _>>>()?;
+        .collect::<HashMap<_, _>>();
     let expected = expected
         .iter()
         .map(|item| {
@@ -991,36 +922,14 @@ async fn reconcile_curseforge_manual_downloads(
 
     let _instance_lock = state.lock_instance_content(instance_id).await;
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
-    let member_rows = sqlx::query(
-        "SELECT id, content_entry_id, provider_project_id,
-                provider_release_id, materialization_state, override_kind
-         FROM instance_pack_members
-         WHERE content_set_id = ? AND provider = 'curseforge'",
-    )
-    .bind(content_set_id)
-    .fetch_all(&mut *tx)
-    .await?;
-    let members = member_rows
-        .into_iter()
-        .map(|row| {
-            Ok((
-                (
-                    row.try_get::<Option<String>, _>("provider_project_id")?,
-                    row.try_get::<Option<String>, _>("provider_release_id")?,
-                ),
-                (
-                    row.try_get::<String, _>("id")?,
-                    row.try_get::<Option<String>, _>("content_entry_id")?,
-                    PackMemberMaterializationState::from_str(
-                        &row.try_get::<String, _>("materialization_state")?,
-                    )?,
-                    PackMemberOverrideKind::from_str(
-                        &row.try_get::<String, _>("override_kind")?,
-                    )?,
-                ),
-            ))
-        })
-        .collect::<crate::Result<HashMap<_, _>>>()?;
+    let members =
+        pack_members::get_curseforge_member_rows(content_set_id, &mut *tx)
+            .await?
+            .into_iter()
+            .map(|(key, id, entry_id, state, kind)| {
+                (key, (id, entry_id, state, kind))
+            })
+            .collect::<HashMap<_, _>>();
     let mut pending: HashSet<(String, String)> =
         pack_members::get_curseforge_pending_downloads(instance_id, &mut *tx)
             .await?
