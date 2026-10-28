@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+use super::values::{
+    optional_timestamp, project_type_from_str, timestamp, unsigned,
+};
 use crate::state::instances::{
     ContentDependencyEdge, ContentDependencyKind, ContentEntry,
     ContentOwnershipKind, ContentRequirement, ContentSet, ContentSetRemoteRef,
@@ -2444,42 +2447,6 @@ pub(crate) async fn bump_content_set_revision_in_transaction(
     .fetch_one(&mut **tx)
     .await?;
     unsigned(revision, "instance_content_sets.revision")
-}
-
-fn project_type_from_str(value: &str) -> crate::Result<ProjectType> {
-    match value {
-        "mod" => Ok(ProjectType::Mod),
-        "datapack" => Ok(ProjectType::DataPack),
-        "resourcepack" => Ok(ProjectType::ResourcePack),
-        "shader" | "shaderpack" => Ok(ProjectType::ShaderPack),
-        "schematic" => Ok(ProjectType::Schematic),
-        "world_save" => Ok(ProjectType::WorldSave),
-        other => Err(crate::ErrorKind::InputError(format!(
-            "Unknown content project type {other}"
-        ))
-        .into()),
-    }
-}
-
-fn timestamp(value: i64) -> DateTime<Utc> {
-    Utc.timestamp_opt(value, 0)
-        .single()
-        .unwrap_or_else(Utc::now)
-}
-
-fn optional_timestamp(value: i64) -> Option<DateTime<Utc>> {
-    Utc.timestamp_opt(value, 0).single()
-}
-
-fn unsigned(value: i64, column: &str) -> crate::Result<u64> {
-    if value < 0 {
-        return Err(crate::ErrorKind::InputError(format!(
-            "Expected {column} to be non-negative"
-        ))
-        .into());
-    }
-
-    Ok(value as u64)
 }
 
 #[cfg(test)]
