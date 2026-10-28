@@ -603,3 +603,43 @@ where
         })
         .collect()
 }
+
+/// Drops one indexed file of an instance.
+pub(crate) async fn delete_file_in_transaction(
+    instance_id: &str,
+    file_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "DELETE FROM instance_files
+         WHERE instance_id = ? AND id = ?",
+    )
+    .bind(instance_id)
+    .bind(file_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Records the path, name and enabled flag of a file that kept its identity
+/// while its stored row is renamed in place.
+pub(crate) async fn rename_file_in_place_in_transaction(
+    instance_id: &str,
+    relative_path: &str,
+    final_relative_path: &str,
+    file_name: &str,
+    enabled: bool,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query("UPDATE instance_files SET relative_path = ?, file_name = ?, enabled = ?, local_mod_data = NULL, icon_path = NULL WHERE instance_id = ? AND relative_path = ?")
+        .bind(final_relative_path)
+        .bind(file_name)
+        .bind(enabled)
+        .bind(instance_id)
+        .bind(relative_path)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}

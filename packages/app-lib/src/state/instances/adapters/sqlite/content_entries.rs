@@ -1119,3 +1119,203 @@ pub(crate) async fn claim_entry_for_pack_in_transaction(
 
     Ok(())
 }
+
+/// Reads the ownership of the entry that claims a file path in the instance's
+/// applied content set.
+pub(crate) async fn get_ownership_kind_for_path(
+    instance_id: &str,
+    relative_path: &str,
+    pool: &SqlitePool,
+) -> crate::Result<Option<ContentOwnershipKind>> {
+    let ownership = sqlx::query_scalar::<_, String>(
+        "SELECT entry.ownership_kind
+         FROM instance_files file
+         INNER JOIN instance_content_entries entry ON entry.file_id = file.id
+         INNER JOIN instances instance ON instance.id = entry.instance_id
+         WHERE file.instance_id = ? AND file.relative_path = ?
+            AND entry.content_set_id = instance.applied_content_set_id
+         ORDER BY entry.modified_at DESC
+         LIMIT 1",
+    )
+    .bind(instance_id)
+    .bind(relative_path)
+    .fetch_optional(pool)
+    .await?;
+
+    ownership
+        .as_deref()
+        .map(ContentOwnershipKind::from_str)
+        .transpose()
+}
+
+/// Reads the newest entry that claims a path of the content set.
+pub(crate) async fn get_entry_id_by_relative_path<'e, E>(
+    content_set_id: &str,
+    relative_path: &str,
+    exec: E,
+) -> crate::Result<Option<String>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let id = sqlx::query_scalar::<_, String>(
+        "SELECT entry.id FROM instance_content_entries entry JOIN instance_files file ON file.id = entry.file_id WHERE entry.content_set_id = ? AND file.relative_path = ? ORDER BY entry.modified_at DESC LIMIT 1",
+    )
+    .bind(content_set_id)
+    .bind(relative_path)
+    .fetch_optional(exec)
+    .await?;
+
+    Ok(id)
+}
+
+/// Reads the newest Modrinth entry of the content set that names a release.
+pub(crate) async fn get_modrinth_entry_id_by_release<'e, E>(
+    content_set_id: &str,
+    project_id: &str,
+    release_id: &str,
+    exec: E,
+) -> crate::Result<Option<String>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let id = sqlx::query_scalar::<_, String>(
+        "SELECT entry.id FROM instance_content_entries entry JOIN instance_content_provider_refs ref ON ref.content_entry_id = entry.id WHERE entry.content_set_id = ? AND ref.provider = 'modrinth' AND ref.provider_project_id = ? AND ref.provider_release_id = ? ORDER BY entry.modified_at DESC LIMIT 1",
+    )
+    .bind(content_set_id)
+    .bind(project_id)
+    .bind(release_id)
+    .fetch_optional(exec)
+    .await?;
+
+    Ok(id)
+}
+
+/// Reads the newest entry that claims one file of the content set.
+pub(crate) async fn get_entry_id_by_file_path<'e, E>(
+    content_set_id: &str,
+    instance_id: &str,
+    relative_path: &str,
+    exec: E,
+) -> crate::Result<Option<String>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let id = sqlx::query_scalar::<_, String>(
+        "SELECT entry.id FROM instance_content_entries entry JOIN instance_files file ON file.id = entry.file_id WHERE entry.content_set_id = ? AND file.instance_id = ? AND file.relative_path = ?",
+    )
+    .bind(content_set_id)
+    .bind(instance_id)
+    .bind(relative_path)
+    .fetch_optional(exec)
+    .await?;
+
+    Ok(id)
+}
+
+/// Records whether one file's entries are enabled, telling the caller how many
+/// rows it reached so a file without an entry can be classified afterwards.
+pub(crate) async fn set_entries_enabled_for_file_in_transaction(
+    content_set_id: &str,
+    file_id: &str,
+    enabled: bool,
+    modified_at: i64,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<u64> {
+    let result = sqlx::query(
+        "UPDATE instance_content_entries
+         SET enabled = ?, modified_at = ?
+         WHERE content_set_id = ? AND file_id = ?",
+    )
+    .bind(i64::from(enabled))
+    .bind(modified_at)
+    .bind(content_set_id)
+    .bind(file_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(result.rows_affected())
+}
+
+/// Drops the entries that claim one file.
+pub(crate) async fn delete_entries_for_file_in_transaction(
+    content_set_id: &str,
+    file_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "DELETE FROM instance_content_entries
+         WHERE content_set_id = ? AND file_id = ?",
+    )
+    .bind(content_set_id)
+    .bind(file_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Drops every provider reference of an entry.
+pub(crate) async fn delete_provider_refs_for_entry_in_transaction(
+    entry_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "DELETE FROM instance_content_provider_refs WHERE content_entry_id = ?",
+    )
+    .bind(entry_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Drops the dependency edges an entry is the parent of.
+pub(crate) async fn delete_dependency_edges_for_parent_in_transaction(
+    entry_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "DELETE FROM instance_content_dependencies WHERE parent_entry_id = ?",
+    )
+    .bind(entry_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Drops the update check an entry held.
+pub(crate) async fn delete_update_check_for_entry_in_transaction(
+    entry_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "DELETE FROM instance_content_update_checks WHERE content_entry_id = ?",
+    )
+    .bind(entry_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Reads the newest entry that claims a path of the content set, which the
+/// caller needs to exist.
+pub(crate) async fn require_entry_id_by_relative_path<'e, E>(
+    content_set_id: &str,
+    relative_path: &str,
+    exec: E,
+) -> crate::Result<String>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let id = sqlx::query_scalar::<_, String>(
+        "SELECT entry.id FROM instance_content_entries entry JOIN instance_files file ON file.id = entry.file_id WHERE entry.content_set_id = ? AND file.relative_path = ? ORDER BY entry.modified_at DESC LIMIT 1",
+    )
+    .bind(content_set_id)
+    .bind(relative_path)
+    .fetch_one(exec)
+    .await?;
+
+    Ok(id)
+}

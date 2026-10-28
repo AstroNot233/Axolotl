@@ -914,3 +914,58 @@ where
         })
         .collect()
 }
+
+/// Records how the pack now treats the members that point at one file.
+pub(crate) async fn set_override_for_file_in_transaction(
+    content_set_id: &str,
+    file_id: &str,
+    override_kind: PackMemberOverrideKind,
+    modified_at: i64,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "UPDATE instance_pack_members
+         SET override_kind = ?, materialization_state = 'present',
+             modified_at = ?
+         WHERE content_entry_id IN (
+            SELECT id FROM instance_content_entries
+            WHERE content_set_id = ? AND file_id = ?
+         )",
+    )
+    .bind(override_kind.as_str())
+    .bind(modified_at)
+    .bind(content_set_id)
+    .bind(file_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Detaches the members that point at one file, keeping them as removed
+/// overrides of the pack.
+pub(crate) async fn detach_members_for_file_in_transaction(
+    content_set_id: &str,
+    file_id: &str,
+    modified_at: i64,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "UPDATE instance_pack_members
+         SET content_entry_id = NULL,
+             materialization_state = 'removed',
+             override_kind = 'removed',
+             modified_at = ?
+         WHERE content_entry_id IN (
+            SELECT id FROM instance_content_entries
+            WHERE content_set_id = ? AND file_id = ?
+         )",
+    )
+    .bind(modified_at)
+    .bind(content_set_id)
+    .bind(file_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}

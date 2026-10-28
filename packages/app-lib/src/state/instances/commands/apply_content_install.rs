@@ -9,7 +9,9 @@ use crate::state::instances::{
     PackMemberOverrideKind,
     adapters::{
         filesystem::project_type_from_relative_path,
-        sqlite::{content_rows, instance_rows},
+        sqlite::{
+            content_entries, content_rows, files, instance_rows, pack_members,
+        },
     },
 };
 use crate::state::{
@@ -1797,26 +1799,14 @@ pub(crate) async fn content_ownership_for_path(
     project_path: &str,
     state: &State,
 ) -> crate::Result<ContentOwnershipKind> {
-    let ownership = sqlx::query_scalar::<_, String>(
-        "SELECT entry.ownership_kind
-         FROM instance_files file
-         INNER JOIN instance_content_entries entry ON entry.file_id = file.id
-         INNER JOIN instances instance ON instance.id = entry.instance_id
-         WHERE file.instance_id = ? AND file.relative_path = ?
-            AND entry.content_set_id = instance.applied_content_set_id
-         ORDER BY entry.modified_at DESC
-         LIMIT 1",
+    let ownership = content_entries::get_ownership_kind_for_path(
+        instance_id,
+        project_path,
+        &state.pool,
     )
-    .bind(instance_id)
-    .bind(project_path)
-    .fetch_optional(&state.pool)
     .await?;
 
-    ownership
-        .as_deref()
-        .map(ContentOwnershipKind::from_str)
-        .transpose()
-        .map(|ownership| ownership.unwrap_or_default())
+    Ok(ownership.unwrap_or_default())
 }
 
 pub(crate) async fn materialize_project_download(
@@ -3139,8 +3129,14 @@ async fn record_resolved_plan_edges(
         .collect::<Vec<_>>();
     let mut ids = Vec::with_capacity(paths.len());
     for path in paths {
-        ids.push(sqlx::query_scalar::<_, String>("SELECT entry.id FROM instance_content_entries entry JOIN instance_files file ON file.id = entry.file_id WHERE entry.content_set_id = ? AND file.relative_path = ? ORDER BY entry.modified_at DESC LIMIT 1")
-            .bind(content_set_id).bind(path).fetch_one(&mut **tx).await?);
+        ids.push(
+            content_entries::require_entry_id_by_relative_path(
+                content_set_id,
+                path,
+                &mut **tx,
+            )
+            .await?,
+        );
     }
     for id in ids.iter().skip(1) {
         content_rows::set_content_entry_auto_dependency_in_transaction(
@@ -3182,9 +3178,20 @@ async fn record_resolved_plan_edges(
         let Some(version) = skipped.version_id.as_deref() else {
             continue;
         };
-        if let Some(child) = sqlx::query_scalar::<_, String>("SELECT entry.id FROM instance_content_entries entry JOIN instance_content_provider_refs ref ON ref.content_entry_id = entry.id WHERE entry.content_set_id = ? AND ref.provider = 'modrinth' AND ref.provider_project_id = ? AND ref.provider_release_id = ? ORDER BY entry.modified_at DESC LIMIT 1")
-            .bind(content_set_id).bind(&skipped.project_id).bind(version).fetch_optional(&mut **tx).await? {
-            edges.push((parent, child, skipped.project_id.clone(), version.to_string()));
+        if let Some(child) = content_entries::get_modrinth_entry_id_by_release(
+            content_set_id,
+            &skipped.project_id,
+            version,
+            &mut **tx,
+        )
+        .await?
+        {
+            edges.push((
+                parent,
+                child,
+                skipped.project_id.clone(),
+                version.to_string(),
+            ));
         }
     }
     for (parent, child, project, version) in edges {
@@ -3400,18 +3407,16 @@ pub(crate) async fn toggle_content_entries(
                     operation.current_path
                 ))
             })?;
-            let updated_entry = sqlx::query(
-                "UPDATE instance_content_entries
-                 SET enabled = ?, modified_at = ?
-                 WHERE content_set_id = ? AND file_id = ?",
-            )
-            .bind(i64::from(operation.enabled))
-            .bind(modified_at)
-            .bind(&scope.content_set_id)
-            .bind(&file.id)
-            .execute(&mut *tx)
-            .await?;
-            if updated_entry.rows_affected() == 0 {
+            let updated_entries =
+                content_entries::set_entries_enabled_for_file_in_transaction(
+                    &scope.content_set_id,
+                    &file.id,
+                    operation.enabled,
+                    modified_at,
+                    &mut tx,
+                )
+                .await?;
+            if updated_entries == 0 {
                 content_rows::upsert_content_entry_from_parts_in_transaction(
                     content_rows::UpsertContentEntry {
                         instance_id: &scope.instance.id,
@@ -3429,24 +3434,17 @@ pub(crate) async fn toggle_content_entries(
                 )
                 .await?;
             }
-            sqlx::query(
-                "UPDATE instance_pack_members
-                 SET override_kind = ?, materialization_state = 'present',
-                     modified_at = ?
-                 WHERE content_entry_id IN (
-                    SELECT id FROM instance_content_entries
-                    WHERE content_set_id = ? AND file_id = ?
-                 )",
+            pack_members::set_override_for_file_in_transaction(
+                &scope.content_set_id,
+                &file.id,
+                if operation.enabled {
+                    PackMemberOverrideKind::None
+                } else {
+                    PackMemberOverrideKind::Disabled
+                },
+                modified_at,
+                &mut tx,
             )
-            .bind(if operation.enabled {
-                "none"
-            } else {
-                "disabled"
-            })
-            .bind(modified_at)
-            .bind(&scope.content_set_id)
-            .bind(&file.id)
-            .execute(&mut *tx)
             .await?;
             results.push(ToggledContentEntry {
                 content_id: operation.content_id.clone(),
@@ -3616,37 +3614,24 @@ pub(crate) async fn remove_project(
         let mut tx = begin_content_write(&state.pool).await?;
         if let Some(file) = file {
             let modified_at = chrono::Utc::now().timestamp();
-            sqlx::query(
-                "UPDATE instance_pack_members
-                 SET content_entry_id = NULL,
-                     materialization_state = 'removed',
-                     override_kind = 'removed',
-                     modified_at = ?
-                 WHERE content_entry_id IN (
-                    SELECT id FROM instance_content_entries
-                    WHERE content_set_id = ? AND file_id = ?
-                 )",
+            pack_members::detach_members_for_file_in_transaction(
+                &scope.content_set_id,
+                &file.id,
+                modified_at,
+                &mut tx,
             )
-            .bind(modified_at)
-            .bind(&scope.content_set_id)
-            .bind(&file.id)
-            .execute(&mut *tx)
             .await?;
-            sqlx::query(
-                "DELETE FROM instance_content_entries
-                 WHERE content_set_id = ? AND file_id = ?",
+            content_entries::delete_entries_for_file_in_transaction(
+                &scope.content_set_id,
+                &file.id,
+                &mut tx,
             )
-            .bind(&scope.content_set_id)
-            .bind(&file.id)
-            .execute(&mut *tx)
             .await?;
-            sqlx::query(
-                "DELETE FROM instance_files
-                 WHERE instance_id = ? AND id = ?",
+            files::delete_file_in_transaction(
+                &scope.instance.id,
+                &file.id,
+                &mut tx,
             )
-            .bind(&scope.instance.id)
-            .bind(&file.id)
-            .execute(&mut *tx)
             .await?;
         }
         content_rows::bump_content_set_revision_in_transaction(
@@ -3905,7 +3890,15 @@ async fn rollback_project_inner(
     };
 
     let mut tx = state.pool.begin().await?;
-    sqlx::query("UPDATE instance_files SET relative_path = ?, file_name = ?, enabled = ?, local_mod_data = NULL, icon_path = NULL WHERE instance_id = ? AND relative_path = ?").bind(&final_relative_path).bind(&final_name).bind(!disabled).bind(&scope.instance.id).bind(project_path).execute(&mut *tx).await?;
+    files::rename_file_in_place_in_transaction(
+        &scope.instance.id,
+        project_path,
+        &final_relative_path,
+        &final_name,
+        !disabled,
+        &mut tx,
+    )
+    .await?;
     content_rows::upsert_instance_file_from_parts_in_transaction(
         content_rows::UpsertInstanceFile {
             instance_id: &scope.instance.id,
@@ -3922,10 +3915,19 @@ async fn rollback_project_inner(
     )
     .await?;
 
-    let entry_id: Option<String> = sqlx::query_scalar("SELECT entry.id FROM instance_content_entries entry JOIN instance_files file ON file.id = entry.file_id WHERE entry.content_set_id = ? AND file.instance_id = ? AND file.relative_path = ?")
-        .bind(&scope.content_set_id).bind(&scope.instance.id).bind(&final_relative_path).fetch_optional(&mut *tx).await?;
+    let entry_id = content_entries::get_entry_id_by_file_path(
+        &scope.content_set_id,
+        &scope.instance.id,
+        &final_relative_path,
+        &mut tx,
+    )
+    .await?;
     if let Some(entry_id) = entry_id {
-        sqlx::query("DELETE FROM instance_content_provider_refs WHERE content_entry_id = ?").bind(&entry_id).execute(&mut *tx).await?;
+        content_entries::delete_provider_refs_for_entry_in_transaction(
+            &entry_id,
+            &mut tx,
+        )
+        .await?;
         sqlx::query(
             "DELETE FROM resource_installed_artifacts WHERE entry_id = ?",
         )
@@ -3936,8 +3938,16 @@ async fn rollback_project_inner(
             .bind(&entry_id)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM instance_content_dependencies WHERE parent_entry_id = ?").bind(&entry_id).execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM instance_content_update_checks WHERE content_entry_id = ?").bind(&entry_id).execute(&mut *tx).await?;
+        content_entries::delete_dependency_edges_for_parent_in_transaction(
+            &entry_id,
+            &mut tx,
+        )
+        .await?;
+        content_entries::delete_update_check_for_entry_in_transaction(
+            &entry_id,
+            &mut tx,
+        )
+        .await?;
     }
     sqlx::query("DELETE FROM store_instance_files WHERE instance_id = ? AND relative_path IN (?, ?)").bind(instance_id).bind(project_path).bind(&final_relative_path).execute(&mut *tx).await?;
     let hash_cache = CacheValue::FileHash(CachedFileHash {
