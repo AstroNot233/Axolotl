@@ -1033,3 +1033,51 @@ pub(crate) async fn upsert_content_update_check(
 #[cfg(test)]
 #[path = "content_entries_tests.rs"]
 mod tests;
+
+/// Reads every provider reference of a content set, with the provider it marks
+/// as the entry's origin.
+pub(crate) async fn get_provider_refs_with_origin_for_content_set(
+    content_set_id: &str,
+    pool: &SqlitePool,
+) -> crate::Result<Vec<(String, ContentProviderRef, Option<ContentProvider>)>> {
+    let rows = sqlx::query(
+        "SELECT ref.content_entry_id, ref.provider,
+                ref.provider_project_id, ref.provider_release_id,
+                ref.provider_file_id,
+                ref.is_origin
+         FROM instance_content_provider_refs ref
+         INNER JOIN instance_content_entries entry
+            ON entry.id = ref.content_entry_id
+         WHERE entry.content_set_id = ?
+         ORDER BY ref.content_entry_id, ref.is_origin DESC, ref.provider,
+            ref.provider_project_id, ref.provider_release_id IS NULL,
+            ref.provider_release_id",
+    )
+    .bind(content_set_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut references = Vec::with_capacity(rows.len());
+    for row in rows {
+        let entry_id = row.try_get::<String, _>("content_entry_id")?;
+        let provider = row.try_get::<String, _>("provider")?;
+        let provider_project_id =
+            row.try_get::<String, _>("provider_project_id")?;
+        let provider_release_id =
+            row.try_get::<Option<String>, _>("provider_release_id")?;
+        let provider_file_id =
+            row.try_get::<Option<String>, _>("provider_file_id")?;
+        let reference = ContentProviderRef::from_database(
+            &provider,
+            &provider_project_id,
+            provider_release_id.as_deref(),
+            provider_file_id.as_deref(),
+        )?;
+        let origin = (row.try_get::<i64, _>("is_origin")? != 0)
+            .then(|| ContentProvider::from_str(&provider))
+            .transpose()?;
+        references.push((entry_id, reference, origin));
+    }
+
+    Ok(references)
+}

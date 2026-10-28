@@ -12,7 +12,10 @@ use super::sync_content_files::project_type_for_file;
 use crate::State;
 use crate::state::instances::adapters::{
     filesystem,
-    sqlite::{content_rows, instance_rows},
+    sqlite::{
+        content_entries, content_rows, content_sets, files, instance_rows,
+        pack_members,
+    },
 };
 use crate::state::instances::{
     ContentDependencyInfo, ContentDependencyRef, ContentItemCapabilities,
@@ -131,44 +134,24 @@ async fn get_content_snapshot_inner(
             version_id,
         } = &link
     {
-        let needs_reconciliation = sqlx::query_scalar::<_, i64>(
-            "SELECT EXISTS(
-                SELECT 1 FROM instance_pack_members
-                WHERE content_set_id = ? AND reconciled = 0
-            )",
+        let needs_reconciliation = pack_members::has_unreconciled_members(
+            &content_set.id,
+            &state.pool,
         )
-        .bind(&content_set.id)
-        .fetch_one(&state.pool)
-        .await?
-            != 0;
-        let needs_manual_recovery = sqlx::query_scalar::<_, i64>(
-            "SELECT EXISTS(
-                SELECT 1 FROM instance_pack_members member
-                WHERE member.content_set_id = ?
-                    AND member.provider = 'curseforge'
-                    AND member.required = 1
-                    AND member.materialization_state = 'missing'
-            )",
+        .await?;
+        let needs_manual_recovery =
+            pack_members::has_missing_required_curseforge_member(
+                &content_set.id,
+                &state.pool,
+            )
+            .await?;
+        let needs_local_classification = files::has_unclassified_present_file(
+            instance_id,
+            &content_set.id,
+            &state.pool,
         )
-        .bind(&content_set.id)
-        .fetch_one(&state.pool)
-        .await?
-            != 0;
-        let needs_local_classification = sqlx::query_scalar::<_, i64>(
-            "SELECT EXISTS(
-                SELECT 1
-                FROM instance_files file
-                LEFT JOIN instance_content_entries entry
-                    ON entry.content_set_id = ? AND entry.file_id = file.id
-                WHERE file.instance_id = ? AND file.missing = 0
-                    AND entry.id IS NULL
-            )",
-        )
-        .bind(&content_set.id)
-        .bind(instance_id)
-        .fetch_one(&state.pool)
-        .await?
-            != 0;
+        .await?;
+
         let parsed_ids = project_id
             .parse::<u32>()
             .ok()
@@ -234,44 +217,19 @@ async fn get_content_snapshot_inner(
 
     let mut refs_by_entry = HashMap::new();
     let mut origin_by_entry = HashMap::new();
-    let provider_rows = sqlx::query(
-        "SELECT ref.content_entry_id, ref.provider,
-                ref.provider_project_id, ref.provider_release_id,
-                ref.provider_file_id,
-                ref.is_origin
-         FROM instance_content_provider_refs ref
-         INNER JOIN instance_content_entries entry
-            ON entry.id = ref.content_entry_id
-         WHERE entry.content_set_id = ?
-         ORDER BY ref.content_entry_id, ref.is_origin DESC, ref.provider,
-            ref.provider_project_id, ref.provider_release_id IS NULL,
-            ref.provider_release_id",
-    )
-    .bind(&content_set.id)
-    .fetch_all(&state.pool)
-    .await?;
-    for row in provider_rows {
-        let entry_id = row.try_get::<String, _>("content_entry_id")?;
-        let provider = row.try_get::<String, _>("provider")?;
-        let provider_project_id =
-            row.try_get::<String, _>("provider_project_id")?;
-        let provider_release_id =
-            row.try_get::<Option<String>, _>("provider_release_id")?;
-        let provider_file_id =
-            row.try_get::<Option<String>, _>("provider_file_id")?;
-        let reference = ContentProviderRef::from_database(
-            &provider,
-            &provider_project_id,
-            provider_release_id.as_deref(),
-            provider_file_id.as_deref(),
-        )?;
+    let provider_rows =
+        content_entries::get_provider_refs_with_origin_for_content_set(
+            &content_set.id,
+            &state.pool,
+        )
+        .await?;
+    for (entry_id, reference, origin) in provider_rows {
         refs_by_entry
             .entry(entry_id.clone())
             .or_insert_with(Vec::new)
             .push(reference);
-        if row.try_get::<i64, _>("is_origin")? != 0 {
-            origin_by_entry
-                .insert(entry_id, ContentProvider::from_str(&provider)?);
+        if let Some(provider) = origin {
+            origin_by_entry.insert(entry_id, provider);
         }
     }
 
@@ -467,8 +425,12 @@ async fn get_content_snapshot_inner(
                     return;
                 }
             };
-            let current: Option<(String, i64)> = match sqlx::query_as("SELECT content.id, content.revision FROM instances instance JOIN instance_content_sets content ON content.id = instance.applied_content_set_id WHERE instance.id = ?")
-                .bind(&instance_id).fetch_optional(&mut *tx).await {
+            let current = match content_sets::get_applied_content_set_revision(
+                &instance_id,
+                &mut *tx,
+            )
+            .await
+            {
                 Ok(current) => current,
                 Err(error) => {
                     tracing::warn!(%error, "Content dependency backfill snapshot check failed");

@@ -401,3 +401,21 @@ pub(crate) async fn set_applied_protocol_version_in_transaction(
 
     Ok(())
 }
+
+/// Reads the applied content set's identity and revision for a revision check.
+pub(crate) async fn get_applied_content_set_revision<'e, E>(
+    instance_id: &str,
+    exec: E,
+) -> crate::Result<Option<(String, i64)>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let current = sqlx::query_as(
+        "SELECT content.id, content.revision FROM instances instance JOIN instance_content_sets content ON content.id = instance.applied_content_set_id WHERE instance.id = ?",
+    )
+    .bind(instance_id)
+    .fetch_optional(exec)
+    .await?;
+
+    Ok(current)
+}

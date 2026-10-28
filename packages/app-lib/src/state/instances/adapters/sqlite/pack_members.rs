@@ -645,3 +645,43 @@ pub(crate) async fn reconcile_pack_unlink_in_transaction(
 #[cfg(test)]
 #[path = "pack_members_tests.rs"]
 mod tests;
+
+/// Whether the content set still has a member the pack snapshot has not
+/// reconciled against.
+pub(crate) async fn has_unreconciled_members(
+    content_set_id: &str,
+    pool: &SqlitePool,
+) -> crate::Result<bool> {
+    let unreconciled: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM instance_pack_members
+            WHERE content_set_id = ? AND reconciled = 0
+        )",
+    )
+    .bind(content_set_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(unreconciled != 0)
+}
+
+/// Whether a required CurseForge member of the content set is still missing.
+pub(crate) async fn has_missing_required_curseforge_member(
+    content_set_id: &str,
+    pool: &SqlitePool,
+) -> crate::Result<bool> {
+    let missing: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM instance_pack_members member
+            WHERE member.content_set_id = ?
+                AND member.provider = 'curseforge'
+                AND member.required = 1
+                AND member.materialization_state = 'missing'
+        )",
+    )
+    .bind(content_set_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(missing != 0)
+}

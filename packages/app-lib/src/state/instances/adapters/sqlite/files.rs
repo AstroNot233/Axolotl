@@ -540,3 +540,27 @@ pub(crate) async fn remove_instance_file_by_relative_path(
 
     Ok(())
 }
+
+/// Whether the instance has a present file that no content entry claims.
+pub(crate) async fn has_unclassified_present_file(
+    instance_id: &str,
+    content_set_id: &str,
+    pool: &SqlitePool,
+) -> crate::Result<bool> {
+    let unclassified: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1
+            FROM instance_files file
+            LEFT JOIN instance_content_entries entry
+                ON entry.content_set_id = ? AND entry.file_id = file.id
+            WHERE file.instance_id = ? AND file.missing = 0
+                AND entry.id IS NULL
+        )",
+    )
+    .bind(content_set_id)
+    .bind(instance_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(unclassified != 0)
+}
