@@ -235,11 +235,9 @@ pub(crate) async fn list_content(
         &state.pool,
     )
     .await?;
-    let link = sqlite::instance_rows::get_instance_link(
-        &resolved.instance.id,
-        &state.pool,
-    )
-    .await?;
+    let link =
+        sqlite::links::get_instance_link(&resolved.instance.id, &state.pool)
+            .await?;
     let imported_modpack_scope = is_imported_modpack_scope(&link);
     let curseforge_modpack_scope = is_curseforge_modpack_scope(&link);
     let linked_modpack_source_kind = linked_modpack_source_kind(&link);
@@ -408,11 +406,9 @@ pub(crate) async fn list_linked_modpack_content(
         &state.pool,
     )
     .await?;
-    let link = sqlite::instance_rows::get_instance_link(
-        &resolved.instance.id,
-        &state.pool,
-    )
-    .await?;
+    let link =
+        sqlite::links::get_instance_link(&resolved.instance.id, &state.pool)
+            .await?;
     if is_imported_modpack_scope(&link) {
         let files = content_projects_for_scope(
             &resolved,

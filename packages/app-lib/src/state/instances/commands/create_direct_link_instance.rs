@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::state::instances::adapters::sqlite::{content_sets, files};
+use crate::state::instances::adapters::sqlite::{content_sets, files, links};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateDirectLinkInstance {
@@ -159,7 +159,7 @@ pub(crate) async fn create_direct_link_instance(
         &mut tx,
     )
     .await?;
-    instance_rows::upsert_instance_link(
+    links::upsert_instance_link(
         &instance_id,
         &InstanceLink::Unmanaged,
         &mut tx,
@@ -207,7 +207,9 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    use crate::state::instances::adapters::sqlite::{content_sets, files};
+    use crate::state::instances::adapters::sqlite::{
+        content_sets, files, links,
+    };
 
     fn write_version(
         root: &Path,
