@@ -579,11 +579,26 @@ pub(crate) async fn execute(
     }
     canceled(&cancel)?;
     let write_started = std::time::Instant::now();
-    tracing::info!(plan_id = %plan.id, instance_id, actions = plan.actions.len(), "Resource execution waiting for database writer");
+    tracing::info!(
+        plan_id = plan.id.as_str(),
+        instance_id,
+        actions = plan.actions.len(),
+        "Resource execution waiting for database writer"
+    );
     let _writer = state.acquire_install_db_permit().await?;
-    tracing::info!(plan_id = %plan.id, instance_id, elapsed_ms = write_started.elapsed().as_millis() as u64, "Resource execution waiting for instance lock");
+    tracing::info!(
+        plan_id = plan.id.as_str(),
+        instance_id,
+        elapsed_ms = write_started.elapsed().as_millis() as u64,
+        "Resource execution waiting for instance lock"
+    );
     let _lock = state.lock_instance_content_exclusive(instance_id).await;
-    tracing::info!(plan_id = %plan.id, instance_id, elapsed_ms = write_started.elapsed().as_millis() as u64, "Resource execution acquired write access");
+    tracing::info!(
+        plan_id = plan.id.as_str(),
+        instance_id,
+        elapsed_ms = write_started.elapsed().as_millis() as u64,
+        "Resource execution acquired write access"
+    );
     let scope = resolve_content_scope(instance_id, None, state).await?;
     if scope.instance.install_stage
         != crate::state::InstanceInstallStage::Installed
@@ -769,7 +784,11 @@ pub(crate) async fn execute(
     canceled(&cancel)?;
     sqlx::query("INSERT INTO resource_execution_journals(plan_id, payload) VALUES (?, ?) ON CONFLICT(plan_id) DO UPDATE SET payload = excluded.payload").bind(plan.id.as_str()).bind(serde_json::to_string(&journal)?).execute(&state.pool).await?;
     let _critical = crate::install::critical_section::enter();
-    tracing::info!(plan_id = %plan.id, instance_id, "Resource execution publishing verified files");
+    tracing::info!(
+        plan_id = plan.id.as_str(),
+        instance_id,
+        "Resource execution publishing verified files"
+    );
     let mut installed_fingerprints = Vec::new();
     let result: crate::Result<()> = async {
         for ((file, (source, _, size, sha1, _)), _) in
@@ -854,7 +873,12 @@ pub(crate) async fn execute(
     drop(_critical);
     drop(_lock);
     drop(_writer);
-    tracing::info!(plan_id = %plan.id, instance_id, elapsed_ms = write_started.elapsed().as_millis() as u64, "Resource execution committed files and database");
+    tracing::info!(
+        plan_id = plan.id.as_str(),
+        instance_id,
+        elapsed_ms = write_started.elapsed().as_millis() as u64,
+        "Resource execution committed files and database"
+    );
     if let Some(reporter) = reporter {
         reporter
             .update(

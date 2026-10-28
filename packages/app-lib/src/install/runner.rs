@@ -405,7 +405,7 @@ pub async fn queue_resource_plan(
     let record = store::get(id, &state).await?.ok_or_else(|| {
         crate::ErrorKind::InputError("resource job was not created".into())
     })?;
-    tracing::info!(job_id = %id, plan_id = %plan_id, revision, instance_id = %plan.instance_id, actions = plan.actions.len(), "Resource execution queued");
+    tracing::info!(job_id = %id, plan_id = plan_id.as_str(), revision, instance_id = %plan.instance_id, actions = plan.actions.len(), "Resource execution queued");
     lifecycle::spawn_job(id);
     if let Err(error) = emit_install_job(&record.snapshot()).await {
         tracing::warn!(%error, "Could not emit queued resource job");
