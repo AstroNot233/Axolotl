@@ -631,6 +631,121 @@ async fn refresh_rows_fill_source_batches_without_increasing_network_concurrency
     state.pool.close().await;
 }
 
+#[tokio::test]
+async fn failed_database_commit_never_publishes_and_retry_revisits_only_unsaved_entries()
+ {
+    let (_temp, state, _) = fixture().await;
+    let task = state
+        .content_refresh
+        .start(state.clone(), "instance".into(), RefreshMode::Normal)
+        .await
+        .unwrap();
+    finished(&state).await;
+    let key = RefreshCheckKey {
+        instance_id: "instance".into(),
+        entry_id: "fast".into(),
+    };
+    let peer = RefreshCheckKey {
+        instance_id: "instance".into(),
+        entry_id: "slow".into(),
+    };
+    let previous = ContentRefreshChecks::get(&state.data, &key)
+        .await
+        .unwrap()
+        .unwrap();
+    let previous_peer = ContentRefreshChecks::get(&state.data, &peer)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut no_update = previous.clone();
+    no_update.succeeded(chrono::Utc::now().timestamp(), None);
+    let write = RefreshWrite {
+        entry_id: "fast".into(),
+        file_id: "fast".into(),
+        context: previous.context.clone(),
+        check: Some(no_update),
+        presentation: None,
+        artifact: None,
+    };
+    sqlx::query("CREATE TRIGGER reject_refresh_result BEFORE INSERT ON content_refresh_checks BEGIN SELECT RAISE(FAIL, 'simulated write failure'); END").execute(&state.pool).await.unwrap();
+    let mut events = state.content_refresh.subscribe();
+    assert!(
+        state
+            .content_refresh
+            .save(&state, "instance", &task.id, vec![write])
+            .await
+            .is_err()
+    );
+    assert!(matches!(
+        events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+    assert_eq!(
+        ContentRefreshChecks::get(&state.data, &key)
+            .await
+            .unwrap()
+            .unwrap(),
+        previous
+    );
+    assert!(
+        state
+            .content_refresh
+            .slots
+            .lock()
+            .await
+            .get("instance")
+            .unwrap()
+            .unsaved_entries
+            .contains("fast")
+    );
+    sqlx::query("DROP TRIGGER reject_refresh_result")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    state
+        .content_refresh
+        .start(state.clone(), "instance".into(), RefreshMode::RetryFailed)
+        .await
+        .unwrap();
+    finished(&state).await;
+    let current = state
+        .content_refresh
+        .state(&state, "instance")
+        .await
+        .unwrap();
+    assert_eq!(current.task.unwrap().checked, 1);
+    assert!(
+        state
+            .content_refresh
+            .slots
+            .lock()
+            .await
+            .get("instance")
+            .unwrap()
+            .unsaved_entries
+            .is_empty()
+    );
+    assert_eq!(
+        ContentRefreshChecks::get(&state.data, &peer)
+            .await
+            .unwrap()
+            .unwrap(),
+        previous_peer
+    );
+    assert!(
+        current
+            .snapshot
+            .items
+            .iter()
+            .find(|item| item.entry_id.as_deref() == Some("fast"))
+            .unwrap()
+            .resource_update
+            .is_some()
+    );
+    state.content_refresh.shutdown().await;
+    state.pool.close().await;
+}
+
 async fn fixture() -> (tempfile::TempDir, Arc<crate::State>, Arc<Provider>) {
     let temp = tempfile::tempdir().unwrap();
     let directories = crate::state::DirectoryInfo {

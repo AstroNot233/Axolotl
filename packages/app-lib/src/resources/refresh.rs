@@ -90,6 +90,8 @@ pub struct RefreshState {
 }
 
 struct Slot {
+    unsaved_entries: HashSet<String>,
+    pack_failed: bool,
     background_failed: bool,
     outcomes: HashMap<
         String,
@@ -175,6 +177,12 @@ impl RefreshCoordinator {
         let background_failed = slots
             .get(&instance_id)
             .is_some_and(|slot| slot.background_failed);
+        let unsaved_entries = slots
+            .get(&instance_id)
+            .map(|slot| slot.unsaved_entries.clone())
+            .unwrap_or_default();
+        let pack_failed =
+            slots.get(&instance_id).is_some_and(|slot| slot.pack_failed);
         let task = RefreshTask {
             id: uuid::Uuid::new_v4().to_string(),
             mode,
@@ -189,6 +197,8 @@ impl RefreshCoordinator {
         slots.insert(
             instance_id.clone(),
             Slot {
+                unsaved_entries,
+                pack_failed,
                 background_failed,
                 outcomes: HashMap::new(),
                 task: task.clone(),
@@ -292,16 +302,33 @@ impl RefreshCoordinator {
         let mut current = Vec::new();
         let _lock = state.lock_instance_content_exclusive(instance_id).await;
         for write in writes {
+            slot.unsaved_entries.insert(write.entry_id.clone());
             if entry::bytes_still_current(state, instance_id, &write).await? {
                 current.push(write);
+            } else {
+                slot.unsaved_entries.remove(&write.entry_id);
             }
         }
+        let entry_ids = current
+            .iter()
+            .map(|write| write.entry_id.clone())
+            .collect::<HashSet<_>>();
         let applied = crate::state::store::content_refresh::set_results(
             &state.data,
             instance_id,
             current,
         )
-        .await?;
+        .await;
+        let applied = match applied {
+            Ok(applied) => {
+                slot.unsaved_entries.retain(|id| !entry_ids.contains(id));
+                applied
+            }
+            Err(error) => {
+                slot.unsaved_entries.extend(entry_ids);
+                return Err(error.into());
+            }
+        };
         for write in applied {
             tracing::debug!(instance_id, entry_id = %write.entry_id, update = write.check.is_some(), presentation = write.presentation.is_some(), "Saved content refresh result");
             let update = write.check.as_ref().map(|check| {
@@ -374,6 +401,14 @@ async fn run_round(
         HashSet::new()
     };
     let started = std::time::Instant::now();
+    let unsaved_entries = state
+        .content_refresh
+        .slots
+        .lock()
+        .await
+        .get(instance_id)
+        .map(|slot| slot.unsaved_entries.clone())
+        .unwrap_or_default();
     let service = state.resources().await?.clone();
     let (scan_tx, mut scans) = mpsc::channel(8);
     let scan_state = state.clone();
@@ -401,8 +436,40 @@ async fn run_round(
         let cancel = scan_cancel.clone();
         workers.push(tokio_util::task::AbortOnDropHandle::new(tokio::spawn(
             async move {
-                refresh_pack(&state, &instance_id, &task_id, mode, &cancel)
+                let retry_pack = state
+                    .content_refresh
+                    .slots
+                    .lock()
                     .await
+                    .get(&instance_id)
+                    .is_some_and(|slot| slot.pack_failed);
+                let pack_mode =
+                    if mode == RefreshMode::RetryFailed && retry_pack {
+                        RefreshMode::ForceRemote
+                    } else {
+                        mode
+                    };
+                let result = refresh_pack(
+                    &state,
+                    &instance_id,
+                    &task_id,
+                    pack_mode,
+                    &cancel,
+                )
+                .await;
+                if let Some(slot) = state
+                    .content_refresh
+                    .slots
+                    .lock()
+                    .await
+                    .get_mut(&instance_id)
+                    .filter(|slot| {
+                        slot.task.id == task_id && !slot.cancel.is_cancelled()
+                    })
+                {
+                    slot.pack_failed = result.is_err();
+                }
+                result
             },
         )));
     }
@@ -466,8 +533,11 @@ async fn run_round(
                         let mut slots = state.content_refresh.slots.lock().await;
                         let records = crate::state::store::content_snapshot::get(&state.data, instance_id).await?;
                         let eligible = files.iter().filter(|file| !failed_paths.contains(&file.relative_path)).collect::<Vec<_>>();
-                        let mut work = entry::work(&records, eligible.iter().filter(|file| !retry_scan_paths.contains(&file.relative_path)).map(|file| file.id.as_str()), mode);
+                        let unsaved_file_ids = records.entries.iter().filter(|entry| unsaved_entries.contains(&entry.id))
+                            .filter_map(|entry| entry.file_id.as_deref()).collect::<HashSet<_>>();
+                        let mut work = entry::work(&records, eligible.iter().filter(|file| !retry_scan_paths.contains(&file.relative_path) && !unsaved_file_ids.contains(file.id.as_str())).map(|file| file.id.as_str()), mode);
                         work.extend(entry::work(&records, eligible.iter().filter(|file| retry_scan_paths.contains(&file.relative_path)).map(|file| file.id.as_str()), RefreshMode::Normal));
+                        work.extend(entry::work(&records, eligible.iter().filter(|file| unsaved_file_ids.contains(file.id.as_str())).map(|file| file.id.as_str()), RefreshMode::ForceRemote));
                         for item in work {
                             if scheduled.insert((item.entry.entry_id.clone(), item.context.sha1.clone())) {
                                 pending.push_back(item);

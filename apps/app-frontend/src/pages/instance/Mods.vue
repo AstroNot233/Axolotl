@@ -695,7 +695,7 @@ defineEmits<{
 }>()
 
 function hasPreloadedContent(contentData: InstanceContentData | null | undefined) {
-    return contentData?.path === props.instance.id
+    return contentData?.path === props.instance.id && contentData.snapshot.items.length > 0
 }
 
 const loading = ref(!hasPreloadedContent(props.preloadedContent))
