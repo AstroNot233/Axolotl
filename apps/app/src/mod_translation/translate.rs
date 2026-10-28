@@ -2320,7 +2320,9 @@ mod tests {
         ));
         assert_eq!(failed.code, TranslateErrorCode::InvalidArchive);
         assert_eq!(failed.message, "bad archive");
-    }    use crate::mod_translation::analyze::{
+    }
+
+    use crate::mod_translation::analyze::{
         LanguageKind, Loader, ResourceCoverage,
     };
 
