@@ -77,6 +77,8 @@ fn resource_analysis_commands_are_registered_and_allowed_for_the_main_window() {
         "resource_analysis_update",
         "resource_analysis_close",
         "resource_prepare_operation",
+        "resource_start_content_refresh",
+        "resource_get_content_refresh_state",
     ] {
         assert!(runtime.contains(command));
         assert!(manifest.contains(command));
@@ -94,6 +96,44 @@ fn resource_analysis_commands_are_registered_and_allowed_for_the_main_window() {
     );
     assert!(
         capabilities["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|permission| permission == "axolotl-resources:default")
+    );
+}
+
+#[test]
+fn content_refresh_commands_match_callers_and_events_are_limited_to_the_main_window()
+ {
+    let runtime = runtime_commands(include_str!("../src/api/resources.rs"));
+    let manifest =
+        manifest_commands(include_str!("../build.rs"), "axolotl-resources");
+    let frontend =
+        include_str!("../../app-frontend/src/helpers/content-refresh.ts");
+    for command in [
+        "resource_start_content_refresh",
+        "resource_get_content_refresh_state",
+    ] {
+        assert!(runtime.contains(command));
+        assert!(manifest.contains(command));
+        assert!(
+            frontend.contains(&format!("plugin:axolotl-resources|{command}"))
+        );
+    }
+    let source = include_str!("../src/api/resources.rs");
+    assert!(source.contains("get_webview_window(\"main\")"));
+    assert!(source.contains("window.emit(\"resource_content_refresh\""));
+    assert!(
+        include_str!("../src/main.rs")
+            .contains("initialize_content_refresh_events(&app).await?")
+    );
+    let capability: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/plugins.json"))
+            .unwrap();
+    assert_eq!(capability["windows"], serde_json::json!(["main"]));
+    assert!(
+        capability["permissions"]
             .as_array()
             .unwrap()
             .iter()

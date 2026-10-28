@@ -402,6 +402,7 @@ export type PackMemberMaterializationState = 'present' | 'pending_manual' | 'mis
 export type PackMemberOverrideKind = 'none' | 'disabled' | 'removed' | 'version'
 
 export interface InstanceContentSnapshotItem {
+    resourceUpdate?: import('./resources').SourceReleaseRef | null
     artifactRef?: import('./resources').ResourceArtifact['reference'] | null
     resourceId?: string | null
     packResourceId?: string | null

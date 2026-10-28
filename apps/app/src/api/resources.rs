@@ -14,6 +14,8 @@ static REQUESTS: LazyLock<DashMap<RequestId, CancellationToken>> =
     LazyLock::new(DashMap::new);
 static EARLY_CANCELLATIONS: LazyLock<DashMap<RequestId, std::time::Instant>> =
     LazyLock::new(DashMap::new);
+static CONTENT_REFRESH_EVENTS: tokio::sync::OnceCell<()> =
+    tokio::sync::OnceCell::const_new();
 
 struct RequestGuard(RequestId);
 impl Drop for RequestGuard {
@@ -76,6 +78,8 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             resource_prepare_entry_operation,
             resource_list_installed,
             resource_check_updates,
+            resource_start_content_refresh,
+            resource_get_content_refresh_state,
             resource_revise_plan,
             resource_queue_plan,
             resource_list_history,
@@ -93,6 +97,51 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             resource_rollback
         ])
         .build()
+}
+
+pub async fn initialize_content_refresh_events(
+    app: &tauri::AppHandle,
+) -> Result<()> {
+    use tauri::{Emitter, Manager};
+    CONTENT_REFRESH_EVENTS.get_or_try_init(|| async {
+        let mut events = theseus::resources::refresh::subscribe().await?;
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+        loop {
+            let payload = match events.recv().await {
+                Ok(event) => serde_json::to_value(event).ok(),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    Some(serde_json::json!({"kind": "resync"}))
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            if let (Some(window), Some(payload)) =
+                (app.get_webview_window("main"), payload)
+                && let Err(error) =
+                    window.emit("resource_content_refresh", payload)
+            {
+                tracing::warn!(%error, "Could not forward content refresh event");
+            }
+        }
+        });
+        Ok::<(), super::TheseusSerializableError>(())
+    }).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resource_start_content_refresh(
+    instance_id: String,
+    mode: theseus::resources::refresh::RefreshMode,
+) -> Result<theseus::resources::refresh::RefreshTask> {
+    Ok(theseus::resources::refresh::start(instance_id, mode).await?)
+}
+
+#[tauri::command]
+pub async fn resource_get_content_refresh_state(
+    instance_id: String,
+) -> Result<theseus::resources::refresh::RefreshState> {
+    Ok(theseus::resources::refresh::get_state(instance_id).await?)
 }
 
 #[tauri::command]

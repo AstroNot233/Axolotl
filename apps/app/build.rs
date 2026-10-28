@@ -437,6 +437,8 @@ fn main() {
                         "resource_prepare_entry_operation",
                         "resource_list_installed",
                         "resource_check_updates",
+                        "resource_start_content_refresh",
+                        "resource_get_content_refresh_state",
                         "resource_revise_plan",
                         "resource_queue_plan",
                         "resource_list_history",
