@@ -6,7 +6,9 @@ import {
     extractSchematicNeighborFace,
     getSchematicMeshOcclusionFaces,
     getSchematicSpecialBlockMesh,
+    getSchematicWaterloggedFluidMesh,
     isSchematicOccluding,
+    isSchematicWaterlogged,
     isSeamlessSchematicGlassPair,
     schematicBlockAt,
     shouldCullSchematicFace,
@@ -232,4 +234,74 @@ it('ender chests remain single even with an invalid double-chest type', () => {
 
     expect(requestedTextures.has('minecraft:entity/chest/ender')).toBeTruthy()
     expect(!requestedTextures.has('minecraft:entity/chest/ender_left')).toBeTruthy()
+})
+
+function trackingAtlas(requested: Set<string>) {
+    return {
+        getTextureAtlas: () => ({}) as ImageData,
+        getTextureUV: (id: Identifier) => {
+            requested.add(id.toString())
+            return [0, 0, 1, 1] as [number, number, number, number]
+        },
+    }
+}
+
+it('waterlogged blocks mesh their fluid inside the block bounds', () => {
+    const requested = new Set<string>()
+    const fluid = getSchematicWaterloggedFluidMesh(
+        { name: 'minecraft:oak_leaves', properties: { waterlogged: 'true' } },
+        trackingAtlas(requested),
+        Cull.none(),
+    )
+    expect(requested).toEqual(
+        new Set(['minecraft:block/water_still', 'minecraft:block/water_flow']),
+    )
+    const vertices = fluid?.quads.flatMap((quad) => quad.vertices()) ?? []
+    expect(vertices).toHaveLength(24)
+    expect(Math.max(...vertices.map((vertex) => vertex.pos.y))).toBeCloseTo(0.8875, 4)
+    for (const vertex of vertices) {
+        for (const coordinate of [vertex.pos.x, vertex.pos.y, vertex.pos.z]) {
+            expect(coordinate).toBeGreaterThan(0)
+            expect(coordinate).toBeLessThan(1)
+        }
+    }
+    expect(vertices[0].color[2]).toBeGreaterThan(0.8)
+    expect(vertices[0].color[0]).toBeLessThan(0.3)
+})
+
+it('waterlogged fluid follows the neighbor cull', () => {
+    const cull = Cull.none()
+    cull.up = true
+    const fluid = getSchematicWaterloggedFluidMesh(
+        { name: 'minecraft:oak_leaves', properties: { waterlogged: 'true' } },
+        trackingAtlas(new Set()),
+        cull,
+    )
+    expect(fluid?.quads).toHaveLength(5)
+})
+
+it('blocks without waterlogged fluid mesh no fluid at all', () => {
+    const requested = new Set<string>()
+    const atlas = trackingAtlas(requested)
+    expect(
+        getSchematicWaterloggedFluidMesh(
+            { name: 'minecraft:oak_leaves', properties: { waterlogged: 'false' } },
+            atlas,
+            Cull.none(),
+        ),
+    ).toBeUndefined()
+    expect(
+        getSchematicWaterloggedFluidMesh(
+            { name: 'minecraft:stone', properties: {} },
+            atlas,
+            Cull.none(),
+        ),
+    ).toBeUndefined()
+    expect(requested.size).toBe(0)
+    expect(
+        isSchematicWaterlogged({
+            name: 'minecraft:oak_leaves',
+            properties: { waterlogged: 'true' },
+        }),
+    ).toBe(true)
 })

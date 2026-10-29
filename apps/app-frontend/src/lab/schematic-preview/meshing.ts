@@ -373,6 +373,44 @@ export function getSchematicSpecialBlockMesh(
     )
 }
 
+const WATERLOGGED_FLUID_INSET = 1 / 64
+
+export function isSchematicWaterlogged(state: SchematicBlockState) {
+    return state.properties.waterlogged === 'true'
+}
+
+/**
+ * Vanilla keeps the fluid of a waterlogged block flush with the block bounds, where it shares
+ * planes with the host block's own faces. Translucent geometry is drawn after opaque geometry with
+ * `depthFunc: LessEqual`, so a flush fluid would paint over cutout blocks such as leaves. Pulling
+ * the fluid a fraction of a pixel inside keeps it visible only through the host block's gaps.
+ */
+function insetWaterloggedFluid(mesh: Mesh) {
+    const inset = (value: number) =>
+        value <= 0 ? WATERLOGGED_FLUID_INSET : value >= 1 ? 1 - WATERLOGGED_FLUID_INSET : value
+    for (const quad of mesh.quads) {
+        for (const vertex of quad.vertices()) {
+            vertex.pos = new Vector(inset(vertex.pos.x), inset(vertex.pos.y), inset(vertex.pos.z))
+        }
+    }
+    return mesh
+}
+
+/** Fluid held by a waterlogged block, meshed apart from the block so it can stay translucent. */
+export function getSchematicWaterloggedFluidMesh(
+    state: SchematicBlockState,
+    atlas: TextureAtlasProvider,
+    cull: Cull,
+) {
+    if (!isSchematicWaterlogged(state)) return undefined
+    const fluid = getSchematicSpecialBlockMesh(
+        { name: 'minecraft:water', properties: { level: '0' } },
+        atlas,
+        cull,
+    )
+    return fluid.quads.length > 0 ? insetWaterloggedFluid(fluid) : undefined
+}
+
 function seamlessGlassId(name: string) {
     const normalized = normalizedBlockName(name)
     const path = normalized.split(':').at(-1) ?? normalized
