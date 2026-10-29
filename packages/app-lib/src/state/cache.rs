@@ -2893,6 +2893,28 @@ impl CachedEntry {
         }
     }
 
+    /// Drops entries outside any open unit. A hash entry is dropped before the
+    /// write that replaces it commits, so a run stopping between the two reads
+    /// a miss instead of the metadata of the file it replaced.
+    pub(crate) async fn forget_best_effort(items: &[Self], pool: &SqlitePool) {
+        if items.is_empty() {
+            return;
+        }
+        let handle = Handle::new(pool.clone());
+        for item in items {
+            let key = CacheKey {
+                data_type: item.type_.as_str().to_string(),
+                id: item.id.clone(),
+            };
+            if let Err(error) = Cache::set(&handle, &key, None).await {
+                tracing::warn!(
+                    error = %error,
+                    "Failed to drop a cache entry; continuing without it"
+                );
+            }
+        }
+    }
+
     pub(crate) async fn upsert_many(
         items: &[Self],
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,

@@ -2526,7 +2526,7 @@ async fn add_project_bytes_with_provider(
         Some(&sha1),
         Some(project_type),
         None,
-        &state.data,
+        &state.cache_handle(),
     )
     .await?;
     fetch::write(&full_path, &bytes, &state.io_semaphore).await?;
@@ -3116,6 +3116,8 @@ async fn record_project_files_transaction(
         &mut tx,
     )
     .await?;
+    CachedEntry::forget_best_effort(&hash_cache_entries, state.cache_pool())
+        .await;
     tx.commit().await?;
     CachedEntry::store_best_effort(&hash_cache_entries, state.cache_pool())
         .await;
@@ -3964,6 +3966,8 @@ async fn rollback_project_inner(
     )
     .await?;
     sqlx::query("DELETE FROM resource_legacy_rollback_journals WHERE instance_id = ?").bind(instance_id).execute(&mut *tx).await?;
+    CachedEntry::forget_best_effort(std::slice::from_ref(&hash_cache), state.cache_pool())
+        .await;
     tx.commit().await?;
     CachedEntry::store_best_effort(&[hash_cache], state.cache_pool()).await;
 

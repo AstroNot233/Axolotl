@@ -272,15 +272,12 @@ impl State {
     /// Where the cache table lives: the derived database, which is a memory
     /// database while the file is unavailable, so callers always have a pool.
     pub(crate) fn cache_pool(&self) -> &SqlitePool {
-        self.derived.pool().expect(
-            "the derived database answers with a pool unless an in-memory \
-             database cannot be opened either",
-        )
+        self.derived.pool()
     }
 
     /// The same database, as the handle its collections are read through.
     pub(crate) fn cache_handle(&self) -> store::Handle {
-        store::Handle::new(self.cache_pool().clone())
+        self.derived.handle()
     }
 
     pub async fn resources(
@@ -1305,9 +1302,7 @@ impl State {
             directories.caches_dir().join(store::derived_db::FILE_NAME),
         )
         .await;
-        if let Some(cache_pool) = derived.pool() {
-            CachedEntry::store_best_effort(&legacy_cache, cache_pool).await;
-        }
+        CachedEntry::store_best_effort(&legacy_cache, derived.pool()).await;
 
         let discord_rpc = DiscordGuard::init()?;
 

@@ -377,12 +377,11 @@ console.log('resource identities: real upgrade, downgrade and re-upgrade')
             VALUES ('frozen', 'sample', 'install_content', 'queued',
                 '{"request":{"type":"install_content","project_id":"12345678","version_id":"release1"}}', 1, 2);
     `)
-    // `cache` is deliberately absent: the upgrade moves it to the derived
-    // database, and the check right after the comparison asserts it left here.
-    const businessTables = ['content_favorites', 'instance_files', 'instance_content_entries', 'instance_content_provider_refs', 'instance_pack_members', 'instance_links', 'install_jobs']
+    // `cache` stays in the app database: the resource cache still imports the
+    // rows a previous launcher left there, so the table is read, never written.
+    const businessTables = ['content_favorites', 'instance_files', 'instance_content_entries', 'instance_content_provider_refs', 'instance_pack_members', 'instance_links', 'install_jobs', 'cache']
     const original = businessTables.map((table) => database.prepare(`SELECT * FROM ${table}`).all())
     for (const name of files.filter((name) => Number(name.slice(0, 14)) >= version)) apply(name)
-    check('the cache table leaves the app database', database.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'cache'").get().count === 0)
     check('resource naming preferences default on when upgrading', database.prepare('SELECT resource_chinese_filenames, resource_preserve_filenames FROM settings WHERE id = 0').get().resource_chinese_filenames === 1 && database.prepare('SELECT resource_preserve_filenames FROM settings WHERE id = 0').get().resource_preserve_filenames === 1)
     database.exec("INSERT INTO resource_pack_unlinks(instance_id, content_set_id, unlinked_at) VALUES ('sample', 'set', 42)")
     assert.deepEqual(businessTables.map((table) => database.prepare(`SELECT * FROM ${table}`).all()), original)

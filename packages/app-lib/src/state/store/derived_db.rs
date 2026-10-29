@@ -41,7 +41,7 @@ static MIGRATOR: sqlx::migrate::Migrator =
 
 pub(crate) struct DerivedDb {
     path: PathBuf,
-    pool: Option<SqlitePool>,
+    pool: SqlitePool,
     disabled: bool,
 }
 
@@ -52,7 +52,7 @@ impl DerivedDb {
     pub(crate) async fn open(path: PathBuf) -> Self {
         let mut disabled = false;
         let pool = match Self::connect(&path).await {
-            Ok(pool) => Some(pool),
+            Ok(pool) => pool,
             Err(error) => {
                 tracing::warn!(
                     error = %error,
@@ -61,13 +61,18 @@ impl DerivedDb {
                 );
                 disabled = true;
                 match Self::connect_in_memory().await {
-                    Ok(pool) => Some(pool),
+                    Ok(pool) => pool,
                     Err(error) => {
                         tracing::warn!(
                             error = %error,
-                            "The derived database has no in-memory stand-in either"
+                            "The derived database has no in-memory stand-in; \
+                             its statements will fail rather than settle"
                         );
-                        None
+                        // Constructing a lazy pool performs no I/O and cannot
+                        // fail, so callers that need a pool always get one.
+                        SqlitePool::connect_lazy_with(
+                            SqliteConnectOptions::new().in_memory(true),
+                        )
                     }
                 }
             }
@@ -130,16 +135,14 @@ impl DerivedDb {
         self.disabled
     }
 
-    /// What statements are run on, which is an in-memory database while the
-    /// file is unavailable, or nothing if even that could not be opened.
-    pub(crate) fn pool(&self) -> Option<&SqlitePool> {
-        self.pool.as_ref()
+    /// What statements are run on: the file, or the stand-in that replaced it.
+    pub(crate) fn pool(&self) -> &SqlitePool {
+        &self.pool
     }
 
-    /// What this database's records are read and written through, or nothing
-    /// while it is disabled.
-    pub(crate) fn handle(&self) -> Option<Handle> {
-        self.pool().map(|pool| Handle::new(pool.clone()))
+    /// What this database's records are read and written through.
+    pub(crate) fn handle(&self) -> Handle {
+        Handle::new(self.pool.clone())
     }
 
     /// Reads through this database, and answers what an empty one would answer
@@ -152,10 +155,7 @@ impl DerivedDb {
         if self.disabled {
             return Ok(T::default());
         }
-        match self.handle() {
-            Some(handle) => read(&handle).await,
-            None => Ok(T::default()),
-        }
+        read(&self.handle()).await
     }
 
     /// Writes through this database, or drops the write while it is disabled:
@@ -171,10 +171,7 @@ impl DerivedDb {
             );
             return Ok(());
         }
-        match self.handle() {
-            Some(handle) => write(&handle).await,
-            None => Ok(()),
-        }
+        write(&self.handle()).await
     }
 }
 
@@ -238,10 +235,6 @@ mod tests {
         let db = DerivedDb::open(path.clone()).await;
 
         assert!(db.is_disabled(), "an unknown version must disable it");
-        assert!(
-            db.pool().is_some(),
-            "a disabled database still answers with a pool"
-        );
         assert!(path.exists(), "a disabled database must be kept as it is");
     }
 
@@ -254,10 +247,6 @@ mod tests {
         let db = DerivedDb::open(path.clone()).await;
 
         assert!(db.is_disabled(), "garbage bytes must disable it");
-        assert!(
-            db.pool().is_some(),
-            "a disabled database still answers with a pool"
-        );
         assert!(path.exists(), "a disabled database must be kept as it is");
     }
 
@@ -300,7 +289,10 @@ mod tests {
 
         let db = DerivedDb::open(path.clone()).await;
 
-        assert!(db.handle().is_some(), "an empty migration set is usable");
+        assert!(
+            db.pool().acquire().await.is_ok(),
+            "an empty migration set is usable"
+        );
         assert!(!db.is_disabled(), "an opened file is not a stand-in");
         assert!(path.exists());
     }
@@ -311,7 +303,7 @@ mod tests {
     async fn the_cache_rows_round_trip_on_a_derived_handle() {
         let temp = tempfile::tempdir().unwrap();
         let db = DerivedDb::open(temp.path().join(FILE_NAME)).await;
-        let pool = db.pool().expect("a fresh derived database opens");
+        let pool = db.pool();
         let semaphore = FetchSemaphore(Semaphore::new(1));
         let written =
             CacheValue::ReportTypes(vec!["tag".to_string()]).get_entry();
@@ -336,7 +328,7 @@ mod tests {
         let path = temp.path().join(FILE_NAME);
         tokio::fs::write(&path, b"not a database").await.unwrap();
         let db = DerivedDb::open(path).await;
-        let pool = db.pool().expect("a disabled database answers with a pool");
+        let pool = db.pool();
         let semaphore = FetchSemaphore(Semaphore::new(1));
 
         let read = CachedEntry::get_report_types(
@@ -351,5 +343,73 @@ mod tests {
             CacheValue::ReportTypes(vec!["tag".to_string()]).get_entry();
         let written = CachedEntry::upsert_many(&[write], pool).await;
         assert!(written.is_ok(), "a discarded write is not an error");
+    }
+
+    /// A database a previous build left behind still opens, keeps its records,
+    /// and gains the table this build added a migration for.
+    #[tokio::test]
+    async fn an_existing_derived_database_upgrades_in_place() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(FILE_NAME);
+        let previous = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                super::MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version < 2)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        previous.run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO translation_cache (key, translation, created_at)
+             VALUES (kept, text, 7)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let cache_before: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = table AND name = cache",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cache_before, 0, "the older build had no cache table");
+        pool.close().await;
+
+        let db = DerivedDb::open(path).await;
+
+        assert!(!db.is_disabled(), "an older file still opens");
+        let kept: (String, i64) = sqlx::query_as(
+            "SELECT translation, created_at FROM translation_cache
+             WHERE key = kept",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            kept,
+            ("text".to_string(), 7),
+            "records survive the upgrade"
+        );
+        let cache_after: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = table AND name = cache",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(cache_after, 1, "the new table arrives with the upgrade");
     }
 }

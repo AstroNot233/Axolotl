@@ -1315,9 +1315,12 @@ async fn persist_plan(
         .bind(plan.id.as_str())
         .execute(&mut *tx)
         .await?;
+    // The hash cache lives in the derived database. Dropping the entries the
+    // commit is about to replace keeps a run that stops before the write below
+    // from trusting metadata of the file that was just replaced.
+    crate::state::CachedEntry::forget_best_effort(&cache_entries, cache_pool)
+        .await;
     tx.commit().await?;
-    // The hash cache lives in the derived database, so it is written after the
-    // app transaction commits: a failed cache write cannot undo the rows.
     crate::state::CachedEntry::store_best_effort(&cache_entries, cache_pool)
         .await;
     Ok(())
