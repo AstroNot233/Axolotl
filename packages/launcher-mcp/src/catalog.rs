@@ -14,11 +14,16 @@ mod instance_workflows;
 mod interface;
 mod java;
 mod launch;
+mod launcher_system;
+mod maintenance;
 mod modpacks;
 mod multiplayer;
+mod preferences;
 mod resource_history;
 mod resource_updates;
 mod resources;
+mod schematics;
+mod seed_tools;
 mod servers;
 mod skins;
 mod worlds;
@@ -73,6 +78,12 @@ fn entry(
                             || name.starts_with("skin_")
                             || name.starts_with("cape_")
                             || name.contains("mcarchive")
+                            || name.starts_with("proxy_")
+                            || name == "network_test"
+                            || name.contains("update")
+                                && name.starts_with("launcher_")
+                            || name == "news_get_minecraft"
+                            || name == "system_open_url"
                             || matches!(
                                 name,
                                 "instance_create"
@@ -418,6 +429,11 @@ pub(crate) fn entries() -> Vec<Entry> {
         ),
     ];
     entries.extend(resources::entries());
+    entries.extend(schematics::entries());
+    entries.extend(seed_tools::entries());
+    entries.extend(preferences::entries());
+    entries.extend(maintenance::entries());
+    entries.extend(launcher_system::entries());
     entries.extend(core::entries());
     entries.extend(multiplayer::entries());
     entries.extend(gallery::entries());
@@ -542,9 +558,9 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
                                 || matches!(c, b'-' | b'_')
                         })))
         }),
-        Some("integer") => value.as_u64().is_some_and(|n| {
-            rule["minimum"].as_u64().is_none_or(|min| n >= min)
-                && rule["maximum"].as_u64().is_none_or(|max| n <= max)
+        Some("integer") => value.as_i64().is_some_and(|n| {
+            rule["minimum"].as_i64().is_none_or(|min| n >= min)
+                && rule["maximum"].as_i64().is_none_or(|max| n <= max)
         }),
         Some("boolean") => value.is_boolean(),
         Some("array") => value.as_array().is_some_and(|items| {

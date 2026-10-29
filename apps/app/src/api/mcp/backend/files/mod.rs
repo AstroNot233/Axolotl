@@ -1,5 +1,5 @@
 mod archives;
-mod nbt;
+pub(super) mod nbt;
 pub(super) mod paths;
 #[cfg(test)]
 mod tests;

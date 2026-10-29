@@ -42,6 +42,271 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    SchematicListFiles {
+        instance_id: String,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    SchematicOpen {
+        instance_id: String,
+        path: String,
+        expected_sha256: String,
+    },
+    SchematicGet {
+        schematic_id: uuid::Uuid,
+        revision: usize,
+        section: String,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    SchematicGetBlock {
+        schematic_id: uuid::Uuid,
+        revision: usize,
+        region_id: String,
+        x: i32,
+        y: i32,
+        z: i32,
+    },
+    SchematicReadRegion {
+        schematic_id: uuid::Uuid,
+        revision: usize,
+        region_id: String,
+        x: i32,
+        y: i32,
+        z: i32,
+        width: usize,
+        height: usize,
+        depth: usize,
+    },
+    SchematicApplyEdits {
+        schematic_id: uuid::Uuid,
+        revision: usize,
+        edits_json: String,
+        #[serde(default)]
+        target_state_json: Option<String>,
+    },
+    SchematicTransform {
+        schematic_id: uuid::Uuid,
+        revision: usize,
+        transform: String,
+    },
+    SchematicExport {
+        schematic_id: uuid::Uuid,
+        revision: usize,
+        format: String,
+        target_kind: String,
+        target_id: String,
+        path: String,
+    },
+    SchematicClose {
+        schematic_id: uuid::Uuid,
+        revision: usize,
+    },
+    SeedGetProfiles {
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    SeedReadWorld {
+        instance_id: String,
+        world_id: String,
+    },
+    SeedGetSpawn {
+        seed: String,
+        edition: String,
+        version: String,
+    },
+    SeedGetBiome {
+        seed: String,
+        edition: String,
+        version: String,
+        dimension: String,
+        x: i32,
+        y: i32,
+        z: i32,
+    },
+    SeedFindFeatures {
+        seed: String,
+        edition: String,
+        version: String,
+        dimension: String,
+        min_x: i32,
+        min_z: i32,
+        max_x: i32,
+        max_z: i32,
+        #[serde(default)]
+        feature_mask: Option<usize>,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    SeedRenderTile {
+        seed: String,
+        edition: String,
+        version: String,
+        dimension: String,
+        x: i32,
+        z: i32,
+        scale: String,
+        width: usize,
+        height: usize,
+        #[serde(default)]
+        elevation: Option<i32>,
+        #[serde(default)]
+        terrain: Option<bool>,
+        #[serde(default)]
+        contours: Option<bool>,
+    },
+    SeedGetStructureDetails {
+        seed: String,
+        edition: String,
+        version: String,
+        dimension: String,
+        x: i32,
+        z: i32,
+        feature_mask: usize,
+    },
+    SeedGetContainerLoot {
+        seed: String,
+        edition: String,
+        version: String,
+        dimension: String,
+        x: i32,
+        z: i32,
+        feature_mask: usize,
+        container: usize,
+    },
+    SeedScanOres {
+        seed: String,
+        edition: String,
+        version: String,
+        dimension: String,
+        ore_kinds: Vec<String>,
+        chunks: Vec<i32>,
+    },
+    SeedRenderUnderground {
+        seed: String,
+        edition: String,
+        version: String,
+        dimension: String,
+        x: i32,
+        z: i32,
+        scale: String,
+        width: usize,
+        height: usize,
+        elevation: i32,
+        #[serde(default)]
+        terrain: Option<bool>,
+        #[serde(default)]
+        contours: Option<bool>,
+        layers: usize,
+    },
+    SettingsGet {
+        #[serde(default)]
+        fields: Option<Vec<String>>,
+    },
+    SettingsGetSchema {},
+    SettingsPatch {
+        patch_json: String,
+    },
+    PrivacyGet {},
+    PrivacySet {
+        telemetry: bool,
+        discord_rpc: bool,
+    },
+    ProxyGet {},
+    ProxySet {
+        mode: String,
+        #[serde(default)]
+        url: Option<String>,
+        preserve_credentials: bool,
+    },
+    ProxyTest {},
+    NetworkTest {
+        target: String,
+        mode: String,
+    },
+    NetworkGetEnvironment {},
+    StorageScan {
+        #[serde(default)]
+        force: Option<bool>,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    StorageClearCache {},
+    StorageAnalyzeMetadata {},
+    StorageCleanMetadata {
+        cleanup_id: uuid::Uuid,
+        groups: Vec<String>,
+    },
+    DatabaseGetInfo {},
+    DatabaseCheckIntegrity {},
+    DatabaseBackup {},
+    DatabaseListBackups {
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    DatabaseMaintainBackups {},
+    DatabaseCopyChannel {
+        source_channel: String,
+        target_channel: String,
+    },
+    LauncherGetUpdateSettings {},
+    LauncherSetUpdateChannel {
+        channel: String,
+    },
+    LauncherSetUpdatePreferences {
+        immediate_update_fetch: bool,
+        updates_paused: bool,
+        #[serde(default)]
+        auto_download_updates: Option<bool>,
+    },
+    LauncherCheckUpdate {
+        #[serde(default)]
+        channel: Option<String>,
+    },
+    LauncherGetUpdateSize {
+        update_id: uuid::Uuid,
+    },
+    LauncherDownloadUpdate {
+        update_id: uuid::Uuid,
+    },
+    LauncherCancelUpdate {},
+    LauncherRestart {},
+    LauncherExit {},
+    ShortcutCreateInstance {
+        instance_id: String,
+        #[serde(default)]
+        server_address: Option<String>,
+        #[serde(default)]
+        world_id: Option<String>,
+    },
+    SystemOpenPath {
+        target_kind: String,
+        target_id: String,
+        path: String,
+        reveal: bool,
+    },
+    SystemOpenUrl {
+        url: String,
+    },
+    LauncherParseLink {
+        link: String,
+    },
+    NewsGetMinecraft {
+        #[serde(default)]
+        limit: Option<usize>,
+    },
     CoreListComponents {
         instance_id: String,
         #[serde(default)]
@@ -1130,7 +1395,48 @@ impl Command {
     pub(crate) fn deferred(&self) -> bool {
         matches!(
             self,
-            Self::CorePreviewJar { .. }
+            Self::SchematicListFiles { .. }
+                | Self::SchematicOpen { .. }
+                | Self::SchematicGetBlock { .. }
+                | Self::SchematicReadRegion { .. }
+                | Self::SchematicApplyEdits { .. }
+                | Self::SchematicTransform { .. }
+                | Self::SchematicExport { .. }
+                | Self::SeedReadWorld { .. }
+                | Self::SeedGetSpawn { .. }
+                | Self::SeedGetBiome { .. }
+                | Self::SeedFindFeatures { .. }
+                | Self::SeedRenderTile { .. }
+                | Self::SeedGetStructureDetails { .. }
+                | Self::SeedGetContainerLoot { .. }
+                | Self::SeedScanOres { .. }
+                | Self::SeedRenderUnderground { .. }
+                | Self::SettingsPatch { .. }
+                | Self::PrivacySet { .. }
+                | Self::ProxySet { .. }
+                | Self::ProxyTest { .. }
+                | Self::NetworkTest { .. }
+                | Self::StorageScan { .. }
+                | Self::StorageClearCache { .. }
+                | Self::StorageAnalyzeMetadata { .. }
+                | Self::StorageCleanMetadata { .. }
+                | Self::DatabaseCheckIntegrity { .. }
+                | Self::DatabaseBackup { .. }
+                | Self::DatabaseMaintainBackups { .. }
+                | Self::DatabaseCopyChannel { .. }
+                | Self::LauncherSetUpdateChannel { .. }
+                | Self::LauncherSetUpdatePreferences { .. }
+                | Self::LauncherCheckUpdate { .. }
+                | Self::LauncherGetUpdateSize { .. }
+                | Self::LauncherDownloadUpdate { .. }
+                | Self::LauncherCancelUpdate { .. }
+                | Self::LauncherRestart { .. }
+                | Self::LauncherExit { .. }
+                | Self::ShortcutCreateInstance { .. }
+                | Self::SystemOpenPath { .. }
+                | Self::SystemOpenUrl { .. }
+                | Self::NewsGetMinecraft { .. }
+                | Self::CorePreviewJar { .. }
                 | Self::CoreAddJarMod { .. }
                 | Self::CoreReplaceJar { .. }
                 | Self::CoreSetEnabled { .. }

@@ -11,16 +11,21 @@ mod interface;
 mod java;
 mod jobs;
 mod launch;
+mod launcher_system;
 mod lifecycle;
 mod logs;
+mod maintenance;
 mod metadata;
 mod modpacks;
 mod multiplayer;
+mod preferences;
 mod queries;
 mod resource_history;
 mod resource_updates;
 mod resources;
 mod reviewed;
+mod schematics;
+mod seed_tools;
 mod servers;
 mod skins;
 mod upgrades;
@@ -45,6 +50,9 @@ pub(super) struct LauncherBackend {
     import_sources: ScopedRegistry<imports::ImportSource>,
     import_plans: ScopedRegistry<imports::ImportSource>,
     upgrades: ScopedRegistry<upgrades::UpgradePlan>,
+    schematics: ScopedRegistry<schematics::Document>,
+    metadata_cleanups: ScopedRegistry<String>,
+    updates: ScopedRegistry<launcher_system::UpdateHandle>,
 }
 
 impl LauncherBackend {
@@ -64,6 +72,69 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::SchematicListFiles { .. }
+                | Command::SchematicOpen { .. }
+                | Command::SchematicGet { .. }
+                | Command::SchematicGetBlock { .. }
+                | Command::SchematicReadRegion { .. }
+                | Command::SchematicApplyEdits { .. }
+                | Command::SchematicTransform { .. }
+                | Command::SchematicExport { .. }
+                | Command::SchematicClose { .. }) => {
+                    schematics::execute(self, command, context).await
+                }
+                command @ (Command::SeedGetProfiles { .. }
+                | Command::SeedReadWorld { .. }
+                | Command::SeedGetSpawn { .. }
+                | Command::SeedGetBiome { .. }
+                | Command::SeedFindFeatures { .. }
+                | Command::SeedRenderTile { .. }
+                | Command::SeedGetStructureDetails { .. }
+                | Command::SeedGetContainerLoot { .. }
+                | Command::SeedScanOres { .. }
+                | Command::SeedRenderUnderground { .. }) => {
+                    seed_tools::execute(self, command, context).await
+                }
+                command @ (Command::SettingsGet { .. }
+                | Command::SettingsGetSchema { .. }
+                | Command::SettingsPatch { .. }
+                | Command::PrivacyGet { .. }
+                | Command::PrivacySet { .. }
+                | Command::ProxyGet { .. }
+                | Command::ProxySet { .. }
+                | Command::ProxyTest { .. }
+                | Command::NetworkTest { .. }
+                | Command::NetworkGetEnvironment { .. }) => {
+                    preferences::execute(self, command, context).await
+                }
+                command @ (Command::StorageScan { .. }
+                | Command::StorageClearCache { .. }
+                | Command::StorageAnalyzeMetadata { .. }
+                | Command::StorageCleanMetadata { .. }
+                | Command::DatabaseGetInfo { .. }
+                | Command::DatabaseCheckIntegrity { .. }
+                | Command::DatabaseBackup { .. }
+                | Command::DatabaseListBackups { .. }
+                | Command::DatabaseMaintainBackups { .. }
+                | Command::DatabaseCopyChannel { .. }) => {
+                    maintenance::execute(self, command, context).await
+                }
+                command @ (Command::LauncherGetUpdateSettings { .. }
+                | Command::LauncherSetUpdateChannel { .. }
+                | Command::LauncherSetUpdatePreferences { .. }
+                | Command::LauncherCheckUpdate { .. }
+                | Command::LauncherGetUpdateSize { .. }
+                | Command::LauncherDownloadUpdate { .. }
+                | Command::LauncherCancelUpdate { .. }
+                | Command::LauncherRestart { .. }
+                | Command::LauncherExit { .. }
+                | Command::ShortcutCreateInstance { .. }
+                | Command::SystemOpenPath { .. }
+                | Command::SystemOpenUrl { .. }
+                | Command::LauncherParseLink { .. }
+                | Command::NewsGetMinecraft { .. }) => {
+                    launcher_system::execute(self, command, context).await
+                }
                 command @ (Command::CoreListComponents { .. }
                 | Command::CorePreviewJar { .. }
                 | Command::CoreAddJarMod { .. }

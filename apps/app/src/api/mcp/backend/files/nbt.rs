@@ -6,6 +6,12 @@ use serde_json::{Value, json};
 use std::io::{Cursor, Read};
 const LIMIT: usize = 2 * 1024 * 1024;
 
+pub(in super::super) fn validate_document(
+    bytes: &[u8],
+) -> Result<(), ToolError> {
+    decode(bytes).map(|_| ())
+}
+
 // quartz_nbt allocates declared lengths and recurses while reading. Preflight
 // the decompressed wire format before allowing its parser to allocate.
 struct Wire<'a> {

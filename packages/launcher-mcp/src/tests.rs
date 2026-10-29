@@ -14,6 +14,8 @@ use std::{
 mod backup_tests;
 #[path = "domain_tests.rs"]
 mod domain_tests;
+#[path = "maintenance_tests.rs"]
+mod maintenance_tests;
 #[path = "operation_tests.rs"]
 mod operation_tests;
 #[path = "workflow_tests.rs"]
