@@ -512,6 +512,42 @@ export function schematicBlockAt(
     return blocks[y * 256 + z * 16 + x] ?? 0
 }
 
+function holdsSchematicWater(state: SchematicBlockState) {
+    return isSchematicWaterlogged(state) || normalizedBlockName(state.name) === 'minecraft:water'
+}
+
+/**
+ * Waterlogged fluid is inset away from every block boundary so the host block's own faces stay in
+ * front of it. Two adjacent waterlogged blocks would then show a seam where their fluid volumes
+ * pull apart, so fluid faces shared with another water-holding block are culled the way vanilla
+ * culls faces between two cells of the same fluid.
+ */
+export function getSchematicFluidCull(
+    position: readonly [number, number, number],
+    blocks: Uint32Array,
+    neighborFaces: SchematicNeighborFaces,
+    palette: readonly SchematicBlockState[],
+    cull: Cull,
+) {
+    const fluidCull: Cull = { ...cull }
+    for (const direction of SCHEMATIC_DIRECTIONS) {
+        if (fluidCull[direction]) continue
+        const offset = SCHEMATIC_DIRECTION_OFFSETS[direction]
+        const neighbor =
+            palette[
+                schematicBlockAt(
+                    blocks,
+                    neighborFaces,
+                    position[0] + offset[0],
+                    position[1] + offset[1],
+                    position[2] + offset[2],
+                )
+            ]
+        if (neighbor && holdsSchematicWater(neighbor)) fluidCull[direction] = true
+    }
+    return fluidCull
+}
+
 export function applySeamlessSchematicGlassUvs(
     vertices: SchematicTexturedVertex[],
     position: readonly [number, number, number],

@@ -1,9 +1,11 @@
 import { Cull, type Identifier, Mesh, Quad, Vector } from 'deepslate'
 import { expect, it } from 'vitest'
 
+import type { SchematicBlockState } from './backend.ts'
 import {
     applySeamlessSchematicGlassUvs,
     extractSchematicNeighborFace,
+    getSchematicFluidCull,
     getSchematicMeshOcclusionFaces,
     getSchematicSpecialBlockMesh,
     getSchematicWaterloggedFluidMesh,
@@ -270,14 +272,74 @@ it('waterlogged blocks mesh their fluid inside the block bounds', () => {
 })
 
 it('waterlogged fluid follows the neighbor cull', () => {
-    const cull = Cull.none()
-    cull.up = true
-    const fluid = getSchematicWaterloggedFluidMesh(
+    const heights = (cull: Cull) =>
+        (
+            getSchematicWaterloggedFluidMesh(
+                { name: 'minecraft:oak_leaves', properties: { waterlogged: 'true' } },
+                trackingAtlas(new Set()),
+                cull,
+            )?.quads ?? []
+        ).map((quad) => quad.vertices().map((vertex) => vertex.pos.y))
+    const surface = 0.8875
+    const bottom = 1 / 64
+    const culled = Cull.none()
+    culled.up = true
+    const remaining = heights(culled)
+    const flat = (value: number, quad: number[]) =>
+        quad.every((height) => Math.abs(height - value) < 1e-6)
+
+    // Deepslate drops the top surface and raises the fluid to a full cell when the cell above is
+    // culled, so the remaining faces are the floor plus the four sides reaching the top boundary.
+    expect(heights(Cull.none()).filter((quad) => flat(surface, quad))).toHaveLength(1)
+    expect(remaining).toHaveLength(5)
+    expect(remaining.filter((quad) => flat(surface, quad))).toHaveLength(0)
+    expect(
+        remaining.filter((quad) => flat(1 - bottom, quad)),
+        'the up face must be culled',
+    ).toHaveLength(0)
+    expect(
+        remaining.filter((quad) => flat(bottom, quad)),
+        'the down face must remain',
+    ).toHaveLength(1)
+    expect(
+        remaining.filter((quad) => quad.some((height) => Math.abs(height - (1 - bottom)) < 1e-6)),
+        'the four side faces must remain',
+    ).toHaveLength(4)
+})
+
+it('waterlogged fluid is culled against any neighbor that holds water', () => {
+    const blocks = new Uint32Array(16 * 16 * 16)
+    const fluidPalette: SchematicBlockState[] = [
+        { name: 'minecraft:air', properties: {} },
         { name: 'minecraft:oak_leaves', properties: { waterlogged: 'true' } },
-        trackingAtlas(new Set()),
-        cull,
-    )
-    expect(fluid?.quads).toHaveLength(5)
+        { name: 'minecraft:water', properties: { level: '0' } },
+        { name: 'minecraft:stone', properties: {} },
+        { name: 'minecraft:oak_leaves', properties: { waterlogged: 'false' } },
+    ]
+    const index = (x: number, y: number, z: number) => y * 256 + z * 16 + x
+    blocks[index(1, 1, 1)] = 1
+    blocks[index(2, 1, 1)] = 1
+    blocks[index(1, 2, 1)] = 2
+    blocks[index(1, 0, 1)] = 3
+    blocks[index(1, 1, 2)] = 4
+
+    const fluidCull = getSchematicFluidCull([1, 1, 1], blocks, {}, fluidPalette, Cull.none())
+    expect(fluidCull.east, 'a waterlogged neighbor holds water').toBe(true)
+    expect(fluidCull.up, 'a water neighbor holds water').toBe(true)
+    expect(fluidCull.down, 'stone is not water').toBeFalsy()
+    expect(fluidCull.south, 'dry leaves are not water').toBeFalsy()
+    expect(fluidCull.west, 'air is not water').toBeFalsy()
+    expect(fluidCull.north, 'air is not water').toBeFalsy()
+    expect(
+        getSchematicFluidCull(
+            [15, 1, 1],
+            blocks,
+            { east: new Uint32Array(256).fill(2) },
+            fluidPalette,
+            Cull.none(),
+        ).east,
+        'fluid is also culled across a chunk boundary',
+    ).toBe(true)
 })
 
 it('blocks without waterlogged fluid mesh no fluid at all', () => {

@@ -5,6 +5,7 @@ import { createBlockGeometry } from './block-geometry'
 import { isSchematicAir } from './editing'
 import {
     applySeamlessSchematicGlassUvs,
+    getSchematicFluidCull,
     getSchematicMeshOcclusionFaces,
     isSchematicOccluding,
     isSchematicTranslucent,
@@ -374,7 +375,10 @@ function buildChunk(message: WorkerMeshMessage) {
                 // skipping it also keeps a fluid failure from disturbing the appended host mesh.
                 if (!meshed) continue
                 try {
-                    const fluid = geometry.water(state, cull)
+                    const fluid = geometry.water(
+                        state,
+                        getSchematicFluidCull([x, y, z], blocks, neighborFaces, palette, cull),
+                    )
                     if (fluid) appendBlockMesh(translucent, fluid, position)
                 } catch {
                     // The host mesh is already appended; dropping the fluid keeps it intact.
