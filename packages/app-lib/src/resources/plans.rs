@@ -617,8 +617,8 @@ pub(crate) async fn installed(
                     .or(resource_id);
         }
         if resource_id.is_none() {
-            let refs = crate::state::instances::adapters::sqlite::content_rows::get_content_provider_refs(&entry_id, pool).await?;
-            let origin = crate::state::instances::adapters::sqlite::content_rows::get_content_origin_provider(&entry_id, pool).await?;
+            let refs = crate::state::instances::adapters::sqlite::content_entries::get_content_provider_refs(&entry_id, pool).await?;
+            let origin = crate::state::instances::adapters::sqlite::content_entries::get_content_origin_provider(&entry_id, pool).await?;
             if let Some(reference) = refs
                 .iter()
                 .find(|reference| Some(reference.provider()) == origin)

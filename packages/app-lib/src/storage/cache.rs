@@ -54,8 +54,7 @@ async fn retained_content(
 async fn retained_in_channel(
     pool: &sqlx::SqlitePool,
 ) -> crate::Result<Vec<String>> {
-    let busy: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM install_jobs WHERE status IN ('queued', 'running', 'canceling', 'waiting_for_user') OR json_extract(state, '$.rollback') IS NOT NULL").fetch_one(pool).await?;
-    if busy > 0 {
+    if crate::install::store::has_any_unfinished_job(pool).await? {
         return Err(invalid(
             "Finish pending installations and recovery before clearing downloaded caches.",
         ));
