@@ -92,13 +92,15 @@ pub(super) async fn execution_lock(
     state: &State,
     job: &store::InstallJobRecord,
 ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
-    let instance = job
+    let key = job
         .instance_id
         .clone()
-        .or_else(|| request_instance(&job.state.request))?;
+        .or_else(|| request_instance(&job.state.request))
+        .map(|instance| format!("instance:{instance}"))
+        .unwrap_or_else(|| format!("job:{}", job.id));
     let lock = state
         .install_execution_locks
-        .entry(instance)
+        .entry(key)
         .or_default()
         .clone();
     Some(lock.lock_owned().await)

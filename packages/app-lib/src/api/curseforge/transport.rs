@@ -25,6 +25,24 @@ const METADATA_REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
 const API_PERMIT_TIMEOUT: Duration = Duration::from_secs(20);
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
+pub(crate) fn metadata_cache_scope() -> String {
+    use sha2::{Digest, Sha256};
+    let state = State::get_if_initialized();
+    let settings = state
+        .as_ref()
+        .map(|state| (state.curseforge_source(), state.network_scope()));
+    // Only a digest leaves this function: credentials and proxy settings must
+    // never become cache keys or diagnostic strings in plain text.
+    let identity = serde_json::to_vec(&(
+        api_base_url(),
+        api_key_generation(),
+        api_key(),
+        settings,
+    ))
+    .expect("metadata cache identity is serializable");
+    format!("{:x}", Sha256::digest(identity))
+}
+
 struct RequestTrace {
     id: u64,
     started: Instant,

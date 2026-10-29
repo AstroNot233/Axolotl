@@ -48,6 +48,127 @@ fn request(instance: &str, content: &str) -> InstallRequest {
 }
 
 #[tokio::test]
+async fn stopped_worker_recovery_waits_for_execution_and_preserves_terminal_results()
+ {
+    let (_temp, state) = fixture().await;
+    let id = Uuid::new_v4();
+    let job = InstallJobState::new(request("first", "mod"));
+    let record = store::insert(id, &job, InstallJobStatus::Running, &state)
+        .await
+        .unwrap();
+    let owner = execution_lock(&state, &record).await;
+    let mut recovery = tokio::spawn({
+        let state = state.clone();
+        async move {
+            lifecycle::recover_stopped_job(
+                id,
+                &state,
+                None,
+                &ErrorKind::OtherError("worker exited".into()).into(),
+            )
+            .await
+        }
+    });
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(30),
+            &mut recovery
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        store::get_required(id, &state).await.unwrap().status,
+        InstallJobStatus::Running
+    );
+    drop(owner);
+    recovery.await.unwrap().unwrap();
+    let failed = store::get_required(id, &state).await.unwrap();
+    assert_eq!(failed.status, InstallJobStatus::Failed);
+    assert!(
+        failed
+            .state
+            .error
+            .unwrap()
+            .message
+            .contains("worker exited")
+    );
+    let terminal = Uuid::new_v4();
+    store::insert(terminal, &job, InstallJobStatus::Succeeded, &state)
+        .await
+        .unwrap();
+    lifecycle::recover_stopped_job(
+        terminal,
+        &state,
+        None,
+        &ErrorKind::OtherError("late failure".into()).into(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        store::get_required(terminal, &state).await.unwrap().status,
+        InstallJobStatus::Succeeded
+    );
+    state.pool.close().await;
+}
+
+#[tokio::test]
+async fn cancellation_without_a_token_waits_for_owner_then_cleans_up_once() {
+    let (_temp, state) = fixture().await;
+    let id = Uuid::new_v4();
+    let job = InstallJobState::new(request("first", "mod"));
+    let record = store::insert(id, &job, InstallJobStatus::Running, &state)
+        .await
+        .unwrap();
+    let owner = execution_lock(&state, &record).await;
+    assert_eq!(
+        cancel_job_with_state(id, state.clone())
+            .await
+            .unwrap()
+            .status,
+        InstallJobStatus::Canceling
+    );
+    assert_eq!(
+        cancel_job_with_state(id, state.clone())
+            .await
+            .unwrap()
+            .status,
+        InstallJobStatus::Canceling
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    assert_eq!(
+        store::get_required(id, &state).await.unwrap().status,
+        InstallJobStatus::Canceling
+    );
+    drop(owner);
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let current = store::get_required(id, &state).await.unwrap();
+            if current.status == InstallJobStatus::Canceled {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let current = store::get_required(id, &state).await.unwrap();
+    assert_eq!(
+        current
+            .state
+            .events
+            .iter()
+            .filter(|event| matches!(
+                event.kind,
+                InstallJobEventKind::RollbackStarted { .. }
+            ))
+            .count(),
+        1
+    );
+    state.pool.close().await;
+}
+
+#[tokio::test]
 async fn canceling_terminal_jobs_returns_the_authoritative_status_without_reopening_them()
  {
     let (_temp, state) = fixture().await;

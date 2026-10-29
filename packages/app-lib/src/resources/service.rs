@@ -153,6 +153,15 @@ pub struct ResourceService {
 }
 
 impl ResourceService {
+    pub(crate) fn source_namespace(
+        &self,
+        source: &SourceId,
+    ) -> ResourceResult<String> {
+        self.sources
+            .get(source)
+            .map(|runtime| runtime.provider.namespace())
+            .ok_or(ResourceError::Unavailable)
+    }
     #[cfg(test)]
     pub(crate) fn set_wait_budgets(
         &mut self,
@@ -616,6 +625,11 @@ impl ResourceService {
             }
             let queries: Vec<_> =
                 active.iter().map(|flight| flight.query.clone()).collect();
+            if active.iter().any(|flight| {
+                provider.namespace() != flight.key.cache.namespace
+            }) {
+                return Err(ResourceError::Canceled);
+            }
             let responses = provider.fetch_many(&queries).await;
             if responses.len() != active.len() {
                 return Err(ResourceError::InvalidResponse(
@@ -814,6 +828,18 @@ pub(crate) fn validate_value(
     value: &ProviderValue,
 ) -> ResourceResult<()> {
     let valid = match (query, value) {
+        (ProviderQuery::CurseForgeFilesProtocol { project_id, index, page_size, .. }, ProviderValue::Protocol(value)) => {
+            *source == SourceId::curseforge() &&
+                serde_json::from_value::<crate::api::curseforge::CurseForgeFilesResponse>(value.clone()).is_ok_and(|page| {
+                    page.pagination.index == *index
+                        && page.pagination.page_size == *page_size
+                        && page.files.len() <= *page_size as usize
+                        && page.pagination.result_count as usize == page.files.len()
+                        && index.checked_add(page.pagination.result_count).is_some_and(|end| page.pagination.result_count == 0 || end <= page.pagination.total_count)
+                        && page.files.iter().all(|file| file.mod_id == *project_id && file.id > 0)
+                        && page.files.iter().map(|file| file.id).collect::<std::collections::HashSet<_>>().len() == page.files.len()
+                })
+        }
         (ProviderQuery::ReleasesProtocol { project_id }, ProviderValue::Protocol(value)) => {
             *source == SourceId::modrinth() && value.as_array().is_some_and(|values| values.iter().all(|value| value["project_id"].as_str() == Some(project_id.as_str()) && serde_json::from_value::<crate::state::Version>(value.clone()).is_ok()))
         }
@@ -828,7 +854,7 @@ pub(crate) fn validate_value(
         (ProviderQuery::Locate { .. }, ProviderValue::Project(document)) => document.metadata.project.source == *source && document.description.source == *source && crate::state::instances::adapters::sqlite::resource_rows::validate_project(&document.metadata.project).is_ok(),
         (_, ProviderValue::NotFound) => !matches!(
             query,
-            ProviderQuery::Search { .. } | ProviderQuery::Releases { .. }
+            ProviderQuery::Search { .. } | ProviderQuery::Releases { .. } | ProviderQuery::CurseForgeFilesProtocol { .. }
         ),
         (
             ProviderQuery::Project { id, .. },
