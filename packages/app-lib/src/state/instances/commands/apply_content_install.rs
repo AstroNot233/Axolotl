@@ -2993,14 +2993,17 @@ async fn record_project_files_transaction(
             } else {
                 crate::resources::InstallScope::Instance
             };
-            sqlx::query("INSERT INTO resource_installed_artifacts(entry_id, artifact, scope) VALUES (?, ?, ?) ON CONFLICT(entry_id) DO UPDATE SET artifact = excluded.artifact, scope = excluded.scope")
-                .bind(&entry.id).bind(serde_json::to_string(artifact)?).bind(serde_json::to_string(&resource_scope)?).execute(&mut *tx).await?;
-        } else {
-            sqlx::query(
-                "DELETE FROM resource_installed_artifacts WHERE entry_id = ?",
+            crate::resources::installed::set_installed_artifact(
+                &entry.id,
+                artifact,
+                &resource_scope,
+                &mut *tx,
             )
-            .bind(&entry.id)
-            .execute(&mut *tx)
+            .await?;
+        } else {
+            crate::resources::installed::delete_installed_artifact(
+                &entry.id, &mut *tx,
+            )
             .await?;
         }
         if record.ownership_kind == ContentOwnershipKind::PackManaged {
@@ -3928,11 +3931,10 @@ async fn rollback_project_inner(
             &mut tx,
         )
         .await?;
-        sqlx::query(
-            "DELETE FROM resource_installed_artifacts WHERE entry_id = ?",
+        crate::resources::installed::delete_installed_artifact(
+            &entry_id,
+            &mut *tx,
         )
-        .bind(&entry_id)
-        .execute(&mut *tx)
         .await?;
         sqlx::query("DELETE FROM resource_entry_graphs WHERE entry_id = ?")
             .bind(&entry_id)
