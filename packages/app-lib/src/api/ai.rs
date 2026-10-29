@@ -3904,7 +3904,11 @@ mod tests {
                 .iter()
                 .map(|model| (model.id.as_str(), model.source.as_str()))
                 .collect::<Vec<_>>(),
-            [("kept", "builtin"), ("added", "custom"), ("fetched", "remote")]
+            [
+                ("kept", "builtin"),
+                ("added", "custom"),
+                ("fetched", "remote")
+            ]
         );
         assert_eq!(models[0].name, "Renamed");
         assert!(!models[0].enabled);
