@@ -377,6 +377,8 @@ console.log('resource identities: real upgrade, downgrade and re-upgrade')
             VALUES ('frozen', 'sample', 'install_content', 'queued',
                 '{"request":{"type":"install_content","project_id":"12345678","version_id":"release1"}}', 1, 2);
     `)
+    // `cache` stays in the app database: the resource cache still imports the
+    // rows a previous launcher left there, so the table is read, never written.
     const businessTables = ['content_favorites', 'instance_files', 'instance_content_entries', 'instance_content_provider_refs', 'instance_pack_members', 'instance_links', 'install_jobs', 'cache']
     const original = businessTables.map((table) => database.prepare(`SELECT * FROM ${table}`).all())
     for (const name of files.filter((name) => Number(name.slice(0, 14)) >= version)) apply(name)
