@@ -886,19 +886,6 @@ where
     (item, result)
 }
 
-impl Clone for H2BatchAsset {
-    fn clone(&self) -> Self {
-        Self {
-            url: self.url.clone(),
-            destination: self.destination.clone(),
-            legacy_destinations: self.legacy_destinations.clone(),
-            sha1: self.sha1.clone(),
-            size: self.size,
-            logical_items: self.logical_items,
-        }
-    }
-}
-
 /// Selects every asset stream through the shared authority scheduler.
 struct AssetBatchConnectionGroup {
     primary: Arc<SharedH2Connection>,
