@@ -246,9 +246,14 @@ function fromDesignFile(value: Record<string, unknown>): BannerDesign {
         )
     }
     const baseValue = value.baseColor ?? value.base
-    const baseColor = typeof baseValue === 'string' ? normalizeDyeColor(baseValue) : null
-    if (typeof baseValue === 'string' && !baseColor) {
-        throw new BannerParseError('invalid-color', baseValue)
+    const baseColor =
+        typeof baseValue === 'number'
+            ? dyeColorFromLegacyIndex(baseValue)
+            : typeof baseValue === 'string'
+              ? normalizeDyeColor(baseValue)
+              : null
+    if (baseValue !== undefined && !baseColor) {
+        throw new BannerParseError('invalid-color', String(baseValue))
     }
     return { baseColor: baseColor ?? 'white', layers: clampLayers(layers) }
 }

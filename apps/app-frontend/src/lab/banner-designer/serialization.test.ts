@@ -197,6 +197,13 @@ describe('banner import', () => {
         expect(parsed.layers[0].color).toBe('white')
     })
 
+    it('reads a numeric base colour in a design file the way it reads layer colours', () => {
+        const parsed = parseBannerText('{"baseColor":14,"layers":[{"pattern":"cross","color":0}]}')
+        expect(parsed.baseColor).toBe('red')
+        expect(parsed.layers[0].color).toBe('white')
+        expect(codes(() => parseBannerText('{"baseColor":99,"layers":[]}'))).toBe('invalid-color')
+    })
+
     it('falls back to the item id when the legacy NBT has no base color', () => {
         const parsed = parseBannerText(
             '/give @p minecraft:lime_banner{BlockEntityTag:{Patterns:[{Pattern:"bricks",Color:4b}]}}',
