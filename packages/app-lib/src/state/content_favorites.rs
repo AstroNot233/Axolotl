@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::resources::favorites as resource_favorites;
-use crate::resources::favorites::ResourceFavorite;
 use crate::resources::{
     ResourceType, SourceId, SourceProjectId, SourceProjectRef,
 };
@@ -68,7 +67,9 @@ fn resource_type(value: ContentFavoriteType) -> ResourceType {
 /// the same set the retired table holds today, because the resource layer only
 /// mirrors modrinth, curseforge and mcarchive into it; the filter and this
 /// module retire with that table.
-fn content_favorite(favorite: ResourceFavorite) -> Option<ContentFavorite> {
+fn content_favorite(
+    favorite: resource_favorites::SavedFavorite,
+) -> Option<ContentFavorite> {
     let provider =
         ContentFavoriteProvider::parse(favorite.project.source.as_str())
             .ok()?;
@@ -84,8 +85,9 @@ fn content_favorite(favorite: ResourceFavorite) -> Option<ContentFavorite> {
 pub(crate) async fn list(
     _handle: &Handle,
 ) -> crate::Result<Vec<ContentFavorite>> {
+    let state = crate::State::get().await?;
     let mut favorites = Vec::new();
-    for favorite in resource_favorites::list().await? {
+    for favorite in resource_favorites::saved(&state.pool).await? {
         if let Some(favorite) = content_favorite(favorite) {
             favorites.push(favorite);
         }
@@ -112,14 +114,13 @@ pub(crate) async fn add(
         None,
     )
     .await?;
-    // The write reports nothing, and reading the favorite back keeps the
-    // moment an existing one was first saved.
-    let saved = resource_favorites::list()
+    // The write reports nothing, and reading the row back keeps the moment an
+    // existing favorite was first saved.
+    let state = crate::State::get().await?;
+    let saved = resource_favorites::saved(&state.pool)
         .await?
         .into_iter()
-        .find(|saved| {
-            saved.project == project || saved.projects.contains(&project)
-        })
+        .find(|saved| saved.project == project)
         .ok_or_else(|| {
             crate::ErrorKind::OtherError(
                 "The favorite was removed while it was being saved".to_string(),
@@ -140,6 +141,7 @@ pub(crate) async fn remove(
     _handle: &Handle,
 ) -> crate::Result<()> {
     let project = source_project(provider, project_id)?;
-    resource_favorites::remove(&project).await?;
+    let state = crate::State::get().await?;
+    resource_favorites::remove_project(&state.pool, &project).await?;
     Ok(())
 }

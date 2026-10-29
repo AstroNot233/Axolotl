@@ -31,19 +31,6 @@ pub(super) async fn derived() -> (tempfile::TempDir, Handle) {
     (directory, handle)
 }
 
-/// A second connection to the derived database `directory` holds, for rows a
-/// collection would not write.
-pub(super) async fn derived_pool(directory: &std::path::Path) -> SqlitePool {
-    sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect_with(
-            sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(directory.join(FILE_NAME)),
-        )
-        .await
-        .unwrap()
-}
-
 /// A handle on a database of its own, with `instances` already there.
 pub(super) async fn handle_with_instances(instances: &[&str]) -> Handle {
     let pool = pool().await;

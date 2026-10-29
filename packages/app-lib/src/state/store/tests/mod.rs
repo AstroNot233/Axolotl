@@ -10,6 +10,7 @@ mod content_favorites;
 mod content_refresh;
 mod crash_analysis_mod_snapshots;
 mod credentials;
+mod favorites;
 mod game_option_locale_origins;
 mod game_option_pack_bases;
 mod game_option_update_state;

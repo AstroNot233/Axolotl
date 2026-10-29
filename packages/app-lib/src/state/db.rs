@@ -4732,7 +4732,6 @@ mod tests {
                        'crash_analysis_mod_snapshots',
                        'discovered_javas',
                        'google_translate_ip_cache',
-                       'telemetry_outbox',
                        'translation_cache'
                    )",
             )
@@ -4740,7 +4739,21 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(remaining, 0);
+            let outbox: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = 'telemetry_outbox'",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            assert_eq!(outbox, 1);
         }
+        let queued: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM telemetry_outbox")
+                .fetch_one(&upgrade)
+                .await
+                .unwrap();
+        assert_eq!(queued, 1);
     }
 
     #[tokio::test]
