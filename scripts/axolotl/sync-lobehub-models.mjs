@@ -191,8 +191,8 @@ async function fetchSponsoredModels(providerId, url) {
     const seen = new Set()
     return body.models.map((model) => {
         requireObject(model, `${providerId} model`)
-        if (typeof model.model !== 'string' || !model.model.trim()) {
-            throw new Error(`${providerId} model has no id`)
+        if (typeof model.model !== 'string' || !model.model || model.model !== model.model.trim()) {
+            throw new Error(`${providerId} model has an invalid id: ${JSON.stringify(model.model)}`)
         }
         if (seen.has(model.model)) throw new Error(`Duplicate ${providerId} model: ${model.model}`)
         seen.add(model.model)
@@ -325,15 +325,19 @@ assertSponsoredProvidersPreserved(rustSource)
 const currentCatalog = JSON.parse(catalogText)
 const currentProviders = validateCurrentCatalog(currentCatalog, rustSource)
 const loadModels = createModelBankLoader(upstreamRoot)
-const sponsoredModels = Object.fromEntries(
-    await Promise.all(
-        Object.entries(SPONSORED_MODEL_SOURCES).map(async ([providerId, url]) => {
-            const models = await fetchSponsoredModels(providerId, url)
-            assertCheckModelListed(rustSource, providerId, models)
-            return [providerId, models]
-        }),
-    ),
-)
+// A sponsor's outage or bad response keeps its current models instead of
+// blocking the LobeHub update; the warning is annotated on the workflow run.
+const sponsoredModels = {}
+for (const [providerId, url] of Object.entries(SPONSORED_MODEL_SOURCES)) {
+    try {
+        const models = await fetchSponsoredModels(providerId, url)
+        assertCheckModelListed(rustSource, providerId, models)
+        sponsoredModels[providerId] = models
+    } catch (error) {
+        const message = `Keeping the current ${providerId} models: ${error.message}`
+        console.warn(process.env.GITHUB_ACTIONS === 'true' ? `::warning::${message}` : message)
+    }
+}
 const { providers, synchronizedCount, upstreamChatCount } = buildCatalog(
     await loadModels(),
     currentProviders,
