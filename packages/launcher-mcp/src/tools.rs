@@ -35,7 +35,7 @@ pub(crate) async fn call(
                 "requires_session": entry.access != Access::Public,
                 "requires_full_access": entry.access == Access::FullAccess,
                 "read_only": entry.read_only,
-                "returns_operation_id": matches!(entry.tool.name.as_ref(), "resource_check_updates" | "resource_prepare_update" | "resource_prepare_switch" | "resource_execute_changes" | "modpack_prepare_install" | "modpack_prepare_local" | "modpack_execute_install" | "instance_scan_imports" | "instance_prepare_import" | "instance_execute_import" | "instance_plan_upgrade" | "instance_get_upgrade_plan" | "instance_revise_upgrade" | "instance_select_upgrade_solution" | "instance_execute_upgrade" | "instance_launch" | "install_job_retry" | "install_job_resume" | "install_job_cancel" | "resource_prepare_install" | "resource_execute_plan" | "resource_revise_plan" | "content_remove" | "backup_enable" | "backup_disable" | "backup_set_exclusions" | "backup_create" | "backup_preview_restore" | "backup_restore" | "backup_delete_snapshot" | "world_backup" | "world_delete" | "instance_launch_world" | "instance_join_server" | "java_install" | "java_test" | "java_set_default" | "download_job_retry" | "download_job_resume" | "download_job_cancel" | "download_job_delete" | "download_history_clear" | "install_job_scan_missing_files" | "install_job_skip_missing" | "install_job_repair_and_retry" | "account_set_default" | "account_remove" | "account_add_offline" | "server_create" | "server_start" | "server_delete" | "server_console_send" | "server_install_forge" | "server_install_neoforge" | "server_install_modpack" | "instance_duplicate" | "instance_reinstall" | "instance_delete" | "resource_favorite_add" | "resource_favorite_remove" | "resource_history_rollback" | "resource_scan_backups" | "resource_prepare_history_cleanup" | "resource_execute_history_cleanup"),
+                "returns_operation_id": matches!(entry.tool.name.as_ref(), "core_preview_jar" | "core_add_jar_mod" | "core_replace_jar" | "core_set_enabled" | "core_move_component" | "core_remove_component" | "core_restore_component" | "core_install_mcarchive_loader" | "core_import_mcarchive_loader" | "multiplayer_list_nodes" | "multiplayer_set_provider" | "multiplayer_prepare_provider" | "multiplayer_host" | "multiplayer_join" | "multiplayer_stop" | "multiplayer_reset" | "multiplayer_check_update" | "multiplayer_update" | "multiplayer_logs_read" | "multiplayer_get_diagnostics" | "screenshot_save_edit" | "screenshot_delete" | "screenshot_move" | "screenshot_export" | "screenshot_group_create" | "screenshot_group_rename" | "screenshot_group_delete" | "screenshot_set_group" | "skin_list" | "cape_list" | "skin_get_texture" | "skin_import" | "skin_save" | "skin_equip" | "skin_delete" | "skin_unequip" | "skin_set_order" | "cape_equip" | "cape_unequip" | "file_write" | "file_apply_patch" | "file_create_directory" | "file_copy" | "file_move" | "file_trash" | "archive_create" | "archive_extract" | "nbt_patch" | "resource_check_updates" | "resource_prepare_update" | "resource_prepare_switch" | "resource_execute_changes" | "modpack_prepare_install" | "modpack_prepare_local" | "modpack_execute_install" | "instance_scan_imports" | "instance_prepare_import" | "instance_execute_import" | "instance_plan_upgrade" | "instance_get_upgrade_plan" | "instance_revise_upgrade" | "instance_select_upgrade_solution" | "instance_execute_upgrade" | "instance_launch" | "install_job_retry" | "install_job_resume" | "install_job_cancel" | "resource_prepare_install" | "resource_execute_plan" | "resource_revise_plan" | "content_remove" | "backup_enable" | "backup_disable" | "backup_set_exclusions" | "backup_create" | "backup_preview_restore" | "backup_restore" | "backup_delete_snapshot" | "world_backup" | "world_delete" | "instance_launch_world" | "instance_join_server" | "java_install" | "java_test" | "java_set_default" | "download_job_retry" | "download_job_resume" | "download_job_cancel" | "download_job_delete" | "download_history_clear" | "install_job_scan_missing_files" | "install_job_skip_missing" | "install_job_repair_and_retry" | "account_set_default" | "account_remove" | "account_add_offline" | "server_create" | "server_start" | "server_delete" | "server_console_send" | "server_install_forge" | "server_install_neoforge" | "server_install_modpack" | "instance_duplicate" | "instance_reinstall" | "instance_delete" | "resource_favorite_add" | "resource_favorite_remove" | "resource_history_rollback" | "resource_scan_backups" | "resource_prepare_history_cleanup" | "resource_execute_history_cleanup"),
             })).collect::<Vec<_>>(),
             "restrictions": {
                 "ordinary_mode": {"manual_control_approval": true, "deletion": false, "direct_interface_control": false},
@@ -96,8 +96,25 @@ pub(crate) async fn call(
             }
         }
     };
-    let result = if request.name == "ui_screenshot" {
+    let result = if matches!(
+        request.name.as_ref(),
+        "ui_screenshot" | "screenshot_get"
+    ) {
         result.and_then(screenshot)
+    } else if request.name == "operations_get" {
+        result.and_then(|mut value| {
+            if value["status"] == "succeeded"
+                && value["result"]["image"].is_object()
+            {
+                let mut image = screenshot(value["result"].take())?;
+                value["result"] =
+                    image.structured_content.take().unwrap_or(Value::Null);
+                image.structured_content = Some(value);
+                Ok(image)
+            } else {
+                Ok(CallToolResult::structured(value))
+            }
+        })
     } else {
         result.map(CallToolResult::structured)
     };

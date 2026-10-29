@@ -22,7 +22,7 @@ fn summary(info: ServerInfo) -> Value {
         "pinned":manifest.home_pinned_at.is_some(),"created_at":manifest.created_at,"last_started_at":manifest.last_started_at,"last_exit_crashed":manifest.last_exit_crashed})
 }
 
-fn require_stopped(info: &ServerInfo) -> Result<(), ToolError> {
+pub(super) fn require_stopped(info: &ServerInfo) -> Result<(), ToolError> {
     if info.running || info.starting || info.stopping {
         return Err(ToolError::new(
             "server_active",
@@ -32,7 +32,18 @@ fn require_stopped(info: &ServerInfo) -> Result<(), ToolError> {
     Ok(())
 }
 
-async fn info(id: &str) -> Result<ServerInfo, ToolError> {
+pub(super) async fn info(id: &str) -> Result<ServerInfo, ToolError> {
+    if id.is_empty()
+        || id.contains("..")
+        || !id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
+    {
+        return Err(ToolError::new(
+            "invalid_server_id",
+            "Use a managed server ID returned by server_list",
+        ));
+    }
     let info = servers::get(id).await.map_err(error)?;
     if info.manifest.id != id {
         return Err(ToolError::new(

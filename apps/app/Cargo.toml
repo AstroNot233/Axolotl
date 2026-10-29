@@ -11,6 +11,8 @@ license = "GPL-3.0-only"
 base64 = { workspace = true }
 async_zip = { workspace = true, features = ["deflate", "tokio-fs"] }
 bytes = { workspace = true }
+cap-std = { workspace = true }
+cap-fs-ext = { workspace = true }
 chrono = { workspace = true }
 daedalus = { workspace = true }
 dashmap = { workspace = true }

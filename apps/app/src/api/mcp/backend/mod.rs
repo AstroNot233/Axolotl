@@ -1,6 +1,9 @@
 mod accounts;
 mod backups;
+mod core;
 mod downloads;
+mod files;
+mod gallery;
 mod imports;
 mod instance_maintenance;
 mod instances;
@@ -12,12 +15,14 @@ mod lifecycle;
 mod logs;
 mod metadata;
 mod modpacks;
+mod multiplayer;
 mod queries;
 mod resource_history;
 mod resource_updates;
 mod resources;
 mod reviewed;
 mod servers;
+mod skins;
 mod upgrades;
 mod worlds;
 
@@ -59,6 +64,77 @@ impl Backend for LauncherBackend {
     ) -> BoxFuture<'_, Result<Value, ToolError>> {
         Box::pin(async move {
             match command {
+                command @ (Command::CoreListComponents { .. }
+                | Command::CorePreviewJar { .. }
+                | Command::CoreAddJarMod { .. }
+                | Command::CoreReplaceJar { .. }
+                | Command::CoreSetEnabled { .. }
+                | Command::CoreMoveComponent { .. }
+                | Command::CoreRemoveComponent { .. }
+                | Command::CoreRestoreComponent { .. }
+                | Command::CoreInstallMcarchiveLoader { .. }
+                | Command::CoreImportMcarchiveLoader { .. }) => {
+                    core::execute(self, command, context).await
+                }
+                command @ (Command::MultiplayerGetState { .. }
+                | Command::MultiplayerGetConnection { .. }
+                | Command::MultiplayerListNodes { .. }
+                | Command::MultiplayerDetectPorts { .. }
+                | Command::MultiplayerSetProvider { .. }
+                | Command::MultiplayerPrepareProvider { .. }
+                | Command::MultiplayerHost { .. }
+                | Command::MultiplayerJoin { .. }
+                | Command::MultiplayerStop { .. }
+                | Command::MultiplayerReset { .. }
+                | Command::MultiplayerCheckUpdate { .. }
+                | Command::MultiplayerUpdate { .. }
+                | Command::MultiplayerLogsRead { .. }
+                | Command::MultiplayerGetDiagnostics { .. }) => {
+                    multiplayer::execute(self, command, context).await
+                }
+                command @ (Command::ScreenshotList { .. }
+                | Command::ScreenshotGet { .. }
+                | Command::ScreenshotSaveEdit { .. }
+                | Command::ScreenshotDelete { .. }
+                | Command::ScreenshotMove { .. }
+                | Command::ScreenshotExport { .. }
+                | Command::ScreenshotGroupList { .. }
+                | Command::ScreenshotGroupCreate { .. }
+                | Command::ScreenshotGroupRename { .. }
+                | Command::ScreenshotGroupDelete { .. }
+                | Command::ScreenshotSetGroup { .. }) => {
+                    gallery::execute(self, command, context).await
+                }
+                command @ (Command::SkinList { .. }
+                | Command::CapeList { .. }
+                | Command::SkinGetTexture { .. }
+                | Command::SkinImport { .. }
+                | Command::SkinSave { .. }
+                | Command::SkinEquip { .. }
+                | Command::SkinDelete { .. }
+                | Command::SkinUnequip { .. }
+                | Command::SkinSetOrder { .. }
+                | Command::CapeEquip { .. }
+                | Command::CapeUnequip { .. }) => {
+                    skins::execute(self, command, context).await
+                }
+                command @ (Command::FileList { .. }
+                | Command::FileStat { .. }
+                | Command::FileSearch { .. }
+                | Command::FileReadText { .. }
+                | Command::FileReadBinary { .. }
+                | Command::FileWrite { .. }
+                | Command::FileApplyPatch { .. }
+                | Command::FileCreateDirectory { .. }
+                | Command::FileCopy { .. }
+                | Command::FileMove { .. }
+                | Command::FileTrash { .. }
+                | Command::ArchiveCreate { .. }
+                | Command::ArchiveExtract { .. }
+                | Command::NbtRead { .. }
+                | Command::NbtPatch { .. }) => {
+                    files::execute(self, command, context).await
+                }
                 command @ (Command::UiGetContext {}
                 | Command::UiScreenshot {}
                 | Command::UiNavigate { .. }

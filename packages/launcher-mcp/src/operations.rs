@@ -19,6 +19,14 @@ impl Operation {
     fn value(&self) -> Value {
         json!({"operation_id":self.id,"tool":self.tool,"status":self.status,"result":self.result})
     }
+
+    fn summary(&self) -> Value {
+        let mut value = self.value();
+        if value["result"]["image"].is_object() {
+            value["result"]["image"] = serde_json::json!({"available":true,"retrieve_with":"operations_get"});
+        }
+        value
+    }
 }
 
 impl Shared {
@@ -56,7 +64,7 @@ impl Shared {
         self.authorize(transport, control, false)?;
         Ok(
             json!({"items":self.operations.lock().unwrap_or_else(|e| e.into_inner()).0.iter().rev()
-            .filter(|op| op.transport == transport && op.control == control).map(Operation::value).collect::<Vec<_>>()}),
+            .filter(|op| op.transport == transport && op.control == control).map(Operation::summary).collect::<Vec<_>>()}),
         )
     }
 
@@ -108,11 +116,11 @@ impl Shared {
         let operation_id = id.clone();
         tokio::spawn(async move {
             let result = async {
-                let _permit = tokio::select! {
+                let _permit = if command.interrupts_mutation() { None } else { Some(tokio::select! {
                     biased;
                     _ = cancel.cancelled() => return Err(ToolError::new("session_revoked", "Control session ended before execution")),
                     permit = shared.mutations.lock() => permit,
-                };
+                }) };
                 shared.authorize(&transport, &control, full)?;
                 shared.operation_update(&operation_id, "running", None);
                 // Catch backend panics too: an accepted operation must not remain

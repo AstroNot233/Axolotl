@@ -5,17 +5,22 @@ use rmcp::{
 use serde_json::{Map, Value, json};
 mod accounts;
 mod backups;
+mod core;
 mod downloads;
+mod files;
+mod gallery;
 mod instance_maintenance;
 mod instance_workflows;
 mod interface;
 mod java;
 mod launch;
 mod modpacks;
+mod multiplayer;
 mod resource_history;
 mod resource_updates;
 mod resources;
 mod servers;
+mod skins;
 mod worlds;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -64,6 +69,10 @@ fn entry(
                     .idempotent(idempotent)
                     .open_world(
                         name.starts_with("resource_")
+                            || name.starts_with("multiplayer_")
+                            || name.starts_with("skin_")
+                            || name.starts_with("cape_")
+                            || name.contains("mcarchive")
                             || matches!(
                                 name,
                                 "instance_create"
@@ -409,6 +418,11 @@ pub(crate) fn entries() -> Vec<Entry> {
         ),
     ];
     entries.extend(resources::entries());
+    entries.extend(core::entries());
+    entries.extend(multiplayer::entries());
+    entries.extend(gallery::entries());
+    entries.extend(skins::entries());
+    entries.extend(files::entries());
     entries.extend(resource_updates::entries());
     entries.extend(modpacks::entries());
     entries.extend(backups::entries());
@@ -466,10 +480,12 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
             !s.chars().any(|c| {
                 c.is_control()
                     && !(rule["format"] == "ui-text"
-                        && matches!(c, '\n' | '\t'))
+                        && matches!(c, '\n' | '\r' | '\t'))
             }) && rule["minLength"].as_u64().is_none_or(|min| {
                 len >= min
-                    && (rule["format"] == "ui-text" || !s.trim().is_empty())
+                    && (min == 0
+                        || rule["format"] == "ui-text"
+                        || !s.trim().is_empty())
             }) && rule["maxLength"].as_u64().is_none_or(|max| len <= max)
                 && rule["enum"]
                     .as_array()
@@ -490,7 +506,17 @@ fn valid_value(value: &Value, rule: &Value) -> bool {
                     || uuid::Uuid::parse_str(s).is_ok())
                 && (rule["format"] != "log-filename"
                     || crate::log_text::valid_filename(s))
+                && (rule["format"] != "image-filename"
+                    || (valid_relative_path(s)
+                        && !s.contains('/')
+                        && s.to_ascii_lowercase().ends_with(".png")))
                 && (rule["format"] != "relative-path" || valid_relative_path(s))
+                && (rule["format"] != "directory-path"
+                    || s.is_empty()
+                    || valid_relative_path(s))
+                && (rule["format"] != "sha256"
+                    || (s.len() == 64
+                        && s.bytes().all(|c| c.is_ascii_hexdigit())))
                 && (rule["format"] != "world-id"
                     || crate::world_input::valid_world_id(s))
                 && (rule["format"] != "server-address"

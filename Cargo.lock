@@ -7377,6 +7377,8 @@ dependencies = [
  "base64 0.22.1",
  "block2",
  "bytes",
+ "cap-fs-ext",
+ "cap-std",
  "cc",
  "chrono",
  "daedalus",

@@ -42,6 +42,330 @@ impl ToolError {
     deny_unknown_fields
 )]
 pub enum Command {
+    CoreListComponents {
+        instance_id: String,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    CorePreviewJar {
+        instance_id: String,
+    },
+    CoreAddJarMod {
+        instance_id: String,
+        path: String,
+        expected_sha256: String,
+    },
+    CoreReplaceJar {
+        instance_id: String,
+        path: String,
+        expected_sha256: String,
+    },
+    CoreSetEnabled {
+        instance_id: String,
+        component_id: String,
+        enabled: bool,
+    },
+    CoreMoveComponent {
+        instance_id: String,
+        component_id: String,
+        direction: String,
+    },
+    CoreRemoveComponent {
+        instance_id: String,
+        component_id: String,
+    },
+    CoreRestoreComponent {
+        instance_id: String,
+        component_id: String,
+    },
+    CoreInstallMcarchiveLoader {
+        instance_id: String,
+    },
+    CoreImportMcarchiveLoader {
+        instance_id: String,
+        path: String,
+        expected_sha256: String,
+    },
+    MultiplayerGetState {},
+    MultiplayerGetConnection {},
+    MultiplayerListNodes {
+        #[serde(default)]
+        force_refresh: Option<bool>,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    MultiplayerDetectPorts {
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    MultiplayerSetProvider {
+        provider: String,
+    },
+    MultiplayerPrepareProvider {
+        provider: String,
+    },
+    MultiplayerHost {
+        provider: String,
+        #[serde(default)]
+        player_name: Option<String>,
+        #[serde(default)]
+        room_code: Option<String>,
+        #[serde(default)]
+        local_port: Option<usize>,
+        #[serde(default)]
+        node_name: Option<String>,
+        #[serde(default)]
+        instance_id: Option<String>,
+    },
+    MultiplayerJoin {
+        room_code: String,
+        player_name: String,
+    },
+    MultiplayerStop {},
+    MultiplayerReset {},
+    MultiplayerCheckUpdate {},
+    MultiplayerUpdate {},
+    MultiplayerLogsRead {
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        max_bytes: Option<usize>,
+    },
+    MultiplayerGetDiagnostics {
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        max_bytes: Option<usize>,
+    },
+    ScreenshotList {
+        #[serde(default)]
+        instance_id: Option<String>,
+        #[serde(default)]
+        group_id: Option<String>,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    ScreenshotGet {
+        instance_id: String,
+        file_name: String,
+        #[serde(default)]
+        max_dimension: Option<usize>,
+    },
+    ScreenshotSaveEdit {
+        instance_id: String,
+        file_name: String,
+        png_base64: String,
+        mode: String,
+        expected_sha256: String,
+    },
+    ScreenshotDelete {
+        instance_id: String,
+        file_names: Vec<String>,
+    },
+    ScreenshotMove {
+        instance_id: String,
+        file_names: Vec<String>,
+        target_instance_id: String,
+    },
+    ScreenshotExport {
+        instance_id: String,
+        file_names: Vec<String>,
+        target_kind: String,
+        target_id: String,
+        path: String,
+    },
+    ScreenshotGroupList {},
+    ScreenshotGroupCreate {
+        name: String,
+    },
+    ScreenshotGroupRename {
+        group_id: String,
+        name: String,
+    },
+    ScreenshotGroupDelete {
+        group_id: String,
+    },
+    ScreenshotSetGroup {
+        screenshot_ids: Vec<String>,
+        #[serde(default)]
+        group_id: Option<String>,
+    },
+    SkinList {
+        #[serde(default)]
+        refresh: Option<bool>,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    CapeList {
+        #[serde(default)]
+        refresh: Option<bool>,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    SkinGetTexture {
+        skin_id: String,
+    },
+    SkinImport {
+        png_base64: String,
+        variant: String,
+        #[serde(default)]
+        cape_id: Option<uuid::Uuid>,
+    },
+    SkinSave {
+        skin_id: String,
+        png_base64: String,
+        variant: String,
+        #[serde(default)]
+        cape_id: Option<uuid::Uuid>,
+        replace_texture: bool,
+    },
+    SkinEquip {
+        skin_id: String,
+    },
+    SkinDelete {
+        skin_id: String,
+    },
+    SkinUnequip {},
+    SkinSetOrder {
+        skin_ids: Vec<String>,
+    },
+    CapeEquip {
+        cape_id: uuid::Uuid,
+    },
+    CapeUnequip {},
+    FileList {
+        target_kind: String,
+        target_id: String,
+        #[serde(default)]
+        directory: Option<String>,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    FileStat {
+        target_kind: String,
+        target_id: String,
+        path: String,
+    },
+    FileSearch {
+        target_kind: String,
+        target_id: String,
+        #[serde(default)]
+        directory: Option<String>,
+        query: String,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    FileReadText {
+        target_kind: String,
+        target_id: String,
+        path: String,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        max_bytes: Option<usize>,
+    },
+    FileReadBinary {
+        target_kind: String,
+        target_id: String,
+        path: String,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        max_bytes: Option<usize>,
+    },
+    FileWrite {
+        target_kind: String,
+        target_id: String,
+        path: String,
+        content: String,
+        encoding: String,
+        #[serde(default)]
+        expected_sha256: Option<String>,
+        create_new: bool,
+    },
+    FileApplyPatch {
+        target_kind: String,
+        target_id: String,
+        path: String,
+        find: String,
+        replace: String,
+        expected_sha256: String,
+    },
+    FileCreateDirectory {
+        target_kind: String,
+        target_id: String,
+        path: String,
+    },
+    FileCopy {
+        target_kind: String,
+        target_id: String,
+        source_path: String,
+        destination_path: String,
+        expected_sha256: String,
+    },
+    FileMove {
+        target_kind: String,
+        target_id: String,
+        source_path: String,
+        destination_path: String,
+        expected_sha256: String,
+    },
+    FileTrash {
+        target_kind: String,
+        target_id: String,
+        path: String,
+        expected_sha256: String,
+    },
+    ArchiveCreate {
+        target_kind: String,
+        target_id: String,
+        paths: Vec<String>,
+        destination_path: String,
+    },
+    ArchiveExtract {
+        target_kind: String,
+        target_id: String,
+        path: String,
+        destination_path: String,
+        expected_sha256: String,
+    },
+    NbtRead {
+        target_kind: String,
+        target_id: String,
+        path: String,
+        #[serde(default)]
+        tag_path: Option<Vec<String>>,
+        #[serde(default)]
+        offset: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    NbtPatch {
+        target_kind: String,
+        target_id: String,
+        path: String,
+        tag_path: Vec<String>,
+        #[serde(default)]
+        value_snbt: Option<String>,
+        remove: bool,
+        expected_sha256: String,
+    },
     UiGetContext {},
     UiScreenshot {},
     UiNavigate {
@@ -806,7 +1130,55 @@ impl Command {
     pub(crate) fn deferred(&self) -> bool {
         matches!(
             self,
-            Self::InstanceLaunch { .. }
+            Self::CorePreviewJar { .. }
+                | Self::CoreAddJarMod { .. }
+                | Self::CoreReplaceJar { .. }
+                | Self::CoreSetEnabled { .. }
+                | Self::CoreMoveComponent { .. }
+                | Self::CoreRemoveComponent { .. }
+                | Self::CoreRestoreComponent { .. }
+                | Self::CoreInstallMcarchiveLoader { .. }
+                | Self::CoreImportMcarchiveLoader { .. }
+                | Self::MultiplayerListNodes { .. }
+                | Self::MultiplayerSetProvider { .. }
+                | Self::MultiplayerPrepareProvider { .. }
+                | Self::MultiplayerHost { .. }
+                | Self::MultiplayerJoin { .. }
+                | Self::MultiplayerStop { .. }
+                | Self::MultiplayerReset { .. }
+                | Self::MultiplayerCheckUpdate { .. }
+                | Self::MultiplayerUpdate { .. }
+                | Self::MultiplayerLogsRead { .. }
+                | Self::MultiplayerGetDiagnostics { .. }
+                | Self::ScreenshotSaveEdit { .. }
+                | Self::ScreenshotDelete { .. }
+                | Self::ScreenshotMove { .. }
+                | Self::ScreenshotExport { .. }
+                | Self::ScreenshotGroupCreate { .. }
+                | Self::ScreenshotGroupRename { .. }
+                | Self::ScreenshotGroupDelete { .. }
+                | Self::ScreenshotSetGroup { .. }
+                | Self::SkinList { .. }
+                | Self::CapeList { .. }
+                | Self::SkinGetTexture { .. }
+                | Self::SkinImport { .. }
+                | Self::SkinSave { .. }
+                | Self::SkinEquip { .. }
+                | Self::SkinDelete { .. }
+                | Self::SkinUnequip { .. }
+                | Self::SkinSetOrder { .. }
+                | Self::CapeEquip { .. }
+                | Self::CapeUnequip { .. }
+                | Self::FileWrite { .. }
+                | Self::FileApplyPatch { .. }
+                | Self::FileCreateDirectory { .. }
+                | Self::FileCopy { .. }
+                | Self::FileMove { .. }
+                | Self::FileTrash { .. }
+                | Self::ArchiveCreate { .. }
+                | Self::ArchiveExtract { .. }
+                | Self::NbtPatch { .. }
+                | Self::InstanceLaunch { .. }
                 | Self::InstallJobRetry { .. }
                 | Self::InstallJobResume { .. }
                 | Self::InstallJobCancel { .. }
@@ -874,7 +1246,13 @@ impl Command {
     }
 
     pub(crate) fn interrupts_mutation(&self) -> bool {
-        matches!(self, Self::ServerStop { .. } | Self::ServerKill { .. })
+        matches!(
+            self,
+            Self::ServerStop { .. }
+                | Self::ServerKill { .. }
+                | Self::MultiplayerStop {}
+                | Self::MultiplayerReset {}
+        )
     }
 }
 

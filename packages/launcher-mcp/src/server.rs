@@ -73,7 +73,7 @@ impl Server {
             StreamableHttpServerConfig::default()
                 .with_cancellation_token(shared.shutdown.clone())
                 .with_json_response(true)
-                .with_max_request_body_bytes(16 * 1024)
+                .with_max_request_body_bytes(4 * 1024 * 1024)
                 .enforce_origin_validation(),
         );
         let app = Router::new()
