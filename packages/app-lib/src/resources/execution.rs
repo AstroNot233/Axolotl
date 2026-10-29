@@ -3,6 +3,17 @@ use crate::state::instances::commands::{
     instance_content_root, materialize_verified_project_download_copy,
     resolve_content_scope, restore_project_materialization,
 };
+use crate::state::store::Collection as _;
+use crate::state::store::Handle;
+use crate::state::store::resource_entry_graphs::{
+    EntryGraphRecord, ResourceEntryGraphs,
+};
+use crate::state::store::resource_execution_journals::ResourceExecutionJournals;
+use crate::state::store::resource_history::{
+    ResourceHistory, ResourceHistoryRecord,
+};
+use crate::state::store::resource_operation_plans::ResourceOperationPlans;
+use crate::state::store::resource_pack_unlinks;
 use crate::state::{
     ContentOwnershipKind, ContentProviderRef, ContentRequirement,
     ContentSourceKind, ProjectType,
@@ -307,14 +318,24 @@ pub(crate) async fn execute(
     {
         return Err(input("resource plan is not executable"));
     }
-    let completed: Option<i64> = sqlx::query_scalar("SELECT completed FROM resource_operation_plans WHERE id = ? AND revision = ?").bind(plan.id.as_str()).bind(plan.revision).fetch_optional(&state.pool).await?;
+    let completed = ResourceOperationPlans::completed_at(
+        &state.data,
+        plan.id.as_str(),
+        plan.revision,
+    )
+    .await?;
     if completed == Some(1) {
         return Ok(());
     }
     if completed.is_none() {
         return Err(input("durable resource plan not found"));
     }
-    let payload: String = sqlx::query_scalar("SELECT payload FROM resource_operation_plans WHERE id = ? AND revision = ?").bind(plan.id.as_str()).bind(plan.revision).fetch_one(&state.pool).await?;
+    let payload = ResourceOperationPlans::payload_at(
+        &state.data,
+        plan.id.as_str(),
+        plan.revision,
+    )
+    .await?;
     let draft: plans::OperationDraft = serde_json::from_str(&payload)?;
     if draft.plan != *plan {
         return Err(input("task does not match the reviewed resource plan"));
@@ -609,22 +630,14 @@ pub(crate) async fn execute(
         return Err(input("instance is not ready for resource changes"));
     }
     let root = instance_content_root(&state.directories, &scope.instance)?;
-    if sqlx::query_scalar::<_, i64>(
-        "SELECT completed FROM resource_operation_plans WHERE id = ?",
-    )
-    .bind(plan.id.as_str())
-    .fetch_one(&state.pool)
-    .await?
+    if ResourceOperationPlans::completed(&state.data, plan.id.as_str()).await?
         == 1
     {
         return Ok(());
     }
-    let previous_journal: Option<String> = sqlx::query_scalar(
-        "SELECT payload FROM resource_execution_journals WHERE plan_id = ?",
-    )
-    .bind(plan.id.as_str())
-    .fetch_optional(&state.pool)
-    .await?;
+    let previous_journal =
+        ResourceExecutionJournals::for_plan(&state.data, plan.id.as_str())
+            .await?;
     if let Some(journal) = previous_journal {
         let _critical = crate::install::critical_section::enter();
         recover_files(
@@ -685,8 +698,12 @@ pub(crate) async fn execute(
         }
     }
     if plan.actions.is_empty() {
-        sqlx::query("UPDATE resource_operation_plans SET completed = 1 WHERE id = ? AND revision = ?")
-            .bind(plan.id.as_str()).bind(plan.revision).execute(&state.pool).await?;
+        ResourceOperationPlans::mark_completed(
+            &state.data,
+            plan.id.as_str(),
+            plan.revision,
+        )
+        .await?;
         return Ok(());
     }
     for parent in retained_parents.values() {
@@ -785,7 +802,12 @@ pub(crate) async fn execute(
         }
     }
     canceled(&cancel)?;
-    sqlx::query("INSERT INTO resource_execution_journals(plan_id, payload) VALUES (?, ?) ON CONFLICT(plan_id) DO UPDATE SET payload = excluded.payload").bind(plan.id.as_str()).bind(serde_json::to_string(&journal)?).execute(&state.pool).await?;
+    ResourceExecutionJournals::save(
+        &state.data,
+        plan.id.as_str(),
+        &serde_json::to_string(&journal)?,
+    )
+    .await?;
     let _critical = crate::install::critical_section::enter();
     tracing::info!(
         plan_id = plan.id.as_str(),
@@ -837,11 +859,10 @@ pub(crate) async fn execute(
     if let Err(error) = result {
         match recover_files(&root, &journal).await {
             Ok(()) => {
-                sqlx::query(
-                    "DELETE FROM resource_execution_journals WHERE plan_id = ?",
+                ResourceExecutionJournals::delete(
+                    &state.data,
+                    plan.id.as_str(),
                 )
-                .bind(plan.id.as_str())
-                .execute(&state.pool)
                 .await?;
             }
             Err(recovery) => {
@@ -907,7 +928,11 @@ pub(crate) async fn recover_plan(
     let _lock = state
         .lock_instance_content_exclusive(&plan.instance_id)
         .await;
-    let payload: Option<String> = sqlx::query_scalar("SELECT journal.payload FROM resource_execution_journals journal JOIN resource_operation_plans plan ON plan.id = journal.plan_id WHERE journal.plan_id = ? AND plan.completed = 0").bind(plan.id.as_str()).fetch_optional(&state.pool).await?;
+    let payload = ResourceExecutionJournals::pending_payload(
+        &state.data,
+        plan.id.as_str(),
+    )
+    .await?;
     let _critical = crate::install::critical_section::enter();
     if let Some(payload) = payload {
         let scope =
@@ -918,12 +943,8 @@ pub(crate) async fn recover_plan(
             &serde_json::from_str::<Vec<JournalFile>>(&payload)?,
         )
         .await?;
-        sqlx::query(
-            "DELETE FROM resource_execution_journals WHERE plan_id = ?",
-        )
-        .bind(plan.id.as_str())
-        .execute(&state.pool)
-        .await?;
+        ResourceExecutionJournals::delete(&state.data, plan.id.as_str())
+            .await?;
     }
     clear_staging(plan, state).await
 }
@@ -946,12 +967,10 @@ async fn persist_plan(
         let refs =
             content_entries::get_content_provider_refs_with_origin(id, pool)
                 .await?;
-        let graph: Option<(String, String)> = sqlx::query_as(
-            "SELECT nodes, edges FROM resource_entry_graphs WHERE entry_id = ?",
-        )
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+        let key = id.to_owned();
+        let graph = ResourceEntryGraphs::get(&Handle::new(pool.clone()), &key)
+            .await?
+            .map(|record| (record.nodes, record.edges));
         let entry = content_entries::get_content_entry_by_id(id, pool).await?;
         prior.insert(action.entry_id.clone(), (refs, graph, entry));
     }
@@ -983,14 +1002,14 @@ async fn persist_plan(
         .collect();
     let now = chrono::Utc::now();
     let mut cache_entries = Vec::new();
-    let restore: Option<serde_json::Value> = if let Some(id) =
-        &draft.restore_history
-    {
-        let payload: String = sqlx::query_scalar("SELECT payload FROM resource_history WHERE id = ? AND backup_available = 1").bind(id.as_str()).fetch_one(&mut *tx).await?;
-        Some(serde_json::from_str(&payload)?)
-    } else {
-        None
-    };
+    let restore: Option<serde_json::Value> =
+        if let Some(id) = &draft.restore_history {
+            let payload =
+                ResourceHistory::backup_payload(&mut *tx, id.as_str()).await?;
+            Some(serde_json::from_str(&payload)?)
+        } else {
+            None
+        };
     for ((action, (_, kind, size, sha1, digest)), file) in
         plan.actions.iter().zip(downloads).zip(journal)
     {
@@ -1140,15 +1159,20 @@ async fn persist_plan(
             let metadata: crate::state::ContentEntry = serde_json::from_value(
                 restore["restoreEntryMetadata"].clone(),
             )?;
-            let unlinked: i64 = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM resource_pack_unlinks WHERE instance_id = ? AND content_set_id = ?)").bind(&plan.instance_id).bind(set_id).fetch_one(&mut *tx).await?;
-            let ownership = if unlinked != 0
+            let unlinked = resource_pack_unlinks::marked(
+                &mut *tx,
+                &plan.instance_id,
+                set_id,
+            )
+            .await?;
+            let ownership = if unlinked
                 && metadata.ownership_kind == ContentOwnershipKind::PackManaged
             {
                 ContentOwnershipKind::UserAdded
             } else {
                 metadata.ownership_kind
             };
-            let source = if unlinked != 0 {
+            let source = if unlinked {
                 ContentSourceKind::Local
             } else {
                 metadata.source_kind
@@ -1246,10 +1270,34 @@ async fn persist_plan(
                     .filter(|edge| edge.parent_entry_id == id)
                     .collect::<Vec<_>>(),
             )?;
-            sqlx::query("INSERT INTO resource_history(id, instance_id, entry_id, recorded_at, payload, backup_relative_path, backup_size, backup_sha1, backup_available) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(history.id.as_str()).bind(&plan.instance_id).bind(id).bind(now.timestamp()).bind(payload.to_string()).bind(&file.backup).bind(current.integrity.size.map(|size| size as i64)).bind(current.integrity.hashes.iter().find(|hash| hash.algorithm == HashAlgorithm::Sha1).map(|hash| &hash.value)).bind(history.backup_available).execute(&mut *tx).await?;
+            ResourceHistory::insert(
+                &mut *tx,
+                history.id.as_str(),
+                &ResourceHistoryRecord {
+                    instance_id: plan.instance_id.clone(),
+                    entry_id: id.to_string(),
+                    recorded_at: now.timestamp(),
+                    payload: payload.to_string(),
+                    backup_relative_path: file.backup.clone(),
+                    backup_size: current.integrity.size.map(|size| size as i64),
+                    backup_sha1: current
+                        .integrity
+                        .hashes
+                        .iter()
+                        .find(|hash| hash.algorithm == HashAlgorithm::Sha1)
+                        .map(|hash| hash.value.clone()),
+                    backup_available: history.backup_available,
+                },
+            )
+            .await?;
         }
         let (nodes, edges) = entry_graph(plan, &action.node_id);
-        sqlx::query("INSERT INTO resource_entry_graphs(entry_id, nodes, edges) VALUES (?, ?, ?) ON CONFLICT(entry_id) DO UPDATE SET nodes = excluded.nodes, edges = excluded.edges").bind(id).bind(serde_json::to_string(&nodes)?).bind(serde_json::to_string(&edges)?).execute(&mut *tx).await?;
+        let graph = EntryGraphRecord {
+            nodes: serde_json::to_string(&nodes)?,
+            edges: serde_json::to_string(&edges)?,
+        };
+        let key = id.to_owned();
+        ResourceEntryGraphs::write(&mut *tx, &key, Some(&graph)).await?;
     }
     for action in &plan.actions {
         let mut edges = Vec::new();
@@ -1297,24 +1345,45 @@ async fn persist_plan(
         {
             let member: crate::state::PackMember =
                 serde_json::from_value(member.clone())?;
-            let unlinked: i64 = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM resource_pack_unlinks WHERE instance_id = ? AND content_set_id = ?)").bind(&plan.instance_id).bind(set_id).fetch_one(&mut *tx).await?;
-            if unlinked == 0 {
+            let unlinked = resource_pack_unlinks::marked(
+                &mut *tx,
+                &plan.instance_id,
+                set_id,
+            )
+            .await?;
+            if !unlinked {
                 pack_members::upsert_pack_member_in_transaction(
                     &member, &mut tx,
                 )
                 .await?;
             }
         }
-        sqlx::query("UPDATE resource_entry_graphs SET nodes = ?, edges = ? WHERE entry_id = ?").bind(serde_json::to_string(&previous.previous_nodes)?).bind(serde_json::to_string(&previous.previous_dependencies)?).bind(previous.entry_id.as_str()).execute(&mut *tx).await?;
-        sqlx::query("UPDATE resource_history SET backup_available = 0, payload = ? WHERE id = ?").bind(payload.to_string()).bind(id.as_str()).execute(&mut *tx).await?;
+        ResourceEntryGraphs::restore_in(
+            &mut *tx,
+            previous.entry_id.as_str(),
+            &EntryGraphRecord {
+                nodes: serde_json::to_string(&previous.previous_nodes)?,
+                edges: serde_json::to_string(&previous.previous_dependencies)?,
+            },
+        )
+        .await?;
+        let payload = payload.to_string();
+        ResourceHistory::retire_with_payload_in(
+            &mut *tx,
+            id.as_str(),
+            &payload,
+        )
+        .await?;
     }
     content_sets::bump_content_set_revision_in_transaction(set_id, &mut tx)
         .await?;
-    sqlx::query("UPDATE resource_operation_plans SET completed = 1 WHERE id = ? AND revision = ?").bind(plan.id.as_str()).bind(plan.revision).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM resource_execution_journals WHERE plan_id = ?")
-        .bind(plan.id.as_str())
-        .execute(&mut *tx)
-        .await?;
+    ResourceOperationPlans::mark_completed_in(
+        &mut *tx,
+        plan.id.as_str(),
+        plan.revision,
+    )
+    .await?;
+    ResourceExecutionJournals::delete_in(&mut *tx, plan.id.as_str()).await?;
     // The hash cache lives in the derived database. Dropping the entries the
     // commit is about to replace keeps a run that stops before the write below
     // from trusting metadata of the file that was just replaced.

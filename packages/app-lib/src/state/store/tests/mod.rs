@@ -23,6 +23,8 @@ mod join_log;
 mod modrinth_sessions;
 mod official_login_proof;
 mod resource_cache;
+mod resource_favorites;
+mod resource_plans;
 mod resource_source_projects;
 mod settings;
 mod settings_api;

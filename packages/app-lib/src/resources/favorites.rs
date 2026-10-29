@@ -1,8 +1,13 @@
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use std::collections::HashMap;
 
 use super::*;
+use crate::state::store::Collection as _;
+use crate::state::store::Handle;
+use crate::state::store::atom;
+use crate::state::store::resource_favorites::{
+    ResourceFavoriteKey, ResourceFavorites,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,19 +42,12 @@ fn type_key(value: ResourceType) -> ResourceResult<&'static str> {
         )),
     }
 }
-fn db(error: sqlx::Error) -> ResourceError {
-    ResourceError::Database(error.to_string())
+fn favorite_key(project: &SourceProjectRef) -> ResourceFavoriteKey {
+    ResourceFavoriteKey {
+        source: project.source.as_str().to_owned(),
+        project_id: project.project_id.as_str().to_owned(),
+    }
 }
-
-/// The favorites as they were saved, with the resource each project maps to.
-const SAVED_ROWS: &str = "
-    SELECT favorite.source, favorite.project_id, favorite.content_type,
-        favorite.saved_at, project.resource_id
-    FROM resource_favorites AS favorite
-    LEFT JOIN resource_source_projects AS project
-        ON project.source = favorite.source
-        AND project.project_id = favorite.project_id
-    ORDER BY favorite.saved_at DESC, favorite.source, favorite.project_id";
 
 pub async fn list() -> ResourceResult<Vec<ResourceFavorite>> {
     let state = crate::State::get().await?;
@@ -97,16 +95,8 @@ pub(crate) async fn remove_project(
     pool: &sqlx::SqlitePool,
     project: &SourceProjectRef,
 ) -> ResourceResult<()> {
-    let mut transaction = pool.begin().await.map_err(db)?;
-    sqlx::query(
-        "DELETE FROM resource_favorites WHERE source = ? AND project_id = ?",
-    )
-    .bind(project.source.as_str())
-    .bind(project.project_id.as_str())
-    .execute(&mut *transaction)
-    .await
-    .map_err(db)?;
-    transaction.commit().await.map_err(db)?;
+    let handle = Handle::new(pool.clone());
+    ResourceFavorites::set(&handle, &favorite_key(project), None).await?;
     Ok(())
 }
 
@@ -124,27 +114,17 @@ pub struct SavedFavorite {
 pub(crate) async fn saved(
     pool: &sqlx::SqlitePool,
 ) -> ResourceResult<Vec<SavedFavorite>> {
-    let rows = sqlx::query(SAVED_ROWS).fetch_all(pool).await.map_err(db)?;
+    let rows = ResourceFavorites::saved(&Handle::new(pool.clone())).await?;
     let mut favorites = Vec::with_capacity(rows.len());
-    for row in rows {
+    for (source, project_id, content_type, saved_at, resource_id) in rows {
         favorites.push(SavedFavorite {
             project: SourceProjectRef {
-                source: SourceId::new(
-                    row.try_get::<String, _>("source").map_err(db)?,
-                )?,
-                project_id: SourceProjectId::new(
-                    row.try_get::<String, _>("project_id").map_err(db)?,
-                )?,
+                source: SourceId::new(source)?,
+                project_id: SourceProjectId::new(project_id)?,
             },
-            content_type: favorite_type(
-                &row.try_get::<String, _>("content_type").map_err(db)?,
-            )?,
-            saved_at: row.try_get("saved_at").map_err(db)?,
-            resource_id: row
-                .try_get::<Option<String>, _>("resource_id")
-                .map_err(db)?
-                .map(ResourceId::new)
-                .transpose()?,
+            content_type: favorite_type(&content_type)?,
+            saved_at,
+            resource_id: resource_id.map(ResourceId::new).transpose()?,
         });
     }
     Ok(favorites)
@@ -159,50 +139,32 @@ impl ResourceService {
             ResourceError::Database("resource store unavailable".into())
         })?;
         let preferred = self.preferred_source().await?;
-        let rows = sqlx::query(SAVED_ROWS).fetch_all(pool).await.map_err(db)?;
+        let handle = Handle::new(pool.clone());
+        let rows = ResourceFavorites::saved(&handle).await?;
         let mut favorites: Vec<ResourceFavorite> = Vec::new();
         let mut groups = HashMap::new();
-        let links = sqlx::query("SELECT project.resource_id, project.source, project.project_id, (SELECT alias FROM resource_aliases alias WHERE alias.source = project.source AND alias.project_id = project.project_id ORDER BY rowid DESC LIMIT 1) AS alias FROM resource_source_projects project WHERE project.resource_id IN (SELECT project.resource_id FROM resource_source_projects project JOIN resource_favorites favorite ON favorite.source = project.source AND favorite.project_id = project.project_id) ORDER BY project.source, project.project_id").fetch_all(pool).await.map_err(db)?;
+        let links = ResourceFavorites::favorited_projects(&handle).await?;
         let mut projects_by_resource: HashMap<
             ResourceId,
             Vec<SourceProjectRef>,
         > = HashMap::new();
         let mut aliases = HashMap::new();
-        for link in links {
+        for (resource_id, source, project_id, alias) in links {
             let project = SourceProjectRef {
-                source: SourceId::new(
-                    link.try_get::<String, _>("source").map_err(db)?,
-                )?,
-                project_id: SourceProjectId::new(
-                    link.try_get::<String, _>("project_id").map_err(db)?,
-                )?,
+                source: SourceId::new(source)?,
+                project_id: SourceProjectId::new(project_id)?,
             };
-            let id = ResourceId::new(
-                link.try_get::<String, _>("resource_id").map_err(db)?,
-            )?;
-            aliases.insert(
-                project.clone(),
-                link.try_get::<Option<String>, _>("alias").map_err(db)?,
-            );
+            let id = ResourceId::new(resource_id)?;
+            aliases.insert(project.clone(), alias);
             projects_by_resource.entry(id).or_default().push(project);
         }
-        for row in rows {
+        for (source, project_id, content_type, saved_at, id) in rows {
             let project = SourceProjectRef {
-                source: SourceId::new(
-                    row.try_get::<String, _>("source").map_err(db)?,
-                )?,
-                project_id: SourceProjectId::new(
-                    row.try_get::<String, _>("project_id").map_err(db)?,
-                )?,
+                source: SourceId::new(source)?,
+                project_id: SourceProjectId::new(project_id)?,
             };
-            let id = row
-                .try_get::<Option<String>, _>("resource_id")
-                .map_err(db)?
-                .map(ResourceId::new)
-                .transpose()?;
-            let content_type = favorite_type(
-                &row.try_get::<String, _>("content_type").map_err(db)?,
-            )?;
+            let id = id.map(ResourceId::new).transpose()?;
+            let content_type = favorite_type(&content_type)?;
             let key = (
                 id.as_ref().map(|id| id.as_str().to_owned()).unwrap_or_else(
                     || {
@@ -233,7 +195,7 @@ impl ResourceService {
                     project,
                     projects,
                     content_type,
-                    saved_at: row.try_get("saved_at").map_err(db)?,
+                    saved_at,
                 });
             }
         }
@@ -261,11 +223,14 @@ impl ResourceService {
             ResourceError::Database("resource store unavailable".into())
         })?;
         store.ensure_project(&project, &[content_type]).await?;
-        let mut transaction = pool.begin().await.map_err(db)?;
         let saved_at = chrono::Utc::now().timestamp_millis();
-        sqlx::query("INSERT INTO resource_favorites(source, project_id, content_type, saved_at) VALUES (?, ?, ?, ?) ON CONFLICT(source, project_id) DO UPDATE SET content_type = excluded.content_type")
-            .bind(project.source.as_str()).bind(project.project_id.as_str()).bind(key).bind(saved_at).execute(&mut *transaction).await.map_err(db)?;
-        transaction.commit().await.map_err(db)?;
+        ResourceFavorites::save(
+            &Handle::new(pool.clone()),
+            &favorite_key(&project),
+            key,
+            saved_at,
+        )
+        .await?;
         Ok(())
     }
 
@@ -292,11 +257,17 @@ impl ResourceService {
         if !projects.contains(project) {
             projects.push(project.clone());
         }
-        let mut transaction = pool.begin().await.map_err(db)?;
+        let handle = Handle::new(pool.clone());
+        let mut unit = atom(&handle).await?;
         for project in projects {
-            sqlx::query("DELETE FROM resource_favorites WHERE source = ? AND project_id = ?").bind(project.source.as_str()).bind(project.project_id.as_str()).execute(&mut *transaction).await.map_err(db)?;
+            ResourceFavorites::atom_set(
+                &mut unit,
+                &favorite_key(&project),
+                None,
+            )
+            .await?;
         }
-        transaction.commit().await.map_err(db)?;
+        unit.commit().await?;
         Ok(())
     }
 }
