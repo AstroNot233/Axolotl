@@ -1,8 +1,6 @@
 use super::{identity::LocalArtifactIdentity, *};
 use tokio_util::sync::CancellationToken;
 
-use crate::state::instances::adapters::sqlite::files;
-
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InstalledArtifactRecord {
@@ -10,6 +8,74 @@ pub(crate) struct InstalledArtifactRecord {
     pub artifact: ResourceArtifact,
     #[serde(default)]
     pub declared_compatibility: Option<ReleaseCompatibility>,
+}
+
+/// The artifact payload stored for an entry, as written, so a caller can
+/// compare integrity before replacing it.
+pub(crate) async fn installed_artifact_payload<'e, E>(
+    entry_id: &str,
+    exec: E,
+) -> crate::Result<Option<String>>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    Ok(sqlx::query_scalar(
+        "SELECT artifact FROM resource_installed_artifacts WHERE entry_id = ?",
+    )
+    .bind(entry_id)
+    .fetch_optional(exec)
+    .await?)
+}
+
+/// Records the artifact an entry installs, replacing what it held before.
+pub(crate) async fn set_installed_artifact<'e, E, T>(
+    entry_id: &str,
+    payload: &T,
+    scope: &InstallScope,
+    exec: E,
+) -> crate::Result<()>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    T: serde::Serialize + ?Sized,
+{
+    sqlx::query("INSERT INTO resource_installed_artifacts(entry_id, artifact, scope) VALUES (?, ?, ?) ON CONFLICT(entry_id) DO UPDATE SET artifact = excluded.artifact, scope = excluded.scope")
+        .bind(entry_id)
+        .bind(serde_json::to_string(payload)?)
+        .bind(serde_json::to_string(scope)?)
+        .execute(exec)
+        .await?;
+
+    Ok(())
+}
+
+/// Drops the artifact an entry no longer installs.
+pub(crate) async fn delete_installed_artifact<'e, E>(
+    entry_id: &str,
+    exec: E,
+) -> crate::Result<()>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    sqlx::query("DELETE FROM resource_installed_artifacts WHERE entry_id = ?")
+        .bind(entry_id)
+        .execute(exec)
+        .await?;
+
+    Ok(())
+}
+
+/// Drops every resource row an entry leaves behind when it goes away.
+pub(crate) async fn delete_entry_resource_traces(
+    entry_id: &str,
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> crate::Result<()> {
+    delete_installed_artifact(entry_id, &mut **tx).await?;
+    sqlx::query("DELETE FROM resource_entry_graphs WHERE entry_id = ?")
+        .bind(entry_id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
 }
 
 pub(crate) async fn attach_compatibility(
@@ -497,7 +563,6 @@ pub(super) async fn installed_file_identity(
 ) -> ResourceResult<LocalArtifactIdentity> {
     use crate::state::store::content_file_fingerprints::ContentFileFingerprints;
 
-    use crate::state::instances::adapters::sqlite::files;
     let previous = ContentFileFingerprints::get_current(
         &state.data,
         instance_id,
@@ -874,7 +939,8 @@ async fn hydrate_entries_with_service(
     }
     let mut tx = state.pool.begin().await.map_err(plans::db)?;
     for (id, artifact, scope) in persisted {
-        let previous: Option<String> = sqlx::query_scalar("SELECT artifact FROM resource_installed_artifacts WHERE entry_id = ?").bind(id.as_str()).fetch_optional(&mut *tx).await.map_err(plans::db)?;
+        let previous =
+            installed_artifact_payload(id.as_str(), &mut *tx).await?;
         let declared_compatibility = previous
             .and_then(|payload| {
                 serde_json::from_str::<InstalledArtifactRecord>(&payload).ok()
@@ -891,7 +957,7 @@ async fn hydrate_entries_with_service(
             artifact,
             declared_compatibility,
         };
-        sqlx::query("INSERT INTO resource_installed_artifacts(entry_id, artifact, scope) VALUES (?, ?, ?) ON CONFLICT(entry_id) DO UPDATE SET artifact = excluded.artifact, scope = excluded.scope").bind(id.as_str()).bind(serde_json::to_string(&record)?).bind(serde_json::to_string(&scope)?).execute(&mut *tx).await.map_err(plans::db)?;
+        set_installed_artifact(id.as_str(), &record, &scope, &mut *tx).await?;
     }
     tx.commit().await.map_err(plans::db)?;
     Ok(HydratedInstalled { entries, failures })

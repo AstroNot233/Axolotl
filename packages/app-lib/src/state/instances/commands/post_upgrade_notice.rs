@@ -15,19 +15,14 @@ pub(crate) async fn replace_instance_post_upgrade_notice(
     notice: &InstancePostUpgradeNotice,
     pool: &SqlitePool,
 ) -> crate::Result<()> {
-    let mut connection = pool.acquire().await?;
-    replace_instance_post_upgrade_notice_on_connection(notice, &mut connection)
-        .await
+    post_upgrade_notices::replace_post_upgrade_notice(notice, pool).await
 }
 
 pub(crate) async fn replace_instance_post_upgrade_notice_on_connection(
     notice: &InstancePostUpgradeNotice,
     connection: &mut SqliteConnection,
 ) -> crate::Result<()> {
-    post_upgrade_notices::replace_post_upgrade_notice_on_connection(
-        notice, connection,
-    )
-    .await
+    post_upgrade_notices::replace_post_upgrade_notice(notice, connection).await
 }
 
 pub(crate) async fn dismiss_instance_post_upgrade_notice(

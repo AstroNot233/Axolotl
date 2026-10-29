@@ -11,7 +11,8 @@ use crate::State;
 use crate::state::instances::adapters::{
     filesystem,
     sqlite::{
-        content_entries, content_sets, files, instance_rows, pack_members,
+        content_entries, content_sets, files, instance_rows, links,
+        pack_members,
     },
 };
 use crate::state::instances::{
@@ -75,8 +76,7 @@ async fn get_content_snapshot_inner(
                     "Instance has no applied content set".to_string(),
                 )
             })?;
-    let link =
-        instance_rows::get_instance_link(instance_id, &state.pool).await?;
+    let link = links::get_instance_link(instance_id, &state.pool).await?;
     // Managed instances keep their cached database snapshot on first open.
     // Directly associated instances have no install pipeline to seed that
     // snapshot, so their first content-page load must scan the external game

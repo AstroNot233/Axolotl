@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::values::{optional_timestamp, timestamp, unsigned};
 use crate::state::ModLoader;
 use crate::state::instances::{
@@ -258,51 +256,6 @@ pub(crate) async fn update_content_set(
     .await?;
 
     Ok(())
-}
-
-pub(crate) async fn get_content_set_remote_refs<'e, E>(
-    content_set_id: &str,
-    exec: E,
-) -> crate::Result<Vec<ContentSetRemoteRef>>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    let rows = sqlx::query_as!(
-        ContentSetRemoteRefRow,
-        "
-        SELECT *
-        FROM instance_content_set_remote_refs
-        WHERE content_set_id = ?
-        ORDER BY ref_type ASC
-        ",
-        content_set_id,
-    )
-    .fetch_all(exec)
-    .await?;
-
-    rows.into_iter().map(TryInto::try_into).collect()
-}
-
-pub(crate) async fn get_content_set_sync_state<'e, E>(
-    content_set_id: &str,
-    exec: E,
-) -> crate::Result<Option<ContentSetSyncState>>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    let row = sqlx::query_as!(
-        ContentSetSyncStateRow,
-        "
-        SELECT *
-        FROM instance_content_set_sync_state
-        WHERE content_set_id = ?
-        ",
-        content_set_id,
-    )
-    .fetch_optional(exec)
-    .await?;
-
-    row.map(TryInto::try_into).transpose()
 }
 
 pub(crate) async fn bump_content_set_revision_in_transaction(

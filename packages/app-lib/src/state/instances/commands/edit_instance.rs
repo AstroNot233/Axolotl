@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::state::instances::adapters::sqlite::content_sets;
+use crate::state::instances::adapters::sqlite::{content_sets, links};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct EditInstance {
@@ -207,8 +207,7 @@ pub(crate) async fn edit_instance(
     }
 
     if let Some(link) = &patch.link {
-        instance_rows::upsert_instance_link(&instance.id, link, &mut tx)
-            .await?;
+        links::upsert_instance_link(&instance.id, link, &mut tx).await?;
         if matches!(link, InstanceLink::Unmanaged) {
             let content_set_id = content_set
                 .as_ref()
@@ -264,8 +263,7 @@ pub(crate) async fn restore_instance_metadata(
         &mut tx,
     )
     .await?;
-    instance_rows::upsert_instance_link(&instance.id, &metadata.link, &mut tx)
-        .await?;
+    links::upsert_instance_link(&instance.id, &metadata.link, &mut tx).await?;
     instance_rows::replace_instance_groups(
         &instance.id,
         &metadata.groups,

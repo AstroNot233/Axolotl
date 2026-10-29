@@ -996,7 +996,8 @@ async fn persist_plan(
             .remove(&action.entry_id)
             .ok_or_else(|| input("entry snapshot missing"))?;
         let old_entry = existing.clone();
-        let previous_artifact: Option<String> = sqlx::query_scalar("SELECT artifact FROM resource_installed_artifacts WHERE entry_id = ?").bind(id).fetch_optional(&mut *tx).await?;
+        let previous_artifact: Option<String> =
+            super::installed::installed_artifact_payload(id, &mut *tx).await?;
         let file_name = action
             .target_relative_path
             .rsplit('/')
@@ -1173,7 +1174,13 @@ async fn persist_plan(
             artifact: verified_artifact,
             declared_compatibility: node.declared_compatibility.clone(),
         };
-        sqlx::query("INSERT INTO resource_installed_artifacts(entry_id, artifact, scope) VALUES (?, ?, ?) ON CONFLICT(entry_id) DO UPDATE SET artifact = excluded.artifact, scope = excluded.scope").bind(id).bind(serde_json::to_string(&record)?).bind(serde_json::to_string(&node.scope)?).execute(&mut *tx).await?;
+        super::installed::set_installed_artifact(
+            id,
+            &record,
+            &node.scope,
+            &mut *tx,
+        )
+        .await?;
         sqlx::query("DELETE FROM instance_content_update_checks WHERE content_entry_id = ?").bind(id).execute(&mut *tx).await?;
         sqlx::query("UPDATE instance_pack_members SET override_kind = 'version' WHERE content_entry_id = ?").bind(id).execute(&mut *tx).await?;
         node_entries

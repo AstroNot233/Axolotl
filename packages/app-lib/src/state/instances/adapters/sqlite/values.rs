@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::state::ProjectType;
 use chrono::{DateTime, TimeZone, Utc};
 

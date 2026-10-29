@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use tracing::{info, trace};
 use uuid::Uuid;
 
-use crate::state::instances::adapters::sqlite::content_sets;
+use crate::state::instances::adapters::sqlite::{content_sets, links};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateInstance {
@@ -150,8 +150,7 @@ pub(crate) async fn create_instance(
             &mut tx,
         )
         .await?;
-        instance_rows::upsert_instance_link(&instance_id, &input.link, &mut tx)
-            .await?;
+        links::upsert_instance_link(&instance_id, &input.link, &mut tx).await?;
         instance_rows::replace_instance_groups(&instance_id, &[], &mut tx)
             .await?;
         instance_rows::upsert_instance_launch_overrides(
