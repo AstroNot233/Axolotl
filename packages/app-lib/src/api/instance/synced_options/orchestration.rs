@@ -990,52 +990,6 @@ pub async fn reconcile_all() -> crate::Result<()> {
     Ok(())
 }
 
-pub(crate) async fn monitor_persisted_processes() -> crate::Result<()> {
-    let state = State::get().await?;
-    let instance_ids =
-        sqlx::query_scalar!("SELECT DISTINCT instance_id FROM processes",)
-            .fetch_all(&state.pool)
-            .await?;
-    for instance_id in instance_ids {
-        tokio::spawn(async move {
-            loop {
-                let Ok(state) = State::get().await else {
-                    break;
-                };
-                let Ok(Some(metadata)) =
-                    crate::state::get_instance(&instance_id, &state.pool).await
-                else {
-                    break;
-                };
-                match instance_is_running(&metadata, &state).await {
-                    Ok(true) => {
-                        tokio::time::sleep(std::time::Duration::from_secs(5))
-                            .await;
-                    }
-                    Ok(false) => {
-                        if let Err(error) =
-                            reconcile_instance(&instance_id).await
-                        {
-                            tracing::warn!(
-                                "Failed to reconcile synced options after closing {instance_id}: {error}"
-                            );
-                        }
-                        break;
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            "Failed to inspect the persisted process for {instance_id}: {error}"
-                        );
-                        tokio::time::sleep(std::time::Duration::from_secs(5))
-                            .await;
-                    }
-                }
-            }
-        });
-    }
-    Ok(())
-}
-
 /// Keeps reconciliation state on the heap so callers do not inherit its size.
 pub fn reconcile_instance(
     instance_id: &str,

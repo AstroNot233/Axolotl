@@ -41,24 +41,11 @@ fn db(error: sqlx::Error) -> ResourceError {
     ResourceError::Database(error.to_string())
 }
 
-/// The favorites as they were saved: every `resource_favorites` row, plus the
-/// rows of the retired `content_favorites` table for a provider and project the
-/// current one does not hold.
+/// The favorites as they were saved, with the resource each project maps to.
 const SAVED_ROWS: &str = "
     SELECT favorite.source, favorite.project_id, favorite.content_type,
         favorite.saved_at, project.resource_id
-    FROM (
-        SELECT source, project_id, content_type, saved_at
-        FROM resource_favorites
-        UNION ALL
-        SELECT provider AS source, project_id, content_type, saved_at
-        FROM content_favorites AS old
-        WHERE NOT EXISTS (
-            SELECT 1 FROM resource_favorites AS current
-            WHERE current.source = old.provider
-                AND current.project_id = old.project_id
-        )
-    ) AS favorite
+    FROM resource_favorites AS favorite
     LEFT JOIN resource_source_projects AS project
         ON project.source = favorite.source
         AND project.project_id = favorite.project_id
@@ -113,14 +100,6 @@ pub(crate) async fn remove_project(
     let mut transaction = pool.begin().await.map_err(db)?;
     sqlx::query(
         "DELETE FROM resource_favorites WHERE source = ? AND project_id = ?",
-    )
-    .bind(project.source.as_str())
-    .bind(project.project_id.as_str())
-    .execute(&mut *transaction)
-    .await
-    .map_err(db)?;
-    sqlx::query(
-        "DELETE FROM content_favorites WHERE provider = ? AND project_id = ?",
     )
     .bind(project.source.as_str())
     .bind(project.project_id.as_str())
@@ -183,7 +162,7 @@ impl ResourceService {
         let rows = sqlx::query(SAVED_ROWS).fetch_all(pool).await.map_err(db)?;
         let mut favorites: Vec<ResourceFavorite> = Vec::new();
         let mut groups = HashMap::new();
-        let links = sqlx::query("SELECT project.resource_id, project.source, project.project_id, (SELECT alias FROM resource_aliases alias WHERE alias.source = project.source AND alias.project_id = project.project_id ORDER BY rowid DESC LIMIT 1) AS alias FROM resource_source_projects project WHERE project.resource_id IN (SELECT project.resource_id FROM resource_source_projects project JOIN resource_favorites favorite ON favorite.source = project.source AND favorite.project_id = project.project_id UNION SELECT project.resource_id FROM resource_source_projects project JOIN content_favorites favorite ON favorite.provider = project.source AND favorite.project_id = project.project_id) ORDER BY project.source, project.project_id").fetch_all(pool).await.map_err(db)?;
+        let links = sqlx::query("SELECT project.resource_id, project.source, project.project_id, (SELECT alias FROM resource_aliases alias WHERE alias.source = project.source AND alias.project_id = project.project_id ORDER BY rowid DESC LIMIT 1) AS alias FROM resource_source_projects project WHERE project.resource_id IN (SELECT project.resource_id FROM resource_source_projects project JOIN resource_favorites favorite ON favorite.source = project.source AND favorite.project_id = project.project_id) ORDER BY project.source, project.project_id").fetch_all(pool).await.map_err(db)?;
         let mut projects_by_resource: HashMap<
             ResourceId,
             Vec<SourceProjectRef>,
@@ -286,13 +265,6 @@ impl ResourceService {
         let saved_at = chrono::Utc::now().timestamp_millis();
         sqlx::query("INSERT INTO resource_favorites(source, project_id, content_type, saved_at) VALUES (?, ?, ?, ?) ON CONFLICT(source, project_id) DO UPDATE SET content_type = excluded.content_type")
             .bind(project.source.as_str()).bind(project.project_id.as_str()).bind(key).bind(saved_at).execute(&mut *transaction).await.map_err(db)?;
-        if matches!(
-            project.source.as_str(),
-            "modrinth" | "curseforge" | "mcarchive"
-        ) {
-            sqlx::query("INSERT INTO content_favorites(provider, project_id, content_type, saved_at) VALUES (?, ?, ?, ?) ON CONFLICT(provider, project_id) DO UPDATE SET content_type = excluded.content_type")
-                .bind(project.source.as_str()).bind(project.project_id.as_str()).bind(key).bind(saved_at).execute(&mut *transaction).await.map_err(db)?;
-        }
         transaction.commit().await.map_err(db)?;
         Ok(())
     }
@@ -323,7 +295,6 @@ impl ResourceService {
         let mut transaction = pool.begin().await.map_err(db)?;
         for project in projects {
             sqlx::query("DELETE FROM resource_favorites WHERE source = ? AND project_id = ?").bind(project.source.as_str()).bind(project.project_id.as_str()).execute(&mut *transaction).await.map_err(db)?;
-            sqlx::query("DELETE FROM content_favorites WHERE provider = ? AND project_id = ?").bind(project.source.as_str()).bind(project.project_id.as_str()).execute(&mut *transaction).await.map_err(db)?;
         }
         transaction.commit().await.map_err(db)?;
         Ok(())

@@ -52,6 +52,9 @@ const CHANNELS = ['release', 'beta']
 // Only recent migrations are listed. Dropping to a threshold before them is
 // refused rather than guessed at; --allow-unmapped accepts the risk explicitly.
 const REVERTIBLE_SCHEMA = {
+    // Retires content_favorites, processes and telemetry_error_daily; a dropped
+    // table cannot be recreated, so the record is all a downgrade removes.
+    20261031120000: {},
     // Derived records moved to derived.db: crash_analysis_mod_snapshots,
     // discovered_javas, google_translate_ip_cache and translation_cache are
     // dropped, so the record is all a downgrade removes. telemetry_outbox stays
