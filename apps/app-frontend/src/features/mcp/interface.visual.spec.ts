@@ -60,6 +60,42 @@ it('never executes a revoked or expired native request', async () => {
     stop()
 })
 
+it.each([
+    [new Error('View expired; observe the page again'), 'View expired; observe the page again'],
+    ['Canvas could not be encoded', 'Canvas could not be encoded'],
+    [new Event('error'), 'Launcher UI screenshot failed: error event'],
+    [null, 'Launcher UI screenshot failed: unknown frontend error'],
+])('reports frontend failure details for %s', async (error, message) => {
+    const stop = await startMcpUiBridge(router())
+    mocks.invoke.mockResolvedValueOnce({ action: { kind: 'screenshot' }, scope: 'owner' })
+    mocks.execute.mockRejectedValueOnce(error)
+    await mocks.receive!({ payload: { request_id: 'failed-capture' } })
+    expect(mocks.invoke.mock.calls[1]).toEqual([
+        'plugin:mcp|mcp_ui_respond',
+        { requestId: 'failed-capture', result: { ok: false, error: message } },
+    ])
+    stop()
+})
+
+it('identifies failed image events without exposing the image source', async () => {
+    const stop = await startMcpUiBridge(router())
+    const image = new Image()
+    image.src = 'data:image/png;base64,private-image-data'
+    const error = new Event('error')
+    image.dispatchEvent(error)
+    mocks.invoke.mockResolvedValueOnce({ action: { kind: 'screenshot' }, scope: 'owner' })
+    mocks.execute.mockRejectedValueOnce(error)
+    await mocks.receive!({ payload: { request_id: 'failed-image' } })
+    expect(mocks.invoke.mock.calls[1]).toEqual([
+        'plugin:mcp|mcp_ui_respond',
+        {
+            requestId: 'failed-image',
+            result: { ok: false, error: 'Launcher UI screenshot failed: error event on IMG' },
+        },
+    ])
+    stop()
+})
+
 it('does not execute a request whose claim completes after the bridge stopped', async () => {
     const stop = await startMcpUiBridge(router())
     let resolve: (value: unknown) => void = () => {}

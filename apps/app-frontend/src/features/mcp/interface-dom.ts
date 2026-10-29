@@ -1,6 +1,7 @@
-import { toPng } from 'html-to-image'
 import { nextTick } from 'vue'
 import type { Router } from 'vue-router'
+
+import { captureMcpUi } from './interface-capture'
 
 export type UiAction =
     | { kind: 'context' | 'screenshot' }
@@ -22,6 +23,20 @@ type Target = {
     element: HTMLElement
     label: string
     bounds: { x: number; y: number; width: number; height: number }
+    state: string
+}
+
+function interactionState(element: HTMLElement) {
+    return JSON.stringify([
+        element.getAttribute('role'),
+        element.getAttribute('aria-checked'),
+        element.getAttribute('aria-expanded'),
+        element.getAttribute('aria-selected'),
+        element.getAttribute('aria-disabled'),
+        element.getAttribute('readonly'),
+        element.getAttribute('contenteditable'),
+        element instanceof HTMLInputElement ? [element.type, element.checked] : null,
+    ])
 }
 
 function bounds(element: HTMLElement) {
@@ -38,12 +53,53 @@ function visible(element: HTMLElement) {
         style.visibility !== 'hidden' &&
         style.display !== 'none' &&
         Number(style.opacity) !== 0 &&
+        element.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
         rect.width > 0 &&
         rect.height > 0 &&
         rect.right > 0 &&
         rect.bottom > 0 &&
         rect.left < innerWidth &&
-        rect.top < innerHeight
+        rect.top < innerHeight &&
+        hitPoint(element) !== null
+    )
+}
+
+function hitPoint(element: HTMLElement) {
+    const rect = element.getBoundingClientRect()
+    let left = Math.max(0, rect.left)
+    let top = Math.max(0, rect.top)
+    let right = Math.min(innerWidth, rect.right)
+    let bottom = Math.min(innerHeight, rect.bottom)
+    // Fixed overlays escape ordinary ancestor clipping.
+    if (getComputedStyle(element).position !== 'fixed') {
+        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+            const style = getComputedStyle(parent)
+            const bounds = parent.getBoundingClientRect()
+            if (style.overflowX !== 'visible') {
+                left = Math.max(left, bounds.left)
+                right = Math.min(right, bounds.right)
+            }
+            if (style.overflowY !== 'visible') {
+                top = Math.max(top, bounds.top)
+                bottom = Math.min(bottom, bounds.bottom)
+            }
+            if (style.position === 'fixed') break
+        }
+    }
+    if (right <= left || bottom <= top) return null
+    const x = (left + right) / 2
+    const y = (top + bottom) / 2
+    const hit = document.elementFromPoint(x, y)
+    return hit && (hit === element || element.contains(hit)) ? { x, y } : null
+}
+
+function scrollable(element: HTMLElement, horizontal: boolean) {
+    const style = getComputedStyle(element)
+    return (
+        /^(auto|scroll|overlay)$/.test(horizontal ? style.overflowX : style.overflowY) &&
+        (horizontal
+            ? element.scrollWidth > element.clientWidth
+            : element.scrollHeight > element.clientHeight)
     )
 }
 
@@ -95,7 +151,7 @@ function setText(element: HTMLElement, text: string, inputType = 'insertText') {
             }),
         )
     )
-        return
+        throw new Error('Text edit was cancelled by the control')
     if (editable(element)) {
         const prototype =
             element instanceof HTMLTextAreaElement
@@ -108,13 +164,15 @@ function setText(element: HTMLElement, text: string, inputType = 'insertText') {
 }
 
 function activate(element: HTMLElement) {
-    const rect = element.getBoundingClientRect()
+    const point = hitPoint(element)
+    if (!point) throw new Error('Element is covered; observe the page again')
     const options = {
         bubbles: true,
         cancelable: true,
-        clientX: rect.x + rect.width / 2,
-        clientY: rect.y + rect.height / 2,
+        clientX: point.x,
+        clientY: point.y,
         button: 0,
+        detail: 1,
     }
     element.dispatchEvent(
         new PointerEvent('pointerdown', {
@@ -136,13 +194,17 @@ function activate(element: HTMLElement) {
         }),
     )
     element.dispatchEvent(new MouseEvent('mouseup', options))
-    if (element.isConnected) element.click()
+    if (element.isConnected) element.dispatchEvent(new MouseEvent('click', options))
 }
 
 export function createMcpUiController(router: Router) {
     let scope = ''
     let viewId: string | undefined
     let routePath = ''
+    let focusedElement: Element | null = null
+    let busy = false
+    let stopped = false
+    let capture: AbortController | undefined
     const targets = new Map<string, Target>()
     const invalidate = () => {
         viewId = undefined
@@ -161,13 +223,19 @@ export function createMcpUiController(router: Router) {
         invalidate()
         viewId = crypto.randomUUID()
         routePath = router.currentRoute.value.path
+        focusedElement = document.activeElement
         const all = Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(
             (element) => visible(element) && !sensitive(element),
         )
         const elements = all.slice(0, 100).map((element, index) => {
             const id = `element-${index + 1}`
             const rect = bounds(element)
-            targets.set(id, { element, label: label(element), bounds: rect })
+            targets.set(id, {
+                element,
+                label: label(element),
+                bounds: rect,
+                state: interactionState(element),
+            })
             return {
                 element_id: id,
                 role: element.getAttribute('role') || element.tagName.toLowerCase(),
@@ -209,7 +277,7 @@ export function createMcpUiController(router: Router) {
         const saved = targets.get(id)
         if (!saved || !visible(saved.element) || sensitive(saved.element))
             throw new Error('Element is unavailable; observe the page again')
-        if (label(saved.element) !== saved.label)
+        if (label(saved.element) !== saved.label || interactionState(saved.element) !== saved.state)
             throw new Error('Element changed; observe the page again')
         const rect = bounds(saved.element)
         if (
@@ -221,11 +289,7 @@ export function createMcpUiController(router: Router) {
             )
         )
             throw new Error('Element moved; observe the page again')
-        const x = Math.max(0, Math.min(innerWidth - 1, rect.x + rect.width / 2))
-        const y = Math.max(0, Math.min(innerHeight - 1, rect.y + rect.height / 2))
-        const top = document.elementFromPoint(x, y)
-        if (!top || !(saved.element === top || saved.element.contains(top)))
-            throw new Error('Element is covered; observe the page again')
+        if (!hitPoint(saved.element)) throw new Error('Element is covered; observe the page again')
         if (saved.element.matches(':disabled,[aria-disabled=true]'))
             throw new Error('Element is disabled')
         return saved.element
@@ -235,17 +299,18 @@ export function createMcpUiController(router: Router) {
         if (action.kind === 'context') return observe()
         if (action.kind === 'screenshot') {
             const context = observe()
-            const dataUrl = await toPng(document.documentElement, {
-                width: innerWidth,
-                height: innerHeight,
-                pixelRatio: 1,
-            })
-            if (viewId !== context.view_id)
-                throw new Error('View changed during capture; retry screenshot')
-            const data = dataUrl.split(',')[1]
-            if (!data || data.length > 7 * 1024 * 1024)
-                throw new Error('Screenshot exceeds the image size limit')
-            return { context, image: { mime_type: 'image/png', data } }
+            capture = new AbortController()
+            try {
+                const result = await captureMcpUi(capture.signal)
+                if (viewId !== context.view_id)
+                    throw new Error('View changed during capture; retry screenshot')
+                return {
+                    context: { ...context, warnings: result.warnings },
+                    image: result.image,
+                }
+            } finally {
+                capture = undefined
+            }
         }
         if (action.kind === 'navigate') {
             if (
@@ -288,19 +353,21 @@ export function createMcpUiController(router: Router) {
             element.focus()
             setText(element, action.text)
         } else if (action.kind === 'scroll') {
+            const horizontal = action.direction === 'left' || action.direction === 'right'
             let element: HTMLElement | null =
                 action.element_id === 'viewport'
                     ? document.querySelector('.app-viewport') ||
                       (document.scrollingElement as HTMLElement)
                     : target(action.element_id)
-            const horizontal = action.direction === 'left' || action.direction === 'right'
-            while (
-                element &&
-                (horizontal
-                    ? element.scrollWidth <= element.clientWidth
-                    : element.scrollHeight <= element.clientHeight)
-            )
-                element = element.parentElement
+            if (action.element_id === 'viewport' && element && !scrollable(element, horizontal)) {
+                const rect = element.getBoundingClientRect()
+                const center = document.elementFromPoint(
+                    (Math.max(0, rect.left) + Math.min(innerWidth, rect.right)) / 2,
+                    (Math.max(0, rect.top) + Math.min(innerHeight, rect.bottom)) / 2,
+                )
+                if (center instanceof HTMLElement && element.contains(center)) element = center
+            }
+            while (element && !scrollable(element, horizontal)) element = element.parentElement
             if (!element) throw new Error('No scrollable container at this element')
             invalidate()
             const delta = action.pixels * (['up', 'left'].includes(action.direction) ? -1 : 1)
@@ -311,8 +378,11 @@ export function createMcpUiController(router: Router) {
             })
         } else if (action.kind === 'key') {
             const element = document.activeElement
+            if (element !== focusedElement) throw new Error('Focus changed; observe the page again')
             if (!(element instanceof HTMLElement) || !visible(element) || sensitive(element))
                 throw new Error('Focus a visible launcher control first')
+            if (element.matches(':disabled,[aria-disabled=true]'))
+                throw new Error('Element is disabled')
             invalidate()
             const options = {
                 key: action.key,
@@ -368,14 +438,27 @@ export function createMcpUiController(router: Router) {
     }
 
     return {
-        execute(action: UiAction, controlScope: string) {
-            if (scope !== controlScope) {
+        async execute(action: UiAction, controlScope: string) {
+            if (stopped) throw new Error('Launcher UI controller stopped')
+            if (busy)
+                throw new Error('Launcher UI is busy; retry after the current request finishes')
+            busy = true
+            try {
+                if (scope !== controlScope) {
+                    invalidate()
+                    scope = controlScope
+                }
+                return await perform(action)
+            } catch (error) {
                 invalidate()
-                scope = controlScope
+                throw error
+            } finally {
+                busy = false
             }
-            return perform(action)
         },
         stop() {
+            stopped = true
+            capture?.abort(new Error('Launcher UI controller stopped'))
             invalidate()
             removeRoute()
             for (const name of ['pointerdown', 'keydown', 'input'])
