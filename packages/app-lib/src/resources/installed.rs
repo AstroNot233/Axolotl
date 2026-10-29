@@ -939,9 +939,8 @@ async fn hydrate_entries_with_service(
     }
     let mut tx = state.pool.begin().await.map_err(plans::db)?;
     for (id, artifact, scope) in persisted {
-        let previous = installed_artifact_payload(id.as_str(), &mut *tx)
-            .await
-            .map_err(plans::db)?;
+        let previous =
+            installed_artifact_payload(id.as_str(), &mut *tx).await?;
         let declared_compatibility = previous
             .and_then(|payload| {
                 serde_json::from_str::<InstalledArtifactRecord>(&payload).ok()
@@ -958,9 +957,7 @@ async fn hydrate_entries_with_service(
             artifact,
             declared_compatibility,
         };
-        set_installed_artifact(id.as_str(), &record, &scope, &mut *tx)
-            .await
-            .map_err(plans::db)?;
+        set_installed_artifact(id.as_str(), &record, &scope, &mut *tx).await?;
     }
     tx.commit().await.map_err(plans::db)?;
     Ok(HydratedInstalled { entries, failures })
