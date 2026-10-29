@@ -1510,7 +1510,7 @@ fn artifact(
     }
 }
 
-async fn fixture() -> (
+pub(crate) async fn fixture() -> (
     tempfile::TempDir,
     std::sync::Arc<crate::State>,
     InstalledResource,

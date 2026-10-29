@@ -1309,4 +1309,4 @@ async fn persist_plan(
 
 #[cfg(test)]
 #[path = "execution_tests.rs"]
-mod tests;
+pub(crate) mod tests;
