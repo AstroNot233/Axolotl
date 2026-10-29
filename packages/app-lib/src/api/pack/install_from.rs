@@ -307,7 +307,7 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
     let version_query = CachedEntry::get_version(
         &version_id_ref,
         Some(CacheBehaviour::Bypass),
-        &state.pool,
+        state.cache_pool(),
         &state.api_semaphore,
     );
     let version = tokio::select! {
@@ -491,7 +491,7 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
     let project = CachedEntry::get_project(
         &ModrinthProjectId::new(version.project_id.clone())?,
         None,
-        &state.pool,
+        state.cache_pool(),
         &state.api_semaphore,
     )
     .await?

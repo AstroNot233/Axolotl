@@ -636,9 +636,11 @@ pub async fn repair_cache_and_retry_job(
         return Err(crate::resources::protocol::error(error));
     }
 
-    if let Err(error) =
-        crate::state::CachedEntry::purge_cache_types(&cache_types, &state.pool)
-            .await
+    if let Err(error) = crate::state::CachedEntry::purge_cache_types(
+        &cache_types,
+        state.cache_pool(),
+    )
+    .await
     {
         operation.cache_repair_started = false;
         return Err(crate::ErrorKind::OtherError(format!(
