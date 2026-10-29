@@ -68,6 +68,12 @@ type MeshBuffers = {
     blockPositions: number[]
 }
 
+type SchematicMeshVertex = {
+    pos: { x: number; y: number; z: number }
+    texture?: [number, number]
+    color: [number, number, number]
+}
+
 let activeEpoch = 0
 let palette: SchematicBlockState[] = []
 let geometry: ReturnType<typeof createBlockGeometry>
@@ -113,11 +119,7 @@ function transferables(data: SchematicMeshData): Transferable[] {
 
 function appendQuad(
     buffers: MeshBuffers,
-    vertices: Array<{
-        pos: { x: number; y: number; z: number }
-        texture?: [number, number]
-        color: [number, number, number]
-    }>,
+    vertices: SchematicMeshVertex[],
     blockPosition: [number, number, number],
 ) {
     const edge1 = {
@@ -144,6 +146,27 @@ function appendQuad(
         buffers.uvs.push(vertex.texture?.[0] ?? 0, vertex.texture?.[1] ?? 0)
         buffers.colors.push(vertex.color[0], vertex.color[1], vertex.color[2])
         buffers.blockPositions.push(...blockPosition)
+    }
+}
+
+function appendBlockMesh(
+    buffers: MeshBuffers,
+    mesh: deepslate.Mesh,
+    position: [number, number, number],
+    adjustVertices?: (vertices: SchematicMeshVertex[]) => void,
+) {
+    for (const quad of mesh.quads) {
+        const vertices = quad.vertices().map((item) => ({
+            pos: {
+                x: item.pos.x + position[0],
+                y: item.pos.y + position[1],
+                z: item.pos.z + position[2],
+            },
+            texture: item.texture ? ([...item.texture] as [number, number]) : undefined,
+            color: item.color,
+        }))
+        adjustVertices?.(vertices)
+        appendQuad(buffers, vertices, position)
     }
 }
 
@@ -328,31 +351,21 @@ function buildChunk(message: WorkerMeshMessage) {
                     if (mesh.quads.length === 0) {
                         missing.add(state.name)
                         appendFallbackCube(target, position, cull, state.name)
-                        continue
+                    } else {
+                        appendBlockMesh(target, mesh, position, (vertices) => {
+                            applySeamlessSchematicGlassUvs(
+                                vertices,
+                                [x, y, z],
+                                paletteIndex,
+                                blocks,
+                                neighborFaces,
+                                palette,
+                                seamlessGlass,
+                            )
+                        })
                     }
-                    for (const quad of mesh.quads) {
-                        const vertices = quad.vertices().map((item) => ({
-                            pos: {
-                                x: item.pos.x + position[0],
-                                y: item.pos.y + position[1],
-                                z: item.pos.z + position[2],
-                            },
-                            texture: item.texture
-                                ? ([...item.texture] as [number, number])
-                                : undefined,
-                            color: item.color,
-                        }))
-                        applySeamlessSchematicGlassUvs(
-                            vertices,
-                            [x, y, z],
-                            paletteIndex,
-                            blocks,
-                            neighborFaces,
-                            palette,
-                            seamlessGlass,
-                        )
-                        appendQuad(target, vertices, position)
-                    }
+                    const fluid = geometry.water(state, cull)
+                    if (fluid) appendBlockMesh(translucent, fluid, position)
                 } catch {
                     missing.add(state.name)
                     appendFallbackCube(target, position, cull, state.name)
