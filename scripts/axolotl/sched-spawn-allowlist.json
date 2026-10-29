@@ -1,0 +1,1306 @@
+{
+  "entries": [
+    {
+      "file": "apps/app/src/api/auth.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "apps/app/src/api/cache.rs",
+      "form": "tauri::async_runtime::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing Tauri runtime spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "apps/app/src/api/drop.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "apps/app/src/api/drop.rs",
+      "form": "std::fs",
+      "count": 15,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/api/files.rs",
+      "form": "spawn_blocking",
+      "count": 3,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "apps/app/src/api/fonts.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "apps/app/src/api/mcp/config.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/api/mcp/service.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/api/mod_translation.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "apps/app/src/api/mod_translation.rs",
+      "form": "std::fs",
+      "count": 5,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/api/mod_translation.rs",
+      "form": "tauri::async_runtime::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing Tauri runtime spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "apps/app/src/api/mr_auth.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "apps/app/src/api/resources.rs",
+      "form": "tauri::async_runtime::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing Tauri runtime spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "apps/app/src/api/schematic_preview.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "apps/app/src/api/schematic_preview.rs",
+      "form": "std::fs",
+      "count": 7,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/api/seed_map.rs",
+      "form": "spawn_blocking",
+      "count": 10,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "apps/app/src/api/settings.rs",
+      "form": "tauri::async_runtime::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing Tauri runtime spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "apps/app/src/api/shortcuts/mod.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "apps/app/src/api/shortcuts/windows.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "apps/app/src/api/system_accent.rs",
+      "form": "std::thread::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: production OS thread, governed with a bound JoinHandle (T0.10, T3.4)"
+    },
+    {
+      "file": "apps/app/src/api/system_accent.rs",
+      "form": "tauri::async_runtime::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing Tauri runtime spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "apps/app/src/api/utils.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "apps/app/src/api/utils.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/lightweight_mode.rs",
+      "form": "tauri::async_runtime::spawn",
+      "count": 10,
+      "reason": "phase-0 baseline: existing Tauri runtime spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "apps/app/src/main.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/main.rs",
+      "form": "tauri::async_runtime::spawn",
+      "count": 8,
+      "reason": "phase-0 baseline: existing Tauri runtime spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "apps/app/src/mod_translation/analyze.rs",
+      "form": "std::fs",
+      "count": 16,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/mod_translation/jar.rs",
+      "form": "std::fs",
+      "count": 11,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/mod_translation/memory.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "apps/app/src/mod_translation/memory.rs",
+      "form": "std::fs",
+      "count": 4,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/mod_translation/resume.rs",
+      "form": "std::fs",
+      "count": 8,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/mod_translation/translate.rs",
+      "form": "std::fs",
+      "count": 27,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/portable.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/seed_map/mod.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/app/src/updater_impl.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "apps/app/src/updater_impl.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "apps/installer-ui/src/windows.rs",
+      "form": "std::thread::sleep",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking sleep outside async code"
+    },
+    {
+      "file": "apps/installer-ui/src/windows.rs",
+      "form": "std::thread::spawn",
+      "count": 2,
+      "reason": "phase-0 baseline: production OS thread, governed with a bound JoinHandle (T0.10, T3.4)"
+    },
+    {
+      "file": "packages/app-lib/src/api/anti_piracy.rs",
+      "form": "spawn_blocking",
+      "count": 4,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/curseforge/archive.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/curseforge/archive.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/curseforge/modpack/entry.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/curseforge/modpack/entry.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/curseforge/modpack/expected.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/curseforge/modpack/expected.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/curseforge/modpack/local.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/curseforge/modpack/local.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/curseforge/verify/worker.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/curseforge/verify/worker.rs",
+      "form": "tokio::spawn",
+      "count": 2,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/drop_classifier.rs",
+      "form": "std::fs",
+      "count": 21,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/google_ip.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/hongshi.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/hongshi.rs",
+      "form": "tokio::spawn",
+      "count": 4,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/backup.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/backup.rs",
+      "form": "std::fs",
+      "count": 6,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/backup.rs",
+      "form": "tokio::spawn",
+      "count": 4,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/core_components.rs",
+      "form": "spawn_blocking",
+      "count": 4,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/core_components.rs",
+      "form": "std::fs",
+      "count": 8,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/screenshots/operations.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/screenshots/operations.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/screenshots/reconciliation.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/screenshots/reconciliation.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/synced_options/game_options/locales/archive.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/synced_options/game_options/locales/mod.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/synced_options/game_options/locales/origins.rs",
+      "form": "spawn_blocking",
+      "count": 3,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/synced_options/game_options/locales/sources.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/synced_options/orchestration.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/synced_servers/projection.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/synced_servers/projection.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/instance/upgrade.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/jre.rs",
+      "form": "spawn_blocking",
+      "count": 3,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/jre.rs",
+      "form": "std::fs",
+      "count": 5,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/jre.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/loader_metadata.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/logs.rs",
+      "form": "std::fs",
+      "count": 6,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/logs/crash_analysis.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/logs/crash_analysis.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/memory.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/minecraft_skins.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/minecraft_skins/offline.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/minecraft_skins/offline.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/archive_util.rs",
+      "form": "spawn_blocking",
+      "count": 4,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/archive_util.rs",
+      "form": "std::fs",
+      "count": 20,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/detect.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/detect.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/import/direct_link.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/import/gamedir_resolve.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/import/hmcl.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/import/instance_json.rs",
+      "form": "std::fs",
+      "count": 4,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/import/mod.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/import/mod.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/import/mod.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/import/pcl.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/import/pe_info.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/install_from.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/install_mrpack.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/install_mrpack.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/install_mrpack.rs",
+      "form": "tokio::spawn",
+      "count": 2,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/install_plain_archive.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/install_plain_archive.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/pack/parallel_minecraft_install.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/servers/fabric.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/servers/fabric.rs",
+      "form": "std::fs",
+      "count": 5,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/servers/lifecycle.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/servers/lifecycle.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/servers/lifecycle.rs",
+      "form": "tokio::spawn",
+      "count": 5,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/servers/logs.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/servers/modpack.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/servers/modpack.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/terracotta.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/terracotta.rs",
+      "form": "std::fs",
+      "count": 22,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/terracotta.rs",
+      "form": "tokio::spawn",
+      "count": 2,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/terracotta/binary.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/terracotta/lan.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/api/worlds/datapacks.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/worlds/datapacks.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/api/worlds/mod.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/api/worlds/mod.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/event/mod.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/install/diagnostics.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/install/events.rs",
+      "form": "tokio::spawn",
+      "count": 2,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/install/import_plan.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/install/import_plan.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/install/missing_content.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/install/recovery.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/install/recovery.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/install/runner.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/install/runner/lifecycle.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/install/runner/pack.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/args.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/args.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/direct_ensure.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/direct_link.rs",
+      "form": "std::fs",
+      "count": 12,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/download.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/local_version.rs",
+      "form": "std::fs",
+      "count": 4,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/mod.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/mod.rs",
+      "form": "tokio::spawn",
+      "count": 3,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/multimc/jarmod.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/multimc/jarmod.rs",
+      "form": "std::fs",
+      "count": 12,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/natives.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/natives.rs",
+      "form": "std::fs",
+      "count": 9,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/optifine.rs",
+      "form": "spawn_blocking",
+      "count": 5,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/launcher/optifine.rs",
+      "form": "std::fs",
+      "count": 5,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/logger.rs",
+      "form": "std::fs",
+      "count": 19,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/logger.rs",
+      "form": "std::thread::sleep",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking sleep outside async code"
+    },
+    {
+      "file": "packages/app-lib/src/logger.rs",
+      "form": "thread::Builder",
+      "count": 1,
+      "reason": "phase-0 baseline: production OS thread, governed with a bound JoinHandle (T3.4)"
+    },
+    {
+      "file": "packages/app-lib/src/mod_metadata/icon.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/mod_metadata/manifest.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/resources/execution.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/resources/execution.rs",
+      "form": "std::fs",
+      "count": 5,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/resources/export/files.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/resources/export/files.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/resources/export/scan.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/resources/export/scan.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/resources/export/writer.rs",
+      "form": "std::fs",
+      "count": 4,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/resources/fingerprints.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/resources/fingerprints.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/resources/plans/artifact_metadata.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/resources/refresh.rs",
+      "form": "tokio::spawn",
+      "count": 5,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/resources/service.rs",
+      "form": "tokio::spawn",
+      "count": 3,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/resources/write_access.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/scheduler/panic.rs",
+      "form": "std::fs",
+      "count": 4,
+      "reason": "panic hook appends to panic.log directly, bypassing the log writer lock it could be holding (D15)"
+    },
+    {
+      "file": "packages/app-lib/src/state/cache.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/state/discord.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/state/discovered_javas.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/state/friends.rs",
+      "form": "tokio::spawn",
+      "count": 3,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/adapters/filesystem.rs",
+      "form": "std::fs",
+      "count": 4,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/apply_content_install.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/apply_content_install.rs",
+      "form": "std::fs",
+      "count": 5,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/apply_content_install.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/content_snapshot.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/import_world_save.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/import_world_save.rs",
+      "form": "std::fs",
+      "count": 12,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/instance_upgrade/solver.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/list_content/items.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/list_content/items.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/sync_content_files.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/sync_content_files.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/commands/sync_direct_link_instances.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/state/instances/watcher.rs",
+      "form": "tokio::spawn",
+      "count": 9,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/state/legacy_converter.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/state/mod.rs",
+      "form": "tokio::spawn",
+      "count": 3,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/state/process.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/state/process.rs",
+      "form": "tokio::spawn",
+      "count": 6,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/state/settings.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/state/tunnel.rs",
+      "form": "tokio::spawn",
+      "count": 2,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/storage/cache.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/storage/meta.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/storage/usage.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/util/download/endpoint_selection/coordinator.rs",
+      "form": "tokio::spawn",
+      "count": 2,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/util/download/endpoint_selection/store.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/util/download/endpoint_selection/store.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/util/download/h2_pool.rs",
+      "form": "tokio::spawn",
+      "count": 2,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/util/download/h2_range.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/util/download/integrity.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/util/download/integrity.rs",
+      "form": "std::fs",
+      "count": 1,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/util/download/local_resources.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/util/download/verified_file.rs",
+      "form": "spawn_blocking",
+      "count": 1,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/util/download/verified_file.rs",
+      "form": "std::fs",
+      "count": 7,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/util/fetch/file.rs",
+      "form": "spawn_blocking",
+      "count": 2,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/util/fetch/file.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/util/fetch/probe.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/util/fetch/progress.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/util/fetch/segment.rs",
+      "form": "std::fs",
+      "count": 4,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/util/fetch/tail.rs",
+      "form": "std::fs",
+      "count": 2,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/util/file_lock.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/util/io.rs",
+      "form": "spawn_blocking",
+      "count": 3,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/util/io.rs",
+      "form": "std::fs",
+      "count": 11,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/util/jre.rs",
+      "form": "spawn_blocking",
+      "count": 4,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/util/jre.rs",
+      "form": "std::fs",
+      "count": 22,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/util/jre.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/util/resolve_shortcut.rs",
+      "form": "std::fs",
+      "count": 3,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/app-lib/src/util/rpc.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/app-lib/src/util/symlink.rs",
+      "form": "spawn_blocking",
+      "count": 4,
+      "reason": "phase-0 baseline: blocking work on the shared blocking pool, which L0 must stop using (T3.6)"
+    },
+    {
+      "file": "packages/app-lib/src/util/symlink.rs",
+      "form": "std::fs",
+      "count": 4,
+      "reason": "phase-0 baseline: synchronous file I/O; must not appear in L0 or inside a critical section (D17)"
+    },
+    {
+      "file": "packages/launcher-mcp/src/protocol.rs",
+      "form": "tokio::spawn",
+      "count": 2,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    },
+    {
+      "file": "packages/launcher-mcp/src/server.rs",
+      "form": "tokio::spawn",
+      "count": 1,
+      "reason": "phase-0 baseline: existing task spawn; moves to scheduler dispatch with the governed items (spec §5.6) or stays operation-scoped"
+    }
+  ]
+}

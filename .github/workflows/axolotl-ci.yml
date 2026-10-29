@@ -101,6 +101,26 @@ jobs:
         run: node --test scripts/axolotl/create-release-notes.test.mjs
       - name: Check Discord release notifications
         run: node --test scripts/axolotl/publish-discord-release.test.mjs
+      - name: Check scheduler resource gates
+        # Advisory until the team adopts the scheduler policy: these gates fail
+        # on any new lock, spawn or std::fs site until its policy entry lands.
+        continue-on-error: true
+        run: |
+          node scripts/axolotl/sched-resource-inventory.mjs
+          node scripts/axolotl/sched-resource-golden-check.mjs
+          node --test scripts/axolotl/sched-resource-fixtures.test.mjs scripts/axolotl/sched-gates.test.mjs
+          node scripts/axolotl/sched-resource-consistency-check.mjs
+          node scripts/axolotl/sched-leaf-primitive-check.mjs
+          node scripts/axolotl/sched-l0-resource-check.mjs
+          node scripts/axolotl/sched-level-predicate-check.mjs
+          node scripts/axolotl/sched-bare-spawn-check.mjs
+          # Exit 1 from these two means the design falls back to per-family
+          # orders (an accepted outcome); only other codes fail the job.
+          for gate in sched-recall-gap-gate sched-order-annotation-check; do
+            status=0
+            node "scripts/axolotl/$gate.mjs" || status=$?
+            if [ "$status" -gt 1 ]; then exit "$status"; fi
+          done
       - name: Check formatting of Rust code
         run: cargo fmt --all --check
 
