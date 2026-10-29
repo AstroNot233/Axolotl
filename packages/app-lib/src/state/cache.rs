@@ -2232,7 +2232,7 @@ impl CachedEntry {
                         type_,
                         expired_keys,
                         &state.api_semaphore,
-                        &state.pool,
+                        state.cache_pool(),
                         false,
                     )
                     .await?
@@ -2243,7 +2243,7 @@ impl CachedEntry {
                     Self::persist_fetched_cache_best_effort(
                         type_,
                         &values,
-                        &state.pool,
+                        state.cache_pool(),
                         CacheRefreshSource::Background,
                     )
                     .await;
@@ -2875,6 +2875,22 @@ impl CachedEntry {
         };
 
         Ok(value)
+    }
+
+    /// Writes entries outside any open unit. A cache is derived data, so a
+    /// failure here is logged rather than carried to a caller whose own
+    /// transaction has already committed.
+    pub(crate) async fn store_best_effort(items: &[Self], pool: &SqlitePool) {
+        if items.is_empty() {
+            return;
+        }
+        if let Err(error) = Self::upsert_many(items, pool).await {
+            tracing::warn!(
+                error = %error,
+                entry_count = items.len(),
+                "Failed to persist cache entries; continuing without them"
+            );
+        }
     }
 
     pub(crate) async fn upsert_many(

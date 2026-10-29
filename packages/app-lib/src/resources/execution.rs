@@ -824,6 +824,7 @@ pub(crate) async fn execute(
         }
         persist_plan(
             &state.pool,
+            state.cache_pool(),
             &scope.content_set_id,
             plan,
             &downloads,
@@ -929,6 +930,7 @@ pub(crate) async fn recover_plan(
 
 async fn persist_plan(
     pool: &SqlitePool,
+    cache_pool: &SqlitePool,
     set_id: &str,
     plan: &ResourceOperationPlan,
     downloads: &[(PathBuf, ResourceType, u64, String, String)],
@@ -980,6 +982,7 @@ async fn persist_plan(
         .map(|node| (node.id.clone(), node.installed_entries.clone()))
         .collect();
     let now = chrono::Utc::now();
+    let mut cache_entries = Vec::new();
     let restore: Option<serde_json::Value> = if let Some(id) =
         &draft.restore_history
     {
@@ -1064,7 +1067,7 @@ async fn persist_plan(
                 }),
             })
             .get_entry();
-        crate::state::CachedEntry::upsert_many(&[cache], &mut *tx).await?;
+        cache_entries.push(cache);
         sqlx::query("UPDATE instance_files SET local_mod_data = ?, icon_path = NULL WHERE id = ?").bind(&local_mod_data).bind(&disk_file.id).execute(&mut *tx).await?;
         let old_path = action
             .current
@@ -1313,6 +1316,10 @@ async fn persist_plan(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    // The hash cache lives in the derived database, so it is written after the
+    // app transaction commits: a failed cache write cannot undo the rows.
+    crate::state::CachedEntry::store_best_effort(&cache_entries, cache_pool)
+        .await;
     Ok(())
 }
 
