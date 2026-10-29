@@ -671,3 +671,123 @@ fn to_layout(layout: &str) -> HomeLayout {
         HomeLayout::Standard
     })
 }
+use sqlx::SqlitePool;
+
+/// The rows the settings documents hand over from.
+///
+/// These are read-only on purpose: a domain that has a document never writes
+/// its column again, and the statements below only feed the handover and the
+/// fallback a domain answers with while it has no document.
+pub(crate) struct LegacyAiSettings {
+    pub(crate) enabled: bool,
+    pub(crate) legacy_openai_credential_cleanup: bool,
+}
+
+pub(crate) async fn read_legacy_ai_settings(
+    pool: &SqlitePool,
+) -> crate::Result<Option<LegacyAiSettings>> {
+    let row = sqlx::query(
+        "SELECT enabled, legacy_openai_credential_cleanup FROM ai_settings WHERE id = 0",
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|row| LegacyAiSettings {
+        enabled: row.get::<i64, _>("enabled") != 0,
+        legacy_openai_credential_cleanup: row
+            .get::<i64, _>("legacy_openai_credential_cleanup")
+            != 0,
+    }))
+}
+
+pub(crate) struct LegacyAiProviderConfig {
+    pub(crate) provider_id: String,
+    pub(crate) custom_name: Option<String>,
+    pub(crate) protocol: String,
+    pub(crate) enabled: bool,
+    pub(crate) endpoint: String,
+    pub(crate) settings: String,
+}
+
+pub(crate) async fn read_legacy_ai_provider_configs(
+    pool: &SqlitePool,
+) -> crate::Result<Vec<LegacyAiProviderConfig>> {
+    let rows = sqlx::query(
+        "SELECT provider_id, custom_name, protocol, enabled, endpoint, settings FROM ai_provider_configs ORDER BY provider_id",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| LegacyAiProviderConfig {
+            provider_id: row.get("provider_id"),
+            custom_name: row.get("custom_name"),
+            protocol: row.get("protocol"),
+            enabled: row.get::<i64, _>("enabled") != 0,
+            endpoint: row.get("endpoint"),
+            settings: row.get("settings"),
+        })
+        .collect())
+}
+
+pub(crate) struct LegacyAiProviderModel {
+    pub(crate) provider_id: String,
+    pub(crate) model_id: String,
+    pub(crate) display_name: String,
+    pub(crate) enabled: bool,
+    pub(crate) source: String,
+}
+
+pub(crate) async fn read_legacy_ai_provider_models(
+    pool: &SqlitePool,
+) -> crate::Result<Vec<LegacyAiProviderModel>> {
+    let rows = sqlx::query(
+        "SELECT provider_id, model_id, display_name, enabled, source FROM ai_provider_models ORDER BY provider_id, model_id",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| LegacyAiProviderModel {
+            provider_id: row.get("provider_id"),
+            model_id: row.get("model_id"),
+            display_name: row.get("display_name"),
+            enabled: row.get::<i64, _>("enabled") != 0,
+            source: row.get("source"),
+        })
+        .collect())
+}
+
+pub(crate) struct LegacyLogShareSettings {
+    pub(crate) share_provider: String,
+    pub(crate) ai_source: String,
+    pub(crate) auto_upload: bool,
+    pub(crate) multi_file: bool,
+    pub(crate) metadata_enabled: bool,
+    pub(crate) no_storage: bool,
+    pub(crate) show_progress: bool,
+    pub(crate) crash_enabled: bool,
+    pub(crate) crash_provider_id: String,
+    pub(crate) crash_model_id: String,
+}
+
+pub(crate) async fn read_legacy_log_share_settings(
+    pool: &SqlitePool,
+) -> crate::Result<Option<LegacyLogShareSettings>> {
+    let row = sqlx::query(
+        "SELECT s.share_provider, a.ai_source, s.auto_upload, s.multi_file, s.metadata_enabled, s.no_storage, s.show_progress, a.enabled, a.provider_id, a.model_id FROM log_share_settings s JOIN crash_analysis_ai_settings a ON a.id = s.id WHERE s.id = 0",
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|row| LegacyLogShareSettings {
+        share_provider: row.get("share_provider"),
+        ai_source: row.get("ai_source"),
+        auto_upload: row.get::<i64, _>("auto_upload") != 0,
+        multi_file: row.get::<i64, _>("multi_file") != 0,
+        metadata_enabled: row.get::<i64, _>("metadata_enabled") != 0,
+        no_storage: row.get::<i64, _>("no_storage") != 0,
+        show_progress: row.get::<i64, _>("show_progress") != 0,
+        crash_enabled: row.get::<i64, _>("enabled") != 0,
+        crash_provider_id: row.get("provider_id"),
+        crash_model_id: row.get("model_id"),
+    }))
+}

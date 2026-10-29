@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 
 use super::crash_analysis::collect_crash_logs;
 use crate::State;
+use crate::state::documents;
 
 const LOGSHARE_BASE_URL: &str = "https://api.logshare.cn";
 const LOGSHARE_AI_READ_TIMEOUT_SECS: u64 = 300;
@@ -80,18 +81,15 @@ struct UploadBody {
 
 pub async fn get_log_share_settings() -> crate::Result<LogShareSettings> {
     let state = State::get().await?;
-    let row = sqlx::query_as::<_, (String, String, i64, i64, i64, i64)>(
-        "SELECT s.share_provider, a.ai_source, s.auto_upload, s.multi_file, s.no_storage, s.show_progress FROM log_share_settings s JOIN crash_analysis_ai_settings a ON a.id = s.id WHERE s.id = 0",
-    )
-    .fetch_one(&state.pool)
-    .await?;
+    let document =
+        documents::log_share::read(&documents::Documents::new(&state)).await?;
     Ok(LogShareSettings {
-        share_provider: row.0,
-        ai_source: row.1,
-        auto_upload: row.2 != 0,
-        multi_file: row.3 != 0,
-        no_storage: row.4 != 0,
-        show_progress: row.5 != 0,
+        share_provider: document.share_provider,
+        ai_source: document.ai_source,
+        auto_upload: document.auto_upload,
+        multi_file: document.multi_file,
+        no_storage: document.no_storage,
+        show_progress: document.show_progress,
     })
 }
 
@@ -100,17 +98,17 @@ pub async fn update_log_share_settings(
 ) -> crate::Result<()> {
     let settings = normalize_settings(settings);
     let state = State::get().await?;
-    sqlx::query(
-        "UPDATE log_share_settings SET share_provider = ?, auto_upload = ?, multi_file = ?, no_storage = ?, show_progress = ? WHERE id = 0",
+    documents::log_share::update_share(
+        &documents::Documents::new(&state),
+        documents::log_share::ShareSettings {
+            share_provider: settings.share_provider,
+            auto_upload: settings.auto_upload,
+            multi_file: settings.multi_file,
+            no_storage: settings.no_storage,
+            show_progress: settings.show_progress,
+        },
     )
-    .bind(&settings.share_provider)
-    .bind(settings.auto_upload)
-    .bind(settings.multi_file)
-    .bind(settings.no_storage)
-    .bind(settings.show_progress)
-    .execute(&state.pool)
-    .await?;
-    Ok(())
+    .await
 }
 
 fn normalize_settings(mut settings: LogShareSettings) -> LogShareSettings {

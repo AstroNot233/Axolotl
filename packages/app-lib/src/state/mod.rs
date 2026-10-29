@@ -98,6 +98,7 @@ mod legacy_converter;
 pub mod attached_world_data;
 pub(crate) mod content_store;
 pub(crate) mod content_types;
+pub(crate) mod documents;
 pub mod instance_groups;
 pub(crate) mod store;
 
@@ -1297,6 +1298,8 @@ impl State {
 
         let directories =
             DirectoryInfo::init(settings.custom_dir, &app_identifier).await?;
+
+        documents::hand_over(&pool, &directories.settings_dir).await;
 
         let derived = store::derived_db::DerivedDb::open(
             directories.caches_dir().join(store::derived_db::FILE_NAME),

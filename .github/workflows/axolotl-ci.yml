@@ -230,6 +230,12 @@ jobs:
       - name: Test derived database
         if: runner.os == 'Linux'
         run: cargo test --package theseus derived_db
+      # The settings documents: a document answers for its domain, and a key it
+      # leaves out stays at its default instead of returning to the row.
+      # Hermetic (in-memory sqlite + temp dirs).
+      - name: Test settings documents
+        if: runner.os == 'Linux'
+        run: cargo test --package theseus state::documents
       # Provider-neutral resource layer: catalog, plans, execution, providers.
       # Hermetic (in-memory sqlite + temp dirs); Linux only for matrix cost.
       - name: Test provider-neutral resource layer
