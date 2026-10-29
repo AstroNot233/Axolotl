@@ -16,7 +16,11 @@ import {
     BANNER_PATTERNS,
     type BannerPatternId,
 } from '@/lab/banner-designer/patterns.ts'
-import type { BannerDesign, BannerLayer } from '@/lab/banner-designer/types.ts'
+import {
+    type BannerDesign,
+    type BannerLayer,
+    withLayerReplaced,
+} from '@/lab/banner-designer/types.ts'
 
 const props = defineProps<{
     design: BannerDesign
@@ -69,16 +73,18 @@ const messages = defineMessages({
 const color = ref<DyeColor>('black')
 const pattern = ref<BannerPatternId>('stripe_bottom')
 const search = ref('')
+/** The layer the dialog is open for, or `null` while adding a new one. */
+const editing = ref<BannerLayer | null>(null)
 
-const isEditing = computed(() => Boolean(props.layer))
+const isEditing = computed(() => Boolean(editing.value))
 
-const previewDesign = computed<BannerDesign>(() => ({
-    baseColor: props.design.baseColor,
-    layers: [
-        ...props.design.layers.filter((entry) => entry.id !== props.layer?.id),
-        { id: 'banner-layer-pending', pattern: pattern.value, color: color.value },
-    ],
-}))
+const previewDesign = computed<BannerDesign>(() =>
+    withLayerReplaced(props.design, editing.value?.id ?? null, {
+        id: 'banner-layer-pending',
+        pattern: pattern.value,
+        color: color.value,
+    }),
+)
 const previewColor = computed(() => dyeColorDefinition(color.value))
 
 const groups = computed(() => {
@@ -110,6 +116,7 @@ function tileDesign(id: BannerPatternId): BannerDesign {
  * so reading it here would open the previously edited layer.
  */
 function show(layer: BannerLayer | null = props.layer ?? null) {
+    editing.value = layer
     color.value = layer?.color ?? 'black'
     pattern.value = layer?.pattern ?? 'stripe_bottom'
     search.value = ''

@@ -38,3 +38,23 @@ export function designsMatch(left: BannerDesign, right: BannerDesign): boolean {
         )
     )
 }
+
+/**
+ * The design as it will look once `replacement` stands in for `layerId`. The
+ * slot is kept, so a pattern that sits under other layers previews under them
+ * too instead of being painted on top. An id the design does not hold appends,
+ * which is where a layer that is being added lands.
+ */
+export function withLayerReplaced(
+    design: BannerDesign,
+    layerId: string | null,
+    replacement: BannerLayer,
+): BannerDesign {
+    const index = layerId ? design.layers.findIndex((layer) => layer.id === layerId) : -1
+    if (index < 0) {
+        return { baseColor: design.baseColor, layers: [...design.layers, replacement] }
+    }
+    const layers = [...design.layers]
+    layers[index] = replacement
+    return { baseColor: design.baseColor, layers }
+}
