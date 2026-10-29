@@ -511,6 +511,27 @@ console.log('retiring the legacy tables: the drop outlives the downgrade')
     check('a downgrade below the retirement is refused', below.status === 1 && below.output.includes('does not match'), below.output)
 }
 
+// --- a table a newer migration dropped ----------------------------------------
+
+console.log('a table a newer migration dropped is not demanded back')
+{
+    const MOVE_REFRESH_STATE = 20261101120000
+    const file = path.join(directory, 'moved', 'beta', 'app.db')
+    const files = fs.readdirSync(migrationsDir).filter((name) => name.endsWith('.sql')).sort()
+    const { database, apply } = migratedDatabase(file, files.filter((name) => Number(name.slice(0, 14)) < MOVE_REFRESH_STATE))
+    for (const name of files.filter((name) => Number(name.slice(0, 14)) >= MOVE_REFRESH_STATE)) apply(name)
+    check('the refresh tables leave the app database', database.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name IN ('content_refresh_packs', 'content_refresh_scan_failures')").get().count === 0)
+    database.close()
+    // The migration that created those tables is still being passed, and it
+    // cannot drop what a newer migration already removed.
+    const result = run(['--db', file, '--to', '20261028110000', '--apply'])
+    check('a downgrade passes the migration that dropped them', result.status === 0, result.output)
+    const old = new DatabaseSync(file)
+    check('the removed records go', !migrations(file).includes(MOVE_REFRESH_STATE))
+    check('and the tables stay gone', old.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name IN ('content_refresh_packs', 'content_refresh_scan_failures')").get().count === 0)
+    old.close()
+}
+
 if (process.platform !== 'win32') {
     console.log('skipping the running launcher checks outside Windows')
 } else {
