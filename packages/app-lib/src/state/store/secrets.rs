@@ -7,9 +7,15 @@
 //! in its column with its mark clear, so signing in never depends on the store
 //! answering: the row is then read exactly as an older build wrote it.
 //!
+//! A row whose mark does depend on the store, though, is not read without it: a
+//! secret that cannot be read cannot be hidden from an exported report either, so
+//! a store that does not answer fails the read instead of emptying the secret.
+//!
 //! This module is the only way the crate reaches the store.
 
 use std::cell::Cell;
+use std::path::Path;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::Handle;
@@ -25,6 +31,10 @@ const MOST: usize = if cfg!(windows) { 1280 } else { 8192 };
 
 /// What every key the launcher stores starts with.
 const PREFIX: &str = "axolotl-account";
+
+/// The name this run's entries are stored under, once the data directory it
+/// belongs to is known.
+static NAMESPACE: OnceLock<String> = OnceLock::new();
 
 /// What the store answered about one key.
 pub(crate) enum Stored {
@@ -49,6 +59,45 @@ static REPORTED: AtomicBool = AtomicBool::new(false);
 /// Whether this thread has no credential store the launcher can use.
 pub(crate) fn unavailable() -> bool {
     NO_STORE.with(Cell::get)
+}
+
+/// Names this run's entries after the data directory they belong to.
+///
+/// A run told to use another data directory — a development build pointed at a
+/// directory of its own — shares nothing with the one the identifier alone
+/// names, so the two cannot read each other's accounts.
+///
+/// Called once at startup, before the first secret is read or written. Until it
+/// is, and in a test build, the identifier alone answers.
+pub(crate) fn identify(directory: &Path) {
+    let _ = NAMESPACE.set(namespace_of(directory));
+}
+
+/// The store name one data directory's secrets are kept under.
+///
+/// The digest is what separates the two directories: the path itself is not in
+/// the name, which every process on the host can list.
+fn namespace_of(directory: &Path) -> String {
+    format!("{}-{:016x}", base_identifier(), fingerprint(directory))
+}
+
+/// The name a release resolves to.
+fn base_identifier() -> String {
+    crate::brand::app_data_dir_identifier(crate::brand::BUNDLE_IDENTIFIER)
+}
+
+/// A short, stable digest of one path.
+///
+/// FNV-1a, spelled out: the standard hasher is free to change between Rust
+/// releases, and a name that changed with the compiler would strand every secret
+/// the previous build stored.
+fn fingerprint(directory: &Path) -> u64 {
+    let mut digest: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in directory.to_string_lossy().bytes() {
+        digest ^= u64::from(byte);
+        digest = digest.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    digest
 }
 
 /// The key one row's secret is stored under.
@@ -113,29 +162,123 @@ pub(crate) async fn take(key: String) -> Stored {
 }
 
 /// Drops whatever one key names, which a row that no longer has the secret needs.
-pub(crate) async fn forget(key: String) {
+///
+/// The value the entry held comes back with it, so a caller whose own statement
+/// then fails can put it back. `Err` means the entry is still there.
+pub(crate) async fn forget(key: String) -> crate::Result<Option<String>> {
     if unavailable() {
-        return;
+        return Ok(None);
     }
 
-    if let Err(refusal) = backend().delete(&key) {
-        report(&key, refusal);
+    let held = match backend().get(&key) {
+        Ok(held) => held,
+        Err(refusal) => {
+            report(&key, refusal);
+            return Err(refused_error(&key));
+        }
+    };
+
+    match backend().delete(&key) {
+        Ok(()) => Ok(held),
+        Err(refusal) => {
+            report(&key, refusal);
+            Err(refused_error(&key))
+        }
     }
 }
 
-/// One secret column of a row: the store's value when the row's mark says the
-/// store holds it, and the column's own value otherwise.
-pub(crate) async fn resolve(key: String, kept: bool, column: String) -> String {
-    if !kept {
-        return column;
+/// The secret one mark says the store holds.
+///
+/// An empty answer — the store holds nothing under the key — reads as an empty
+/// secret, which asks for a new sign-in rather than failing. A store that does
+/// not answer at all is an error: an emptied secret reads as a signed-out
+/// account, and the export that hides secrets would have nothing left to hide.
+pub(crate) async fn resolve(key: String) -> crate::Result<String> {
+    match take(key).await {
+        Stored::Value(value) => Ok(value),
+        Stored::Missing => Ok(String::new()),
+        Stored::Unavailable => Err(unreadable()),
+    }
+}
+
+/// The failure a mark that names the store answers with when the store does not.
+pub(crate) fn unreadable() -> crate::Error {
+    crate::ErrorKind::OtherError(
+        "The credential store is not answering; the account cannot be read right now"
+            .to_string(),
+    )
+    .into()
+}
+
+/// The failure a secret the store will not drop answers with.
+fn refused_error(key: &str) -> crate::Error {
+    crate::ErrorKind::OtherError(format!(
+        "The credential store would not drop the secret of {key}; nothing was removed, so it can be removed again"
+    ))
+    .into()
+}
+
+/// The store as one write found it: what each key held, so a write whose own
+/// statement then fails leaves the store the way it was.
+#[derive(Default)]
+pub(crate) struct Undo(Vec<(String, Option<String>)>);
+
+impl Undo {
+    /// Reads what one key holds now, before the write that is about to change it.
+    pub(crate) async fn watch(&mut self, key: &str) {
+        let held = match take(key.to_string()).await {
+            Stored::Value(value) => Some(value),
+            Stored::Missing | Stored::Unavailable => None,
+        };
+        self.0.push((key.to_string(), held));
     }
 
-    match take(key).await {
-        Stored::Value(value) => value,
-        // Nothing left to fall back on: a row whose secret the store no longer
-        // has reads as an empty secret, which asks for a new sign-in instead of
-        // failing. A store that does not answer at all leaves the row as it was.
-        Stored::Missing | Stored::Unavailable => column,
+    /// Drops one entry, because nothing will name it afterwards, and keeps what
+    /// it held.
+    ///
+    /// `required` is set for an entry the row's mark says the store holds: a
+    /// store that will not drop it then fails the caller's write, so a row is
+    /// never deleted out from under a secret that stays in the store.
+    pub(crate) async fn drop(
+        &mut self,
+        key: &str,
+        required: bool,
+    ) -> crate::Result<()> {
+        if required && unavailable() {
+            return Err(refused_error(key));
+        }
+
+        match forget(key.to_string()).await {
+            Ok(held) => {
+                self.0.push((key.to_string(), held));
+                Ok(())
+            }
+            Err(error) if required => Err(error),
+            Err(error) => {
+                tracing::warn!(
+                    %key,
+                    %error,
+                    "The credential store would not drop an entry the row no longer names"
+                );
+                Ok(())
+            }
+        }
+    }
+
+    /// Puts the store back the way it was, undoing the latest change first.
+    pub(crate) async fn restore(self) {
+        for (key, held) in self.0.into_iter().rev() {
+            let back = match held {
+                Some(value) => keep(key.clone(), &value).await,
+                None => forget(key.clone()).await.is_ok(),
+            };
+            if !back {
+                tracing::error!(
+                    %key,
+                    "The credential store would not take a secret back after a write that failed"
+                );
+            }
+        }
     }
 }
 
@@ -199,13 +342,15 @@ impl Backend for System {
 
 #[cfg(not(test))]
 fn entry(key: &str) -> Result<keyring::Entry, Refused> {
-    // The same name the data directory uses, so a build with a directory of its
-    // own keeps its own secrets. A release resolves to the plain identifier.
-    keyring::Entry::new(
-        &crate::brand::app_data_dir_identifier(crate::brand::BUNDLE_IDENTIFIER),
-        key,
-    )
-    .map_err(refused)
+    // The data directory the run keeps its rows in is part of the name, so two
+    // directories started from one build keep their secrets apart.
+    keyring::Entry::new(&namespace(), key).map_err(refused)
+}
+
+/// The name this run's entries are stored under.
+#[cfg(not(test))]
+fn namespace() -> String {
+    NAMESPACE.get().cloned().unwrap_or_else(base_identifier)
 }
 
 #[cfg(not(test))]
@@ -247,6 +392,7 @@ pub(crate) mod testing {
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::{Backend, NO_STORE, Refused};
 
@@ -254,6 +400,7 @@ pub(crate) mod testing {
     #[derive(Default)]
     pub(crate) struct Memory {
         values: Mutex<HashMap<String, String>>,
+        refuses_deletes: AtomicBool,
     }
 
     impl Memory {
@@ -270,6 +417,12 @@ pub(crate) mod testing {
         /// Every key the store holds, so a test can see what a move left behind.
         pub(crate) fn keys(&self) -> Vec<String> {
             self.lock().keys().cloned().collect()
+        }
+
+        /// Refuses to drop an entry, the way a keyring asking for money or for a
+        /// screen that is not there does.
+        pub(crate) fn refuse_deletes(&self) {
+            self.refuses_deletes.store(true, Ordering::Relaxed);
         }
 
         fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
@@ -290,6 +443,9 @@ pub(crate) mod testing {
         }
 
         fn delete(&self, key: &str) -> Result<(), Refused> {
+            if self.refuses_deletes.load(Ordering::Relaxed) {
+                return Err(Refused("the keyring is locked".to_string()));
+            }
             self.lock().remove(key);
             Ok(())
         }
@@ -368,6 +524,35 @@ pub(crate) mod testing {
     impl Drop for Injection {
         fn drop(&mut self) {
             install(None);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{base_identifier, namespace_of};
+
+    /// Two data directories never share the entries that hold their secrets, and
+    /// neither puts its own path into the name.
+    #[test]
+    fn a_data_directory_names_its_own_entries() {
+        let release = Path::new("/home/player/.local/share/axolotl");
+        let branch = Path::new("/home/player/.local/share/axolotl-branch");
+
+        assert_eq!(namespace_of(release), namespace_of(release));
+        assert_ne!(namespace_of(release), namespace_of(branch));
+        assert!(
+            namespace_of(release).starts_with(&base_identifier()),
+            "the identifier stays in front, so the service is recognisable"
+        );
+        for directory in [release, branch] {
+            let name = namespace_of(directory);
+            assert!(
+                !name.contains("player") && !name.contains('/'),
+                "the name says nothing about where the directory is: {name}"
+            );
         }
     }
 }

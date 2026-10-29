@@ -1,7 +1,7 @@
 //! What a content snapshot reads, and the transaction it reads it in.
 
 use crate::state::instances::commands::content_snapshot::local;
-use crate::state::store::content_snapshot::{get, get_with_saved_pack};
+use crate::state::store::content_snapshot::{get, get_with_saved_pack, pause};
 use crate::state::store::derived_db::{DerivedDb, FILE_NAME};
 use crate::state::store::{Collection as _, Handle, content_refresh_checks::*};
 
@@ -34,10 +34,10 @@ async fn derived() -> (tempfile::TempDir, DerivedDb) {
     (directory, db)
 }
 
-/// The revision and the items come from one read transaction, so a write that
-/// is still open is seen by neither and a committed one by both. `get_inner`
-/// is private to the module that reads the snapshot, so the write is held open
-/// on another connection instead of being run between the two reads.
+/// The revision and the items come from one read transaction: a write that lands
+/// between the two reads is in neither. The pause the snapshot offers a test
+/// build is what makes the second read happen after the write, so the snapshot
+/// mixing two reads would read the new revision beside the old items.
 #[tokio::test]
 async fn snapshot_revision_and_items_stay_in_the_same_read_transaction() {
     let temp = tempfile::tempdir().unwrap();
@@ -54,6 +54,7 @@ async fn snapshot_revision_and_items_stay_in_the_same_read_transaction() {
     sqlx::migrate!().run(&pool).await.unwrap();
     seed(&pool).await;
     let handle = Handle::new(pool.clone());
+
     let mut writer = pool.begin().await.unwrap();
     sqlx::query("DELETE FROM instance_files WHERE id = 'file'")
         .execute(&mut *writer)
@@ -65,12 +66,23 @@ async fn snapshot_revision_and_items_stay_in_the_same_read_transaction() {
     .execute(&mut *writer)
     .await
     .unwrap();
+    let _paused = pause::pause(Box::pin(async move {
+        writer.commit().await.unwrap();
+    }));
+
     let records = get(&handle, "instance").await.unwrap();
-    assert_eq!(records.content_set.revision, 1);
-    assert_eq!(records.files.len(), 1);
-    writer.commit().await.unwrap();
+    assert_eq!(
+        records.content_set.revision, 1,
+        "the write that landed after the revision was read is not in it"
+    );
+    assert_eq!(
+        records.files.len(),
+        1,
+        "and the items come from the same read, so they do not name it either"
+    );
+
     let records = get(&handle, "instance").await.unwrap();
-    assert_eq!(records.content_set.revision, 2);
+    assert_eq!(records.content_set.revision, 2, "the write did land");
     assert!(records.files.is_empty());
     pool.close().await;
 }

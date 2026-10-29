@@ -1251,6 +1251,18 @@ impl State {
     async fn initialize_state(
         app_identifier: String,
     ) -> crate::Result<Arc<Self>> {
+        // The directory the rows live in names the entries that hold their
+        // secrets, so it is settled before the first secret is read or written.
+        // It is the one `DirectoryInfo` resolves to, which is not yet built
+        // here: nothing may reach the store ahead of it.
+        let settings_dir = DirectoryInfo::initial_settings_dir_path(
+            &app_identifier,
+        )
+        .ok_or(crate::ErrorKind::FSError(
+            "Could not find valid settings dir".to_string(),
+        ))?;
+        store::secrets::identify(&settings_dir);
+
         tracing::info!("Connecting to app database");
         let pool = db::connect(&app_identifier).await?;
         let data = store::Handle::new(pool.clone());

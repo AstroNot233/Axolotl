@@ -9,7 +9,7 @@ use sqlx::SqliteConnection;
 use sqlx::sqlite::SqliteRow;
 
 use super::Collection;
-use super::secrets::{self, Stored};
+use super::secrets::{self, Stored, Undo};
 
 /// The accounts, one per identity.
 pub(crate) struct MinecraftUsers;
@@ -75,6 +75,83 @@ pub(crate) struct MinecraftUserRecord {
     pub yggdrasil_client_token: String,
 }
 
+/// What one row says about the tokens it names: which of them the store holds,
+/// and which still sit in their columns.
+#[derive(Clone, PartialEq, Eq)]
+struct Marks {
+    mark: i64,
+    columns: [String; 3],
+}
+
+impl Marks {
+    fn of(row: &SqliteRow) -> crate::Result<Self> {
+        let mut columns = [String::new(), String::new(), String::new()];
+        for (index, (_, column)) in TOKENS.into_iter().enumerate() {
+            columns[index] = row.try_get(column)?;
+        }
+
+        Ok(Self {
+            mark: row.try_get("secrets_externalized")?,
+            columns,
+        })
+    }
+}
+
+/// What the row says now, when it says something else than `heard`.
+///
+/// A write that commits while this read waits leaves the row naming other
+/// tokens, and the two secrets of one account must not come from two versions of
+/// it.
+async fn changed(
+    conn: &mut SqliteConnection,
+    account_id: &str,
+    heard: &Marks,
+) -> crate::Result<Option<Marks>> {
+    let row = sqlx::query(
+        "
+        SELECT access_token, refresh_token, yggdrasil_client_token,
+               secrets_externalized
+        FROM minecraft_users
+        WHERE account_id = ?
+        ",
+    )
+    .bind(account_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let now = Marks::of(&row)?;
+
+    Ok((now != *heard).then_some(now))
+}
+
+/// Writes back what the row should say now that its columns are settled.
+async fn write_marks(
+    conn: &mut SqliteConnection,
+    account_id: &str,
+    marks: &Marks,
+) -> crate::Result<()> {
+    sqlx::query(
+        "
+        UPDATE minecraft_users
+        SET access_token = ?, refresh_token = ?,
+            yggdrasil_client_token = ?, secrets_externalized = ?
+        WHERE account_id = ?
+        ",
+    )
+    .bind(&marks.columns[0])
+    .bind(&marks.columns[1])
+    .bind(&marks.columns[2])
+    .bind(marks.mark)
+    .bind(account_id)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
+}
+
 impl Collection for MinecraftUsers {
     type Key = String;
     type Scope = String;
@@ -104,7 +181,7 @@ impl Collection for MinecraftUsers {
         .await?;
 
         let user = match row {
-            Some(row) => to_record(row).await?,
+            Some(row) => to_record(conn, &row).await?,
             None => None,
         };
 
@@ -116,17 +193,10 @@ impl Collection for MinecraftUsers {
         key: &Self::Key,
         record: Option<&Self::Record>,
     ) -> crate::Result<()> {
-        let Some(record) = record else {
-            sqlx::query("DELETE FROM minecraft_users WHERE account_id = ?")
-                .bind(key)
-                .execute(&mut *conn)
-                .await?;
-            forget_tokens(key).await;
-
-            return Ok(());
-        };
-
-        write_row(conn, key, record).await
+        match record {
+            Some(record) => write_row(conn, key, record).await,
+            None => remove_row(conn, key).await,
+        }
     }
 
     async fn read_all(
@@ -147,7 +217,7 @@ impl Collection for MinecraftUsers {
 
         let mut users = Vec::with_capacity(rows.len());
         for row in rows {
-            if let Some(user) = to_record(row).await? {
+            if let Some(user) = to_record(conn, &row).await? {
                 users.push(user);
             }
         }
@@ -230,8 +300,10 @@ async fn write_row(
     }
 
     // The store is written first, so a row only says a token was moved once the
-    // token is there. A token the store would not take is written to its column
-    // instead, and the row then reads exactly as it did before the move.
+    // token is there. What the store held before comes back if the row below
+    // cannot be written, which would otherwise leave the two disagreeing about
+    // which secret is the account's.
+    let mut undo = Undo::default();
     let marks = keep_tokens(
         account_id,
         [
@@ -239,8 +311,9 @@ async fn write_row(
             record.refresh_token.as_str(),
             record.yggdrasil_client_token.as_str(),
         ],
+        &mut undo,
     )
-    .await;
+    .await?;
     let moved = marks.is_some();
     let (access_token, refresh_token, client_token) = if moved {
         ("", "", "")
@@ -252,7 +325,7 @@ async fn write_row(
         )
     };
 
-    sqlx::query(
+    let written = sqlx::query(
         "
         INSERT INTO minecraft_users (
             account_id, uuid, active, username, account_type, access_token,
@@ -289,7 +362,65 @@ async fn write_row(
     .bind(client_token)
     .bind(marks.unwrap_or_default())
     .execute(&mut *conn)
-    .await?;
+    .await;
+
+    match written {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            undo.restore().await;
+            Err(error.into())
+        }
+    }
+}
+
+/// Removes one account and the tokens it kept in the store.
+///
+/// A token the store will not drop keeps the row: deleting it would leave the
+/// token behind with nothing left to name it.
+async fn remove_row(
+    conn: &mut SqliteConnection,
+    account_id: &str,
+) -> crate::Result<()> {
+    let mark: i64 = sqlx::query_scalar(
+        "SELECT secrets_externalized FROM minecraft_users WHERE account_id = ?",
+    )
+    .bind(account_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .unwrap_or_default();
+
+    let mut undo = Undo::default();
+    if let Err(error) = forget_tokens(account_id, mark, &mut undo).await {
+        undo.restore().await;
+        return Err(error);
+    }
+
+    let removed =
+        sqlx::query("DELETE FROM minecraft_users WHERE account_id = ?")
+            .bind(account_id)
+            .execute(&mut *conn)
+            .await;
+
+    match removed {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            undo.restore().await;
+            Err(error.into())
+        }
+    }
+}
+
+/// Drops the tokens of one account from the store, keeping what they held so a
+/// row that stays can be read again.
+async fn forget_tokens(
+    account_id: &str,
+    mark: i64,
+    undo: &mut Undo,
+) -> crate::Result<()> {
+    for (bit, column) in TOKENS {
+        undo.drop(&token_key(account_id, column), mark & bit != 0)
+            .await?;
+    }
 
     Ok(())
 }
@@ -298,52 +429,103 @@ async fn write_row(
 ///
 /// Nothing means at least one token is only in the row, which the caller writes
 /// as an ordinary row: a store that takes two of three tokens has still lost
-/// none of them, and the next write tries the rest again.
-async fn keep_tokens(account_id: &str, tokens: [&str; 3]) -> Option<i64> {
+/// none of them, and the next write tries the rest again. A token that ends up
+/// in the row is a token the store no longer holds, so its entry is dropped.
+async fn keep_tokens(
+    account_id: &str,
+    tokens: [&str; 3],
+    undo: &mut Undo,
+) -> crate::Result<Option<i64>> {
     let mut marks = 0;
 
     for ((bit, column), token) in TOKENS.into_iter().zip(tokens) {
+        let key = token_key(account_id, column);
+
         if token.is_empty() {
-            // An account without a token has nothing to hide, and the column
-            // already says so.
+            // An account without a token has nothing to hide, and an entry the
+            // store still holds for it would be a secret nothing names.
+            undo.drop(&key, false).await?;
             continue;
         }
-        if !secrets::keep(token_key(account_id, column), token).await {
-            return None;
+
+        undo.watch(&key).await;
+        if !secrets::keep(key, token).await {
+            for (_, column) in TOKENS {
+                undo.drop(&token_key(account_id, column), false).await?;
+            }
+            return Ok(None);
         }
         marks |= bit;
     }
 
-    Some(marks)
+    Ok(Some(marks))
 }
 
-/// Drops the tokens an account no longer has, so that removing it does not leave
-/// them in the store.
-async fn forget_tokens(account_id: &str) {
-    for (_, column) in TOKENS {
-        secrets::forget(token_key(account_id, column)).await;
-    }
-}
-
-/// The account's tokens, each taken from the store when the row's mark says the
+/// The account's tokens, each read from the store where the row's mark says the
 /// store holds it.
+///
+/// The row is read again once the store has answered: a write that committed
+/// while this read waited leaves the row saying something else, and the tokens
+/// are then resolved once more from what it says now. A row still changing after
+/// that is read as it says latest.
 async fn tokens(
+    conn: &mut SqliteConnection,
     account_id: &str,
-    marks: i64,
     row: &SqliteRow,
 ) -> crate::Result<[String; 3]> {
+    let heard = Marks::of(row)?;
+    let (values, settled) = resolved(conn, account_id, heard).await?;
+
+    let Some(latest) = changed(conn, account_id, &settled).await? else {
+        return Ok(values);
+    };
+
+    Ok(resolved(conn, account_id, latest).await?.0)
+}
+
+/// What one row's tokens read as, and what the row should say afterwards.
+///
+/// A column that still holds a token was written by a build that did not move
+/// it, so the column is the newer of the two and is what the account reads as;
+/// the token is moved into the store here, which is what settles the two.
+async fn resolved(
+    conn: &mut SqliteConnection,
+    account_id: &str,
+    marks: Marks,
+) -> crate::Result<([String; 3], Marks)> {
     let mut values = [String::new(), String::new(), String::new()];
+    let mut settled = marks.clone();
+    let mut repaired = false;
 
     for (index, (bit, column)) in TOKENS.into_iter().enumerate() {
-        values[index] = secrets::resolve(
-            token_key(account_id, column),
-            marks & bit != 0,
-            row.try_get(column)?,
-        )
-        .await;
+        if marks.mark & bit == 0 {
+            values[index] = marks.columns[index].clone();
+            continue;
+        }
+
+        let column_value = &marks.columns[index];
+        if column_value.is_empty() {
+            values[index] =
+                secrets::resolve(token_key(account_id, column)).await?;
+            continue;
+        }
+
+        values[index] = column_value.clone();
+        repaired = true;
+        if secrets::keep(token_key(account_id, column), column_value).await {
+            settled.columns[index] = String::new();
+        } else {
+            // The store would not take it, so the row says so and keeps the
+            // token in its column.
+            settled.mark &= !bit;
+        }
     }
 
-    Ok(values)
+    if repaired {
+        write_marks(conn, account_id, &settled).await?;
+    }
+
+    Ok((values, settled))
 }
 
 /// Removes the accounts the replacement leaves out, and only those.
@@ -371,18 +553,15 @@ async fn delete_omitted(
         if records.iter().any(|(key, _)| key == &account_id) {
             continue;
         }
-        sqlx::query("DELETE FROM minecraft_users WHERE account_id = ?")
-            .bind(&account_id)
-            .execute(&mut *conn)
-            .await?;
-        forget_tokens(&account_id).await;
+        remove_row(conn, &account_id).await?;
     }
 
     Ok(())
 }
 
 async fn to_record(
-    row: SqliteRow,
+    conn: &mut SqliteConnection,
+    row: &SqliteRow,
 ) -> crate::Result<Option<(String, MinecraftUserRecord)>> {
     let account_type: String = row.try_get("account_type")?;
     let Some(account_type) = to_account_type(&account_type) else {
@@ -390,9 +569,8 @@ async fn to_record(
     };
 
     let account_id: String = row.try_get("account_id")?;
-    let marks: i64 = row.try_get("secrets_externalized")?;
     let [access_token, refresh_token, yggdrasil_client_token] =
-        tokens(&account_id, marks, &row).await?;
+        tokens(conn, &account_id, row).await?;
 
     Ok(Some((
         account_id,
@@ -443,9 +621,8 @@ pub(crate) async fn token_pairs(
     let mut pairs = Vec::with_capacity(rows.len());
     for row in rows {
         let account_id: String = row.try_get("account_id")?;
-        let marks: i64 = row.try_get("secrets_externalized")?;
         let [access_token, refresh_token, _] =
-            tokens(&account_id, marks, &row).await?;
+            tokens(&mut connection, &account_id, &row).await?;
         pairs.push((access_token, refresh_token));
     }
 
@@ -474,11 +651,13 @@ pub(crate) async fn externalize(
     .await?;
 
     for (account_id, access_token, refresh_token, client_token) in pending {
+        let mut undo = Undo::default();
         let marks = keep_tokens(
             &account_id,
             [&access_token, &refresh_token, &client_token],
+            &mut undo,
         )
-        .await;
+        .await?;
 
         let Some(marks) = marks else {
             if secrets::unavailable() {
