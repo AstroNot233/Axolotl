@@ -3,6 +3,7 @@ pub(crate) mod content_entries;
 pub(crate) mod content_sets;
 pub(crate) mod files;
 pub(crate) mod instance_rows;
+pub(crate) mod links;
 pub(crate) mod loader_component_rows;
 pub(crate) mod pack_members;
 pub(crate) mod playtime;

@@ -2,7 +2,7 @@
 
 use super::Handle;
 use crate::resources::{ResourceId, SourceId};
-use crate::state::instances::adapters::sqlite::instance_rows;
+use crate::state::instances::adapters::sqlite::{instance_rows, links};
 use crate::state::instances::{
     ContentEntry, ContentSet, Instance, InstanceFile, InstanceLink, PackMember,
     PendingManualDownload,
@@ -80,7 +80,7 @@ where
                 )
             })?;
     after_revision().await;
-    let link = instance_rows::get_instance_link(instance_id, &mut *tx).await?;
+    let link = links::get_instance_link(instance_id, &mut *tx).await?;
     let files = files::get_instance_files(instance_id, &mut *tx).await?;
     let entries =
         content_entries::get_content_entries(&content_set.id, &mut *tx).await?;

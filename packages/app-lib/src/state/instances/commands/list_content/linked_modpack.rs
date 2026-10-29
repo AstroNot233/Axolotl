@@ -14,11 +14,9 @@ pub(crate) async fn get_linked_modpack_info(
         &state.pool,
     )
     .await?;
-    let link = sqlite::instance_rows::get_instance_link(
-        &resolved.instance.id,
-        &state.pool,
-    )
-    .await?;
+    let link =
+        sqlite::links::get_instance_link(&resolved.instance.id, &state.pool)
+            .await?;
     if let Some((project_id, version_id)) = linked_curseforge_modpack_ids(&link)
     {
         return get_curseforge_linked_modpack_info(

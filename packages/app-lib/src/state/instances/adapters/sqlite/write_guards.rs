@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use sqlx::{Sqlite, Transaction};
 
 /// Ensures the instance a content write is about to reference still exists.

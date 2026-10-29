@@ -16,7 +16,7 @@ async fn pack_overrides_keep_membership_across_reconciliation() {
 
     let (_temp, state, original, _, _) = fixture().await;
     let mut tx = state.pool.begin().await.unwrap();
-    crate::state::instances::adapters::sqlite::instance_rows::upsert_instance_link(
+    crate::state::instances::adapters::sqlite::links::upsert_instance_link(
         "instance",
         &crate::state::InstanceLink::CurseForgeModpack {
             project_id: "1".into(),
@@ -2913,7 +2913,11 @@ async fn local_pack_without_unlink_history_stays_managed_without_a_warning() {
         },
     ] {
         let mut tx = state.pool.begin().await.unwrap();
-        crate::state::instances::adapters::sqlite::instance_rows::upsert_instance_link("instance", &link, &mut tx).await.unwrap();
+        crate::state::instances::adapters::sqlite::links::upsert_instance_link(
+            "instance", &link, &mut tx,
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
         for _ in 0..2 {
             let snapshot =
@@ -3135,7 +3139,19 @@ async fn rollback_after_unlink_does_not_restore_pack_ownership_or_missing_member
         0
     );
     let mut tx = state.pool.begin().await.unwrap();
-    crate::state::instances::adapters::sqlite::instance_rows::upsert_instance_link("instance", &crate::state::InstanceLink::ImportedModpack { project_id: None, version_id: None, name: Some("Local".into()), version_number: None, filename: None }, &mut tx).await.unwrap();
+    crate::state::instances::adapters::sqlite::links::upsert_instance_link(
+        "instance",
+        &crate::state::InstanceLink::ImportedModpack {
+            project_id: None,
+            version_id: None,
+            name: Some("Local".into()),
+            version_number: None,
+            filename: None,
+        },
+        &mut tx,
+    )
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
