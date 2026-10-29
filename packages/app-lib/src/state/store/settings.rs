@@ -3,7 +3,7 @@
 //! A few columns of the row belong to other readers: the proxy, the DNS server,
 //! the download engine and the CurseForge key are written by the modules that
 //! own them, so they are not part of this record and a write from here leaves
-//! them as they were.
+//! them as they were. `OwnedColumns` is how those modules reach them.
 //!
 //! The columns holding JSON are carried as the text they are stored as: what
 //! the text means is the caller's business.
@@ -167,6 +167,22 @@ pub(crate) struct SettingsRecord {
     pub resource_preserve_filenames: bool,
 }
 
+/// The settings columns their own modules write.
+///
+/// These are not part of `SettingsRecord`: the settings page writes back the
+/// record it read, and a record carrying these would put the proxy and the
+/// CurseForge key back to the values that read saw. The modules that own them
+/// change them instead, so a write from either side leaves the other's columns
+/// as they were.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OwnedColumns {
+    pub proxy_mode: String,
+    pub proxy_url: String,
+    pub proxy_username: String,
+    pub proxy_password: String,
+    pub curseforge_api_key: String,
+}
+
 impl Settings {
     /// Changes the settings row inside the caller's unit, so the row the
     /// change is applied to cannot be replaced between the read and the write.
@@ -176,15 +192,95 @@ impl Settings {
     ) -> crate::Result<()> {
         let mut record = <Self as Collection>::atom_get(unit, &Singleton)
             .await?
-            .ok_or_else(|| -> crate::Error {
-                crate::ErrorKind::OtherError(
-                    "The launcher settings row is missing".to_string(),
-                )
-                .into()
-            })?;
+            .ok_or_else(missing_row)?;
         change(&mut record);
         <Self as Collection>::atom_set(unit, &Singleton, Some(&record)).await
     }
+
+    /// Reads the columns the proxy and the CurseForge key live in.
+    pub(crate) async fn owned_columns(
+        handle: &super::Handle,
+    ) -> crate::Result<OwnedColumns> {
+        let mut connection = handle.connection().await?;
+        read_owned_columns(&mut connection)
+            .await?
+            .ok_or_else(missing_row)
+    }
+
+    /// Changes the columns their own modules write inside the caller's unit,
+    /// so the values read back are the ones the change is applied to.
+    pub(crate) async fn update_owned_in(
+        unit: &mut super::Atom,
+        change: impl FnOnce(&mut OwnedColumns),
+    ) -> crate::Result<()> {
+        let mut columns = read_owned_columns(unit.connection())
+            .await?
+            .ok_or_else(missing_row)?;
+        change(&mut columns);
+        write_owned_columns(unit.connection(), &columns).await
+    }
+}
+
+fn missing_row() -> crate::Error {
+    crate::ErrorKind::OtherError(
+        "The launcher settings row is missing".to_string(),
+    )
+    .into()
+}
+
+async fn read_owned_columns(
+    conn: &mut SqliteConnection,
+) -> crate::Result<Option<OwnedColumns>> {
+    let row = sqlx::query(
+        "
+        SELECT
+            proxy_mode, proxy_url, proxy_username, proxy_password,
+            curseforge_api_key
+        FROM settings
+        WHERE id = 0
+        ",
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    Ok(Some(OwnedColumns {
+        proxy_mode: row.try_get("proxy_mode")?,
+        proxy_url: row.try_get("proxy_url")?,
+        proxy_username: row.try_get("proxy_username")?,
+        proxy_password: row.try_get("proxy_password")?,
+        curseforge_api_key: row.try_get("curseforge_api_key")?,
+    }))
+}
+
+async fn write_owned_columns(
+    conn: &mut SqliteConnection,
+    columns: &OwnedColumns,
+) -> crate::Result<()> {
+    sqlx::query(
+        "
+        UPDATE settings
+        SET
+            proxy_mode = ?,
+            proxy_url = ?,
+            proxy_username = ?,
+            proxy_password = ?,
+            curseforge_api_key = ?
+        WHERE id = 0
+        ",
+    )
+    .bind(&columns.proxy_mode)
+    .bind(&columns.proxy_url)
+    .bind(&columns.proxy_username)
+    .bind(&columns.proxy_password)
+    .bind(&columns.curseforge_api_key)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
 }
 
 impl Collection for Settings {

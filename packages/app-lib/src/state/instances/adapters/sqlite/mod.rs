@@ -1,10 +1,13 @@
+pub(crate) mod attached_world_data;
 pub(crate) mod config_sync_rows;
 pub(crate) mod content_entries;
 pub(crate) mod content_sets;
 pub(crate) mod content_store_files;
 pub(crate) mod files;
+pub(crate) mod instance_groups;
 pub(crate) mod instance_rows;
 pub(crate) mod instance_servers;
+pub(crate) mod legacy_import;
 pub(crate) mod links;
 pub(crate) mod loader_component_rows;
 pub(crate) mod pack_members;

@@ -62,6 +62,7 @@ pub(crate) mod resource_pack_unlinks;
 pub(crate) mod resource_source_projects;
 pub(crate) mod settings;
 pub(crate) mod shared_logs;
+pub(crate) mod store_blobs;
 pub(crate) mod store_retained_refs;
 pub(crate) mod sync_feature_settings;
 pub(crate) mod synced_game_option_preferences;
