@@ -8,7 +8,7 @@ use crate::state::instances::{
 use crate::state::{
     CacheValue, CachedEntry, CachedFileHash, CachedFileUpdate, Credentials,
     DefaultPage, DependencyType, DeviceToken, DeviceTokenKey, DeviceTokenPair,
-    FileType, Hooks, InstanceInstallStage, LauncherFeatureVersion,
+    FileType, Hooks, InstanceInstallStage, JavaVersion, LauncherFeatureVersion,
     MemorySettings, MinecraftAccountType, ModrinthCredentials,
     ModrinthHashMatch, ReleaseChannel, TeamMember, Theme, VersionFile,
     WindowSize, local_id,
@@ -26,13 +26,24 @@ use uuid::Uuid;
 use super::MinecraftProfile;
 use crate::state::store::Handle;
 
+/// What the previous launcher left behind and this one has taken over.
+///
+/// The Java runtimes are returned rather than written: their document is
+/// written once the settings directory is in place, next to the cache entries
+/// that wait for the derived database.
+#[derive(Default)]
+pub struct LegacyMigration {
+    pub java_versions: Vec<JavaVersion>,
+    pub cached_entries: Vec<CachedEntry>,
+}
+
 /// Imports what the previous launcher left behind. The fetched responses it
 /// finds are returned rather than written: they belong to the derived
 /// database, which does not exist yet at this point of startup.
 pub async fn migrate_legacy_data<'a, E>(
     handle: &Handle,
     exec: E,
-) -> crate::Result<Vec<CachedEntry>>
+) -> crate::Result<LegacyMigration>
 where
     E: sqlx::Executor<'a, Database = sqlx::Sqlite>
         + sqlx::Acquire<'a, Database = sqlx::Sqlite>
@@ -41,11 +52,11 @@ where
     let mut settings = state::Settings::get(handle).await?;
 
     if settings.migrated {
-        return Ok(Vec::new());
+        return Ok(LegacyMigration::default());
     };
 
     let Some(old_launcher_root) = default_settings_dir() else {
-        return Ok(Vec::new());
+        return Ok(LegacyMigration::default());
     };
     let old_launcher_root_str = old_launcher_root.to_string_lossy().to_string();
 
@@ -96,6 +107,7 @@ where
 
         settings.prev_custom_dir = Some(old_launcher_root_str.clone());
 
+        let mut java_versions = Vec::new();
         for (_, legacy_version) in legacy_settings.java_globals.0 {
             if crate::util::jre::is_java_install_staging_path(
                 std::path::Path::new(&legacy_version.path),
@@ -109,7 +121,7 @@ where
             if let Ok(java_version) =
                 check_jre(PathBuf::from(legacy_version.path)).await
             {
-                java_version.upsert(handle).await?;
+                java_versions.push(java_version);
             }
         }
 
@@ -405,17 +417,21 @@ where
 
         // The cache lives in the derived database, which is opened after this
         // runs, so the caller writes these once it exists.
-        return Ok(cached_entries
-            .into_iter()
-            .map(|x| {
-                let mut entry = x.get_entry();
-                entry.expires = Utc::now().timestamp() - entry.type_.expiry();
-                entry
-            })
-            .collect());
+        return Ok(LegacyMigration {
+            java_versions,
+            cached_entries: cached_entries
+                .into_iter()
+                .map(|x| {
+                    let mut entry = x.get_entry();
+                    entry.expires =
+                        Utc::now().timestamp() - entry.type_.expiry();
+                    entry
+                })
+                .collect(),
+        });
     }
 
-    Ok(Vec::new())
+    Ok(LegacyMigration::default())
 }
 
 struct LegacyInstanceUpsert {

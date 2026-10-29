@@ -777,6 +777,41 @@ pub(crate) async fn read_legacy_ai_provider_models(
         .collect())
 }
 
+pub(crate) struct LegacyTranslationSettings {
+    pub(crate) provider: String,
+    pub(crate) target_language: String,
+    pub(crate) mode: String,
+    pub(crate) auto_translate: bool,
+    pub(crate) style: String,
+    pub(crate) ai_provider_id: String,
+    pub(crate) ai_model_id: String,
+    pub(crate) ai_system_prompt: String,
+    pub(crate) deepl_api_endpoint: String,
+    pub(crate) deepl_api_key: Option<String>,
+}
+
+pub(crate) async fn read_legacy_translation_settings(
+    pool: &SqlitePool,
+) -> crate::Result<Option<LegacyTranslationSettings>> {
+    let row = sqlx::query(
+        "SELECT provider, target_language, mode, auto_translate, style, ai_provider_id, ai_model_id, openai_system_prompt, deepl_api_endpoint, deepl_api_key FROM translation_settings WHERE id = 0",
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|row| LegacyTranslationSettings {
+        provider: row.get("provider"),
+        target_language: row.get("target_language"),
+        mode: row.get("mode"),
+        auto_translate: row.get::<i64, _>("auto_translate") != 0,
+        style: row.get("style"),
+        ai_provider_id: row.get("ai_provider_id"),
+        ai_model_id: row.get("ai_model_id"),
+        ai_system_prompt: row.get("openai_system_prompt"),
+        deepl_api_endpoint: row.get("deepl_api_endpoint"),
+        deepl_api_key: row.get("deepl_api_key"),
+    }))
+}
+
 pub(crate) struct LegacyLogShareSettings {
     pub(crate) share_provider: String,
     pub(crate) ai_source: String,

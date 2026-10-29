@@ -1255,7 +1255,7 @@ impl State {
         let pool = db::connect(&app_identifier).await?;
         let data = store::Handle::new(pool.clone());
 
-        let legacy_cache =
+        let legacy =
             legacy_converter::migrate_legacy_data(&data, &pool).await?;
 
         tracing::info!("Fetching app settings");
@@ -1301,11 +1301,27 @@ impl State {
 
         documents::hand_over(&pool, &directories.settings_dir).await;
 
+        if !legacy.java_versions.is_empty() {
+            let documents = documents::Documents::at(
+                directories.settings_dir.join(documents::DIR_NAME),
+                &pool,
+            );
+            if let Err(error) =
+                JavaVersion::save_all(&documents, &legacy.java_versions).await
+            {
+                tracing::warn!(
+                    %error,
+                    "Failed to record the imported Java runtimes"
+                );
+            }
+        }
+
         let derived = store::derived_db::DerivedDb::open(
             directories.caches_dir().join(store::derived_db::FILE_NAME),
         )
         .await;
-        CachedEntry::store_best_effort(&legacy_cache, derived.pool()).await;
+        CachedEntry::store_best_effort(&legacy.cached_entries, derived.pool())
+            .await;
 
         let discord_rpc = DiscordGuard::init()?;
 
