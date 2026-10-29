@@ -10,6 +10,74 @@ pub(crate) struct InstalledArtifactRecord {
     pub declared_compatibility: Option<ReleaseCompatibility>,
 }
 
+/// The artifact payload stored for an entry, as written, so a caller can
+/// compare integrity before replacing it.
+pub(crate) async fn installed_artifact_payload<'e, E>(
+    entry_id: &str,
+    exec: E,
+) -> crate::Result<Option<String>>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    Ok(sqlx::query_scalar(
+        "SELECT artifact FROM resource_installed_artifacts WHERE entry_id = ?",
+    )
+    .bind(entry_id)
+    .fetch_optional(exec)
+    .await?)
+}
+
+/// Records the artifact an entry installs, replacing what it held before.
+pub(crate) async fn set_installed_artifact<'e, E, T>(
+    entry_id: &str,
+    payload: &T,
+    scope: &InstallScope,
+    exec: E,
+) -> crate::Result<()>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    T: serde::Serialize + ?Sized,
+{
+    sqlx::query("INSERT INTO resource_installed_artifacts(entry_id, artifact, scope) VALUES (?, ?, ?) ON CONFLICT(entry_id) DO UPDATE SET artifact = excluded.artifact, scope = excluded.scope")
+        .bind(entry_id)
+        .bind(serde_json::to_string(payload)?)
+        .bind(serde_json::to_string(scope)?)
+        .execute(exec)
+        .await?;
+
+    Ok(())
+}
+
+/// Drops the artifact an entry no longer installs.
+pub(crate) async fn delete_installed_artifact<'e, E>(
+    entry_id: &str,
+    exec: E,
+) -> crate::Result<()>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    sqlx::query("DELETE FROM resource_installed_artifacts WHERE entry_id = ?")
+        .bind(entry_id)
+        .execute(exec)
+        .await?;
+
+    Ok(())
+}
+
+/// Drops every resource row an entry leaves behind when it goes away.
+pub(crate) async fn delete_entry_resource_traces(
+    entry_id: &str,
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> crate::Result<()> {
+    delete_installed_artifact(entry_id, &mut **tx).await?;
+    sqlx::query("DELETE FROM resource_entry_graphs WHERE entry_id = ?")
+        .bind(entry_id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
 pub(crate) async fn attach_compatibility(
     pool: &sqlx::SqlitePool,
     instance_id: &str,
@@ -494,6 +562,7 @@ pub(super) async fn installed_file_identity(
     cancel: &CancellationToken,
 ) -> ResourceResult<LocalArtifactIdentity> {
     use crate::state::store::content_file_fingerprints::ContentFileFingerprints;
+
     let previous = ContentFileFingerprints::get_current(
         &state.data,
         instance_id,
@@ -671,8 +740,8 @@ async fn hydrate_entries_with_service(
         indices.into_iter().zip(identities).zip(recognized)
     {
         let entry = &mut entries[index];
-        let refs = crate::state::instances::adapters::sqlite::content_rows::get_content_provider_refs(entry.entry_id.as_str(), &state.pool).await?;
-        let origin = crate::state::instances::adapters::sqlite::content_rows::get_content_origin_provider(entry.entry_id.as_str(), &state.pool).await?;
+        let refs = crate::state::instances::adapters::sqlite::content_entries::get_content_provider_refs(entry.entry_id.as_str(), &state.pool).await?;
+        let origin = crate::state::instances::adapters::sqlite::content_entries::get_content_origin_provider(entry.entry_id.as_str(), &state.pool).await?;
         let mut matches = recognition.matches;
         if let Some(artifact) = verified.remove(&index)
             && !matches
@@ -825,27 +894,42 @@ async fn hydrate_entries_with_service(
                         .await
                     {
                         Ok(document) => document.metadata,
-                        Err(ResourceError::Canceled) => {
-                            return Err(ResourceError::Canceled);
-                        }
+                        Err(
+                            error @ (ResourceError::Canceled
+                            | ResourceError::Database(_)),
+                        ) => return Err(error),
                         Err(_) => continue,
                     };
-                    store
-                        .confirm_projects(&metadata, &other, &selected, matched)
-                        .await?;
+                    identity::try_confirm_projects(
+                        store, &metadata, &other, &selected, matched, cancel,
+                    )
+                    .await?;
                 }
             }
             entry.resource_id = store.lookup(&metadata.project).await?;
         }
         entry.artifact = Some(selected.reference.clone());
-        entry.known_artifacts = matches
-            .iter()
-            .filter(|artifact| {
-                !recognition.ambiguous
-                    || artifact.reference == selected.reference
-            })
-            .map(|artifact| artifact.reference.clone())
-            .collect();
+        // Planning uses known artifacts as project identity, not just byte
+        // evidence. An unconfirmed counterpart must not satisfy dependencies.
+        entry.known_artifacts = vec![selected.reference.clone()];
+        for artifact in &matches {
+            if recognition.ambiguous || artifact.reference == selected.reference
+            {
+                continue;
+            }
+            let same_project =
+                artifact.reference.release.project == metadata.project;
+            let confirmed = if let Some(store) = service.store() {
+                entry.resource_id.is_some()
+                    && store.lookup(&artifact.reference.release.project).await?
+                        == entry.resource_id
+            } else {
+                false
+            };
+            if same_project || confirmed {
+                entry.known_artifacts.push(artifact.reference.clone());
+            }
+        }
         entry.integrity = local.integrity;
         entry.original_file_name = selected.file_name.clone();
         persisted.push((entry.entry_id.clone(), selected, entry.scope.clone()));
@@ -870,7 +954,8 @@ async fn hydrate_entries_with_service(
     }
     let mut tx = state.pool.begin().await.map_err(plans::db)?;
     for (id, artifact, scope) in persisted {
-        let previous: Option<String> = sqlx::query_scalar("SELECT artifact FROM resource_installed_artifacts WHERE entry_id = ?").bind(id.as_str()).fetch_optional(&mut *tx).await.map_err(plans::db)?;
+        let previous =
+            installed_artifact_payload(id.as_str(), &mut *tx).await?;
         let declared_compatibility = previous
             .and_then(|payload| {
                 serde_json::from_str::<InstalledArtifactRecord>(&payload).ok()
@@ -887,7 +972,7 @@ async fn hydrate_entries_with_service(
             artifact,
             declared_compatibility,
         };
-        sqlx::query("INSERT INTO resource_installed_artifacts(entry_id, artifact, scope) VALUES (?, ?, ?) ON CONFLICT(entry_id) DO UPDATE SET artifact = excluded.artifact, scope = excluded.scope").bind(id.as_str()).bind(serde_json::to_string(&record)?).bind(serde_json::to_string(&scope)?).execute(&mut *tx).await.map_err(plans::db)?;
+        set_installed_artifact(id.as_str(), &record, &scope, &mut *tx).await?;
     }
     tx.commit().await.map_err(plans::db)?;
     Ok(HydratedInstalled { entries, failures })

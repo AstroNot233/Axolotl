@@ -400,6 +400,79 @@ async fn stable_catalog_survives_main_database_reopen_and_repeated_migration() {
 }
 
 #[tokio::test]
+async fn optional_project_confirmation_only_skips_insufficient_evidence() {
+    use crate::resources::identity::try_confirm_projects;
+    use tokio_util::sync::CancellationToken;
+
+    let pool = previous_database().await;
+    upgrade(&pool).await;
+    let store = ResourceStore::new(pool.clone());
+    let left = metadata(project(SourceId::modrinth(), "12345678"));
+    let right = metadata(project(SourceId::curseforge(), "123"));
+    let a = artifact(left.project.clone(), "a");
+    let b = artifact(right.project.clone(), "a");
+    let cancel = CancellationToken::new();
+    let mut incompatible = right.clone();
+    incompatible.types = vec![ResourceType::Shader];
+    let mut invalid_hash = b.clone();
+    invalid_hash.integrity.hashes[0].value = "bad hash".into();
+    let mut wrong_hash = b.clone();
+    wrong_hash.integrity.hashes[0].value = "b".repeat(64);
+    let mut weak = b.clone();
+    weak.integrity.hashes = vec![ContentHash {
+        algorithm: HashAlgorithm::Md5,
+        value: "a".repeat(32),
+    }];
+    let mut attachment = b.clone();
+    attachment.role = ArtifactRole::Attachment;
+    let mut wrong_project = right.clone();
+    wrong_project.project.project_id = SourceProjectId::new("456").unwrap();
+    for (metadata, artifact) in [
+        (&incompatible, &b),
+        (&right, &invalid_hash),
+        (&right, &wrong_hash),
+        (&right, &weak),
+        (&right, &attachment),
+        (&wrong_project, &b),
+    ] {
+        assert!(
+            try_confirm_projects(
+                &store, &left, metadata, &a, artifact, &cancel
+            )
+            .await
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            store
+                .confirm_projects(&left, metadata, &a, artifact)
+                .await
+                .is_err()
+        );
+        assert!(store.lookup(&left.project).await.unwrap().is_none());
+        assert!(store.lookup(&right.project).await.unwrap().is_none());
+    }
+    let canceled = CancellationToken::new();
+    canceled.cancel();
+    assert!(matches!(
+        try_confirm_projects(&store, &left, &incompatible, &a, &b, &canceled)
+            .await,
+        Err(ResourceError::Canceled)
+    ));
+    let id = try_confirm_projects(&store, &left, &right, &a, &b, &cancel)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(store.lookup(&left.project).await.unwrap(), Some(id.clone()));
+    assert_eq!(store.lookup(&right.project).await.unwrap(), Some(id));
+    pool.close().await;
+    assert!(matches!(
+        try_confirm_projects(&store, &left, &right, &a, &b, &cancel).await,
+        Err(ResourceError::Database(_))
+    ));
+}
+
+#[tokio::test]
 async fn confirmed_merges_keep_old_ids_alias_ambiguity_favorites_and_cache_independence()
  {
     let pool = previous_database().await;
