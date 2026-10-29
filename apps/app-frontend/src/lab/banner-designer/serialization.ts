@@ -419,11 +419,39 @@ function itemColorFromId(itemId: string, damage: number): DyeColor {
     return color
 }
 
+/**
+ * Reads the selector a give command targets. Selectors can carry spaces inside
+ * quotes or brackets, as in `@a[name="a b"]`, so the token ends at the first
+ * whitespace that is neither quoted nor nested.
+ */
+function readTarget(text: string): string | null {
+    let depth = 0
+    let quote: string | null = null
+    for (let index = 0; index < text.length; index++) {
+        const character = text[index]
+        if (quote) {
+            if (character === '\\') index++
+            else if (character === quote) quote = null
+            continue
+        }
+        if (character === '"' || character === "'") {
+            quote = character
+        } else if (character === '[' || character === '{') {
+            depth++
+        } else if (character === ']' || character === '}') {
+            depth--
+        } else if (depth <= 0 && /\s/.test(character)) {
+            return text.slice(0, index)
+        }
+    }
+    return null
+}
+
 function parseGiveCommand(command: string): BannerDesign {
     let rest = command.replace(/^\/\s*/, '').replace(/^give\s+/i, '')
-    const target = /^\S+\s+/.exec(rest)
+    const target = readTarget(rest)
     if (!target) throw new BannerParseError('invalid-data', 'missing item')
-    rest = rest.slice(target[0].length)
+    rest = rest.slice(target.length).trimStart()
 
     const item = /^[a-z0-9_.:-]+/i.exec(rest)
     if (!item) throw new BannerParseError('invalid-data', 'missing item')

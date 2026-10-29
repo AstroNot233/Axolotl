@@ -240,6 +240,16 @@ describe('banner import', () => {
         ])
     })
 
+    it('keeps a selector that carries a quoted space together with the item', () => {
+        const parsed = parseBannerText(
+            '/give @a[name="a b"] minecraft:red_banner[minecraft:banner_patterns=[{pattern:"cross",color:"white"}]] 1',
+        )
+        expect(parsed.baseColor).toBe('red')
+        expect(parsed.layers.map((layer) => [layer.pattern, layer.color])).toEqual([
+            ['cross', 'white'],
+        ])
+    })
+
     it('rejects give commands for items that are not banners', () => {
         expect(codes(() => parseBannerText('/give @p minecraft:diamond'))).toBe('unsupported')
         expect(codes(() => parseBannerText('/give @p minecraft:red_dye 1'))).toBe('unsupported')
