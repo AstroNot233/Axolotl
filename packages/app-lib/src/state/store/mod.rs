@@ -27,6 +27,7 @@ pub(crate) mod content_snapshot;
 pub(crate) mod content_update_jobs;
 pub(crate) mod custom_minecraft_skin_textures;
 pub(crate) mod custom_minecraft_skins;
+pub(crate) mod derived_db;
 pub(crate) mod discovered_javas;
 pub(crate) mod game_option_locale_origins;
 pub(crate) mod game_option_pack_bases;
