@@ -346,12 +346,14 @@ function buildChunk(message: WorkerMeshMessage) {
                     ),
                 }
                 const target = isSchematicTranslucent(state.name) ? translucent : opaque
+                let meshed = false
                 try {
                     const mesh = createSchematicBlockMesh(state, cull)
                     if (mesh.quads.length === 0) {
                         missing.add(state.name)
                         appendFallbackCube(target, position, cull, state.name)
                     } else {
+                        meshed = true
                         appendBlockMesh(target, mesh, position, (vertices) => {
                             applySeamlessSchematicGlassUvs(
                                 vertices,
@@ -364,11 +366,18 @@ function buildChunk(message: WorkerMeshMessage) {
                             )
                         })
                     }
-                    const fluid = geometry.water(state, cull)
-                    if (fluid) appendBlockMesh(translucent, fluid, position)
                 } catch {
                     missing.add(state.name)
                     appendFallbackCube(target, position, cull, state.name)
+                }
+                // A fallback cube fills the block, so fluid meshed behind it could never be seen;
+                // skipping it also keeps a fluid failure from disturbing the appended host mesh.
+                if (!meshed) continue
+                try {
+                    const fluid = geometry.water(state, cull)
+                    if (fluid) appendBlockMesh(translucent, fluid, position)
+                } catch {
+                    // The host mesh is already appended; dropping the fluid keeps it intact.
                 }
             }
         }
