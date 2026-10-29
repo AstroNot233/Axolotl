@@ -879,8 +879,21 @@ pub(super) async fn cancel_job_with_state(
                 tracing::info!(%job_id, status = record.status.as_str(), elapsed_ms = started.elapsed().as_millis() as u64, "Install cancellation accepted");
                 return Ok(record.snapshot());
             }
-            InstallJobStatus::Canceling | InstallJobStatus::Canceled => {
-                tracing::info!(%job_id, status = job.status.as_str(), "Install cancellation already accepted");
+            // Accepted, but the cleanup that accepted it may have failed: the job
+            // then waits in `Canceling` with nothing left to finish it, and every
+            // later cancellation used to answer "already accepted" forever.
+            // Restarting the cleanup is what "recoverable" is supposed to mean.
+            InstallJobStatus::Canceling => {
+                let snapshot = job.snapshot();
+                if spawn_cancel_cleanup(job_id, job, state) {
+                    tracing::info!(%job_id, "Install cancellation cleanup restarted");
+                } else {
+                    tracing::info!(%job_id, "Install cancellation cleanup is already running");
+                }
+                return Ok(snapshot);
+            }
+            InstallJobStatus::Canceled => {
+                tracing::info!(%job_id, "Install cancellation already finished");
                 return Ok(job.snapshot());
             }
             InstallJobStatus::Queued | InstallJobStatus::WaitingForUser => {
@@ -902,13 +915,7 @@ pub(super) async fn cancel_job_with_state(
                     tracing::warn!(%job_id, %error, "Could not emit accepted install cancellation");
                 }
                 tracing::info!(%job_id, status = record.status.as_str(), elapsed_ms = started.elapsed().as_millis() as u64, "Install cancellation accepted; cleanup continues in background");
-                tokio::spawn(async move {
-                    if let Err(error) =
-                        finish_canceling_job(record, &state).await
-                    {
-                        tracing::error!(%job_id, %error, "Canceled install cleanup could not finish; durable canceling state remains recoverable");
-                    }
-                });
+                spawn_cancel_cleanup(job_id, record, state);
                 return Ok(snapshot);
             }
             _ => {
@@ -917,6 +924,46 @@ pub(super) async fn cancel_job_with_state(
             }
         }
     }
+}
+
+/// Jobs whose post-cancellation cleanup is currently running.
+///
+/// A cleanup that fails leaves its job in `Canceling`, and cancelling again has
+/// to be able to finish it. Two cleanups at once would fight over the same files,
+/// so only the first caller may start one.
+fn cleanups_in_flight()
+-> &'static std::sync::Mutex<std::collections::HashSet<Uuid>> {
+    static IN_FLIGHT: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashSet<Uuid>>,
+    > = std::sync::OnceLock::new();
+    IN_FLIGHT.get_or_init(Default::default)
+}
+
+/// Finish a canceled job's cleanup in the background, at most once at a time.
+///
+/// Returns whether this call started the cleanup; `false` means another one is
+/// still running for the same job.
+fn spawn_cancel_cleanup(
+    job_id: Uuid,
+    record: store::InstallJobRecord,
+    state: State,
+) -> bool {
+    let started = cleanups_in_flight()
+        .lock()
+        .map(|mut in_flight| in_flight.insert(job_id))
+        .unwrap_or(false);
+    if !started {
+        return false;
+    }
+    tokio::spawn(async move {
+        if let Err(error) = finish_canceling_job(record, &state).await {
+            tracing::error!(%job_id, %error, "Canceled install cleanup could not finish; a later cancellation will retry it");
+        }
+        if let Ok(mut in_flight) = cleanups_in_flight().lock() {
+            in_flight.remove(&job_id);
+        }
+    });
+    true
 }
 
 async fn finish_canceling_job(
