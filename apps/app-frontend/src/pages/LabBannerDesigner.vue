@@ -96,6 +96,10 @@ const messages = defineMessages({
         id: 'app.lab.banner-designer.layers.limit',
         defaultMessage: 'A banner holds at most {max} patterns.',
     },
+    layerMoved: {
+        id: 'app.lab.banner-designer.layers.moved',
+        defaultMessage: 'Layer moved to position {position}',
+    },
     exit: { id: 'app.lab.banner-designer.exit', defaultMessage: 'Exit' },
     undo: { id: 'app.lab.banner-designer.undo', defaultMessage: 'Undo' },
     redo: { id: 'app.lab.banner-designer.redo', defaultMessage: 'Redo' },
@@ -123,6 +127,8 @@ const design = ref<BannerDesign | null>(null)
 const editingLayer = ref<BannerLayer | null>(null)
 const recent = ref<RecentBanner[]>(loadRecentBanners())
 const recentExpanded = ref(false)
+/** Spoken after a keyboard reorder, since the list moves without the focus. */
+const layerAnnouncement = ref('')
 
 const history = ref<DesignHistory>(emptyHistory())
 const canUndo = computed(() => history.value.past.length > 0)
@@ -276,7 +282,13 @@ function removeLayer(id: string) {
 }
 
 function moveLayer(displayIndex: number, offset: number) {
-    reorder(displayIndex, displayIndex + offset)
+    const total = design.value?.layers.length ?? 0
+    const target = displayIndex + offset
+    if (!design.value || target < 0 || target >= total) return
+    reorder(displayIndex, target)
+    // Only a keyboard move lands here, so this is the one path that has to say
+    // out loud what happened: the list reorders without the focus moving.
+    layerAnnouncement.value = formatMessage(messages.layerMoved, { position: total - target })
 }
 
 /** Moves the layer at `from` so that it ends up at `to`, both top-first indexes. */
@@ -787,6 +799,9 @@ onBeforeUnmount(() => {
                         </header>
 
                         <div class="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+                            <p class="sr-only" role="status" aria-live="polite">
+                                {{ layerAnnouncement }}
+                            </p>
                             <p
                                 v-if="design.layers.length === 0"
                                 class="m-0 rounded-[var(--radius-md)] border border-dashed border-surface-5 p-4 text-center text-xs text-[var(--color-text-tertiary)]"

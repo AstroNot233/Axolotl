@@ -252,7 +252,7 @@
     "message": "搜索图案"
   },
   "app.lab.banner-designer.layer.drag": {
-    "message": "拖动以排序"
+    "message": "拖动以排序，或按方向键"
   },
   "app.lab.banner-designer.layer.edit": {
     "message": "编辑图层"
@@ -283,6 +283,9 @@
   },
   "app.lab.banner-designer.layers.limit": {
     "message": "一面旗帜最多容纳 {max} 个图案。"
+  },
+  "app.lab.banner-designer.layers.moved": {
+    "message": "图层已移动到第 {position} 层"
   },
   "app.lab.banner-designer.open-recent": {
     "message": "打开旗帜"

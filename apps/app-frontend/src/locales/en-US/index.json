@@ -4371,7 +4371,7 @@
     "message": "Search patterns"
   },
   "app.lab.banner-designer.layer.drag": {
-    "message": "Drag to reorder"
+    "message": "Drag to reorder, or press the arrow keys"
   },
   "app.lab.banner-designer.layer.edit": {
     "message": "Edit layer"
@@ -4402,6 +4402,9 @@
   },
   "app.lab.banner-designer.layers.limit": {
     "message": "A banner holds at most {max} patterns."
+  },
+  "app.lab.banner-designer.layers.moved": {
+    "message": "Layer moved to position {position}"
   },
   "app.lab.banner-designer.open-recent": {
     "message": "Open banner"

@@ -36,7 +36,10 @@ const emit = defineEmits<{
 const { formatMessage } = useVIntl()
 
 const messages = defineMessages({
-    drag: { id: 'app.lab.banner-designer.layer.drag', defaultMessage: 'Drag to reorder' },
+    drag: {
+        id: 'app.lab.banner-designer.layer.drag',
+        defaultMessage: 'Drag to reorder, or press the arrow keys',
+    },
     moveUp: { id: 'app.lab.banner-designer.layer.move-up', defaultMessage: 'Move up' },
     moveDown: { id: 'app.lab.banner-designer.layer.move-down', defaultMessage: 'Move down' },
     edit: { id: 'app.lab.banner-designer.layer.edit', defaultMessage: 'Edit layer' },
@@ -61,6 +64,7 @@ const layerDesign = computed<BannerDesign>(() => ({
             class="flex cursor-grab touch-none select-none items-center justify-center rounded-[var(--radius-sm)] p-0.5 text-[var(--color-text-tertiary)] active:cursor-grabbing"
             role="button"
             tabindex="0"
+            aria-keyshortcuts="ArrowUp ArrowDown"
             :aria-label="`${formatMessage(messages.drag)} (${order})`"
             @pointerdown.prevent="emit('dragstart', $event)"
             @keydown.up.prevent="emit('move', -1)"
