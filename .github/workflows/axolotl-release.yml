@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag to resume (no compilation)"
+        description: 'Existing release tag to resume (no compilation)'
         required: true
         type: string
       target:
-        description: "Publication tasks to run using existing release assets"
+        description: 'Publication tasks to run using existing release assets'
         required: true
         default: all
         type: choice
@@ -23,8 +23,8 @@ on:
           - discord
   push:
     tags:
-      - "v*"
-      - "!v1.9.9"
+      - 'v*'
+      - '!v1.9.9'
 
 permissions:
   contents: write
@@ -141,7 +141,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       SQLX_OFFLINE: true
-      CARGO_PROFILE_RELEASE_LTO: "true"
+      CARGO_PROFILE_RELEASE_LTO: 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -207,7 +207,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       SQLX_OFFLINE: true
-      CARGO_PROFILE_RELEASE_LTO: "true"
+      CARGO_PROFILE_RELEASE_LTO: 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -241,8 +241,8 @@ jobs:
     runs-on: macos-26
     env:
       SQLX_OFFLINE: true
-      CARGO_PROFILE_RELEASE_LTO: "true"
-      TAURI_BUNDLER_DMG_IGNORE_CI: "true"
+      CARGO_PROFILE_RELEASE_LTO: 'true'
+      TAURI_BUNDLER_DMG_IGNORE_CI: 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -252,7 +252,7 @@ jobs:
         uses: ./.github/actions/setup-desktop-build
         with:
           profile: release
-          package-only: "true"
+          package-only: 'true'
       - name: Download macOS ARM64 build artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -375,7 +375,7 @@ jobs:
         env:
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
           UPDATE_SERVER_WEBHOOK_SECRET: ${{ secrets.UPDATE_SERVER_WEBHOOK_SECRET }}
-          UPDATE_SERVER_FORCE_UPDATE: "false"
+          UPDATE_SERVER_FORCE_UPDATE: 'false'
         run: |
           node scripts/axolotl/publish-update-server.mjs \
             release-check/update-server-catalog.json \
