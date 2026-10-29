@@ -64,6 +64,20 @@ where
     Ok(())
 }
 
+/// Drops every resource row an entry leaves behind when it goes away.
+pub(crate) async fn delete_entry_resource_traces(
+    entry_id: &str,
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> crate::Result<()> {
+    delete_installed_artifact(entry_id, &mut **tx).await?;
+    sqlx::query("DELETE FROM resource_entry_graphs WHERE entry_id = ?")
+        .bind(entry_id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
 pub(crate) async fn attach_compatibility(
     pool: &sqlx::SqlitePool,
     instance_id: &str,

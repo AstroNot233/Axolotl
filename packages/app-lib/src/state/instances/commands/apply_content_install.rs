@@ -3931,15 +3931,11 @@ async fn rollback_project_inner(
             &mut tx,
         )
         .await?;
-        crate::resources::installed::delete_installed_artifact(
+        crate::resources::installed::delete_entry_resource_traces(
             &entry_id,
-            &mut *tx,
+            &mut tx,
         )
         .await?;
-        sqlx::query("DELETE FROM resource_entry_graphs WHERE entry_id = ?")
-            .bind(&entry_id)
-            .execute(&mut *tx)
-            .await?;
         content_entries::delete_dependency_edges_for_parent_in_transaction(
             &entry_id,
             &mut tx,
