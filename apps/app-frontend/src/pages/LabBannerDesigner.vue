@@ -169,7 +169,10 @@ const previewScale = computed(() => {
     const { width, height } = areaSize.value
     const limitY = Math.floor(((height || 480) - 96) / BANNER_FACE_HEIGHT)
     const limitX = Math.floor(((width || 480) - 96) / BANNER_FACE_WIDTH)
-    return Math.max(3, Math.min(12, limitY, limitX))
+    // Never force a floor above the space available: a short window would push
+    // the preview past its container. One pixel per texel is the smallest
+    // faithful render, so that is the only hard floor.
+    return Math.max(1, Math.min(12, limitY, limitX))
 })
 
 const layerCount = computed(() => design.value?.layers.length ?? 0)
