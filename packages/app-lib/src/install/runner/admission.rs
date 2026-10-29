@@ -53,13 +53,22 @@ pub(super) async fn existing(
     let Some(instance) = request_instance(request) else {
         return Ok(None);
     };
+    existing_for_instance(state, &instance, request, ignore).await
+}
+
+pub(super) async fn existing_for_instance(
+    state: &State,
+    instance: &str,
+    request: &InstallRequest,
+    ignore: Option<Uuid>,
+) -> crate::Result<Option<InstallJobSnapshot>> {
     let identity = request_identity(request)?;
     for job in store::list(false, state).await? {
         if Some(job.id) == ignore || job.status.is_finished() {
             continue;
         }
-        if job.instance_id.as_deref() != Some(&instance)
-            && request_instance(&job.state.request).as_ref() != Some(&instance)
+        if job.instance_id.as_deref() != Some(instance)
+            && request_instance(&job.state.request).as_deref() != Some(instance)
         {
             continue;
         }

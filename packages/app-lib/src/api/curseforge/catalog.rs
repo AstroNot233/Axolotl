@@ -208,6 +208,37 @@ pub(crate) async fn get_files_with_service(
     service: &std::sync::Arc<crate::resources::ResourceService>,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> crate::Result<CurseForgeFilesResponse> {
+    let result = get_files_round(
+        project_id,
+        request.clone(),
+        service,
+        cancel,
+        crate::resources::CachePolicy::UseFresh,
+    )
+    .await;
+    if matches!(&result, Err(error) if matches!(error.raw.as_ref(), ErrorKind::ResourceError(crate::resources::ResourceError::InvalidResponse(_))))
+    {
+        // Individually valid cached pages can belong to different catalogue
+        // revisions. Retry the aggregate once without reusing those pages.
+        return get_files_round(
+            project_id,
+            request,
+            service,
+            cancel,
+            crate::resources::CachePolicy::ForceRefresh,
+        )
+        .await;
+    }
+    result
+}
+
+async fn get_files_round(
+    project_id: u32,
+    request: CurseForgeFilesRequest,
+    service: &std::sync::Arc<crate::resources::ResourceService>,
+    cancel: &tokio_util::sync::CancellationToken,
+    policy: crate::resources::CachePolicy,
+) -> crate::Result<CurseForgeFilesResponse> {
     let page_size = request.page_size.clamp(1, MAX_PAGE_SIZE);
     let namespace =
         service.source_namespace(&crate::resources::SourceId::curseforge())?;
@@ -217,7 +248,7 @@ pub(crate) async fn get_files_with_service(
     let mut seen = HashSet::new();
 
     let total_count = loop {
-        let response = crate::resources::legacy_catalog::curseforge_files_page(
+        let response = crate::resources::legacy_catalog::curseforge_files_page_with_policy(
             project_id,
             CurseForgeFilesRequest {
                 index,
@@ -226,6 +257,7 @@ pub(crate) async fn get_files_with_service(
             },
             service,
             cancel,
+            policy,
         )
         .await?;
         if service.source_namespace(&crate::resources::SourceId::curseforge())?

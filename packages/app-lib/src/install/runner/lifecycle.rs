@@ -82,6 +82,21 @@ async fn recover_owned_job(
         return Ok(());
     }
     begin_failed_job_rollback(&mut job.state, error);
+    // Persist the removal of any resumable checkpoint before destructive
+    // recovery starts, so a restart cannot treat a half rollback as a resume.
+    if store::update_status_if(
+        job_id, job.status, job.status, &job.state, state,
+    )
+    .await?
+    .is_none()
+    {
+        if store::get_required(job_id, state).await?.status
+            == InstallJobStatus::Canceling
+        {
+            finish_canceled_job(job_id, &mut job.state, state).await?;
+        }
+        return Ok(());
+    }
     let cleaned = match recovery::apply_cleanup(&mut job.state, state).await {
         Ok(()) => true,
         Err(cleanup_error) => {
@@ -100,29 +115,31 @@ async fn recover_owned_job(
     if cleaned {
         clear_deleted_new_instance_id(&mut job.state);
     }
-    let expected = store::get_required(job_id, state).await?.status;
-    if !needs_worker_recovery(expected) {
-        return Ok(());
+    loop {
+        let expected = store::get_required(job_id, state).await?.status;
+        if !needs_worker_recovery(expected) {
+            return Ok(());
+        }
+        let status = if expected == InstallJobStatus::Canceling {
+            job.state.error = Some(InstallErrorView::from_message(
+                "canceled",
+                job.state.progress.phase,
+                "Install was canceled",
+            ));
+            InstallJobStatus::Canceled
+        } else if cleaned {
+            InstallJobStatus::Failed
+        } else {
+            InstallJobStatus::Interrupted
+        };
+        if let Some(record) =
+            store::update_status_if(job_id, expected, status, &job.state, state)
+                .await?
+        {
+            emit_job_best_effort(&record.snapshot()).await;
+            return Ok(());
+        }
     }
-    let status = if expected == InstallJobStatus::Canceling {
-        job.state.error = Some(InstallErrorView::from_message(
-            "canceled",
-            job.state.progress.phase,
-            "Install was canceled",
-        ));
-        InstallJobStatus::Canceled
-    } else if cleaned {
-        InstallJobStatus::Failed
-    } else {
-        InstallJobStatus::Interrupted
-    };
-    if let Some(record) =
-        store::update_status_if(job_id, expected, status, &job.state, state)
-            .await?
-    {
-        emit_job_best_effort(&record.snapshot()).await;
-    }
-    Ok(())
 }
 
 fn needs_worker_recovery(status: InstallJobStatus) -> bool {
@@ -158,6 +175,7 @@ pub(super) async fn complete_committed_job(
     job.continuation = None;
     job.missing_content = None;
     job.rollback = None;
+    job.retry_from_checkpoint = false;
     job.record_event(InstallJobEventKind::JobSucceeded {
         instance_id: current_instance_id(job),
     });
@@ -179,6 +197,7 @@ pub(super) fn begin_failed_job_rollback(
     job_state: &mut InstallJobState,
     error: &crate::Error,
 ) {
+    job_state.retry_from_checkpoint = false;
     let failed_phase = job_state.progress.phase;
     let error_view =
         install_error_view(failed_phase, error, job_state.context.clone());
@@ -221,6 +240,48 @@ pub(super) fn latest_failure_phase(
         (None, Some(reporter)) => reporter.1,
         (None, None) => reporter_state.progress.phase,
     }
+}
+
+pub(super) fn retain_pack_download(
+    job: &mut InstallJobState,
+    error: &crate::Error,
+) -> bool {
+    if matches!(error.raw.as_ref(), ErrorKind::FetchError(error) if error.is_decode())
+    {
+        return false;
+    }
+    let network_error = matches!(
+        error.raw.as_ref(),
+        ErrorKind::NetworkError(_)
+            | ErrorKind::FetchError(_)
+            | ErrorKind::HttpError { .. }
+            | ErrorKind::DownloadH2Error(_)
+            | ErrorKind::DownloadStreamStalled { .. }
+            | ErrorKind::DownloadResourceWaitTimeout(_)
+            | ErrorKind::DownloadTransferSlow
+            | ErrorKind::DownloadEndpointChanged
+            | ErrorKind::ApiIsDownError(_)
+            | ErrorKind::ResourceError(
+                crate::resources::ResourceError::Network { .. }
+                    | crate::resources::ResourceError::Unavailable
+            )
+    );
+    if !network_error || !job.is_new_pack_checkpoint() {
+        return false;
+    }
+    let view =
+        install_error_view(job.progress.phase, error, job.context.clone());
+    job.record_event(InstallJobEventKind::Failed {
+        phase: job.progress.phase,
+        code: view.code.clone(),
+        message: view.message.clone(),
+    });
+    job.error = Some(view);
+    job.retry_from_checkpoint = true;
+    job.pause_reason = None;
+    job.progress.parallel = None;
+    job.active_downloads.clear();
+    true
 }
 
 pub(super) fn begin_waiting_for_user(
@@ -400,6 +461,7 @@ async fn run_owned_job(job_id: Uuid, state: &State) -> crate::Result<()> {
             job_state.progress.parallel = None;
             job_state.error = None;
             job_state.rollback_error = None;
+            job_state.retry_from_checkpoint = false;
             job_state.pause_reason = None;
             if !matches!(
                 job_state.request,
@@ -493,7 +555,40 @@ async fn run_owned_job(job_id: Uuid, state: &State) -> crate::Result<()> {
                 return Ok(());
             }
             job_state.progress.phase = failure_phase;
+            if retain_pack_download(&mut job_state, &error) {
+                let Some(record) = store::update_status_if(
+                    job_id,
+                    InstallJobStatus::Running,
+                    InstallJobStatus::Failed,
+                    &job_state,
+                    state,
+                )
+                .await?
+                else {
+                    if store::get_required(job_id, state).await?.status
+                        == InstallJobStatus::Canceling
+                    {
+                        finish_canceled_job(job_id, &mut job_state, state)
+                            .await?;
+                    }
+                    return Ok(());
+                };
+                tracing::info!(%job_id, instance_id = ?current_instance_id(&job_state), "Modpack download failed; keeping verified files for retry");
+                emit_job_best_effort(&record.snapshot()).await;
+                return Ok(());
+            }
             begin_failed_job_rollback(&mut job_state, &error);
+            if store::checkpoint_running_state(job_id, &job_state, state)
+                .await?
+                .is_none()
+            {
+                if store::get_required(job_id, state).await?.status
+                    == InstallJobStatus::Canceling
+                {
+                    finish_canceled_job(job_id, &mut job_state, state).await?;
+                }
+                return Ok(());
+            }
             let cleanup_succeeded = match recovery::apply_cleanup(
                 &mut job_state,
                 &state,
@@ -525,15 +620,8 @@ async fn run_owned_job(job_id: Uuid, state: &State) -> crate::Result<()> {
             if cleanup_succeeded {
                 clear_deleted_new_instance_id(&mut job_state);
             }
-            let record = store::update_status(
-                job_id,
-                InstallJobStatus::Failed,
-                &job_state,
-                &state,
-            )
-            .await?;
-            tracing::info!(%job_id, status = record.status.as_str(), phase = ?job_state.progress.phase, %error, "Install job execution failed after rollback");
-            emit_job_best_effort(&record.snapshot()).await;
+            persist_failed_cleanup(job_id, &job_state, state).await?;
+            tracing::info!(%job_id, phase = ?job_state.progress.phase, %error, "Install job execution failed after rollback");
             return Ok(());
         }
     }
@@ -541,11 +629,50 @@ async fn run_owned_job(job_id: Uuid, state: &State) -> crate::Result<()> {
     Ok(())
 }
 
+pub(super) async fn persist_failed_cleanup(
+    job_id: Uuid,
+    job: &InstallJobState,
+    state: &State,
+) -> crate::Result<()> {
+    loop {
+        let current = store::get_required(job_id, state).await?;
+        let mut result = job.clone();
+        let status = match current.status {
+            InstallJobStatus::Running => InstallJobStatus::Failed,
+            InstallJobStatus::Canceling => {
+                result.error = Some(InstallErrorView::from_message(
+                    "canceled",
+                    job.progress.phase,
+                    "Install was canceled",
+                ));
+                result.record_event(InstallJobEventKind::JobCanceled {
+                    phase: job.progress.phase,
+                });
+                InstallJobStatus::Canceled
+            }
+            _ => return Ok(()),
+        };
+        if let Some(record) = store::update_status_if(
+            job_id,
+            current.status,
+            status,
+            &result,
+            state,
+        )
+        .await?
+        {
+            emit_job_best_effort(&record.snapshot()).await;
+            return Ok(());
+        }
+    }
+}
+
 async fn finish_canceled_job(
     job_id: Uuid,
     job_state: &mut InstallJobState,
     state: &State,
 ) -> crate::Result<()> {
+    job_state.retry_from_checkpoint = false;
     let started = std::time::Instant::now();
     tracing::info!(%job_id, phase = ?job_state.progress.phase, "Install cancellation cleanup started after execution stopped");
     let canceled_phase = job_state.progress.phase;

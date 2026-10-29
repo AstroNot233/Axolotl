@@ -488,7 +488,11 @@ pub async fn job_support_details(job_id: Uuid) -> crate::Result<String> {
 pub async fn retry_job(job_id: Uuid) -> crate::Result<InstallJobSnapshot> {
     let state = State::get().await?;
     let mut job = store::get_required(job_id, &state).await?;
-    let instance = admission::request_instance(&job.state.request);
+    let instance = if job.state.retry_from_checkpoint {
+        current_instance_id(&job.state)
+    } else {
+        admission::request_instance(&job.state.request)
+    };
     let _admission = admission::lock(&state, instance.as_deref()).await?;
     job = store::get_required(job_id, &state).await?;
     if matches!(
@@ -499,9 +503,19 @@ pub async fn retry_job(job_id: Uuid) -> crate::Result<InstallJobSnapshot> {
     ) {
         return Ok(job.snapshot());
     }
-    if let Some(existing) =
-        admission::existing(&state, &job.state.request, Some(job_id)).await?
-    {
+    let existing = match instance.as_deref() {
+        Some(instance) => {
+            admission::existing_for_instance(
+                &state,
+                instance,
+                &job.state.request,
+                Some(job_id),
+            )
+            .await?
+        }
+        None => None,
+    };
+    if let Some(existing) = existing {
         return Ok(existing);
     }
 
@@ -516,9 +530,12 @@ pub async fn retry_job(job_id: Uuid) -> crate::Result<InstallJobSnapshot> {
         .into());
     }
 
-    job.state.target = job.state.request.target();
-    job.state.cleanup = job.state.request.cleanup();
-    job.state.rollback = None;
+    let resume_checkpoint = prepare_pack_retry(&mut job.state, &state).await?;
+    if !resume_checkpoint {
+        job.state.target = job.state.request.target();
+        job.state.cleanup = job.state.request.cleanup();
+        job.state.rollback = None;
+    }
     job.state.error = None;
     job.state.rollback_error = None;
     job.state.pause_reason = None;
@@ -530,7 +547,9 @@ pub async fn retry_job(job_id: Uuid) -> crate::Result<InstallJobSnapshot> {
     job.state.progress.progress = None;
     job.state.progress.details = InstallPhaseDetails::Empty;
     job.state.progress.parallel = None;
-    init::prepare_initial_instance(&mut job.state, &state).await?;
+    if !resume_checkpoint {
+        init::prepare_initial_instance(&mut job.state, &state).await?;
+    }
     job.state.record_event(InstallJobEventKind::JobQueued {
         kind: job.state.request.kind(),
     });
@@ -549,6 +568,42 @@ pub async fn retry_job(job_id: Uuid) -> crate::Result<InstallJobSnapshot> {
     // The spawned job may already have progressed (or finished) by the time
     // the command returns; hand the caller the freshest stored state.
     Ok(store::get_required(job_id, &state).await?.snapshot())
+}
+
+async fn prepare_pack_retry(
+    job: &mut InstallJobState,
+    state: &State,
+) -> crate::Result<bool> {
+    if !job.retry_from_checkpoint {
+        return Ok(false);
+    }
+    let Some(id) = current_instance_id(job) else {
+        job.retry_from_checkpoint = false;
+        return Ok(false);
+    };
+    let Some(instance) = crate::state::get_instance(&id, &state.pool).await?
+    else {
+        job.retry_from_checkpoint = false;
+        return Ok(false);
+    };
+    if !job.is_new_pack_checkpoint()
+        || instance.instance.install_stage == InstanceInstallStage::Installed
+    {
+        return Err(ErrorKind::InputError("This partial installation no longer matches its download task; start a new installation".into()).into());
+    }
+    if let InstallRequest::CreateModpackInstance {
+        location: CreatePackLocation::FromFile { path },
+        ..
+    } = &job.request
+    {
+        let current =
+            crate::api::pack::install_from::local_pack_retry_identity(path)
+                .await?;
+        if job.local_pack_retry_identity.as_ref() != Some(&current) {
+            return Err(ErrorKind::InputError("The local modpack archive changed after installation started; select it again to start a new installation".into()).into());
+        }
+    }
+    Ok(true)
 }
 
 pub async fn repair_cache_and_retry_job(
@@ -998,6 +1053,7 @@ async fn finish_canceling_job(
 }
 
 fn begin_canceling_job(job_state: &mut InstallJobState) {
+    job_state.retry_from_checkpoint = false;
     let canceled_phase = job_state.progress.phase;
     job_state.error = Some(InstallErrorView::from_message(
         "canceled",

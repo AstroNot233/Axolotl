@@ -3849,6 +3849,50 @@ async fn repeated_file_pages_are_rejected_instead_of_looping_forever() {
         .to_string()
         .contains("pagination")
     );
-    assert_eq!(transport.requests.lock().unwrap().len(), 2);
+    assert_eq!(transport.requests.lock().unwrap().len(), 4);
+    cache.close().await;
+}
+
+#[tokio::test]
+async fn changed_cached_catalogue_is_refetched_once_as_a_complete_round() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let transport = FixtureTransport::new({
+        let calls = calls.clone();
+        move |_, request| {
+            let call = calls.fetch_add(1, Ordering::AcqRel);
+            let index: u32 = request
+                .query
+                .iter()
+                .find(|(key, _)| key == "index")
+                .unwrap()
+                .1
+                .parse()
+                .unwrap();
+            let mut file = raw_files_fixture();
+            file["id"] = json!(1000 + index);
+            Ok(
+                json!({"data":[file],"pagination":{"index":index,"pageSize":50,"resultCount":1,"totalCount": if call == 0 { 3 } else { 2 }}}),
+            )
+        }
+    });
+    let (_temp, cache) = cache().await;
+    let service = ResourceService::new(
+        cache.clone(),
+        vec![Arc::new(Available(Arc::new(
+            CurseForgeProvider::for_tests(transport.clone()),
+        )))],
+    )
+    .unwrap();
+    let page = crate::api::curseforge::get_files_with_service(
+        455508,
+        files_request(),
+        &service,
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(page.files.len(), 2);
+    assert_eq!(page.pagination.total_count, 2);
+    assert_eq!(calls.load(Ordering::Acquire), 4);
     cache.close().await;
 }

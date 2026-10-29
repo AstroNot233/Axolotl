@@ -12,6 +12,23 @@ pub(crate) async fn curseforge_files_page(
     service: &std::sync::Arc<ResourceService>,
     cancel: &CancellationToken,
 ) -> crate::Result<crate::api::curseforge::CurseForgeFilesResponse> {
+    curseforge_files_page_with_policy(
+        project_id,
+        request,
+        service,
+        cancel,
+        CachePolicy::UseFresh,
+    )
+    .await
+}
+
+pub(crate) async fn curseforge_files_page_with_policy(
+    project_id: u32,
+    request: crate::api::curseforge::CurseForgeFilesRequest,
+    service: &std::sync::Arc<ResourceService>,
+    cancel: &CancellationToken,
+    policy: CachePolicy,
+) -> crate::Result<crate::api::curseforge::CurseForgeFilesResponse> {
     let outcome = service
         .query(
             &SourceId::curseforge(),
@@ -23,7 +40,7 @@ pub(crate) async fn curseforge_files_page(
                 index: request.index,
                 page_size: request.page_size.clamp(1, 50),
             },
-            CachePolicy::UseFresh,
+            policy,
             cancel,
         )
         .await

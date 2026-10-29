@@ -64,6 +64,31 @@ pub async fn recover_interrupted_jobs(state: &State) -> crate::Result<()> {
         if job.state.display.is_none() {
             job.state.display = display_from_request(&job.state);
         }
+        if job.status != InstallJobStatus::Canceling
+            && job.state.retry_from_checkpoint
+            && job.state.is_new_pack_checkpoint()
+        {
+            let phase = job.state.progress.phase;
+            job.state.error = Some(InstallErrorView::from_message(
+                "app_closed",
+                phase,
+                "Installation was interrupted. Retry to continue with the downloaded files.",
+            ));
+            job.state.record_event(InstallJobEventKind::Interrupted {
+                reason: InstallInterruptReason::AppClosed,
+                phase,
+            });
+            job.state.progress.parallel = None;
+            let record = store::update_status(
+                job.id,
+                InstallJobStatus::Failed,
+                &job.state,
+                state,
+            )
+            .await?;
+            emit_install_job(&record.snapshot()).await?;
+            continue;
+        }
         let interrupted_phase = job.state.progress.phase;
         job.state.record_event(InstallJobEventKind::Interrupted {
             reason: InstallInterruptReason::AppClosed,
