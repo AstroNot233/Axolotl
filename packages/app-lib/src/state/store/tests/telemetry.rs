@@ -3,7 +3,6 @@
 
 use super::support;
 use crate::state::store::Collection as _;
-use crate::state::store::Handle;
 use crate::state::store::telemetry_identity::{
     Installation, TelemetryIdentity, TelemetryIdentityRecord,
 };
@@ -11,10 +10,6 @@ use crate::state::store::telemetry_outbox::{
     TelemetryEventType, TelemetryOutbox, TelemetryOutboxRecord,
     TelemetryOutboxScope,
 };
-
-fn handle_of(pool: &sqlx::SqlitePool) -> Handle {
-    Handle::new(pool.clone())
-}
 
 fn identity(day: Option<&str>) -> TelemetryIdentityRecord {
     TelemetryIdentityRecord {
@@ -108,7 +103,7 @@ async fn the_installation_holds_one_identity() {
 
 #[tokio::test]
 async fn an_event_round_trips_and_clears() {
-    let handle = support::handle().await;
+    let (_directory, handle) = support::derived().await;
     let stored = event(10);
 
     TelemetryOutbox::set(&handle, &key("event"), Some(&stored))
@@ -130,7 +125,7 @@ async fn an_event_round_trips_and_clears() {
 
 #[tokio::test]
 async fn a_dedupe_key_holds_one_event() {
-    let handle = support::handle().await;
+    let (_directory, handle) = support::derived().await;
     let mut first = event(10);
     first.dedupe_key = "heartbeat:2026-08-17".to_string();
     let mut second = event(20);
@@ -151,7 +146,7 @@ async fn a_dedupe_key_holds_one_event() {
 
 #[tokio::test]
 async fn the_due_scope_reaches_only_the_events_that_may_be_sent() {
-    let handle = support::handle().await;
+    let (_directory, handle) = support::derived().await;
     let due = event(10);
     let mut later = event(20);
     later.next_attempt_at = 100;
@@ -178,7 +173,7 @@ async fn the_due_scope_reaches_only_the_events_that_may_be_sent() {
 
 #[tokio::test]
 async fn writing_no_error_events_clears_only_the_queued_ones() {
-    let handle = support::handle().await;
+    let (_directory, handle) = support::derived().await;
     let heartbeat = event(10);
     let mut error = event(20);
     error.event_type = TelemetryEventType::Error;
@@ -206,7 +201,7 @@ async fn writing_no_error_events_clears_only_the_queued_ones() {
 
 #[tokio::test]
 async fn writing_no_events_clears_the_outbox() {
-    let handle = support::handle().await;
+    let (_directory, handle) = support::derived().await;
     TelemetryOutbox::set(&handle, &key("event"), Some(&event(10)))
         .await
         .unwrap();
@@ -218,7 +213,7 @@ async fn writing_no_events_clears_the_outbox() {
 
 #[tokio::test]
 async fn an_event_outside_the_scope_is_refused() {
-    let handle = support::handle().await;
+    let (_directory, handle) = support::derived().await;
     let mut error = event(10);
     error.event_type = TelemetryEventType::Error;
     let mut later = event(20);
@@ -247,8 +242,8 @@ async fn an_event_outside_the_scope_is_refused() {
 
 #[tokio::test]
 async fn an_event_kind_the_table_does_not_trust_is_no_event() {
-    let pool = support::pool().await;
-    let handle = handle_of(&pool);
+    let (directory, handle) = support::derived().await;
+    let pool = support::derived_pool(directory.path()).await;
     sqlx::raw_sql(
         "PRAGMA ignore_check_constraints = ON;
          INSERT INTO telemetry_outbox (
@@ -273,8 +268,8 @@ async fn an_event_kind_the_table_does_not_trust_is_no_event() {
 
 #[tokio::test]
 async fn a_row_another_part_of_the_queue_owns_is_refused() {
-    let pool = support::pool().await;
-    let handle = handle_of(&pool);
+    let (directory, handle) = support::derived().await;
+    let pool = support::derived_pool(directory.path()).await;
     // An error event under one id, and one this build cannot read under another.
     sqlx::raw_sql(
         "PRAGMA ignore_check_constraints = ON;
@@ -330,7 +325,7 @@ async fn a_row_another_part_of_the_queue_owns_is_refused() {
 
 #[tokio::test]
 async fn a_due_replacement_keeps_the_events_that_are_not_due_yet() {
-    let handle = support::handle().await;
+    let (_directory, handle) = support::derived().await;
     TelemetryOutbox::set(&handle, &key("due"), Some(&event(10)))
         .await
         .unwrap();

@@ -18,7 +18,7 @@ use crate::state::store::telemetry_outbox::{
     TelemetryEventType, TelemetryOutbox, TelemetryOutboxRecord,
     TelemetryOutboxScope,
 };
-use crate::state::store::{Atom, atom};
+use crate::state::store::{Handle, atom};
 
 const ENDPOINT: &str = "https://telemetry.axlmc.org/v1/batch";
 const MAX_OUTBOX_EVENTS: i64 = 100;
@@ -67,7 +67,10 @@ pub(crate) fn start(state: Arc<State>) {
 
 pub async fn set_enabled(state: &State, enabled: bool) -> crate::Result<()> {
     let _database_permit = state.acquire_install_db_permit().await?;
-    TelemetryOutbox::set_all(&state.data, &[]).await?;
+    state
+        .derived
+        .write(async |handle| TelemetryOutbox::set_all(handle, &[]).await)
+        .await?;
 
     if enabled {
         ensure_identity(state).await?;
@@ -87,7 +90,10 @@ async fn run_cycle(
 ) -> crate::Result<()> {
     if !is_enabled(state).await? {
         let _database_permit = state.acquire_install_db_permit().await?;
-        TelemetryOutbox::set_all(&state.data, &[]).await?;
+        state
+            .derived
+            .write(async |handle| TelemetryOutbox::set_all(handle, &[]).await)
+            .await?;
         return Ok(());
     }
 
@@ -95,12 +101,17 @@ async fn run_cycle(
         let _database_permit = state.acquire_install_db_permit().await?;
         ensure_identity(state).await?;
         // Older clients queued error events this build never sends.
-        TelemetryOutbox::set_scoped(
-            &state.data,
-            &TelemetryOutboxScope::Kind(TelemetryEventType::Error),
-            &[],
-        )
-        .await?;
+        state
+            .derived
+            .write(async |handle| {
+                TelemetryOutbox::set_scoped(
+                    handle,
+                    &TelemetryOutboxScope::Kind(TelemetryEventType::Error),
+                    &[],
+                )
+                .await
+            })
+            .await?;
         enqueue_heartbeat(state).await?;
         cleanup_outbox(state).await?;
     }
@@ -155,13 +166,13 @@ async fn enqueue_heartbeat(state: &State) -> crate::Result<()> {
     let event_id = Uuid::new_v4().to_string();
     let occurred_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let payload = heartbeat_payload(&event_id, &occurred_at, &day);
-    insert_outbox_event(
-        &mut unit,
-        &event_id,
-        &format!("heartbeat:{day}"),
-        &payload,
-    )
-    .await?;
+    let dedupe_key = format!("heartbeat:{day}");
+    state
+        .derived
+        .write(async |handle| {
+            insert_outbox_event(handle, &event_id, &dedupe_key, &payload).await
+        })
+        .await?;
     let identity = TelemetryIdentityRecord {
         last_heartbeat_day: Some(day),
         ..identity
@@ -182,7 +193,7 @@ fn heartbeat_payload(event_id: &str, occurred_at: &str, day: &str) -> Value {
 }
 
 async fn insert_outbox_event(
-    unit: &mut Atom,
+    handle: &Handle,
     event_id: &str,
     dedupe_key: &str,
     payload: &Value,
@@ -200,40 +211,23 @@ async fn insert_outbox_event(
         dedupe_key: dedupe_key.to_string(),
         occurrence_count: 1,
     };
-    TelemetryOutbox::atom_set(unit, &event_id.to_string(), Some(&record)).await
+    TelemetryOutbox::set(handle, &event_id.to_string(), Some(&record)).await
 }
 
-/// Trimming the queue keeps the newest events up to a count and a byte budget,
-/// which no record-by-record replacement can say: that part stays in SQL.
 async fn cleanup_outbox(state: &State) -> crate::Result<()> {
     let oldest = Utc::now().timestamp() - MAX_EVENT_AGE_SECONDS;
-    sqlx::query("DELETE FROM telemetry_outbox WHERE created_at < ?")
-        .bind(oldest)
-        .execute(&state.pool)
-        .await?;
-    sqlx::query(
-        "DELETE FROM telemetry_outbox WHERE event_id IN (SELECT event_id FROM telemetry_outbox ORDER BY created_at DESC LIMIT -1 OFFSET ?)",
-    )
-    .bind(MAX_OUTBOX_EVENTS)
-    .execute(&state.pool)
-    .await?;
-    sqlx::query(
-        r#"
-        DELETE FROM telemetry_outbox
-        WHERE event_id IN (
-            SELECT event_id FROM (
-                SELECT event_id,
-                    SUM(size_bytes) OVER (ORDER BY created_at DESC, event_id DESC) AS running_bytes
-                FROM telemetry_outbox
+    state
+        .derived
+        .write(async |handle| {
+            TelemetryOutbox::trim(
+                handle,
+                oldest,
+                MAX_OUTBOX_EVENTS,
+                MAX_OUTBOX_BYTES,
             )
-            WHERE running_bytes > ?
-        )
-        "#,
-    )
-    .bind(MAX_OUTBOX_BYTES)
-    .execute(&state.pool)
-    .await?;
-    Ok(())
+            .await
+        })
+        .await
 }
 
 async fn upload_next_batch(
@@ -244,7 +238,10 @@ async fn upload_next_batch(
         kind: TelemetryEventType::Heartbeat,
         at: Utc::now().timestamp(),
     };
-    let queued = TelemetryOutbox::get_scoped(&state.data, &scope).await?;
+    let queued = state
+        .derived
+        .read(async |handle| TelemetryOutbox::get_scoped(handle, &scope).await)
+        .await?;
     if queued.is_empty() {
         return Ok(());
     }
@@ -304,12 +301,16 @@ async fn delete_events(
     event_ids: &[String],
 ) -> crate::Result<()> {
     let _database_permit = state.acquire_install_db_permit().await?;
-    let mut unit = atom(&state.data).await?;
-    for event_id in event_ids {
-        TelemetryOutbox::atom_set(&mut unit, event_id, None).await?;
-    }
-    unit.commit().await?;
-    Ok(())
+    state
+        .derived
+        .write(async |handle| {
+            let mut unit = atom(handle).await?;
+            for event_id in event_ids {
+                TelemetryOutbox::atom_set(&mut unit, event_id, None).await?;
+            }
+            unit.commit().await
+        })
+        .await
 }
 
 async fn schedule_retry(
@@ -318,29 +319,34 @@ async fn schedule_retry(
 ) -> crate::Result<()> {
     let _database_permit = state.acquire_install_db_permit().await?;
     let now = Utc::now().timestamp();
-    let mut unit = atom(&state.data).await?;
-    for event_id in event_ids {
-        let Some(stored) =
-            TelemetryOutbox::atom_get(&mut unit, event_id).await?
-        else {
-            continue;
-        };
-        let attempts = stored.attempts + 1;
-        let delay = match attempts {
-            1 => 60,
-            2 => 5 * 60,
-            3 => 30 * 60,
-            _ => 6 * 60 * 60,
-        };
-        let record = TelemetryOutboxRecord {
-            next_attempt_at: now + delay,
-            attempts,
-            ..stored
-        };
-        TelemetryOutbox::atom_set(&mut unit, event_id, Some(&record)).await?;
-    }
-    unit.commit().await?;
-    Ok(())
+    state
+        .derived
+        .write(async |handle| {
+            let mut unit = atom(handle).await?;
+            for event_id in event_ids {
+                let Some(stored) =
+                    TelemetryOutbox::atom_get(&mut unit, event_id).await?
+                else {
+                    continue;
+                };
+                let attempts = stored.attempts + 1;
+                let delay = match attempts {
+                    1 => 60,
+                    2 => 5 * 60,
+                    3 => 30 * 60,
+                    _ => 6 * 60 * 60,
+                };
+                let record = TelemetryOutboxRecord {
+                    next_attempt_at: now + delay,
+                    attempts,
+                    ..stored
+                };
+                TelemetryOutbox::atom_set(&mut unit, event_id, Some(&record))
+                    .await?;
+            }
+            unit.commit().await
+        })
+        .await
 }
 
 fn stable_batch_id(event_ids: &[String]) -> String {

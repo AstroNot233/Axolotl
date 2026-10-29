@@ -90,12 +90,44 @@ impl DerivedDb {
     pub(crate) fn handle(&self) -> Option<Handle> {
         self.pool.as_ref().map(|pool| Handle::new(pool.clone()))
     }
+
+    /// Reads through this database, and answers what an empty one would answer
+    /// while it is disabled.
+    pub(crate) async fn read<T, F>(&self, read: F) -> crate::Result<T>
+    where
+        T: Default,
+        F: AsyncFnOnce(&Handle) -> crate::Result<T>,
+    {
+        let Some(handle) = self.handle() else {
+            return Ok(T::default());
+        };
+        read(&handle).await
+    }
+
+    /// Writes through this database, or drops the write while it is disabled:
+    /// no caller can be failed by a record that cannot be kept.
+    pub(crate) async fn write<F>(&self, write: F) -> crate::Result<()>
+    where
+        F: AsyncFnOnce(&Handle) -> crate::Result<()>,
+    {
+        let Some(handle) = self.handle() else {
+            tracing::warn!(
+                database = %self.path.display(),
+                "Derived database disabled; the write is dropped"
+            );
+            return Ok(());
+        };
+        write(&handle).await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{DerivedDb, FILE_NAME};
     use crate::state::store::Collection as _;
+    use crate::state::store::translation_cache::{
+        TranslationCache, TranslationCacheRecord,
+    };
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use std::path::Path;
 
@@ -159,6 +191,38 @@ mod tests {
 
         assert!(db.handle().is_none(), "garbage bytes must disable it");
         assert!(path.exists(), "a disabled database must be kept as it is");
+    }
+
+    #[tokio::test]
+    async fn a_disabled_database_reads_as_empty_and_drops_writes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(FILE_NAME);
+        tokio::fs::write(&path, b"not a database").await.unwrap();
+        let db = DerivedDb::open(path).await;
+        let key = "key".to_string();
+        let record = TranslationCacheRecord {
+            translation: "text".to_string(),
+            created_at: 1,
+        };
+
+        let one: Option<TranslationCacheRecord> = db
+            .read(async |handle| TranslationCache::get(handle, &key).await)
+            .await
+            .unwrap();
+        assert_eq!(one, None, "a disabled database holds no record");
+
+        let all: Vec<(String, TranslationCacheRecord)> = db
+            .read(async |handle| TranslationCache::get_all(handle).await)
+            .await
+            .unwrap();
+        assert!(all.is_empty(), "a disabled database holds no collection");
+
+        let written = db
+            .write(async |handle| {
+                TranslationCache::set(handle, &key, Some(&record)).await
+            })
+            .await;
+        assert!(written.is_ok(), "a dropped write is not an error");
     }
 
     #[tokio::test]
