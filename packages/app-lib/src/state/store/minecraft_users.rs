@@ -1,13 +1,36 @@
 //! The Minecraft accounts the launcher keeps, one row per identity.
+//!
+//! The tokens of an account are kept in the system credential store, and the
+//! row's `secrets_externalized` says which of its token columns the store holds;
+//! a token the store would not take stays in its column.
 
 use sqlx::Row;
 use sqlx::SqliteConnection;
 use sqlx::sqlite::SqliteRow;
 
 use super::Collection;
+use super::secrets::{self, Stored};
 
 /// The accounts, one per identity.
 pub(crate) struct MinecraftUsers;
+
+/// The bits of `secrets_externalized` that say which token the store holds, in
+/// the order the token columns are declared.
+const ACCESS_TOKEN_KEPT: i64 = 1;
+const REFRESH_TOKEN_KEPT: i64 = 1 << 1;
+const CLIENT_TOKEN_KEPT: i64 = 1 << 2;
+
+/// The token columns of a row, each with the bit of its mark.
+const TOKENS: [(i64, &str); 3] = [
+    (ACCESS_TOKEN_KEPT, "access_token"),
+    (REFRESH_TOKEN_KEPT, "refresh_token"),
+    (CLIENT_TOKEN_KEPT, "yggdrasil_client_token"),
+];
+
+/// Where one account's token is stored.
+fn token_key(account_id: &str, column: &str) -> String {
+    secrets::key(&["minecraft-user", account_id, column])
+}
 
 /// How an account signs in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +93,8 @@ impl Collection for MinecraftUsers {
             SELECT
                 account_id, uuid, active, username, account_type, access_token,
                 refresh_token, expires, yggdrasil_api_root,
-                yggdrasil_server_name, yggdrasil_login, yggdrasil_client_token
+                yggdrasil_server_name, yggdrasil_login, yggdrasil_client_token,
+                secrets_externalized
             FROM minecraft_users
             WHERE account_id = ?
             ",
@@ -79,7 +103,10 @@ impl Collection for MinecraftUsers {
         .fetch_optional(&mut *conn)
         .await?;
 
-        let user = row.map(to_record).transpose()?.flatten();
+        let user = match row {
+            Some(row) => to_record(row).await?,
+            None => None,
+        };
 
         Ok(user.map(|(_, record)| record))
     }
@@ -94,6 +121,7 @@ impl Collection for MinecraftUsers {
                 .bind(key)
                 .execute(&mut *conn)
                 .await?;
+            forget_tokens(key).await;
 
             return Ok(());
         };
@@ -109,16 +137,22 @@ impl Collection for MinecraftUsers {
             SELECT
                 account_id, uuid, active, username, account_type, access_token,
                 refresh_token, expires, yggdrasil_api_root,
-                yggdrasil_server_name, yggdrasil_login, yggdrasil_client_token
+                yggdrasil_server_name, yggdrasil_login, yggdrasil_client_token,
+                secrets_externalized
             FROM minecraft_users
             ",
         )
         .fetch_all(&mut *conn)
         .await?;
 
-        rows.into_iter()
-            .filter_map(|row| to_record(row).transpose())
-            .collect::<crate::Result<Vec<_>>>()
+        let mut users = Vec::with_capacity(rows.len());
+        for row in rows {
+            if let Some(user) = to_record(row).await? {
+                users.push(user);
+            }
+        }
+
+        Ok(users)
     }
 
     async fn replace_all(
@@ -195,14 +229,37 @@ async fn write_row(
         clear_other_active(conn, account_id).await?;
     }
 
+    // The store is written first, so a row only says a token was moved once the
+    // token is there. A token the store would not take is written to its column
+    // instead, and the row then reads exactly as it did before the move.
+    let marks = keep_tokens(
+        account_id,
+        [
+            record.access_token.as_str(),
+            record.refresh_token.as_str(),
+            record.yggdrasil_client_token.as_str(),
+        ],
+    )
+    .await;
+    let moved = marks.is_some();
+    let (access_token, refresh_token, client_token) = if moved {
+        ("", "", "")
+    } else {
+        (
+            record.access_token.as_str(),
+            record.refresh_token.as_str(),
+            record.yggdrasil_client_token.as_str(),
+        )
+    };
+
     sqlx::query(
         "
         INSERT INTO minecraft_users (
             account_id, uuid, active, username, account_type, access_token,
             refresh_token, expires, yggdrasil_api_root, yggdrasil_server_name,
-            yggdrasil_login, yggdrasil_client_token
+            yggdrasil_login, yggdrasil_client_token, secrets_externalized
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (account_id) DO UPDATE SET
             uuid = excluded.uuid,
             active = excluded.active,
@@ -214,7 +271,8 @@ async fn write_row(
             yggdrasil_api_root = excluded.yggdrasil_api_root,
             yggdrasil_server_name = excluded.yggdrasil_server_name,
             yggdrasil_login = excluded.yggdrasil_login,
-            yggdrasil_client_token = excluded.yggdrasil_client_token
+            yggdrasil_client_token = excluded.yggdrasil_client_token,
+            secrets_externalized = excluded.secrets_externalized
         ",
     )
     .bind(account_id)
@@ -222,17 +280,70 @@ async fn write_row(
     .bind(record.active)
     .bind(&record.username)
     .bind(record.account_type.as_str())
-    .bind(&record.access_token)
-    .bind(&record.refresh_token)
+    .bind(access_token)
+    .bind(refresh_token)
     .bind(record.expires)
     .bind(&record.yggdrasil_api_root)
     .bind(&record.yggdrasil_server_name)
     .bind(&record.yggdrasil_login)
-    .bind(&record.yggdrasil_client_token)
+    .bind(client_token)
+    .bind(marks.unwrap_or_default())
     .execute(&mut *conn)
     .await?;
 
     Ok(())
+}
+
+/// Puts the tokens of one account in the store and says which of them it holds.
+///
+/// Nothing means at least one token is only in the row, which the caller writes
+/// as an ordinary row: a store that takes two of three tokens has still lost
+/// none of them, and the next write tries the rest again.
+async fn keep_tokens(account_id: &str, tokens: [&str; 3]) -> Option<i64> {
+    let mut marks = 0;
+
+    for ((bit, column), token) in TOKENS.into_iter().zip(tokens) {
+        if token.is_empty() {
+            // An account without a token has nothing to hide, and the column
+            // already says so.
+            continue;
+        }
+        if !secrets::keep(token_key(account_id, column), token).await {
+            return None;
+        }
+        marks |= bit;
+    }
+
+    Some(marks)
+}
+
+/// Drops the tokens an account no longer has, so that removing it does not leave
+/// them in the store.
+async fn forget_tokens(account_id: &str) {
+    for (_, column) in TOKENS {
+        secrets::forget(token_key(account_id, column)).await;
+    }
+}
+
+/// The account's tokens, each taken from the store when the row's mark says the
+/// store holds it.
+async fn tokens(
+    account_id: &str,
+    marks: i64,
+    row: &SqliteRow,
+) -> crate::Result<[String; 3]> {
+    let mut values = [String::new(), String::new(), String::new()];
+
+    for (index, (bit, column)) in TOKENS.into_iter().enumerate() {
+        values[index] = secrets::resolve(
+            token_key(account_id, column),
+            marks & bit != 0,
+            row.try_get(column)?,
+        )
+        .await;
+    }
+
+    Ok(values)
 }
 
 /// Removes the accounts the replacement leaves out, and only those.
@@ -264,12 +375,13 @@ async fn delete_omitted(
             .bind(&account_id)
             .execute(&mut *conn)
             .await?;
+        forget_tokens(&account_id).await;
     }
 
     Ok(())
 }
 
-fn to_record(
+async fn to_record(
     row: SqliteRow,
 ) -> crate::Result<Option<(String, MinecraftUserRecord)>> {
     let account_type: String = row.try_get("account_type")?;
@@ -277,20 +389,25 @@ fn to_record(
         return Ok(None);
     };
 
+    let account_id: String = row.try_get("account_id")?;
+    let marks: i64 = row.try_get("secrets_externalized")?;
+    let [access_token, refresh_token, yggdrasil_client_token] =
+        tokens(&account_id, marks, &row).await?;
+
     Ok(Some((
-        row.try_get("account_id")?,
+        account_id,
         MinecraftUserRecord {
             uuid: row.try_get("uuid")?,
             active: row.try_get("active")?,
             username: row.try_get("username")?,
             account_type,
-            access_token: row.try_get("access_token")?,
-            refresh_token: row.try_get("refresh_token")?,
+            access_token,
+            refresh_token,
             expires: row.try_get("expires")?,
             yggdrasil_api_root: row.try_get("yggdrasil_api_root")?,
             yggdrasil_server_name: row.try_get("yggdrasil_server_name")?,
             yggdrasil_login: row.try_get("yggdrasil_login")?,
-            yggdrasil_client_token: row.try_get("yggdrasil_client_token")?,
+            yggdrasil_client_token,
         },
     )))
 }
@@ -315,13 +432,114 @@ pub(crate) async fn token_pairs(
     handle: &super::Handle,
 ) -> crate::Result<Vec<(String, String)>> {
     let mut connection = handle.connection().await?;
-    let rows = sqlx::query_as(
-        "SELECT access_token, refresh_token
+    let rows = sqlx::query(
+        "SELECT account_id, access_token, refresh_token, secrets_externalized
          FROM minecraft_users
          WHERE account_type <> 'offline'",
     )
     .fetch_all(&mut *connection)
     .await?;
 
-    Ok(rows)
+    let mut pairs = Vec::with_capacity(rows.len());
+    for row in rows {
+        let account_id: String = row.try_get("account_id")?;
+        let marks: i64 = row.try_get("secrets_externalized")?;
+        let [access_token, refresh_token, _] =
+            tokens(&account_id, marks, &row).await?;
+        pairs.push((access_token, refresh_token));
+    }
+
+    Ok(pairs)
+}
+
+/// Moves the tokens these rows still carry into the credential store, and clears
+/// the columns whose token is there.
+///
+/// Runs once at startup, and again after any run that could not move a row. A row
+/// whose tokens are all in the store has nothing left in its columns, so a second
+/// pass has nothing to do.
+pub(crate) async fn externalize(
+    conn: &mut SqliteConnection,
+) -> crate::Result<()> {
+    let pending: Vec<(String, String, String, String)> = sqlx::query_as(
+        "
+        SELECT account_id, access_token, refresh_token, yggdrasil_client_token
+        FROM minecraft_users
+        WHERE secrets_externalized = 0
+          AND (access_token <> '' OR refresh_token <> ''
+               OR yggdrasil_client_token <> '')
+        ",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+
+    for (account_id, access_token, refresh_token, client_token) in pending {
+        let marks = keep_tokens(
+            &account_id,
+            [&access_token, &refresh_token, &client_token],
+        )
+        .await;
+
+        let Some(marks) = marks else {
+            if secrets::unavailable() {
+                return Ok(());
+            }
+            continue;
+        };
+
+        sqlx::query(
+            "
+            UPDATE minecraft_users
+            SET access_token = '', refresh_token = '',
+                yggdrasil_client_token = '', secrets_externalized = ?
+            WHERE account_id = ?
+            ",
+        )
+        .bind(marks)
+        .bind(&account_id)
+        .execute(&mut *conn)
+        .await?;
+    }
+
+    reconcile(conn).await
+}
+
+/// A row that says its token was moved but whose entry is gone holds no token at
+/// all: its mark is cleared, so the account reads as one that needs a new
+/// sign-in instead of failing, and the next write moves it again.
+async fn reconcile(conn: &mut SqliteConnection) -> crate::Result<()> {
+    let marked: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT account_id, secrets_externalized
+         FROM minecraft_users
+         WHERE secrets_externalized <> 0",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+
+    for (account_id, marks) in marked {
+        let mut kept = 0;
+        for (bit, column) in TOKENS {
+            if marks & bit == 0 {
+                continue;
+            }
+            match secrets::take(token_key(&account_id, column)).await {
+                Stored::Value(_) => kept |= bit,
+                Stored::Missing => {}
+                Stored::Unavailable => return Ok(()),
+            }
+        }
+
+        if kept != marks {
+            sqlx::query(
+                "UPDATE minecraft_users SET secrets_externalized = ?
+                 WHERE account_id = ?",
+            )
+            .bind(kept)
+            .bind(&account_id)
+            .execute(&mut *conn)
+            .await?;
+        }
+    }
+
+    Ok(())
 }

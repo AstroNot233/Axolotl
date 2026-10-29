@@ -1,11 +1,24 @@
 //! The Modrinth account the launcher is signed in with.
+//!
+//! The session id is kept in the system credential store, and the row's
+//! `secrets_externalized` says whether the store holds it; a session the store
+//! would not take stays in its column.
 
 use sqlx::SqliteConnection;
 
 use super::Collection;
+use super::secrets::{self, Stored};
 
 /// The Modrinth sessions, one per account.
 pub(crate) struct ModrinthUsers;
+
+/// The bit of `secrets_externalized` that says the store holds the session id.
+const SESSION_ID_KEPT: i64 = 1;
+
+/// Where one session's id is stored.
+fn session_key(id: &str) -> String {
+    secrets::key(&["modrinth-user", id, "session_id"])
+}
 
 /// A session is identified by the account it belongs to.
 pub(crate) type ModrinthUserKey = String;
@@ -36,8 +49,8 @@ impl Collection for ModrinthUsers {
         conn: &mut SqliteConnection,
         key: &Self::Key,
     ) -> crate::Result<Option<Self::Record>> {
-        let row: Option<(bool, String, i64)> = sqlx::query_as(
-            "SELECT active, session_id, expires
+        let row: Option<(bool, String, i64, i64)> = sqlx::query_as(
+            "SELECT active, session_id, expires, secrets_externalized
              FROM modrinth_users
              WHERE id = ?",
         )
@@ -45,9 +58,18 @@ impl Collection for ModrinthUsers {
         .fetch_optional(&mut *conn)
         .await?;
 
-        Ok(row.map(|(active, session_id, expires)| Self::Record {
+        let Some((active, session_id, expires, marks)) = row else {
+            return Ok(None);
+        };
+
+        Ok(Some(Self::Record {
             active,
-            session_id,
+            session_id: secrets::resolve(
+                session_key(key),
+                marks & SESSION_ID_KEPT != 0,
+                session_id,
+            )
+            .await,
             expires,
         }))
     }
@@ -62,6 +84,7 @@ impl Collection for ModrinthUsers {
                 .bind(key)
                 .execute(&mut *conn)
                 .await?;
+            secrets::forget(session_key(key)).await;
 
             return Ok(());
         };
@@ -72,25 +95,31 @@ impl Collection for ModrinthUsers {
     async fn read_all(
         conn: &mut SqliteConnection,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let rows: Vec<(String, bool, String, i64)> = sqlx::query_as(
-            "SELECT id, active, session_id, expires FROM modrinth_users",
+        let rows: Vec<(String, bool, String, i64, i64)> = sqlx::query_as(
+            "SELECT id, active, session_id, expires, secrets_externalized
+             FROM modrinth_users",
         )
         .fetch_all(&mut *conn)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(id, active, session_id, expires)| {
-                (
-                    id,
-                    Self::Record {
-                        active,
+        let mut sessions = Vec::with_capacity(rows.len());
+        for (id, active, session_id, expires, marks) in rows {
+            sessions.push((
+                id.clone(),
+                Self::Record {
+                    active,
+                    session_id: secrets::resolve(
+                        session_key(&id),
+                        marks & SESSION_ID_KEPT != 0,
                         session_id,
-                        expires,
-                    },
-                )
-            })
-            .collect())
+                    )
+                    .await,
+                    expires,
+                },
+            ));
+        }
+
+        Ok(sessions)
     }
 
     async fn replace_all(
@@ -109,8 +138,8 @@ impl Collection for ModrinthUsers {
         conn: &mut SqliteConnection,
         scope: &Self::Scope,
     ) -> crate::Result<Vec<(Self::Key, Self::Record)>> {
-        let rows: Vec<(String, bool, String, i64)> = sqlx::query_as(
-            "SELECT id, active, session_id, expires
+        let rows: Vec<(String, bool, String, i64, i64)> = sqlx::query_as(
+            "SELECT id, active, session_id, expires, secrets_externalized
              FROM modrinth_users
              WHERE active = ?",
         )
@@ -118,19 +147,24 @@ impl Collection for ModrinthUsers {
         .fetch_all(&mut *conn)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(id, active, session_id, expires)| {
-                (
-                    id,
-                    Self::Record {
-                        active,
+        let mut sessions = Vec::with_capacity(rows.len());
+        for (id, active, session_id, expires, marks) in rows {
+            sessions.push((
+                id.clone(),
+                Self::Record {
+                    active,
+                    session_id: secrets::resolve(
+                        session_key(&id),
+                        marks & SESSION_ID_KEPT != 0,
                         session_id,
-                        expires,
-                    },
-                )
-            })
-            .collect())
+                    )
+                    .await,
+                    expires,
+                },
+            ));
+        }
+
+        Ok(sessions)
     }
 
     async fn replace_scoped(
@@ -230,20 +264,38 @@ async fn write_row(
         clear_other_active(conn, key).await?;
     }
 
+    // The store is written first, so a row only says the session was moved once
+    // the session is there. A session the store would not take is written to the
+    // column instead, and reads back the way it did before the move.
+    let stored = !record.session_id.is_empty()
+        && secrets::keep(session_key(key), &record.session_id).await;
+    let (session_id, marks) = if stored {
+        ("", SESSION_ID_KEPT)
+    } else {
+        (record.session_id.as_str(), 0)
+    };
+    if record.session_id.is_empty() {
+        secrets::forget(session_key(key)).await;
+    }
+
     sqlx::query(
         "
-        INSERT INTO modrinth_users (id, active, session_id, expires)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO modrinth_users (
+            id, active, session_id, expires, secrets_externalized
+        )
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT (id) DO UPDATE SET
             active = excluded.active,
             session_id = excluded.session_id,
-            expires = excluded.expires
+            expires = excluded.expires,
+            secrets_externalized = excluded.secrets_externalized
         ",
     )
     .bind(key)
     .bind(record.active)
-    .bind(&record.session_id)
+    .bind(session_id)
     .bind(record.expires)
+    .bind(marks)
     .execute(&mut *conn)
     .await?;
 
@@ -278,6 +330,75 @@ async fn delete_omitted(
             .bind(&id)
             .execute(&mut *conn)
             .await?;
+        secrets::forget(session_key(&id)).await;
+    }
+
+    Ok(())
+}
+
+/// Moves the session ids these rows still carry into the credential store, and
+/// clears the column whose id is there.
+///
+/// Runs once at startup, and again after any run that could not move a row. A row
+/// whose session is in the store has nothing left in its column, so a second pass
+/// has nothing to do.
+pub(crate) async fn externalize(
+    conn: &mut SqliteConnection,
+) -> crate::Result<()> {
+    let pending: Vec<(String, String)> = sqlx::query_as(
+        "SELECT id, session_id
+         FROM modrinth_users
+         WHERE secrets_externalized = 0 AND session_id <> ''",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+
+    for (id, session_id) in pending {
+        if !secrets::keep(session_key(&id), &session_id).await {
+            if secrets::unavailable() {
+                return Ok(());
+            }
+            continue;
+        }
+
+        sqlx::query(
+            "UPDATE modrinth_users
+             SET session_id = '', secrets_externalized = ?
+             WHERE id = ?",
+        )
+        .bind(SESSION_ID_KEPT)
+        .bind(&id)
+        .execute(&mut *conn)
+        .await?;
+    }
+
+    reconcile(conn).await
+}
+
+/// A row that says its session was moved but whose entry is gone holds no session
+/// at all: its mark is cleared, so it reads as a signed-out account instead of
+/// failing, and the next write moves the session again.
+async fn reconcile(conn: &mut SqliteConnection) -> crate::Result<()> {
+    let marked: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM modrinth_users WHERE secrets_externalized <> 0",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+
+    for id in marked {
+        match secrets::take(session_key(&id)).await {
+            Stored::Value(_) => {}
+            Stored::Missing => {
+                sqlx::query(
+                    "UPDATE modrinth_users SET secrets_externalized = 0
+                     WHERE id = ?",
+                )
+                .bind(&id)
+                .execute(&mut *conn)
+                .await?;
+            }
+            Stored::Unavailable => return Ok(()),
+        }
     }
 
     Ok(())

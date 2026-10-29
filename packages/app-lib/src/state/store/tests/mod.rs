@@ -27,6 +27,7 @@ mod resource_cache;
 mod resource_favorites;
 mod resource_plans;
 mod resource_source_projects;
+mod secrets;
 mod settings;
 mod settings_api;
 mod settings_db;

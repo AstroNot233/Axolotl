@@ -1258,6 +1258,13 @@ impl State {
         let legacy =
             legacy_converter::migrate_legacy_data(&data, &pool).await?;
 
+        if let Err(error) = store::secrets::externalize(&data).await {
+            tracing::warn!(
+                %error,
+                "Failed to move the account secrets into the system credential store"
+            );
+        }
+
         tracing::info!("Fetching app settings");
         let mut settings = Settings::get(&data).await?;
         installer_settings::apply_pending_installer_directory(
