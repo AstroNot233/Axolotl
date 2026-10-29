@@ -1,33 +1,17 @@
-import assert from 'node:assert/strict'
-import test from 'node:test'
+import { expect, it } from 'vitest'
 
 import { createNetworkStatus } from './useNetworkStatus.ts'
 
-test('network probe failures recover when a later probe succeeds', () => {
-    const status = createNetworkStatus()
-
-    status.setNetworkReachable(false)
-    assert.equal(status.offline.value, true)
-
-    status.setNetworkReachable(true)
-    assert.equal(status.offline.value, false)
+it('starts online unless the browser reports being offline', () => {
+    expect(createNetworkStatus().offline.value).toBe(false)
+    expect(createNetworkStatus(true).offline.value).toBe(true)
 })
 
-test('browser online clears a temporary probe failure', () => {
+it('browser connectivity changes update global offline mode', () => {
     const status = createNetworkStatus()
-    status.setNetworkReachable(false)
     status.setBrowserOffline(true)
-    assert.equal(status.offline.value, true)
-
+    expect(status.offline.value).toBe(true)
     status.markBrowserOnline()
-    assert.equal(status.browserOffline.value, false)
-    assert.equal(status.offline.value, false)
-})
-
-test('browser offline remains authoritative over a successful probe', () => {
-    const status = createNetworkStatus()
-    status.setNetworkReachable(true)
-    status.setBrowserOffline(true)
-
-    assert.equal(status.offline.value, true)
+    expect(status.browserOffline.value).toBe(false)
+    expect(status.offline.value).toBe(false)
 })

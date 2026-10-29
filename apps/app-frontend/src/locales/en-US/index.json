@@ -1,4 +1,7 @@
 {
+  "app.drop.minecraft-root-added": {
+    "message": "Minecraft folder added"
+  },
   "app.account.modrinth-account": {
     "message": "Modrinth account"
   },
@@ -728,6 +731,12 @@
   "app.appearance-settings.minimize-launcher.title": {
     "message": "Minimize launcher"
   },
+  "app.appearance-settings.nametag-uses-app-font.description": {
+    "message": "Shows your role name tag on the skins page in your interface font instead of the Minecraft pixel font."
+  },
+  "app.appearance-settings.nametag-uses-app-font.title": {
+    "message": "Role name tag uses the app font"
+  },
   "app.appearance-settings.native-decorations.description": {
     "message": "Use system window frame (app restart required)."
   },
@@ -893,6 +902,9 @@
   "app.browse.display-mode.switch": {
     "message": "Switch view"
   },
+  "app.browse.filter-metadata-failed": {
+    "message": "Filter options could not be loaded."
+  },
   "app.browse.fuzzy-search.prefix": {
     "message": "No results found for “{original}”. Showing results for"
   },
@@ -998,9 +1010,6 @@
   "app.browse.server.installing": {
     "message": "Installing"
   },
-  "app.browse.source-failed": {
-    "message": "{source} could not return results for this search. Check the filters or try again later."
-  },
   "app.browse.source.all": {
     "message": "All sources"
   },
@@ -1057,6 +1066,9 @@
   },
   "app.content-favorites.no-matches-title": {
     "message": "No matching favorites"
+  },
+  "app.content-favorites.refreshing": {
+    "message": "Updating favorites…"
   },
   "app.content-favorites.remove": {
     "message": "Remove from favorites"
@@ -1486,6 +1498,12 @@
   },
   "app.downloads.history": {
     "message": "History"
+  },
+  "app.downloads.history-empty-description": {
+    "message": "Records of completed, failed, interrupted, and canceled downloads will appear here."
+  },
+  "app.downloads.history-empty-title": {
+    "message": "No download history"
   },
   "app.downloads.in-progress": {
     "message": "In progress"
@@ -3026,8 +3044,14 @@
   "app.instance.confirm-delete.symlink-warning": {
     "message": "This is a shared instance linked to \"{path}\". Only the link will be removed; the original files will not be deleted."
   },
+  "app.instance.content.datapack-state-unavailable": {
+    "message": "Datapack state is unavailable. Refresh and retry."
+  },
   "app.instance.content.versions-failed": {
     "message": "The release list could not be loaded. Reopen the version selector and try again."
+  },
+  "app.instance.content.world-datapacks-failed": {
+    "message": "Could not read some world datapacks"
   },
   "app.instance.copy-links": {
     "message": "Copy links"
@@ -3142,6 +3166,9 @@
   },
   "app.instance.dependencies.tree-view": {
     "message": "Dependency tree"
+  },
+  "app.instance.dependencies.unknown-type": {
+    "message": "Unknown"
   },
   "app.instance.dependencies.unresolved": {
     "message": "Unresolved"
@@ -3491,9 +3518,6 @@
   "app.instance.mods.content-history-warning.title": {
     "message": "Some local history details are unavailable"
   },
-  "app.instance.mods.content-operation-timeout": {
-    "message": "Timed out waiting for another content operation to finish. Try again."
-  },
   "app.instance.mods.content-refresh-warning.body": {
     "message": "Local content is still complete and can be managed. Names, icons, or update information may be temporarily unavailable."
   },
@@ -3511,6 +3535,9 @@
   },
   "app.instance.mods.file-already-exists": {
     "message": "Failed to add. The file may already exist"
+  },
+  "app.instance.mods.loading-online-information": {
+    "message": "Loading online information, please wait"
   },
   "app.instance.mods.manage-backups": {
     "message": "Old files and backups"
@@ -4073,6 +4100,9 @@
   "app.java.none-found": {
     "message": "No Java installations found!"
   },
+  "app.java.searching": {
+    "message": "Looking for Java installations…"
+  },
   "app.java.select": {
     "message": "Select"
   },
@@ -4102,6 +4132,372 @@
   },
   "app.lab.category.world": {
     "message": "World"
+  },
+  "app.lab.command-generator.advancement-picker.button": {
+    "message": "Pick advancement"
+  },
+  "app.lab.command-generator.advancement-picker.title": {
+    "message": "Pick an advancement"
+  },
+  "app.lab.command-generator.alias-of": {
+    "message": "{command}'s alias"
+  },
+  "app.lab.command-generator.arg.optional": {
+    "message": "Optional"
+  },
+  "app.lab.command-generator.arg.required": {
+    "message": "Required"
+  },
+  "app.lab.command-generator.arg.select-placeholder": {
+    "message": "Select…"
+  },
+  "app.lab.command-generator.block-picker.button": {
+    "message": "Pick block"
+  },
+  "app.lab.command-generator.block-picker.title": {
+    "message": "Pick a block"
+  },
+  "app.lab.command-generator.close": {
+    "message": "Close"
+  },
+  "app.lab.command-generator.coordinate.absolute": {
+    "message": "Absolute"
+  },
+  "app.lab.command-generator.coordinate.axis-label": {
+    "message": "{axis} coordinate"
+  },
+  "app.lab.command-generator.coordinate.local": {
+    "message": "Local (^)"
+  },
+  "app.lab.command-generator.coordinate.relative": {
+    "message": "Relative (~)"
+  },
+  "app.lab.command-generator.coordinate.use-coords": {
+    "message": "Coordinates"
+  },
+  "app.lab.command-generator.coordinate.use-entity": {
+    "message": "Entity"
+  },
+  "app.lab.command-generator.copied": {
+    "message": "Copied"
+  },
+  "app.lab.command-generator.copy": {
+    "message": "Copy"
+  },
+  "app.lab.command-generator.copy-failed": {
+    "message": "Could not copy the command. Select and copy the text manually."
+  },
+  "app.lab.command-generator.description": {
+    "message": "Generate Minecraft Java Edition commands with visual NBT editing."
+  },
+  "app.lab.command-generator.effect-picker.button": {
+    "message": "Pick effect"
+  },
+  "app.lab.command-generator.effect-picker.title": {
+    "message": "Pick a status effect"
+  },
+  "app.lab.command-generator.error.enum": {
+    "message": "Choose a valid value for {name}."
+  },
+  "app.lab.command-generator.error.integer": {
+    "message": "Enter a whole number for {name}."
+  },
+  "app.lab.command-generator.error.number": {
+    "message": "Enter a number for {name}."
+  },
+  "app.lab.command-generator.error.range": {
+    "message": "Enter a value within the allowed range for {name}."
+  },
+  "app.lab.command-generator.error.required": {
+    "message": "Enter {name}."
+  },
+  "app.lab.command-generator.error.unknown": {
+    "message": "Unknown error"
+  },
+  "app.lab.command-generator.execute.build-first": {
+    "message": "Please build the subcommand chain first"
+  },
+  "app.lab.command-generator.execute.chain-empty": {
+    "message": "Click a subcommand below to add it to the chain."
+  },
+  "app.lab.command-generator.execute.chain-title": {
+    "message": "Subcommand chain"
+  },
+  "app.lab.command-generator.execute.clear": {
+    "message": "Clear"
+  },
+  "app.lab.command-generator.execute.final-hint": {
+    "message": "Type the actual command without the leading slash."
+  },
+  "app.lab.command-generator.execute.final-placeholder": {
+    "message": "say hello"
+  },
+  "app.lab.command-generator.execute.final-title": {
+    "message": "Command to run"
+  },
+  "app.lab.command-generator.execute.move-down": {
+    "message": "Move down"
+  },
+  "app.lab.command-generator.execute.move-up": {
+    "message": "Move up"
+  },
+  "app.lab.command-generator.execute.picker-title": {
+    "message": "Available subcommands"
+  },
+  "app.lab.command-generator.execute.quick-examples": {
+    "message": "Quick examples"
+  },
+  "app.lab.command-generator.execute.quick.all-say-hello": {
+    "message": "All players say hello"
+  },
+  "app.lab.command-generator.execute.quick.check-zombies": {
+    "message": "Check for zombies"
+  },
+  "app.lab.command-generator.execute.quick.grass-below": {
+    "message": "Say when grass is below"
+  },
+  "app.lab.command-generator.execute.quick.kill-nearby-zombies": {
+    "message": "Kill nearby zombies and count"
+  },
+  "app.lab.command-generator.execute.quick.move-forward": {
+    "message": "All entities move forward"
+  },
+  "app.lab.command-generator.execute.remove-step": {
+    "message": "Remove subcommand"
+  },
+  "app.lab.command-generator.filter.all": {
+    "message": "All"
+  },
+  "app.lab.command-generator.filter.category": {
+    "message": "Category"
+  },
+  "app.lab.command-generator.filter.permission": {
+    "message": "Permission level"
+  },
+  "app.lab.command-generator.filters": {
+    "message": "Filters"
+  },
+  "app.lab.command-generator.generate": {
+    "message": "Generate"
+  },
+  "app.lab.command-generator.guide-examples": {
+    "message": "Examples"
+  },
+  "app.lab.command-generator.guide-title": {
+    "message": "Guide"
+  },
+  "app.lab.command-generator.item-nbt.add-lore": {
+    "message": "Add line"
+  },
+  "app.lab.command-generator.item-nbt.ench-add": {
+    "message": "Add enchantment"
+  },
+  "app.lab.command-generator.item-nbt.ench-empty": {
+    "message": "No enchantments yet."
+  },
+  "app.lab.command-generator.item-nbt.ench-hint": {
+    "message": "Pick an enchantment and set its level."
+  },
+  "app.lab.command-generator.item-nbt.ench-label": {
+    "message": "Enchantments"
+  },
+  "app.lab.command-generator.item-nbt.level": {
+    "message": "Level"
+  },
+  "app.lab.command-generator.item-nbt.lore-hint": {
+    "message": "Each line appears under the item name."
+  },
+  "app.lab.command-generator.item-nbt.lore-label": {
+    "message": "Lore lines"
+  },
+  "app.lab.command-generator.item-nbt.lore-placeholder": {
+    "message": "A line of lore…"
+  },
+  "app.lab.command-generator.item-nbt.name-hint": {
+    "message": "Shown as the item title."
+  },
+  "app.lab.command-generator.item-nbt.name-label": {
+    "message": "Custom name"
+  },
+  "app.lab.command-generator.item-nbt.name-placeholder": {
+    "message": "Legendary sword"
+  },
+  "app.lab.command-generator.item-nbt.preview-empty": {
+    "message": "Empty — no NBT will be applied."
+  },
+  "app.lab.command-generator.item-nbt.preview-label": {
+    "message": "NBT preview"
+  },
+  "app.lab.command-generator.item-nbt.remove-enchantment": {
+    "message": "Remove enchantment"
+  },
+  "app.lab.command-generator.item-nbt.remove-lore": {
+    "message": "Remove lore line"
+  },
+  "app.lab.command-generator.item-nbt.title": {
+    "message": "Item customisation"
+  },
+  "app.lab.command-generator.item-nbt.unbreakable-hint": {
+    "message": "Prevents the item from taking durability damage."
+  },
+  "app.lab.command-generator.item-nbt.unbreakable-label": {
+    "message": "Unbreakable"
+  },
+  "app.lab.command-generator.item-picker.button": {
+    "message": "Pick item"
+  },
+  "app.lab.command-generator.item-picker.empty": {
+    "message": "No matches found."
+  },
+  "app.lab.command-generator.item-picker.loading": {
+    "message": "Loading…"
+  },
+  "app.lab.command-generator.item-picker.search-placeholder": {
+    "message": "Search by name or ID"
+  },
+  "app.lab.command-generator.item-picker.title": {
+    "message": "Pick an item"
+  },
+  "app.lab.command-generator.nbt.add-tag": {
+    "message": "Add child tag"
+  },
+  "app.lab.command-generator.nbt.advanced": {
+    "message": "Advanced"
+  },
+  "app.lab.command-generator.nbt.advanced.add-root": {
+    "message": "Add root tag"
+  },
+  "app.lab.command-generator.nbt.advanced.preset-custom-name": {
+    "message": "Custom name"
+  },
+  "app.lab.command-generator.nbt.advanced.preset-enchanted": {
+    "message": "Enchanted item"
+  },
+  "app.lab.command-generator.nbt.advanced.snbt-preview": {
+    "message": "SNBT preview"
+  },
+  "app.lab.command-generator.nbt.advanced.title": {
+    "message": "Advanced NBT tree"
+  },
+  "app.lab.command-generator.nbt.child-count": {
+    "message": "{count} children"
+  },
+  "app.lab.command-generator.nbt.remove-tag": {
+    "message": "Remove tag"
+  },
+  "app.lab.command-generator.nbt.simple": {
+    "message": "Simple"
+  },
+  "app.lab.command-generator.nbt.tag-name": {
+    "message": "Tag name"
+  },
+  "app.lab.command-generator.nbt.tag-value": {
+    "message": "Tag value"
+  },
+  "app.lab.command-generator.nbt.toggle-tag": {
+    "message": "Expand or collapse tag"
+  },
+  "app.lab.command-generator.nbt.type.byte": {
+    "message": "Byte"
+  },
+  "app.lab.command-generator.nbt.type.compound": {
+    "message": "Compound"
+  },
+  "app.lab.command-generator.nbt.type.double": {
+    "message": "Double"
+  },
+  "app.lab.command-generator.nbt.type.float": {
+    "message": "Float"
+  },
+  "app.lab.command-generator.nbt.type.int": {
+    "message": "Int"
+  },
+  "app.lab.command-generator.nbt.type.list": {
+    "message": "List"
+  },
+  "app.lab.command-generator.nbt.type.long": {
+    "message": "Long"
+  },
+  "app.lab.command-generator.nbt.type.raw": {
+    "message": "SNBT array"
+  },
+  "app.lab.command-generator.nbt.type.short": {
+    "message": "Short"
+  },
+  "app.lab.command-generator.nbt.type.string": {
+    "message": "String"
+  },
+  "app.lab.command-generator.parameters-empty": {
+    "message": "This command takes no arguments."
+  },
+  "app.lab.command-generator.perm.seed.multiplayer-note": {
+    "message": "In multiplayer, /seed requires permission level 2."
+  },
+  "app.lab.command-generator.preset.delete": {
+    "message": "Delete preset"
+  },
+  "app.lab.command-generator.preset.global": {
+    "message": "All presets"
+  },
+  "app.lab.command-generator.preset.global-empty": {
+    "message": "No saved presets yet."
+  },
+  "app.lab.command-generator.preset.name": {
+    "message": "Preset name"
+  },
+  "app.lab.command-generator.preset.save": {
+    "message": "Save as preset"
+  },
+  "app.lab.command-generator.preset.toast.command-missing": {
+    "message": "Preset \"{name}\" uses command \"{command}\" which does not exist in this version"
+  },
+  "app.lab.command-generator.preset.toast.deleted": {
+    "message": "Preset \"{name}\" deleted"
+  },
+  "app.lab.command-generator.preset.toast.loaded": {
+    "message": "Preset \"{name}\" loaded"
+  },
+  "app.lab.command-generator.preset.toast.name-required": {
+    "message": "Please enter a preset name"
+  },
+  "app.lab.command-generator.preset.toast.saved": {
+    "message": "Preset \"{name}\" saved"
+  },
+  "app.lab.command-generator.result": {
+    "message": "Generated command"
+  },
+  "app.lab.command-generator.result-hint": {
+    "message": "Fill in the parameters, then generate a command to copy into Minecraft."
+  },
+  "app.lab.command-generator.save": {
+    "message": "Save"
+  },
+  "app.lab.command-generator.select-command": {
+    "message": "Choose a command"
+  },
+  "app.lab.command-generator.select-placeholder": {
+    "message": "Search a command…"
+  },
+  "app.lab.command-generator.select-version": {
+    "message": "Game version"
+  },
+  "app.lab.command-generator.start-hint": {
+    "message": "Search by command name, or start with a common command."
+  },
+  "app.lab.command-generator.start-title": {
+    "message": "Choose a command to get started"
+  },
+  "app.lab.command-generator.subtitle": {
+    "message": "Build Minecraft Java Edition commands visually."
+  },
+  "app.lab.command-generator.title": {
+    "message": "Command generator"
+  },
+  "app.lab.command-generator.version.use-data-components": {
+    "message": "Use data components (1.20.5+)"
+  },
+  "app.lab.command-generator.view-on-wiki": {
+    "message": "View on Wiki"
   },
   "app.lab.enter": {
     "message": "Enter"
@@ -5297,6 +5693,9 @@
   "app.lab.seed-map.area.height": {
     "message": "Height range"
   },
+  "app.lab.seed-map.area.incomplete": {
+    "message": "These results cover only the part of the area searched before it stopped."
+  },
   "app.lab.seed-map.area.invalid-y": {
     "message": "Enter a valid height range between {min} and {max}."
   },
@@ -5344,6 +5743,9 @@
   },
   "app.lab.seed-map.area.query": {
     "message": "Item name or minecraft:item_id"
+  },
+  "app.lab.seed-map.area.scanning": {
+    "message": "Results so far. The rest of the area is still being searched."
   },
   "app.lab.seed-map.area.search": {
     "message": "Search container loot"
@@ -7115,6 +7517,180 @@
   "app.logagent.source-local": {
     "message": "Local LogAgent"
   },
+  "app.mcp.access-title": {
+    "message": "Access permissions"
+  },
+  "app.mcp.acknowledge": {
+    "message": "I understand the risks and trust the AI clients I connect."
+  },
+  "app.mcp.after-setup": {
+    "message": "Use get_launcher_info to check the connection. Call start_session when you want the agent to operate the launcher, and end_session when finished. Standard access asks for approval when starting a control session."
+  },
+  "app.mcp.allow-connection": {
+    "message": "Allow connection"
+  },
+  "app.mcp.cancel": {
+    "message": "Cancel"
+  },
+  "app.mcp.claude-step": {
+    "message": "Run this command in a terminal. Open /mcp in Claude Code to check the connection."
+  },
+  "app.mcp.client-label": {
+    "message": "AI client"
+  },
+  "app.mcp.codex-step": {
+    "message": "Merge this into ~/.codex/config.toml. Replace any existing axolotl section instead of adding a duplicate, then restart Codex to load the configuration."
+  },
+  "app.mcp.connected": {
+    "message": "AI connected"
+  },
+  "app.mcp.connection-description": {
+    "message": "{client} wants to start a launcher control session."
+  },
+  "app.mcp.connection-help": {
+    "message": "Keep the launcher running. These settings are for clients running on this computer."
+  },
+  "app.mcp.connection-title": {
+    "message": "Allow AI to control the launcher?"
+  },
+  "app.mcp.copy-failed": {
+    "message": "Could not copy the token. Try again."
+  },
+  "app.mcp.copy-token": {
+    "message": "Copy token"
+  },
+  "app.mcp.cursor-step": {
+    "message": "Add this entry to ~/.cursor/mcp.json for all projects, or .cursor/mcp.json for the current project. Merge it with any existing mcpServers entries."
+  },
+  "app.mcp.debug-active": {
+    "message": "Connected · preview"
+  },
+  "app.mcp.debug-client": {
+    "message": "Preview agent"
+  },
+  "app.mcp.debug-connect": {
+    "message": "Simulate connection"
+  },
+  "app.mcp.debug-description": {
+    "message": "Simulate a connection request, task completion, or an interrupted connection. No external client is connected."
+  },
+  "app.mcp.debug-finish": {
+    "message": "Simulate task completion"
+  },
+  "app.mcp.debug-full-access": {
+    "message": "Preview full access (does not change real permissions)"
+  },
+  "app.mcp.debug-idle": {
+    "message": "Disconnected"
+  },
+  "app.mcp.debug-interrupt": {
+    "message": "Simulate connection loss"
+  },
+  "app.mcp.debug-pending": {
+    "message": "Waiting for approval"
+  },
+  "app.mcp.debug-title": {
+    "message": "MCP connection preview"
+  },
+  "app.mcp.deny-connection": {
+    "message": "Decline"
+  },
+  "app.mcp.disabled": {
+    "message": "MCP is off. Existing connections are closed."
+  },
+  "app.mcp.disconnect": {
+    "message": "Disconnect {client}"
+  },
+  "app.mcp.disconnect-hint": {
+    "message": "While connected, the window edge uses your accent color. Click “AI connected” in the title bar to disconnect at any time."
+  },
+  "app.mcp.enable-first": {
+    "message": "Enable MCP above to see your connection address and configuration."
+  },
+  "app.mcp.enable-full-access": {
+    "message": "Enable full access"
+  },
+  "app.mcp.enabled": {
+    "message": "Enable MCP"
+  },
+  "app.mcp.enabled-description": {
+    "message": "Allow AI clients on this computer to connect to the launcher."
+  },
+  "app.mcp.endpoint-notice": {
+    "message": "The examples use MCP_URL as a placeholder. Replace it with the launcher’s service URL when MCP becomes available, then keep the launcher running."
+  },
+  "app.mcp.full-access": {
+    "message": "Full access mode"
+  },
+  "app.mcp.full-access-description": {
+    "message": "Skip control-session approval and allow deletion tools and direct control of the launcher interface."
+  },
+  "app.mcp.full-mode": {
+    "message": "Full access"
+  },
+  "app.mcp.full-mode-notice": {
+    "message": "Agents can start control sessions without approval, delete data, and directly control the interface. Only connect clients you trust."
+  },
+  "app.mcp.introduction": {
+    "message": "Connect an AI client to manage your launcher through Model Context Protocol."
+  },
+  "app.mcp.manual-approval": {
+    "message": "Approve each control session before an agent can act."
+  },
+  "app.mcp.no-deletion": {
+    "message": "Deletion tools are unavailable."
+  },
+  "app.mcp.not-running": {
+    "message": "MCP could not start. Resolve the error below and retry."
+  },
+  "app.mcp.official-guide": {
+    "message": "Official setup guide"
+  },
+  "app.mcp.preview-notice": {
+    "message": "MCP connections are not available yet. Explore access settings and client setup below."
+  },
+  "app.mcp.require-auth": {
+    "message": "Require authentication"
+  },
+  "app.mcp.require-auth-description": {
+    "message": "Require clients to provide a connection token. Changing this setting disconnects the current session."
+  },
+  "app.mcp.retry": {
+    "message": "Retry"
+  },
+  "app.mcp.running": {
+    "message": "Listening for connections"
+  },
+  "app.mcp.setup-description": {
+    "message": "Choose a client to view its setup instructions."
+  },
+  "app.mcp.setup-title": {
+    "message": "Connect your AI client"
+  },
+  "app.mcp.standard-mode": {
+    "message": "Standard access"
+  },
+  "app.mcp.token": {
+    "message": "Connection token"
+  },
+  "app.mcp.token-copied": {
+    "message": "Token copied"
+  },
+  "app.mcp.tools-only": {
+    "message": "Agents use launcher tools and cannot directly control the interface."
+  },
+  "app.mcp.vscode-step": {
+    "message": "Use “MCP: Open User Configuration” in the Command Palette and merge this server into your configuration. The example uses the VS Code servers format."
+  },
+  "app.mcp.warning-description": {
+    "message": "Agents will be able to start control sessions without approval, use deletion tools, and control the launcher interface. Mistakes or malicious instructions could delete worlds and instances, change files, or expose private data."
+  },
+  "app.mcp.warning-session": {
+    "message": "Changing access mode disconnects the current session. The next connection uses the new permissions."
+  },
+  "app.mcp.warning-title": {
+    "message": "Enable full access mode?"
+  },
   "app.memory-display.available": {
     "message": "{memory} available"
   },
@@ -7145,6 +7721,9 @@
   "app.memory-display.used": {
     "message": "Memory in use"
   },
+  "app.minecraft-auth.activate-java-profile": {
+    "message": "If you already own Minecraft, sign in on the <minecraft-link>official Minecraft website</minecraft-link>, then try signing in to the launcher again."
+  },
   "app.minecraft-auth.contact-support": {
     "message": "Contact support"
   },
@@ -7160,8 +7739,14 @@
   "app.minecraft-auth.minecraft-login": {
     "message": "Minecraft Login"
   },
+  "app.minecraft-auth.missing-java-profile": {
+    "message": "We couldn't find a Minecraft: Java Edition profile for this Microsoft account."
+  },
   "app.minecraft-auth.no-error-message": {
     "message": "No error message."
+  },
+  "app.minecraft-auth.purchase-minecraft": {
+    "message": "If you need to buy Minecraft, you can purchase it <store-link>here</store-link>."
   },
   "app.minecraft-auth.sign-in-again": {
     "message": "Sign in again"
@@ -8174,6 +8759,9 @@
   "app.privileged-modal.stopped": {
     "message": "Stop request sent"
   },
+  "app.project.additional-details-failed": {
+    "message": "Some project details could not be loaded."
+  },
   "app.project.coming-soon": {
     "message": "Coming soon"
   },
@@ -8209,9 +8797,6 @@
   },
   "app.project.mcarchive.installed": {
     "message": "Installed {fileName}"
-  },
-  "app.project.mcarchive.loading": {
-    "message": "Loading MCArchive project…"
   },
   "app.project.mcarchive.manual.archive-filter": {
     "message": "Minecraft archives"
@@ -8266,9 +8851,6 @@
   },
   "app.project.planet-minecraft.installed": {
     "message": "Installed {fileName}"
-  },
-  "app.project.planet-minecraft.loading": {
-    "message": "Loading Planet Minecraft project…"
   },
   "app.project.planet-minecraft.manual.archive-filter": {
     "message": "Minecraft archives"
@@ -8525,6 +9107,228 @@
   "app.resources.error.unsupported": {
     "message": "This content source does not support the requested operation or filters."
   },
+  "app.resources.feedback.accessDenied.detail": {
+    "message": "The content source denied access. Check source access settings or choose another source."
+  },
+  "app.resources.feedback.accessDenied.summary": {
+    "message": "The content source denied access."
+  },
+  "app.resources.feedback.analysis.detail": {
+    "message": "Dependency checks could not be completed. Retry the check; installing only selected content will skip these checks."
+  },
+  "app.resources.feedback.analysis.summary": {
+    "message": "Dependency checks could not be completed."
+  },
+  "app.resources.feedback.backup.detail": {
+    "message": "The rollback backup is unavailable or has changed. Refresh the backup list and choose an available backup."
+  },
+  "app.resources.feedback.backup.summary": {
+    "message": "The rollback backup is unavailable."
+  },
+  "app.resources.feedback.cache.detail": {
+    "message": "The resource cache cannot be read. Restart the launcher and retry."
+  },
+  "app.resources.feedback.cache.summary": {
+    "message": "The resource cache is unavailable."
+  },
+  "app.resources.feedback.canceled.detail": {
+    "message": "The content operation was cancelled. Retry when you are ready."
+  },
+  "app.resources.feedback.canceled.summary": {
+    "message": "The operation was cancelled."
+  },
+  "app.resources.feedback.catalogIncomplete.detail": {
+    "message": "The version list could not be fully loaded. Open the project’s Versions tab and choose a specific version or file."
+  },
+  "app.resources.feedback.catalogIncomplete.summary": {
+    "message": "The version list is incomplete."
+  },
+  "app.resources.feedback.chooseFile.detail": {
+    "message": "The selected version does not identify one installable file. Open the project’s Versions tab and choose a specific file."
+  },
+  "app.resources.feedback.chooseFile.summary": {
+    "message": "Select a specific installation file."
+  },
+  "app.resources.feedback.constraints.detail": {
+    "message": "The dependency requirements cannot be satisfied together. Choose compatible versions or remove the conflicting selection."
+  },
+  "app.resources.feedback.constraints.summary": {
+    "message": "The dependency requirements conflict."
+  },
+  "app.resources.feedback.database.detail": {
+    "message": "The launcher could not read or save the content state. Restart the launcher and retry."
+  },
+  "app.resources.feedback.database.summary": {
+    "message": "The content state could not be saved or read."
+  },
+  "app.resources.feedback.dependency.detail": {
+    "message": "A required dependency could not be prepared. Retry or select a compatible dependency version; installing only selected content will omit unresolved dependencies."
+  },
+  "app.resources.feedback.dependency.summary": {
+    "message": "A required dependency could not be prepared."
+  },
+  "app.resources.feedback.diskFull.detail": {
+    "message": "There is not enough disk space. Free space on the instance and cache drives, then retry."
+  },
+  "app.resources.feedback.diskFull.summary": {
+    "message": "There is not enough disk space."
+  },
+  "app.resources.feedback.identity.detail": {
+    "message": "The selected content and installed entry do not match reliably. Refresh the instance and select the intended content again."
+  },
+  "app.resources.feedback.identity.summary": {
+    "message": "The content identity could not be confirmed."
+  },
+  "app.resources.feedback.instanceBusy.detail": {
+    "message": "The instance is not ready for content changes. Wait for installation or other content tasks to finish, then retry."
+  },
+  "app.resources.feedback.instanceBusy.summary": {
+    "message": "The instance is busy."
+  },
+  "app.resources.feedback.instanceMissing.detail": {
+    "message": "The target instance could not be found. Return to the library and select an existing instance."
+  },
+  "app.resources.feedback.instanceMissing.summary": {
+    "message": "The instance could not be found."
+  },
+  "app.resources.feedback.integrity.detail": {
+    "message": "The downloaded file failed verification. Retry the download or choose another source."
+  },
+  "app.resources.feedback.integrity.summary": {
+    "message": "The file failed verification."
+  },
+  "app.resources.feedback.invalidArtifact.detail": {
+    "message": "The selected file is unavailable or its integrity information cannot be verified. Refresh the project or choose another file."
+  },
+  "app.resources.feedback.invalidArtifact.summary": {
+    "message": "The selected file cannot be verified."
+  },
+  "app.resources.feedback.invalidResponse.detail": {
+    "message": "The content source returned incomplete or invalid information. Retry or choose another version."
+  },
+  "app.resources.feedback.invalidResponse.summary": {
+    "message": "The content source returned invalid information."
+  },
+  "app.resources.feedback.localMismatch.detail": {
+    "message": "The imported file does not match the selected version. Download the correct file and select it again."
+  },
+  "app.resources.feedback.localMismatch.summary": {
+    "message": "The imported file does not match."
+  },
+  "app.resources.feedback.manualDownload.detail": {
+    "message": "The source requires a manual download. Download the exact selected file from its project page, then import it into the instance."
+  },
+  "app.resources.feedback.manualDownload.summary": {
+    "message": "A manual download is required."
+  },
+  "app.resources.feedback.missingFile.detail": {
+    "message": "A required local file is missing, disabled, or ambiguous. Check the instance files and enable or install the intended dependency."
+  },
+  "app.resources.feedback.missingFile.summary": {
+    "message": "A required local file is unavailable."
+  },
+  "app.resources.feedback.network.detail": {
+    "message": "Could not connect to the content source. Check your connection or proxy and retry."
+  },
+  "app.resources.feedback.network.summary": {
+    "message": "Could not connect to the content source."
+  },
+  "app.resources.feedback.noCompatibleRelease.detail": {
+    "message": "No version matches the current game version and loader. Open the project’s Versions tab and choose a specific version."
+  },
+  "app.resources.feedback.noCompatibleRelease.summary": {
+    "message": "No matching version was found."
+  },
+  "app.resources.feedback.notFound.detail": {
+    "message": "The selected project or version is no longer available. Refresh the project and choose another version."
+  },
+  "app.resources.feedback.notFound.summary": {
+    "message": "The selected project or version is unavailable."
+  },
+  "app.resources.feedback.occupied.detail": {
+    "message": "Another file already occupies the destination. Review the existing file, then remove or rename it if appropriate before retrying."
+  },
+  "app.resources.feedback.occupied.summary": {
+    "message": "The destination is occupied."
+  },
+  "app.resources.feedback.path.detail": {
+    "message": "The installation path is invalid or outside the instance. Choose a valid file or target world and retry."
+  },
+  "app.resources.feedback.path.summary": {
+    "message": "The installation path is invalid."
+  },
+  "app.resources.feedback.permission.detail": {
+    "message": "The launcher cannot write the file. Close programs using it and check the instance folder’s write permissions, then retry."
+  },
+  "app.resources.feedback.permission.summary": {
+    "message": "The file cannot be written."
+  },
+  "app.resources.feedback.planExpired.detail": {
+    "message": "This review is no longer current or was already submitted. Reopen the review and check existing tasks before trying again."
+  },
+  "app.resources.feedback.planExpired.summary": {
+    "message": "This review is no longer current."
+  },
+  "app.resources.feedback.rateLimited.detail": {
+    "message": "The content source is receiving too many requests. Wait a moment and retry."
+  },
+  "app.resources.feedback.rateLimited.summary": {
+    "message": "Too many requests."
+  },
+  "app.resources.feedback.scope.detail": {
+    "message": "This content cannot be installed in the selected location. Choose the appropriate instance or target world."
+  },
+  "app.resources.feedback.scope.summary": {
+    "message": "The installation location is unsuitable."
+  },
+  "app.resources.feedback.selected.detail": {
+    "message": "The selected content could not be prepared. Retry or select another version or file. Skipping dependencies cannot resolve this failure."
+  },
+  "app.resources.feedback.selected.summary": {
+    "message": "The selected content could not be prepared."
+  },
+  "app.resources.feedback.server.detail": {
+    "message": "The content source is temporarily failing. Retry later or choose another source."
+  },
+  "app.resources.feedback.server.summary": {
+    "message": "The content source is temporarily failing."
+  },
+  "app.resources.feedback.stale.detail": {
+    "message": "The instance or selected files changed. Refresh this review and retry."
+  },
+  "app.resources.feedback.stale.summary": {
+    "message": "The instance content has changed."
+  },
+  "app.resources.feedback.timeout.detail": {
+    "message": "The request timed out. Check your connection and retry."
+  },
+  "app.resources.feedback.timeout.summary": {
+    "message": "The request timed out."
+  },
+  "app.resources.feedback.tls.detail": {
+    "message": "A secure connection could not be established. Check your system time, proxy and certificates, then retry."
+  },
+  "app.resources.feedback.tls.summary": {
+    "message": "A secure connection could not be established."
+  },
+  "app.resources.feedback.unavailable.detail": {
+    "message": "The content source is unavailable. Check the connection and source settings, then retry."
+  },
+  "app.resources.feedback.unavailable.summary": {
+    "message": "The content source is unavailable."
+  },
+  "app.resources.feedback.unknown.detail": {
+    "message": "The operation could not be completed. Retry, or reopen this review if it keeps failing."
+  },
+  "app.resources.feedback.unknown.summary": {
+    "message": "The operation could not be completed."
+  },
+  "app.resources.feedback.unsupported.detail": {
+    "message": "This source does not support the requested operation. Choose another source or an exact file."
+  },
+  "app.resources.feedback.unsupported.summary": {
+    "message": "The source does not support this operation."
+  },
   "app.resources.history.cancel": {
     "message": "Close"
   },
@@ -8579,8 +9383,68 @@
   "app.resources.operation.compatibility": {
     "message": "{state, select, compatible {Compatible} incompatible {Incompatible} other {Unknown}}"
   },
+  "app.resources.operation.compatibility-detail": {
+    "message": "{subject}: {assessment}. Choose a matching version, or install the selected content with these compatibility exceptions."
+  },
+  "app.resources.operation.compatibility-summary": {
+    "message": "Compatibility is unknown or mismatched."
+  },
+  "app.resources.operation.conflict.all-versions": {
+    "message": "all versions"
+  },
+  "app.resources.operation.conflict.conflicting-releases": {
+    "message": "{subject} is required with different files: {required}. The selected file is {actual}."
+  },
+  "app.resources.operation.conflict.dependency": {
+    "message": "a required dependency"
+  },
+  "app.resources.operation.conflict.dependency-version": {
+    "message": "{subject} requires {related} to match {required}; the selected version or file is {actual}."
+  },
+  "app.resources.operation.conflict.details": {
+    "message": "Conflict details"
+  },
+  "app.resources.operation.conflict.incompatible-installed-dependent": {
+    "message": "Installed {related} declares an incompatibility with {subject} ({required})."
+  },
+  "app.resources.operation.conflict.incompatible-resource": {
+    "message": "{subject} declares an incompatibility with {related} ({required})."
+  },
+  "app.resources.operation.conflict.installed-dependency-disabled": {
+    "message": "The installed dependency {related} is disabled."
+  },
+  "app.resources.operation.conflict.installed-dependency-missing": {
+    "message": "The installed dependency file {related} is missing."
+  },
+  "app.resources.operation.conflict.installed-dependency-version": {
+    "message": "Installed {related} does not satisfy {subject}: required {required}, installed {actual}."
+  },
+  "app.resources.operation.conflict.installed-dependent": {
+    "message": "Installed {related} requires {subject} to match {required}; the selected version is {actual}."
+  },
+  "app.resources.operation.conflict.not-newer-release": {
+    "message": "{subject} version {actual} is not newer than the installed version {required}. Use Switch version to install it."
+  },
+  "app.resources.operation.conflict.required-release": {
+    "message": "the required release or file"
+  },
+  "app.resources.operation.conflict.retained-version-constraints": {
+    "message": "No release of {subject} satisfies the requirements of {related}: {required}."
+  },
+  "app.resources.operation.conflict.selected-content": {
+    "message": "The selected content"
+  },
+  "app.resources.operation.conflict.unresolved-version": {
+    "message": "version unknown"
+  },
+  "app.resources.operation.conflict.version-constraints": {
+    "message": "No release of {subject} satisfies all requirements: {required}."
+  },
   "app.resources.operation.dependency-analysis-failed": {
     "message": "Dependency analysis failed. The instance may not work correctly."
+  },
+  "app.resources.operation.dependency-analysis-summary": {
+    "message": "Dependency checks could not be completed."
   },
   "app.resources.operation.disabled-dependency": {
     "message": "This installed dependency is disabled. Enable it or review its version before continuing."
@@ -8588,26 +9452,17 @@
   "app.resources.operation.empty": {
     "message": "No file changes are needed."
   },
-  "app.resources.operation.header": {
-    "message": "Review content changes"
-  },
-  "app.resources.operation.install-selected-only": {
-    "message": "Force install selected content only"
-  },
-  "app.resources.operation.selected-only": {
-    "message": "Only the selected content will be installed. Dependencies will not be checked or installed."
-  },
-  "app.resources.operation.skip-unwritable": {
-    "message": "Force install writable files"
-  },
-  "app.resources.operation.file-not-writable": {
-    "message": "Cannot write {path}. Close any program using this file or skip it."
+  "app.resources.operation.file-issue": {
+    "message": "{reason} File: {path}"
   },
   "app.resources.operation.file-write-skipped": {
     "message": "{path} will be skipped because it cannot be written."
   },
-  "app.resources.operation.no-writable-files": {
-    "message": "No writable files remain to install."
+  "app.resources.operation.file-write-summary": {
+    "message": "Some files cannot be written."
+  },
+  "app.resources.operation.header": {
+    "message": "Review content changes"
   },
   "app.resources.operation.identity-unconfirmed": {
     "message": "The selected resource could not be identified reliably."
@@ -8618,11 +9473,35 @@
   "app.resources.operation.invalid-path": {
     "message": "The file path is invalid or cannot be used for this installation."
   },
+  "app.resources.operation.issue-source": {
+    "message": "{subject} ({source}): {reason}"
+  },
+  "app.resources.operation.issue-subject": {
+    "message": "{subject}: {reason}"
+  },
   "app.resources.operation.loading": {
     "message": "Resolving releases and dependencies…"
   },
-  "app.resources.operation.manual-download": {
-    "message": "{name} requires a manual download and cannot be installed automatically."
+  "app.resources.operation.loading-collecting-constraints": {
+    "message": "Collecting the version requirements of installed content…"
+  },
+  "app.resources.operation.loading-identifying-installed": {
+    "message": "Identifying installed content…"
+  },
+  "app.resources.operation.loading-prefetching": {
+    "message": "Fetching project details…"
+  },
+  "app.resources.operation.loading-refreshing-content": {
+    "message": "Checking installed files…"
+  },
+  "app.resources.operation.loading-reresolving": {
+    "message": "Resolving dependencies again to settle version conflicts…"
+  },
+  "app.resources.operation.loading-validating": {
+    "message": "Checking that the files can be written…"
+  },
+  "app.resources.operation.manual-download-summary": {
+    "message": "This file requires a manual download."
   },
   "app.resources.operation.missing-dependency": {
     "message": "A required dependency could not be resolved."
@@ -8630,14 +9509,17 @@
   "app.resources.operation.no-worlds": {
     "message": "Create a singleplayer world in this instance before installing data packs."
   },
+  "app.resources.operation.no-writable-files": {
+    "message": "No writable files remain to install."
+  },
   "app.resources.operation.optional": {
     "message": "Available dependencies"
   },
   "app.resources.operation.optional-for": {
     "message": "Optional dependency of {names}"
   },
-  "app.resources.operation.path-occupied": {
-    "message": "{path} is already used by another file, so it cannot be installed."
+  "app.resources.operation.preview-unavailable": {
+    "message": "Installation checks could not be completed."
   },
   "app.resources.operation.refresh": {
     "message": "Refresh this preview"
@@ -8654,23 +9536,29 @@
   "app.resources.operation.retry": {
     "message": "Retry"
   },
+  "app.resources.operation.review-issues": {
+    "message": "Installation issues"
+  },
   "app.resources.operation.satisfied": {
     "message": "Already satisfied"
+  },
+  "app.resources.operation.skip-unwritable": {
+    "message": "Force install writable files"
   },
   "app.resources.operation.source-unavailable": {
     "message": "The source cannot provide this item right now."
   },
-  "app.resources.operation.stale-revision": {
-    "message": "The instance changed. Refresh this preview before continuing."
+  "app.resources.operation.stale-summary": {
+    "message": "The instance content has changed."
   },
   "app.resources.operation.unresolved-optional": {
     "message": "Some optional dependencies could not be resolved."
   },
   "app.resources.operation.unselected-dependency": {
-    "message": "Automatic dependency installation is off. Add this required dependency to continue."
+    "message": "Automatic dependency installation is off. This required dependency is not selected."
   },
   "app.resources.operation.version-conflict": {
-    "message": "A version conflict prevents installing this item."
+    "message": "A version conflict was detected."
   },
   "app.resources.operation.world": {
     "message": "Target world for data packs"
@@ -8692,6 +9580,21 @@
   },
   "app.resources.search.confirmed-source": {
     "message": "Open the confirmed {source} project"
+  },
+  "app.resources.search.failure.environment": {
+    "message": "{source} does not support filtering by client or server. Remove the environment filter to include its results."
+  },
+  "app.resources.search.failure.filters": {
+    "message": "{source} does not support this combination of filters. Remove some filters or choose another source."
+  },
+  "app.resources.search.failure.reason": {
+    "message": "{source}: {reason}"
+  },
+  "app.resources.search.failure.sort": {
+    "message": "{source} does not support this sort order. Choose Relevance or Downloads to include its results."
+  },
+  "app.resources.search.failure.unknown": {
+    "message": "{source} could not load search results. Try again later."
   },
   "app.resources.search.window-exhausted": {
     "message": "{source} has reached its search result window."
@@ -8897,17 +9800,29 @@
   "app.servers.action.stop": {
     "message": "Stop"
   },
+  "app.servers.action.stopping": {
+    "message": "Stopping..."
+  },
+  "app.servers.action.terminate": {
+    "message": "Terminate"
+  },
+  "app.servers.card.manage": {
+    "message": "Manage {name}"
+  },
   "app.servers.card.port": {
     "message": "Port {port}"
   },
   "app.servers.card.type": {
     "message": "{type} · {version}"
   },
-  "app.servers.console.forge-command-placeholder": {
-    "message": "Send a command - Tab completion supported"
+  "app.servers.console.logs": {
+    "message": "Logs"
   },
   "app.servers.console.not-running": {
     "message": "The server is not running"
+  },
+  "app.servers.console.terminal": {
+    "message": "Terminal"
   },
   "app.servers.count": {
     "message": "{count, plural, =0 {No servers yet} one {# server} other {# servers}}"
@@ -8977,6 +9892,18 @@
   },
   "app.servers.loading": {
     "message": "Loading servers..."
+  },
+  "app.servers.management.clear-search": {
+    "message": "Clear search"
+  },
+  "app.servers.management.heading": {
+    "message": "Your servers"
+  },
+  "app.servers.management.no-matches": {
+    "message": "No matching servers"
+  },
+  "app.servers.management.search": {
+    "message": "Search by name, loader or version"
   },
   "app.servers.modpack.background-hint": {
     "message": "You can close this window — the download continues in the background."
@@ -9368,11 +10295,14 @@
   "app.servers.settings.saved": {
     "message": "Server settings saved"
   },
+  "app.servers.settings.stop-command": {
+    "message": "Stop command"
+  },
+  "app.servers.settings.stop-command-hint": {
+    "message": "Defaults to stop. Enter ^C to send Ctrl+C. Saved changes apply immediately."
+  },
   "app.servers.status.crashed": {
     "message": "Crashed"
-  },
-  "app.servers.status.created": {
-    "message": "Not set up"
   },
   "app.servers.status.download-failed": {
     "message": "Download failed"
@@ -9386,8 +10316,8 @@
   "app.servers.status.eula-pending": {
     "message": "EULA pending"
   },
-  "app.servers.status.ready": {
-    "message": "Ready"
+  "app.servers.status.not-running": {
+    "message": "Not running"
   },
   "app.servers.status.running": {
     "message": "Running"
@@ -9400,6 +10330,9 @@
   },
   "app.servers.type.forge": {
     "message": "Forge"
+  },
+  "app.servers.type.neoforge": {
+    "message": "NeoForge"
   },
   "app.servers.type.paper": {
     "message": "Paper"
@@ -9449,6 +10382,9 @@
   "app.servers.wizard.loader-version": {
     "message": "Loader version"
   },
+  "app.servers.wizard.loading-versions": {
+    "message": "Loading versions…"
+  },
   "app.servers.wizard.log": {
     "message": "Output"
   },
@@ -9463,6 +10399,9 @@
   },
   "app.servers.wizard.next": {
     "message": "Next"
+  },
+  "app.servers.wizard.no-loader-versions": {
+    "message": "No loader versions are available for this game version."
   },
   "app.servers.wizard.retry": {
     "message": "Retry"
@@ -11363,6 +12302,54 @@
   "app.settings.resources.concurrency.manual": {
     "message": "Manual"
   },
+  "app.settings.resources.curseforge-api-key": {
+    "message": "CurseForge API key"
+  },
+  "app.settings.resources.curseforge-api-key-description": {
+    "message": "Used for CurseForge search, project pages, and installations. A key entered here replaces the one the launcher provides."
+  },
+  "app.settings.resources.curseforge-api-key-field": {
+    "message": "API key"
+  },
+  "app.settings.resources.curseforge-api-key-placeholder": {
+    "message": "Leave empty to drop the key entered here"
+  },
+  "app.settings.resources.curseforge-api-key-save": {
+    "message": "Save key"
+  },
+  "app.settings.resources.curseforge-api-key-saving": {
+    "message": "Saving…"
+  },
+  "app.settings.resources.curseforge-api-key-status-launcher": {
+    "message": "No key is set here, so the launcher key is used."
+  },
+  "app.settings.resources.curseforge-api-key-status-missing": {
+    "message": "No key is available. CurseForge content cannot be searched or installed until one is set here."
+  },
+  "app.settings.resources.curseforge-api-key-status-override": {
+    "message": "Using the key entered here. The launcher key is not used."
+  },
+  "app.settings.resources.curseforge-api-key-status-unauthorized": {
+    "message": "CurseForge rejected this key. Check it or enter another one."
+  },
+  "app.settings.resources.curseforge-api-key-unsaved": {
+    "message": "Unsaved changes"
+  },
+  "app.settings.resources.curseforge-api-key-verified": {
+    "message": "CurseForge accepted the key."
+  },
+  "app.settings.resources.curseforge-api-key-verify": {
+    "message": "Check key"
+  },
+  "app.settings.resources.curseforge-api-key-verify-failed": {
+    "message": "CurseForge did not accept the key."
+  },
+  "app.settings.resources.curseforge-api-key-verify-unavailable": {
+    "message": "Could not check the key. Try again later."
+  },
+  "app.settings.resources.curseforge-api-key-verifying": {
+    "message": "Checking…"
+  },
   "app.settings.resources.curseforge-mirror": {
     "message": "CurseForge"
   },
@@ -12253,6 +13240,9 @@
   },
   "app.settings.tabs.logs": {
     "message": "Logs & diagnostics"
+  },
+  "app.settings.tabs.mcp": {
+    "message": "MCP"
   },
   "app.settings.tabs.network-connection": {
     "message": "Network tests"
@@ -13369,6 +14359,12 @@
   },
   "app.worlds.title": {
     "message": "Worlds"
+  },
+  "console.action.collapse": {
+    "message": "Collapse"
+  },
+  "console.action.expand": {
+    "message": "Expand"
   },
   "create.add-minecraft-folder": {
     "message": "Add .minecraft folder"
@@ -15125,6 +16121,9 @@
   "instance.upgrade.select.fabric-versions-error": {
     "message": "Fabric versions could not be loaded. Automatic remains available."
   },
+  "instance.upgrade.select.item-state": {
+    "message": "{state, select, checking {Checking…} found {Compatible release found} missing {No compatible release} unidentified {Not identified} unsupported {Not supported} other {Needs review}}"
+  },
   "instance.upgrade.select.loading-fabric-versions": {
     "message": "Loading Fabric versions…"
   },
@@ -15155,11 +16154,17 @@
   "instance.upgrade.select.planning-error-title": {
     "message": "Compatibility analysis failed"
   },
+  "instance.upgrade.select.planning-phase": {
+    "message": "{phase, select, reading_content {Reading content files ({completed}/{total})} checking_candidates {Checking releases for Minecraft {version} ({completed}/{total})} solving {Resolving dependencies…} other {Making sure the instance has not changed…}}"
+  },
   "instance.upgrade.select.planning-status": {
     "message": "Analyzing compatibility for {count} content items…"
   },
   "instance.upgrade.select.review-compatibility": {
     "message": "Review compatibility"
+  },
+  "instance.upgrade.select.stop-analysis": {
+    "message": "Stop analysis"
   },
   "instance.upgrade.select.target": {
     "message": "Target"
@@ -15517,6 +16522,15 @@
   },
   "unknown-pack-warning-modal.warning.title": {
     "message": "Unknown file warning"
+  },
+  "app.instance.content.checking": {
+    "message": "Refreshing… {current}/{total}"
+  },
+  "app.instance.content.check-failures": {
+    "message": "{count, plural, one {# check failed} other {# checks failed}}"
+  },
+  "app.instance.content.unrecognized": {
+    "message": "{count, plural, one {# file could not be identified} other {# files could not be identified}}"
   },
   "app.skins.player.title": {
     "message": "Find player skin"

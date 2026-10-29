@@ -3,13 +3,13 @@ use super::{
     MinecraftProfile, MinecraftSkin, MinecraftSkinVariant,
 };
 use crate::ErrorKind;
-use crate::util::fetch::INSECURE_REQWEST_CLIENT;
+use crate::state::store::Handle;
+use crate::util::fetch::authentication_client;
 use base64::Engine;
 use base64::prelude::{BASE64_STANDARD, BASE64_STANDARD_NO_PAD};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::Sqlite;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration as StdDuration, Instant};
@@ -167,7 +167,7 @@ pub async fn begin_yggdrasil_login(
     api_root: &str,
     login: &str,
     password: &str,
-    exec: impl sqlx::Executor<'_, Database = Sqlite> + Copy,
+    handle: &Handle,
 ) -> crate::Result<YggdrasilLoginResult> {
     let login = login.trim();
     if login.is_empty() {
@@ -206,7 +206,7 @@ pub async fn begin_yggdrasil_login(
             metadata,
             login,
         );
-        credentials.upsert(exec).await?;
+        credentials.upsert(handle).await?;
         return Ok(YggdrasilLoginResult::Complete { credentials });
     }
 
@@ -241,7 +241,7 @@ pub async fn begin_yggdrasil_login(
             metadata,
             login,
         );
-        credentials.upsert(exec).await?;
+        credentials.upsert(handle).await?;
         return Ok(YggdrasilLoginResult::Complete { credentials });
     }
 
@@ -268,7 +268,7 @@ pub async fn begin_yggdrasil_login(
 pub async fn finish_yggdrasil_login(
     flow_id: Uuid,
     profile_id: Uuid,
-    exec: impl sqlx::Executor<'_, Database = Sqlite> + Copy,
+    handle: &Handle,
 ) -> crate::Result<Credentials> {
     let login =
         PENDING_LOGINS
@@ -324,13 +324,13 @@ pub async fn finish_yggdrasil_login(
         },
         &login.login,
     );
-    credentials.upsert(exec).await?;
+    credentials.upsert(handle).await?;
     Ok(credentials)
 }
 
 pub async fn refresh_yggdrasil_credentials(
     credentials: &mut Credentials,
-    exec: impl sqlx::Executor<'_, Database = Sqlite> + Copy,
+    handle: &Handle,
 ) -> crate::Result<()> {
     if credentials.expires > Utc::now() {
         return Ok(());
@@ -344,7 +344,7 @@ pub async fn refresh_yggdrasil_credentials(
         .as_error()
     })?;
     let validate_url = endpoint(&account.api_root, "validate")?;
-    let response = INSECURE_REQWEST_CLIENT
+    let response = authentication_client()
         .post(validate_url)
         .json(&json!({
             "accessToken": credentials.access_token,
@@ -355,7 +355,7 @@ pub async fn refresh_yggdrasil_credentials(
 
     if response.status().is_success() {
         credentials.expires = Utc::now() + Duration::minutes(5);
-        credentials.upsert(exec).await?;
+        credentials.upsert(handle).await?;
         return Ok(());
     }
     if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -364,7 +364,7 @@ pub async fn refresh_yggdrasil_credentials(
             account.server_name
         );
         credentials.expires = Utc::now() + Duration::minutes(1);
-        credentials.upsert(exec).await?;
+        credentials.upsert(handle).await?;
         return Ok(());
     }
     if response.status().as_u16() != 403 && response.status().as_u16() != 401 {
@@ -395,7 +395,7 @@ pub async fn refresh_yggdrasil_credentials(
         account.client_token = refreshed.client_token;
     }
     credentials.expires = Utc::now() + Duration::minutes(5);
-    credentials.upsert(exec).await?;
+    credentials.upsert(handle).await?;
     Ok(())
 }
 
@@ -409,7 +409,7 @@ pub async fn fetch_yggdrasil_profile(
         profile_id.simple()
     ))?;
     url.query_pairs_mut().append_pair("unsigned", "false");
-    let response = INSECURE_REQWEST_CLIENT.get(url).send().await?;
+    let response = authentication_client().get(url).send().await?;
     if response.status() == reqwest::StatusCode::NO_CONTENT {
         return Ok(None);
     }
@@ -489,7 +489,7 @@ pub async fn fetch_yggdrasil_metadata(
     api_root: &str,
 ) -> crate::Result<YggdrasilMetadata> {
     let api_root = normalize_api_root(api_root)?;
-    let response = INSECURE_REQWEST_CLIENT.get(&api_root).send().await?;
+    let response = authentication_client().get(&api_root).send().await?;
     if !response.status().is_success() {
         return Err(response_error(response).await);
     }
@@ -573,7 +573,7 @@ async fn post_json<T: for<'de> Deserialize<'de>>(
     action: &str,
     body: serde_json::Value,
 ) -> crate::Result<T> {
-    let response = INSECURE_REQWEST_CLIENT
+    let response = authentication_client()
         .post(endpoint(api_root, action)?)
         .header(reqwest::header::ACCEPT_LANGUAGE, "zh-CN")
         .json(&body)
@@ -713,6 +713,7 @@ mod tests {
             .await
             .unwrap();
         sqlx::migrate!().run(&pool).await.unwrap();
+        let handle = Handle::new(pool);
         let profile_id = Uuid::new_v4();
         let credentials = create_credentials(
             YggdrasilProfile {
@@ -728,9 +729,9 @@ mod tests {
             },
             "player@example.com",
         );
-        credentials.upsert(&pool).await.unwrap();
+        credentials.upsert(&handle).await.unwrap();
 
-        let stored = Credentials::get_active_without_refresh(&pool)
+        let stored = Credentials::get_active_without_refresh(&handle)
             .await
             .unwrap()
             .unwrap();

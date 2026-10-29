@@ -16,6 +16,13 @@ fn run_command(command: &mut Command, description: &str) {
     );
 }
 
+fn copy_if_changed(source: &std::path::Path, destination: &std::path::Path) {
+    let contents = std::fs::read(source).expect("Read generated resource");
+    if std::fs::read(destination).ok().as_deref() != Some(contents.as_slice()) {
+        std::fs::copy(source, destination).expect("Copy generated resource");
+    }
+}
+
 fn newest_mtime(path: &std::path::Path) -> Option<std::time::SystemTime> {
     let mut newest: Option<std::time::SystemTime> = None;
     if path.is_file() {
@@ -233,6 +240,12 @@ fn build_seed_map_engine() {
                     "-fwrapv",
                     "-static-libgcc",
                     "-Wl,--export-all-symbols",
+                    // Tauri watches the bundled DLL. Keep identical builds
+                    // byte-for-byte stable so syncing it preserves its mtime.
+                    "-Wl,--no-insert-timestamp",
+                    // MinGW's automatic base depends on the output path, which
+                    // differs between Cargo configurations. ASLR stays enabled.
+                    "-Wl,--image-base,0x180000000",
                     "-Ivendor/cubiomes",
                 ])
                 .arg("-include")
@@ -244,13 +257,11 @@ fn build_seed_map_engine() {
         );
         let resources = std::path::Path::new("resources/seed-map");
         std::fs::create_dir_all(resources).expect("Create seed map resources");
-        std::fs::copy(&dll, resources.join("axolotl-cubiomes.dll"))
-            .expect("Bundle seed map DLL");
-        std::fs::copy(
-            source.join("LICENSE"),
-            resources.join("LICENSE.cubiomes.txt"),
-        )
-        .expect("Bundle cubiomes license");
+        copy_if_changed(&dll, &resources.join("axolotl-cubiomes.dll"));
+        copy_if_changed(
+            &source.join("LICENSE"),
+            &resources.join("LICENSE.cubiomes.txt"),
+        );
         println!(
             "cargo:rustc-env=AXOLOTL_CUBIOMES_BUILD_DLL={}",
             dll.display()
@@ -315,6 +326,7 @@ fn main() {
                     .commands(&[
                         "check_reachable",
                         "check_mojang_services",
+                        "network_scope",
                         "set_mojang_auth_use_mirror",
                         "mojang_auth_use_mirror",
                         "login",
@@ -419,9 +431,14 @@ fn main() {
                         "resource_favorite_add",
                         "resource_favorite_remove",
                         "resource_prepare_operation",
+                        "resource_analysis_open",
+                        "resource_analysis_update",
+                        "resource_analysis_close",
                         "resource_prepare_entry_operation",
                         "resource_list_installed",
                         "resource_check_updates",
+                        "resource_start_content_refresh",
+                        "resource_get_content_refresh_state",
                         "resource_revise_plan",
                         "resource_queue_plan",
                         "resource_list_history",
@@ -459,19 +476,12 @@ fn main() {
                 InlinedPlugin::new()
                     .commands(&[
                         "curseforge_capability",
+                        "curseforge_api_key_override",
+                        "curseforge_set_api_key",
                         "curseforge_validate_credentials",
                         "curseforge_search_projects",
-                        "curseforge_get_project",
-                        "curseforge_get_projects",
-                        "curseforge_get_description",
-                        "curseforge_get_files",
-                        "curseforge_get_files_page",
-                        "curseforge_get_file",
-                        "curseforge_get_files_many",
-                        "curseforge_get_changelog",
                         "curseforge_get_download_url",
                         "curseforge_get_categories",
-                        "curseforge_match_fingerprints",
                         "curseforge_recognize_instance_files",
                         "curseforge_import_manual_downloads",
                         "curseforge_list_pending_manual_downloads",
@@ -721,6 +731,7 @@ fn main() {
                         "instance_plan_content_updates",
                         "instance_apply_content_update_plan",
                         "instance_plan_upgrade",
+                        "instance_cancel_upgrade_planning",
                         "instance_get_upgrade_plan",
                         "instance_discard_upgrade_plan",
                         "instance_update_upgrade_resolution",
@@ -857,6 +868,7 @@ fn main() {
                         "seed_map_spawn",
                         "seed_map_biome_at",
                         "seed_map_scan_ores",
+                        "seed_map_cancel_ore_scan",
                         "seed_map_read_level_dat",
                         "seed_map_structure_details",
                         "seed_map_container_loot",
@@ -898,6 +910,19 @@ fn main() {
                         "tags_get_loaders",
                         "tags_get_game_versions",
                         "tags_get_donation_platforms",
+                    ])
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
+            )
+            .plugin(
+                "mcp",
+                InlinedPlugin::new()
+                    .commands(&[
+                        "mcp_get_state",
+                        "mcp_configure",
+                        "mcp_respond",
+                        "mcp_disconnect",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
@@ -1123,9 +1148,9 @@ fn main() {
                         "servers_write_file",
                         "servers_download_file",
                         "servers_install_forge",
+                        "servers_install_neoforge",
                         "servers_install_modpack",
                         "servers_start",
-                        "servers_send_command",
                         "servers_send_console_input",
                         "servers_resize_console",
                         "servers_stop",
@@ -1134,6 +1159,7 @@ fn main() {
                         "servers_port_process",
                         "servers_get_log_buffer",
                         "servers_get_log_delta",
+                        "servers_get_console_delta",
                         "servers_clear_log",
                     ])
                     .default_permission(
@@ -1168,6 +1194,7 @@ fn main() {
                         "mod_translation_analyze",
                         "mod_translation_translate",
                         "mod_translation_cancel",
+                        "mod_translation_cancel_analysis",
                         "mod_translation_list_tasks",
                         "mod_translation_get_task",
                         "mod_translation_dismiss_task",

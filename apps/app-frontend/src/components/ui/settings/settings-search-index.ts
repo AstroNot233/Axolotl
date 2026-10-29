@@ -18,6 +18,44 @@ const message = (id: string, defaultMessage: string): MessageDescriptor => ({ id
 
 export const settingsSearchEntries: SettingsSearchEntry[] = [
     {
+        id: 'mcp-authentication',
+        categoryId: 'mcp',
+        targetId: 'settings-target-mcp-access',
+        label: message('app.mcp.require-auth', 'Require authentication'),
+        description: message(
+            'app.mcp.require-auth-description',
+            'Require clients to provide a connection token. Changing this setting disconnects the current session.',
+        ),
+    },
+    {
+        id: 'mcp-enabled',
+        categoryId: 'mcp',
+        targetId: 'settings-target-mcp-enabled',
+        label: message('app.mcp.enabled', 'Enable MCP'),
+    },
+    {
+        id: 'mcp-access',
+        categoryId: 'mcp',
+        targetId: 'settings-target-mcp-access',
+        label: message('app.mcp.full-access', 'Full access mode'),
+        description: message(
+            'app.mcp.full-access-description',
+            'Allow connections without approval, deletion tools, and direct control of the launcher interface.',
+        ),
+    },
+    {
+        id: 'mcp-clients',
+        categoryId: 'mcp',
+        targetId: 'settings-target-mcp-clients',
+        label: message('app.mcp.setup-title', 'Connect your AI client'),
+        keywords: [
+            message(
+                'app.mcp.client-search',
+                'MCP Model Context Protocol Codex Claude Code Cursor VS Code installation connection agent',
+            ),
+        ],
+    },
+    {
         id: 'network-tests',
         categoryId: 'network-connection',
         targetId: 'settings-target-network-tests',
@@ -400,6 +438,19 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
         label: message('app.appearance-settings.hide-nametag.title', 'Hide nametag'),
     },
     {
+        id: 'appearance-nametag-uses-app-font',
+        categoryId: 'interface',
+        targetId: 'settings-target-appearance-nametag-uses-app-font',
+        label: message(
+            'app.appearance-settings.nametag-uses-app-font.title',
+            'Role name tag uses the app font',
+        ),
+        description: message(
+            'app.appearance-settings.nametag-uses-app-font.description',
+            'Shows your role name tag on the skins page in your interface font instead of the Minecraft pixel font.',
+        ),
+    },
+    {
         id: 'appearance-unknown-pack-warning',
         categoryId: 'content-downloads',
         targetId: 'settings-target-appearance-unknown-pack-warning',
@@ -630,6 +681,17 @@ export const settingsSearchEntries: SettingsSearchEntry[] = [
         targetId: 'settings-target-resources-download-mirrors',
         label: message('app.settings.resources.download-mirrors', 'Download mirrors'),
         keywords: [message('app.settings.tabs.resource-management', 'Resource management')],
+    },
+    {
+        id: 'resources-curseforge-api-key',
+        categoryId: 'content-downloads',
+        targetId: 'settings-target-resources-curseforge-api-key',
+        label: message('app.settings.resources.curseforge-api-key', 'CurseForge API key'),
+        description: message(
+            'app.settings.resources.curseforge-api-key-description',
+            'Used for CurseForge search, project pages, and installations. A key entered here replaces the one the launcher provides.',
+        ),
+        keywords: [message('app.settings.resources.curseforge-api-key-field', 'API key')],
     },
     {
         id: 'resources-chinese-names',

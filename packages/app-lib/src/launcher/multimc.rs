@@ -1,5 +1,7 @@
 //! MultiMC component profiles retained alongside imported game data.
 
+mod jarmod;
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -19,6 +21,8 @@ pub(crate) struct MultiMcProfile {
     root: PathBuf,
     pack: MMCPack,
     patches: Vec<(String, Value)>,
+    jar_mods: Vec<jarmod::Artifact>,
+    main_jar: Option<jarmod::Artifact>,
 }
 
 fn invalid(message: impl Into<String>) -> crate::Error {
@@ -85,6 +89,8 @@ impl MultiMcProfile {
             ));
         }
         let mut patches = Vec::new();
+        let mut jar_mods = Vec::new();
+        let mut main_jar = None;
         let mut seen = HashSet::new();
         // Modern mmc-pack.json explicitly stores component order. The order
         // field inside individual patches belongs to the older file format.
@@ -154,15 +160,20 @@ impl MultiMcProfile {
                     component.uid
                 )));
             }
-            if ["jarMods", "+jarMods", "mods"].iter().any(|key| {
-                patch
-                    .get(key)
-                    .and_then(Value::as_array)
-                    .is_some_and(|values| !values.is_empty())
-            }) {
+            if let Some(mods) = patch.get("mods")
+                && !mods
+                    .as_array()
+                    .ok_or_else(|| invalid("Invalid MultiMC mods list"))?
+                    .is_empty()
+            {
                 return Err(invalid(
-                    "MultiMC JAR-mod components are not supported",
+                    "MultiMC managed loader mods are not supported",
                 ));
+            }
+            jar_mods.extend(jarmod::parse_jar_mods(&patch)?);
+            if let Some(raw) = patch.get("mainJar") {
+                main_jar =
+                    Some(jarmod::Artifact::parse(raw.clone(), "libraries")?);
             }
             patches.push((component.uid.clone(), patch));
         }
@@ -170,6 +181,8 @@ impl MultiMcProfile {
             root,
             pack,
             patches,
+            jar_mods,
+            main_jar,
         })
     }
 
@@ -272,7 +285,11 @@ impl MultiMcProfile {
         vanilla: Option<&VersionInfo>,
         libraries_dir: &Path,
     ) -> crate::Result<()> {
-        if self.replaces_minecraft() {
+        if self.patches.iter().any(|(uid, patch)| {
+            uid == "net.minecraft"
+                && (patch.get("libraries").is_some()
+                    || patch.get("+libraries").is_some())
+        }) {
             // Keep standard loader additions when only Minecraft was replaced.
             // When the loader is patched too, the baseline is already vanilla.
             info.libraries.retain(|library| {
@@ -285,8 +302,16 @@ impl MultiMcProfile {
             });
         }
         let mut extra_jvm = Vec::new();
+        if !self.jar_mods.is_empty() {
+            extra_jvm.extend([
+                "-Dfml.ignoreInvalidMinecraftCertificates=true".to_string(),
+                "-Dfml.ignorePatchDiscrepancies=true".to_string(),
+            ]);
+        }
         let mut tweakers = Vec::new();
+        let mut traits = HashSet::new();
         for (uid, patch) in &self.patches {
+            traits.extend(strings(patch, "+traits")?);
             if let Some(main_class) =
                 patch.get("mainClass").and_then(Value::as_str)
             {
@@ -311,7 +336,26 @@ impl MultiMcProfile {
                 }
                 if let Some(artifact) =
                     patch.pointer("/mainJar/downloads/artifact")
+                    && patch
+                        .pointer("/mainJar/MMC-hint")
+                        .and_then(Value::as_str)
+                        != Some("local")
+                    && artifact
+                        .get("url")
+                        .and_then(Value::as_str)
+                        .is_some_and(|url| !url.is_empty())
+                    && artifact
+                        .get("sha1")
+                        .and_then(Value::as_str)
+                        .is_some_and(|hash| !hash.is_empty())
+                    && artifact
+                        .get("size")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|size| size > 0)
                 {
+                    // The standard client downloader requires complete
+                    // integrity metadata. Other main JARs are resolved by
+                    // prepare_runtime with optional hashes and sizes.
                     info.downloads.insert(
                         DownloadType::Client,
                         serde_json::from_value(artifact.clone())?,
@@ -377,6 +421,19 @@ impl MultiMcProfile {
                     }
                 }
             }
+        }
+        // MultiMC's legacy no-applet launch invokes Minecraft.main directly.
+        // Keeping Mojang's LaunchWrapper here would select its applet tweaker
+        // even for replacement clients such as the BTA installer.
+        if traits.contains("legacyLaunch")
+            && traits.contains("noapplet")
+            && !self
+                .patches
+                .iter()
+                .any(|(_, patch)| patch.get("mainClass").is_some())
+            && info.main_class == "net.minecraft.launchwrapper.Launch"
+        {
+            info.main_class = "net.minecraft.client.Minecraft".to_string();
         }
         if !extra_jvm.is_empty() {
             let arguments = info.arguments.get_or_insert_with(Default::default);
@@ -525,7 +582,7 @@ fn strings(patch: &Value, key: &str) -> crate::Result<Vec<String>> {
 mod tests {
     use super::*;
 
-    fn baseline() -> VersionInfo {
+    pub(super) fn baseline() -> VersionInfo {
         serde_json::from_value(json!({
             "id": "1.7.10", "assets": "1.7.10",
             "assetIndex": {"id": "1.7.10", "sha1": "", "size": 0, "totalSize": 0, "url": ""},
@@ -537,7 +594,7 @@ mod tests {
         })).unwrap()
     }
 
-    fn write_profile(
+    pub(super) fn write_profile(
         root: &Path,
         components: Value,
         patches: &[(&str, Value)],
@@ -601,6 +658,152 @@ mod tests {
             b"bundled-patch",
         )
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn multimc_lwjgl_platform_rules_preserve_supported_and_foreign_libraries()
+     {
+        let directory = tempfile::tempdir().unwrap();
+        let platforms = [
+            "freebsd",
+            "linux-arm32",
+            "linux-arm64",
+            "linux-ppc64le",
+            "linux",
+            "osx",
+            "osx-arm64",
+            "windows",
+            "windows-arm64",
+        ];
+        let libraries: Vec<_> = platforms.iter().map(|platform| json!({
+            "name": format!("org.lwjgl:lwjgl-natives-{platform}:3.4.3"),
+            "rules": [{"action": "allow", "os": {"name": platform}}],
+            "downloads": {"artifact": {"url": format!("https://example.com/natives-{platform}.jar")}}
+        })).collect();
+        write_profile(
+            directory.path(),
+            json!([
+                {"uid":"org.lwjgl3", "version":"3.4.3"},
+                {"uid":"net.minecraft", "version":"1.7.10"}
+            ]),
+            &[("org.lwjgl3", json!({"libraries": libraries}))],
+        );
+        let profile = MultiMcProfile::from_root(directory.path().to_path_buf())
+            .await
+            .unwrap();
+        let mut info = baseline();
+        profile
+            .apply(&mut info, None, &directory.path().join("cache"))
+            .await
+            .unwrap();
+        let restored: VersionInfo =
+            serde_json::from_value(serde_json::to_value(&info).unwrap())
+                .unwrap();
+        assert_eq!(restored.libraries.len(), platforms.len() + 1);
+        for library in restored
+            .libraries
+            .iter()
+            .filter(|library| library.rules.is_some())
+        {
+            let platform = library.rules.as_ref().unwrap()[0]
+                .os
+                .as_ref()
+                .unwrap()
+                .name
+                .as_ref()
+                .unwrap();
+            let native =
+                daedalus::minecraft::Os::native_arch(std::env::consts::ARCH);
+            let expected = *platform == native || *platform == native.get_os();
+            assert_eq!(
+                super::super::parse_rules(
+                    library.rules.as_ref().unwrap(),
+                    std::env::consts::ARCH,
+                    &super::super::QuickPlayType::None,
+                    true
+                ),
+                expected
+            );
+        }
+    }
+
+    /// Run with AXOLOTL_TEST_MULTIMC_ARCHIVE pointing to a local MultiMC export.
+    #[tokio::test]
+    #[ignore = "requires an external local MultiMC archive"]
+    async fn local_multimc_archive_profile_applies() {
+        let path = PathBuf::from(
+            std::env::var_os("AXOLOTL_TEST_MULTIMC_ARCHIVE")
+                .expect("set AXOLOTL_TEST_MULTIMC_ARCHIVE"),
+        );
+        let detected =
+            crate::api::pack::detect::detect_local_pack_sync(&path).unwrap();
+        assert_eq!(
+            detected.format,
+            crate::api::pack::detect::LocalPackFormat::MmcExport
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let mut archive =
+            zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).unwrap();
+            let name = crate::api::pack::detect::decode_zip_entry_name(
+                entry.name_raw(),
+            );
+            let Some(relative) = name.strip_prefix(&detected.base_folder)
+            else {
+                continue;
+            };
+            if entry.is_dir()
+                || !(relative == "mmc-pack.json"
+                    || relative.starts_with("patches/")
+                        && relative.ends_with(".json")
+                    || relative.starts_with("libraries/")
+                        && relative.ends_with(".jar"))
+            {
+                continue;
+            }
+            assert!(safe_maven_relative_path(relative));
+            let destination = directory.path().join(relative);
+            std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+            std::io::copy(
+                &mut entry,
+                &mut std::fs::File::create(destination).unwrap(),
+            )
+            .unwrap();
+        }
+        let profile = MultiMcProfile::from_root(directory.path().to_path_buf())
+            .await
+            .unwrap();
+        let mut info = baseline();
+        profile
+            .apply(&mut info, None, &directory.path().join("cache"))
+            .await
+            .unwrap();
+        let restored: VersionInfo =
+            serde_json::from_value(serde_json::to_value(&info).unwrap())
+                .unwrap();
+        assert!(!restored.libraries.is_empty());
+        let selected: Vec<_> = restored
+            .libraries
+            .iter()
+            .filter(|library| {
+                library.rules.as_ref().is_none_or(|rules| {
+                    super::super::parse_rules(
+                        rules,
+                        std::env::consts::ARCH,
+                        &super::super::QuickPlayType::None,
+                        true,
+                    )
+                })
+            })
+            .collect();
+        assert!(!selected.is_empty());
+        eprintln!(
+            "Applied local MultiMC profile: {} libraries, {} selected for this platform, main class {}",
+            restored.libraries.len(),
+            selected.len(),
+            restored.main_class
+        );
     }
 
     #[tokio::test]

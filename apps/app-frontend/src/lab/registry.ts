@@ -1,6 +1,7 @@
 import {
     BlocksIcon,
     BoxIcon,
+    FlaskConicalIcon,
     LanguagesIcon,
     PaletteIcon,
     PencilIcon,
@@ -65,6 +66,14 @@ export const labTools: readonly LabToolDefinition[] = [
         icon: BlocksIcon,
         title: 'Recipe generator',
         description: 'Create Minecraft Java data pack recipes from local item and tag data.',
+    },
+    {
+        id: 'command-generator',
+        category: 'creation',
+        route: '/lab/command-generator',
+        icon: FlaskConicalIcon,
+        title: 'Command generator',
+        description: 'Generate Minecraft Java Edition commands with visual NBT editing.',
     },
 ]
 
