@@ -885,10 +885,17 @@ pub(super) async fn cancel_job_with_state(
             // Restarting the cleanup is what "recoverable" is supposed to mean.
             InstallJobStatus::Canceling => {
                 let snapshot = job.snapshot();
-                if spawn_cancel_cleanup(job_id, job, state) {
-                    tracing::info!(%job_id, "Install cancellation cleanup restarted");
+                // The lifecycle worker owns the cleanup while it is still alive:
+                // it removes its own cancellation registration once the
+                // execution stopped, and it runs `finish_canceled_job` itself.
+                // Running a second cleanup next to that one would apply the
+                // rollback twice and leave the instance inconsistent, so the
+                // retry only takes over after the worker is gone.
+                if state.install_job_cancellations.contains_key(&job_id) {
+                    tracing::info!(%job_id, "Install cancellation cleanup is still owned by the running job");
                 } else {
-                    tracing::info!(%job_id, "Install cancellation cleanup is already running");
+                    tracing::info!(%job_id, "Install cancellation cleanup restarted");
+                    spawn_cancel_cleanup(job_id, state);
                 }
                 return Ok(snapshot);
             }
@@ -915,7 +922,7 @@ pub(super) async fn cancel_job_with_state(
                     tracing::warn!(%job_id, %error, "Could not emit accepted install cancellation");
                 }
                 tracing::info!(%job_id, status = record.status.as_str(), elapsed_ms = started.elapsed().as_millis() as u64, "Install cancellation accepted; cleanup continues in background");
-                spawn_cancel_cleanup(job_id, record, state);
+                spawn_cancel_cleanup(job_id, state);
                 return Ok(snapshot);
             }
             _ => {
@@ -939,31 +946,79 @@ fn cleanups_in_flight()
     IN_FLIGHT.get_or_init(Default::default)
 }
 
+/// Jobs that were cancelled again while their cleanup was already running.
+///
+/// The request must not be dropped: the running cleanup works from the state it
+/// read when it started, so a cancellation that arrives in the meantime would
+/// otherwise never be acted on.
+fn cleanups_requested_again()
+-> &'static std::sync::Mutex<std::collections::HashSet<Uuid>> {
+    static REQUESTED: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashSet<Uuid>>,
+    > = std::sync::OnceLock::new();
+    REQUESTED.get_or_init(Default::default)
+}
+
 /// Finish a canceled job's cleanup in the background, at most once at a time.
+///
+/// The record passed in was read before this call, so it can already be stale by
+/// the time the cleanup runs: another attempt may have finished the job, or a
+/// newer job may have changed the instance. The cleanup therefore re-reads the
+/// durable state and only proceeds while the job is still `Canceling`.
 ///
 /// Returns whether this call started the cleanup; `false` means another one is
 /// still running for the same job.
-fn spawn_cancel_cleanup(
-    job_id: Uuid,
-    record: store::InstallJobRecord,
-    state: State,
-) -> bool {
+fn spawn_cancel_cleanup(job_id: Uuid, state: std::sync::Arc<State>) -> bool {
     let started = cleanups_in_flight()
         .lock()
         .map(|mut in_flight| in_flight.insert(job_id))
         .unwrap_or(false);
     if !started {
+        // A cleanup is already running for this job. Remember the request so
+        // the running cleanup can pick it up instead of the cancellation being
+        // silently dropped.
+        if let Ok(mut requested) = cleanups_requested_again().lock() {
+            requested.insert(job_id);
+        }
         return false;
     }
     tokio::spawn(async move {
-        if let Err(error) = finish_canceling_job(record, &state).await {
+        let result = retry_canceling_cleanup(job_id, &state).await;
+        if let Err(error) = result {
             tracing::error!(%job_id, %error, "Canceled install cleanup could not finish; a later cancellation will retry it");
         }
+        // The slot is released even when the cleanup failed, otherwise the
+        // failure could never be retried.
         if let Ok(mut in_flight) = cleanups_in_flight().lock() {
             in_flight.remove(&job_id);
         }
+        // Another cancellation arrived while this cleanup was running: run it
+        // once more so the newer request is not lost.
+        let again = cleanups_requested_again()
+            .lock()
+            .map(|mut requested| requested.remove(&job_id))
+            .unwrap_or(false);
+        if again {
+            tracing::info!(%job_id, "Install cancellation was requested again during cleanup; retrying");
+            spawn_cancel_cleanup(job_id, state);
+        }
     });
     true
+}
+
+/// Re-read the durable job state and finish the cleanup if it still needs it.
+async fn retry_canceling_cleanup(
+    job_id: Uuid,
+    state: &State,
+) -> crate::Result<()> {
+    let job = store::get_required(job_id, state).await?;
+    if job.status != InstallJobStatus::Canceling {
+        // Someone else finished the cancellation in the meantime; applying the
+        // old snapshot now would roll the instance back over newer changes.
+        tracing::info!(%job_id, status = job.status.as_str(), "Install cancellation no longer needs a cleanup retry");
+        return Ok(());
+    }
+    finish_canceling_job(job, state).await
 }
 
 async fn finish_canceling_job(
@@ -974,6 +1029,12 @@ async fn finish_canceling_job(
     let job_id = job.id;
     let started = std::time::Instant::now();
     tracing::info!(%job_id, phase = ?job.state.progress.phase, "Canceled install cleanup started");
+    // A job whose worker stopped before it recorded the cancellation still has
+    // to end up with the terminal details: the canceled error, the cleared
+    // pause reason and the `JobCanceled` event. The worker does this itself when
+    // it is the one finishing the job; a retry has to do it too, or the finished
+    // snapshot and the diagnostics stay incomplete.
+    begin_canceling_job(&mut job.state);
     let cleanup_succeeded =
         match recovery::apply_cleanup(&mut job.state, state).await {
             Ok(()) => true,
