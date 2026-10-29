@@ -289,10 +289,6 @@ fn resource_ids(rows: Vec<(String, String)>) -> HashMap<String, ResourceId> {
     }).collect()
 }
 
-#[cfg(test)]
-#[path = "tests/content_snapshot.rs"]
-mod tests;
-
 pub(crate) async fn get_instance(
     conn: &mut sqlx::SqliteConnection,
     instance_id: &str,
