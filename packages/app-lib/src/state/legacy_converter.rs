@@ -6,11 +6,12 @@ use crate::state::instances::{
     InstanceLaunchOverrides, InstanceLaunchOverridesData, playtime_to_storage,
 };
 use crate::state::{
-    CacheValue, CachedFileHash, CachedFileUpdate, Credentials, DefaultPage,
-    DependencyType, DeviceToken, DeviceTokenKey, DeviceTokenPair, FileType,
-    Hooks, InstanceInstallStage, LauncherFeatureVersion, MemorySettings,
-    MinecraftAccountType, ModrinthCredentials, ModrinthHashMatch,
-    ReleaseChannel, TeamMember, Theme, VersionFile, WindowSize, local_id,
+    CacheValue, CachedEntry, CachedFileHash, CachedFileUpdate, Credentials,
+    DefaultPage, DependencyType, DeviceToken, DeviceTokenKey, DeviceTokenPair,
+    FileType, Hooks, InstanceInstallStage, LauncherFeatureVersion,
+    MemorySettings, MinecraftAccountType, ModrinthCredentials,
+    ModrinthHashMatch, ReleaseChannel, TeamMember, Theme, VersionFile,
+    WindowSize, local_id,
 };
 use crate::util::fetch::{IoSemaphore, read_json};
 use chrono::{DateTime, Utc};
