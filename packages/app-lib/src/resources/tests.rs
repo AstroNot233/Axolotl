@@ -3467,3 +3467,79 @@ fn update_query_positive_and_negative_ttls_are_at_most_one_hour() {
         300
     );
 }
+
+#[tokio::test]
+async fn pending_provider_deadline_releases_the_flight_and_allows_retry() {
+    let (_temp, cache) = cache().await;
+    let gate = Arc::new(Semaphore::new(0));
+    let provider = MockProvider::new(1, Some(gate.clone()));
+    let mut service =
+        ResourceService::new(cache.clone(), vec![provider.clone()]).unwrap();
+    Arc::get_mut(&mut service).unwrap().set_wait_budgets(
+        std::time::Duration::from_secs(1),
+        std::time::Duration::from_millis(500),
+    );
+    let result = service
+        .query(
+            &SourceId::modrinth(),
+            project_query("pending"),
+            CachePolicy::UseFresh,
+            &CancellationToken::new(),
+        )
+        .await;
+    assert_eq!(result, Err(ResourceError::Network { status: Some(408) }));
+    wait_until(|| provider.canceled.load(Ordering::Acquire) == 1).await;
+    assert_eq!(service.subscriber_count(), 0);
+    gate.add_permits(1);
+    assert!(
+        service
+            .query(
+                &SourceId::modrinth(),
+                project_query("pending"),
+                CachePolicy::UseFresh,
+                &CancellationToken::new()
+            )
+            .await
+            .is_ok()
+    );
+    assert_eq!(provider.calls(), 2);
+    cache.close().await;
+}
+
+#[tokio::test]
+async fn source_admission_timeout_keeps_running_results_and_releases_pending_waiters()
+ {
+    let (_temp, cache) = cache().await;
+    let gate = Arc::new(Semaphore::new(0));
+    let provider = MockProvider::new(1, Some(gate.clone()));
+    let mut service =
+        ResourceService::new(cache.clone(), vec![provider.clone()]).unwrap();
+    Arc::get_mut(&mut service).unwrap().set_wait_budgets(
+        std::time::Duration::from_millis(40),
+        std::time::Duration::from_secs(2),
+    );
+    let request = tokio::spawn({
+        let service = service.clone();
+        async move {
+            service
+                .query_many(
+                    &SourceId::modrinth(),
+                    (0..4).map(|id| project_query(&id.to_string())).collect(),
+                    CachePolicy::UseFresh,
+                    &CancellationToken::new(),
+                )
+                .await
+        }
+    });
+    wait_until(|| provider.calls() == 3).await;
+    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+    gate.add_permits(3);
+    let results = request.await.unwrap();
+    assert!(results[..3].iter().all(Result::is_ok));
+    assert_eq!(
+        results[3],
+        Err(ResourceError::Network { status: Some(408) })
+    );
+    assert_eq!(service.subscriber_count(), 0);
+    cache.close().await;
+}

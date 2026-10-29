@@ -16,6 +16,8 @@ mod plans;
 mod preview;
 mod selection;
 mod transport;
+#[cfg(test)]
+pub(crate) use transport::metadata_deadline;
 mod update;
 mod validation;
 mod verify;

@@ -67,6 +67,7 @@ struct Flight {
     result: watch::Sender<Option<ResourceResult<QueryOutcome>>>,
     changed: Arc<Notify>,
     started_at: i64,
+    deadline: tokio::time::Instant,
     owner: std::sync::Weak<ResourceService>,
 }
 
@@ -107,12 +108,16 @@ impl Subscription {
             if cancel.is_cancelled() {
                 return Err(ResourceError::Canceled);
             }
+            if tokio::time::Instant::now() >= self.0.deadline {
+                return Err(ResourceError::Network { status: Some(408) });
+            }
             if let Some(value) = receiver.borrow_and_update().clone() {
                 return value;
             }
             tokio::select! {
                 biased;
                 _ = cancel.cancelled() => return Err(ResourceError::Canceled),
+                _ = tokio::time::sleep_until(self.0.deadline) => return Err(ResourceError::Network { status: Some(408) }),
                 result = receiver.changed() => if result.is_err() { return Err(ResourceError::Canceled); },
             }
         }
@@ -120,6 +125,8 @@ impl Subscription {
 }
 
 pub struct ResourceService {
+    flight_timeout: std::time::Duration,
+    admission_timeout: std::time::Duration,
     pub(crate) analysis_sessions:
         DashMap<SessionId, Arc<super::plans::analysis::AnalysisSession>>,
     pub(crate) artifact_metadata_reader:
@@ -146,6 +153,16 @@ pub struct ResourceService {
 }
 
 impl ResourceService {
+    #[cfg(test)]
+    pub(crate) fn set_wait_budgets(
+        &mut self,
+        admission: std::time::Duration,
+        flight: std::time::Duration,
+    ) {
+        self.admission_timeout = admission;
+        self.flight_timeout = flight;
+    }
+
     pub(crate) fn search_applicable(
         &self,
         source: &SourceId,
@@ -202,6 +219,8 @@ impl ResourceService {
             }
         }
         Ok(Arc::new(Self {
+            flight_timeout: std::time::Duration::from_secs(120),
+            admission_timeout: std::time::Duration::from_secs(20),
             analysis_sessions: DashMap::new(),
             artifact_metadata_reader: Arc::new(
                 super::plans::artifact_metadata::RuntimeArtifactMetadataReader,
@@ -417,7 +436,8 @@ impl ResourceService {
             };
             let flight = match self.flights.entry(key.clone()) {
                 Entry::Occupied(entry)
-                    if try_subscribe(&entry.get().subscribers) =>
+                    if entry.get().deadline > tokio::time::Instant::now()
+                        && try_subscribe(&entry.get().subscribers) =>
                 {
                     entry.get().clone()
                 }
@@ -429,6 +449,8 @@ impl ResourceService {
                         result: watch::channel(None).0,
                         changed: self.changed.clone(),
                         started_at: Utc::now().timestamp_micros(),
+                        deadline: tokio::time::Instant::now()
+                            + self.flight_timeout,
                         owner: Arc::downgrade(self),
                     });
                     match entry {
@@ -511,12 +533,33 @@ impl ResourceService {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             let runtime = &service.sources[&source];
             loop {
+                if runtime.pending.lock().is_empty() {
+                    return;
+                }
                 // Form the batch only when it can run. Requests arriving while
                 // the source is busy must not become queued one-item batches.
-                let Ok(permit) =
-                    runtime.semaphore.clone().acquire_owned().await
-                else {
-                    return;
+                let permit = match tokio::time::timeout(
+                    service.admission_timeout,
+                    runtime.semaphore.clone().acquire_owned(),
+                )
+                .await
+                {
+                    Ok(Ok(permit)) => permit,
+                    _ => {
+                        let pending =
+                            std::mem::take(&mut *runtime.pending.lock());
+                        for flight in pending {
+                            flight.result.send_replace(Some(Err(
+                                ResourceError::Network { status: Some(408) },
+                            )));
+                            service
+                                .flights
+                                .remove_if(&flight.key, |_, current| {
+                                    Arc::ptr_eq(current, &flight)
+                                });
+                        }
+                        return;
+                    }
                 };
                 let batch = {
                     let mut queued = runtime.pending.lock();
