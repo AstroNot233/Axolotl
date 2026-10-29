@@ -202,16 +202,9 @@ pub async fn update_state(
     state: &InstallJobState,
     app_state: &State,
 ) -> crate::Result<InstallJobRecord> {
-    let _db_permit =
-        app_state
-            .install_db_semaphore
-            .acquire()
-            .await
-            .map_err(|_| {
-                crate::ErrorKind::OtherError(
-                    "install database semaphore closed".to_string(),
-                )
-            })?;
+    // Bounded like every other install database writer: on timeout the write
+    // is abandoned before its unit opens, so the row keeps its last commit.
+    let _db_permit = app_state.acquire_install_db_permit().await?;
     let json = serde_json::to_string(state)?;
     let key = id.to_string();
     let modified = Utc::now().timestamp();
@@ -236,16 +229,9 @@ pub async fn checkpoint_running_state(
     state: &InstallJobState,
     app_state: &State,
 ) -> crate::Result<Option<InstallJobRecord>> {
-    let _db_permit =
-        app_state
-            .install_db_semaphore
-            .acquire()
-            .await
-            .map_err(|_| {
-                crate::ErrorKind::OtherError(
-                    "install database semaphore closed".to_string(),
-                )
-            })?;
+    // Bounded like every other install database writer: on timeout the write
+    // is abandoned before its unit opens, so the row keeps its last commit.
+    let _db_permit = app_state.acquire_install_db_permit().await?;
     let json = serde_json::to_string(state)?;
     let key = id.to_string();
     let modified = Utc::now().timestamp();
@@ -272,16 +258,9 @@ pub async fn update_status(
     state: &InstallJobState,
     app_state: &State,
 ) -> crate::Result<InstallJobRecord> {
-    let _db_permit =
-        app_state
-            .install_db_semaphore
-            .acquire()
-            .await
-            .map_err(|_| {
-                crate::ErrorKind::OtherError(
-                    "install database semaphore closed".to_string(),
-                )
-            })?;
+    // Bounded like every other install database writer: on timeout the write
+    // is abandoned before its unit opens, so the row keeps its last commit.
+    let _db_permit = app_state.acquire_install_db_permit().await?;
     let now = Utc::now();
     let finished = status.is_finished().then_some(now.timestamp());
     let json = serde_json::to_string(state)?;
@@ -309,16 +288,9 @@ pub async fn update_status_if(
     state: &InstallJobState,
     app_state: &State,
 ) -> crate::Result<Option<InstallJobRecord>> {
-    let _db_permit =
-        app_state
-            .install_db_semaphore
-            .acquire()
-            .await
-            .map_err(|_| {
-                crate::ErrorKind::OtherError(
-                    "install database semaphore closed".to_string(),
-                )
-            })?;
+    // Bounded like every other install database writer: on timeout the write
+    // is abandoned before its unit opens, so the row keeps its last commit.
+    let _db_permit = app_state.acquire_install_db_permit().await?;
     let now = Utc::now();
     let finished = status.is_finished().then_some(now.timestamp());
     let json = serde_json::to_string(state)?;
@@ -641,4 +613,84 @@ fn timestamp(value: i64) -> DateTime<Utc> {
 
 fn optional_timestamp(value: i64) -> Option<DateTime<Utc>> {
     Utc.timestamp_opt(value, 0).single()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::install::model::{ContentChangeIntent, InstallRequest};
+    use std::sync::Arc;
+
+    async fn fixture() -> (tempfile::TempDir, Arc<State>) {
+        let temp = tempfile::tempdir().unwrap();
+        let directories = crate::state::DirectoryInfo {
+            settings_dir: temp.path().into(),
+            config_dir: temp.path().into(),
+            app_identifier: "store-test".into(),
+        };
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(4)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(temp.path().join("state.db"))
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO instances(id, path, install_stage, launcher_feature_version, name, created, modified) VALUES ('first', 'first', 'installed', '1', 'first', 1, 1)").execute(&pool).await.unwrap();
+        let state = crate::state::test_state(directories, pool).await.unwrap();
+        (temp, state)
+    }
+
+    #[tokio::test]
+    async fn store_write_entry_times_out_and_reports() {
+        let (_temp, app_state) = fixture().await;
+        let id = Uuid::new_v4();
+        let job = InstallJobState::new(InstallRequest::ChangeContent {
+            instance_id: "first".into(),
+            intent: ContentChangeIntent::UpdateOne {
+                content_id: "mod".into(),
+                target_release_id: Some("version".into()),
+            },
+            display_title: "Change content".into(),
+            display_icon: None,
+        });
+        let before = insert(id, &job, InstallJobStatus::Running, &app_state)
+            .await
+            .unwrap();
+
+        let writer = app_state.install_db_semaphore.acquire().await.unwrap();
+        let (state, checkpoint, status, swap) = tokio::join!(
+            update_state(id, &job, &app_state),
+            checkpoint_running_state(id, &job, &app_state),
+            update_status(id, InstallJobStatus::Failed, &job, &app_state),
+            update_status_if(
+                id,
+                InstallJobStatus::Running,
+                InstallJobStatus::Succeeded,
+                &job,
+                &app_state,
+            ),
+        );
+        let timed_out = |error: crate::Error| {
+            error
+                .to_string()
+                .contains("Timed out waiting for the install database writer")
+        };
+        assert!(timed_out(state.unwrap_err()));
+        assert!(timed_out(checkpoint.unwrap_err()));
+        assert!(timed_out(status.unwrap_err()));
+        assert!(timed_out(swap.unwrap_err()));
+        drop(writer);
+
+        let after = get_required(id, &app_state).await.unwrap();
+        assert_eq!(after.status, before.status, "no entry wrote its status");
+        assert_eq!(
+            after.finished, before.finished,
+            "no entry finished the job"
+        );
+        app_state.pool.close().await;
+    }
 }

@@ -88,8 +88,11 @@ async fn run_job(job_id: Uuid) -> crate::Result<()> {
         return Ok(());
     }
 
-    let (_execution, _install_permit) =
-        admission::execution_slot(&state, &job).await?;
+    let Some((_execution, _install_permit)) =
+        admission::queued_slot(&state, &job).await?
+    else {
+        return Ok(());
+    };
     job = store::get_required(job_id, &state).await?;
 
     if job.status != InstallJobStatus::Queued {

@@ -4,6 +4,8 @@ use super::*;
 #[path = "admission_tests.rs"]
 mod tests;
 
+mod queue;
+
 pub(super) fn request_instance(request: &InstallRequest) -> Option<String> {
     match request.target() {
         InstallTarget::ExistingInstance { instance_id } => Some(instance_id),
@@ -88,22 +90,27 @@ fn request_identity(
     Ok(value)
 }
 
-pub(super) async fn execution_lock(
-    state: &State,
+/// Longest uninterrupted wait for an execution slot, matching the admission
+/// lock above. A job that waits longer stays queued and checks whether it is
+/// still wanted before waiting again, so waiting never turns into failure.
+pub(super) const EXECUTION_WAIT: std::time::Duration =
+    std::time::Duration::from_secs(20);
+
+/// Waits for the instance execution lock and a global install slot. Returns
+/// `None` when the job finished or started canceling while it waited.
+pub(super) async fn queued_slot<'a>(
+    state: &'a State,
     job: &store::InstallJobRecord,
-) -> Option<tokio::sync::OwnedMutexGuard<()>> {
-    let instance = job
-        .instance_id
-        .clone()
-        .or_else(|| request_instance(&job.state.request))?;
-    let lock = state
-        .install_execution_locks
-        .entry(instance)
-        .or_default()
-        .clone();
-    Some(lock.lock_owned().await)
+) -> crate::Result<
+    Option<(
+        Option<tokio::sync::OwnedMutexGuard<()>>,
+        tokio::sync::SemaphorePermit<'a>,
+    )>,
+> {
+    queue::wait_for_slot(state, job, EXECUTION_WAIT).await
 }
 
+/// Like [`queued_slot`], for callers that need the slot or an error.
 pub(super) async fn execution_slot<'a>(
     state: &'a State,
     job: &store::InstallJobRecord,
@@ -111,7 +118,10 @@ pub(super) async fn execution_slot<'a>(
     Option<tokio::sync::OwnedMutexGuard<()>>,
     tokio::sync::SemaphorePermit<'a>,
 )> {
-    let execution = execution_lock(state, job).await;
-    let global = state.install_job_semaphore.acquire().await?;
-    Ok((execution, global))
+    queued_slot(state, job).await?.ok_or_else(|| {
+        ErrorKind::InputError(
+            "The install task was canceled while it waited for its turn".into(),
+        )
+        .into()
+    })
 }
