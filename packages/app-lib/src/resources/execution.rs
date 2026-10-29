@@ -14,6 +14,7 @@ use crate::state::store::resource_history::{
 };
 use crate::state::store::resource_operation_plans::ResourceOperationPlans;
 use crate::state::store::resource_pack_unlinks;
+use crate::state::store::store_retained_refs as retained_refs;
 use crate::state::{
     ContentOwnershipKind, ContentProviderRef, ContentRequirement,
     ContentSourceKind, ProjectType,
@@ -31,7 +32,7 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 use crate::state::instances::adapters::sqlite::{
-    content_entries, content_sets, files, pack_members,
+    content_entries, content_sets, content_store_files, files, pack_members,
 };
 
 fn input(message: impl Into<String>) -> crate::Error {
@@ -974,11 +975,12 @@ async fn persist_plan(
         let entry = content_entries::get_content_entry_by_id(id, pool).await?;
         prior.insert(action.entry_id.clone(), (refs, graph, entry));
     }
-    let instance_path: String =
-        sqlx::query_scalar("SELECT path FROM instances WHERE id = ?")
-            .bind(&plan.instance_id)
-            .fetch_one(pool)
-            .await?;
+    let instance_path = crate::state::instances::adapters::sqlite::instance_rows::get_instance_path_by_id(
+        &plan.instance_id,
+        pool,
+    )
+    .await?
+    .ok_or_else(|| input("instance disappeared before the plan was stored"))?;
     let mut mod_metadata = HashMap::new();
     for (action, (source_path, kind, _, _, _)) in
         plan.actions.iter().zip(downloads)
@@ -1037,8 +1039,15 @@ async fn persist_plan(
         }
         let local_mod_data = mod_metadata.remove(&action.entry_id).flatten();
         if let Some(current) = &action.current {
-            sqlx::query("UPDATE instance_files SET relative_path = ?, file_name = ? WHERE id = (SELECT file_id FROM instance_content_entries WHERE id = ?) AND instance_id = ? AND relative_path = ?")
-                .bind(&action.target_relative_path).bind(file_name).bind(id).bind(&plan.instance_id).bind(&current.relative_path).execute(&mut *tx).await?;
+            files::rename_entry_file_in_transaction(
+                &plan.instance_id,
+                id,
+                &current.relative_path,
+                &action.target_relative_path,
+                file_name,
+                &mut tx,
+            )
+            .await?;
         }
         let disk_file = files::upsert_instance_file_from_parts_in_transaction(
             files::UpsertInstanceFile {
@@ -1087,24 +1096,53 @@ async fn persist_plan(
             })
             .get_entry();
         cache_entries.push(cache);
-        sqlx::query("UPDATE instance_files SET local_mod_data = ?, icon_path = NULL WHERE id = ?").bind(&local_mod_data).bind(&disk_file.id).execute(&mut *tx).await?;
+        files::set_local_mod_data_in_transaction(
+            &disk_file.id,
+            local_mod_data.as_deref(),
+            &mut tx,
+        )
+        .await?;
         let old_path = action
             .current
             .as_ref()
             .map(|current| current.relative_path.as_str())
             .unwrap_or(&action.target_relative_path);
-        let old_digest: Option<String> = sqlx::query_scalar("SELECT digest FROM store_instance_files WHERE instance_id = ? AND relative_path = ?").bind(&plan.instance_id).bind(old_path).fetch_optional(&mut *tx).await?;
+        let old_digest = content_store_files::get_instance_file_digest(
+            &plan.instance_id,
+            old_path,
+            &mut *tx,
+        )
+        .await?;
         if old_path != action.target_relative_path {
-            sqlx::query("DELETE FROM store_instance_files WHERE instance_id = ? AND relative_path = ?").bind(&plan.instance_id).bind(old_path).execute(&mut *tx).await?;
+            content_store_files::remove_instance_files(
+                &mut tx,
+                &plan.instance_id,
+                &[old_path],
+            )
+            .await?;
         }
-        sqlx::query("INSERT INTO store_instance_files(instance_id, relative_path, digest, created_at, modified_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(instance_id, relative_path) DO UPDATE SET digest = excluded.digest, modified_at = excluded.modified_at").bind(&plan.instance_id).bind(&action.target_relative_path).bind(digest).bind(now.timestamp()).bind(now.timestamp()).execute(&mut *tx).await?;
+        content_store_files::record_instance_file(
+            &mut tx,
+            &plan.instance_id,
+            &action.target_relative_path,
+            digest,
+            now.timestamp(),
+            now.timestamp(),
+        )
+        .await?;
         if let Some(existing) = existing {
             if existing.file_id.as_deref() != Some(&disk_file.id)
                 || existing.content_set_id != set_id
             {
                 return Err(input("resource entry ownership changed"));
             }
-            sqlx::query("UPDATE instance_content_entries SET enabled = ?, modified_at = ? WHERE id = ?").bind(disk_file.enabled as i64).bind(now.timestamp()).bind(id).execute(&mut *tx).await?;
+            content_entries::set_entry_enabled_in_transaction(
+                id,
+                disk_file.enabled,
+                now.timestamp(),
+                &mut tx,
+            )
+            .await?;
         } else {
             let entry =
                 content_entries::upsert_content_entry_from_parts_in_transaction(
@@ -1128,15 +1166,15 @@ async fn persist_plan(
             if action.current.is_some() {
                 return Err(input("original resource entry disappeared"));
             }
-            sqlx::query(
-                "UPDATE instance_content_entries SET id = ? WHERE id = ?",
+            content_entries::rewrite_entry_id_in_transaction(
+                &entry.id, id, &mut tx,
             )
-            .bind(id)
-            .bind(entry.id)
-            .execute(&mut *tx)
             .await?;
         }
-        sqlx::query("DELETE FROM instance_content_provider_refs WHERE content_entry_id = ?").bind(id).execute(&mut *tx).await?;
+        content_entries::delete_provider_refs_for_entry_in_transaction(
+            id, &mut tx,
+        )
+        .await?;
         if action.target.reference.release.project.source.as_str()
             != "planet_minecraft"
         {
@@ -1149,7 +1187,10 @@ async fn persist_plan(
         if let Some(restore) = &restore {
             let previous_refs: Vec<(ContentProviderRef, bool)> =
                 serde_json::from_value(restore["restoreProviderRefs"].clone())?;
-            sqlx::query("DELETE FROM instance_content_provider_refs WHERE content_entry_id = ?").bind(id).execute(&mut *tx).await?;
+            content_entries::delete_provider_refs_for_entry_in_transaction(
+                id, &mut tx,
+            )
+            .await?;
             for (previous, origin) in previous_refs {
                 content_entries::upsert_content_provider_ref_in_transaction(
                     id, &previous, origin, &mut tx,
@@ -1177,7 +1218,16 @@ async fn persist_plan(
             } else {
                 metadata.source_kind
             };
-            sqlx::query("UPDATE instance_content_entries SET ownership_kind = ?, source_kind = ?, auto_dependency = ?, server_requirement = ?, client_requirement = ? WHERE id = ?").bind(ownership.as_str()).bind(source.as_str()).bind(metadata.auto_dependency as i64).bind(metadata.server_requirement.as_str()).bind(metadata.client_requirement.as_str()).bind(id).execute(&mut *tx).await?;
+            content_entries::set_entry_provenance_in_transaction(
+                id,
+                ownership,
+                source,
+                metadata.auto_dependency,
+                metadata.server_requirement,
+                metadata.client_requirement,
+                &mut tx,
+            )
+            .await?;
         }
         let mut verified_artifact = action.target.clone();
         verified_artifact.integrity.size = Some(*size);
@@ -1208,8 +1258,12 @@ async fn persist_plan(
             &mut *tx,
         )
         .await?;
-        sqlx::query("DELETE FROM instance_content_update_checks WHERE content_entry_id = ?").bind(id).execute(&mut *tx).await?;
-        sqlx::query("UPDATE instance_pack_members SET override_kind = 'version' WHERE content_entry_id = ?").bind(id).execute(&mut *tx).await?;
+        content_entries::delete_update_check_for_entry_in_transaction(
+            id, &mut tx,
+        )
+        .await?;
+        pack_members::mark_entry_version_override_in_transaction(id, &mut tx)
+            .await?;
         node_entries
             .entry(action.node_id.clone())
             .or_default()
@@ -1251,7 +1305,13 @@ async fn persist_plan(
             if let Some(old_digest) = old_digest
                 && file.backup.is_some()
             {
-                sqlx::query("INSERT OR IGNORE INTO store_retained_refs(digest, reason, created_at) VALUES (?, ?, ?)").bind(old_digest).bind(format!("resource-history:{}", history.id.as_str())).bind(now.timestamp()).execute(&mut *tx).await?;
+                retained_refs::retain(
+                    &mut *tx,
+                    &old_digest,
+                    &format!("resource-history:{}", history.id.as_str()),
+                    now.timestamp(),
+                )
+                .await?;
             }
             let mut payload = serde_json::to_value(&history)?;
             payload["restoreProviderRefs"] = serde_json::to_value(old_refs)?;

@@ -410,3 +410,95 @@ async fn ensure_keys_belong_to_scope(
 
     Ok(())
 }
+
+impl ResourceOperationPlans {
+    /// The instance `key` was planned for at `revision`.
+    pub(crate) async fn instance_at(
+        handle: &Handle,
+        key: &str,
+        revision: u32,
+    ) -> crate::Result<String> {
+        let instance_id: String = sqlx::query_scalar(
+            "
+            SELECT instance_id
+            FROM resource_operation_plans
+            WHERE id = ? AND revision = ?
+            ",
+        )
+        .bind(key)
+        .bind(revision)
+        .fetch_one(handle.pool())
+        .await?;
+
+        Ok(instance_id)
+    }
+
+    /// The job `key` was queued as at `revision`, read inside the caller's
+    /// unit so the answer cannot go stale before its write lands.
+    pub(crate) async fn job_at_in(
+        conn: &mut SqliteConnection,
+        key: &str,
+        revision: u32,
+    ) -> crate::Result<Option<String>> {
+        let job_id: Option<Option<String>> = sqlx::query_scalar(
+            "
+            SELECT job_id
+            FROM resource_operation_plans
+            WHERE id = ? AND revision = ?
+            ",
+        )
+        .bind(key)
+        .bind(revision)
+        .fetch_optional(&mut *conn)
+        .await?;
+
+        Ok(job_id.flatten())
+    }
+
+    /// The payload `key` stored at `revision`, as long as it is neither queued
+    /// nor completed, read inside the caller's unit.
+    pub(crate) async fn queueable_payload_in(
+        conn: &mut SqliteConnection,
+        key: &str,
+        revision: u32,
+    ) -> crate::Result<Option<String>> {
+        let payload: Option<String> = sqlx::query_scalar(
+            "
+            SELECT payload
+            FROM resource_operation_plans
+            WHERE id = ? AND revision = ? AND queued = 0 AND job_id IS NULL
+            ",
+        )
+        .bind(key)
+        .bind(revision)
+        .fetch_optional(&mut *conn)
+        .await?;
+
+        Ok(payload)
+    }
+
+    /// Records the job `key` was queued as, and only while the plan is still
+    /// unqueued at that revision. Answers how many rows it reached, so a plan
+    /// that moved on is visible to the caller.
+    pub(crate) async fn queue_in(
+        conn: &mut SqliteConnection,
+        key: &str,
+        revision: u32,
+        job_id: &str,
+    ) -> crate::Result<u64> {
+        let updated = sqlx::query(
+            "
+            UPDATE resource_operation_plans
+            SET job_id = ?, queued = 1
+            WHERE id = ? AND revision = ? AND queued = 0 AND job_id IS NULL
+            ",
+        )
+        .bind(job_id)
+        .bind(key)
+        .bind(revision)
+        .execute(&mut *conn)
+        .await?;
+
+        Ok(updated.rows_affected())
+    }
+}

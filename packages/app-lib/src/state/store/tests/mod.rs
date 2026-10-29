@@ -29,6 +29,8 @@ mod resource_source_projects;
 mod settings;
 mod settings_api;
 mod settings_db;
+mod shared_logs;
+mod store_retained_refs;
 mod support;
 mod sync_feature_settings;
 mod synced_game_option_preferences;

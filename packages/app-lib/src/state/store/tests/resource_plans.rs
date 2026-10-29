@@ -154,3 +154,94 @@ async fn a_cleanup_plan_is_opened_at_its_revision_and_consumed_once() {
         None
     );
 }
+
+#[tokio::test]
+async fn the_instance_and_job_a_plan_carries_read_back() {
+    let handle = handle().await;
+    ResourceOperationPlans::insert_prepared(
+        &handle,
+        "plan",
+        "instance",
+        1,
+        "{\"plan\":true}",
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        ResourceOperationPlans::instance_at(&handle, "plan", 1)
+            .await
+            .unwrap(),
+        "instance"
+    );
+
+    let mut connection = handle.pool().acquire().await.unwrap();
+
+    assert_eq!(
+        ResourceOperationPlans::job_at_in(&mut connection, "plan", 1)
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        ResourceOperationPlans::queueable_payload_in(
+            &mut connection,
+            "plan",
+            1
+        )
+        .await
+        .unwrap(),
+        Some("{\"plan\":true}".to_string())
+    );
+}
+
+#[tokio::test]
+async fn a_plan_is_queued_once() {
+    let handle = handle().await;
+    ResourceOperationPlans::insert_prepared(
+        &handle,
+        "plan",
+        "instance",
+        1,
+        "{\"plan\":true}",
+    )
+    .await
+    .unwrap();
+    let mut connection = handle.pool().acquire().await.unwrap();
+
+    let queued =
+        ResourceOperationPlans::queue_in(&mut connection, "plan", 1, "job")
+            .await
+            .unwrap();
+
+    assert_eq!(queued, 1);
+    assert_eq!(
+        ResourceOperationPlans::job_at_in(&mut connection, "plan", 1)
+            .await
+            .unwrap(),
+        Some("job".to_string())
+    );
+    assert_eq!(
+        ResourceOperationPlans::queueable_payload_in(
+            &mut connection,
+            "plan",
+            1
+        )
+        .await
+        .unwrap(),
+        None
+    );
+
+    let requeued =
+        ResourceOperationPlans::queue_in(&mut connection, "plan", 1, "other")
+            .await
+            .unwrap();
+
+    assert_eq!(requeued, 0);
+    assert_eq!(
+        ResourceOperationPlans::job_at_in(&mut connection, "plan", 1)
+            .await
+            .unwrap(),
+        Some("job".to_string())
+    );
+}

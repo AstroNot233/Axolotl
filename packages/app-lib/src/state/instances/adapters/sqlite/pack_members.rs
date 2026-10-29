@@ -1048,3 +1048,119 @@ pub(crate) async fn delete_shared_member_in_transaction(
 
     Ok(())
 }
+
+/// Drops every member a content set holds.
+pub(crate) async fn delete_pack_members_for_set_in_transaction(
+    content_set_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query("DELETE FROM instance_pack_members WHERE content_set_id = ?")
+        .bind(content_set_id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+/// Records that the user picked a version for the member one entry belongs to.
+pub(crate) async fn mark_entry_version_override_in_transaction(
+    entry_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "UPDATE instance_pack_members SET override_kind = 'version' WHERE content_entry_id = ?",
+    )
+    .bind(entry_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Records that the user picked a version for the member one path of a content
+/// set belongs to, answering how many members it reached.
+pub(crate) async fn mark_path_version_override_in_transaction(
+    content_set_id: &str,
+    relative_path: &str,
+    modified_at: i64,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<u64> {
+    let updated = sqlx::query(
+        "UPDATE instance_pack_members
+         SET override_kind = 'version', modified_at = ?
+         WHERE content_entry_id IN (
+            SELECT entry.id
+            FROM instance_content_entries entry
+            INNER JOIN instance_files file ON file.id = entry.file_id
+            WHERE entry.content_set_id = ? AND file.relative_path = ?
+         )",
+    )
+    .bind(modified_at)
+    .bind(content_set_id)
+    .bind(relative_path)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(updated.rows_affected())
+}
+
+/// The instances still waiting on a CurseForge manual download.
+pub(crate) async fn get_instance_ids_with_pending_curseforge_downloads<'e, E>(
+    exec: E,
+) -> crate::Result<Vec<String>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let rows = sqlx::query_scalar(
+        "SELECT DISTINCT instance_id
+         FROM instance_pending_manual_downloads
+         WHERE provider = 'curseforge'
+            AND state IN ('waiting', 'matched', 'error')",
+    )
+    .fetch_all(exec)
+    .await?;
+
+    Ok(rows)
+}
+
+/// The member one content set keeps under a member key.
+pub(crate) async fn find_member_id_by_key<'e, E>(
+    content_set_id: &str,
+    member_key: &str,
+    exec: E,
+) -> crate::Result<Option<String>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let id = sqlx::query_scalar(
+        "SELECT id FROM instance_pack_members
+         WHERE content_set_id = ? AND member_key = ?",
+    )
+    .bind(content_set_id)
+    .bind(member_key)
+    .fetch_optional(exec)
+    .await?;
+
+    Ok(id)
+}
+
+/// The entry the member one content set keeps under a member key claims.
+pub(crate) async fn find_member_entry_id<'e, E>(
+    content_set_id: &str,
+    member_key: &str,
+    exec: E,
+) -> crate::Result<Option<String>>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let entry_id: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT content_entry_id FROM instance_pack_members
+         WHERE content_set_id = ? AND member_key = ?",
+    )
+    .bind(content_set_id)
+    .bind(member_key)
+    .fetch_optional(exec)
+    .await?;
+
+    Ok(entry_id.flatten())
+}

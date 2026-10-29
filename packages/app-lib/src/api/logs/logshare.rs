@@ -7,6 +7,8 @@ use serde_json::{Value, json};
 use super::crash_analysis::collect_crash_logs;
 use crate::State;
 use crate::state::documents;
+use crate::state::store::Collection as _;
+use crate::state::store::shared_logs::{SharedLogRecord, SharedLogs};
 
 const LOGSHARE_BASE_URL: &str = "https://api.logshare.cn";
 const LOGSHARE_AI_READ_TIMEOUT_SECS: u64 = 300;
@@ -123,55 +125,41 @@ fn normalize_settings(mut settings: LogShareSettings) -> LogShareSettings {
 
 pub async fn list_shared_logs() -> crate::Result<Vec<SharedLog>> {
     let state = State::get().await?;
-    let rows = sqlx::query_as::<_, (String, String, String, String, String, Option<String>, Option<String>, i64, i64)>(
-        "SELECT id, url, raw, token, provider, instance_id, instance_name, truncated, created_at FROM shared_logs ORDER BY created_at DESC",
-    )
-    .fetch_all(&state.pool)
-    .await?;
+    let rows = SharedLogs::get_all(&state.data).await?;
     Ok(rows
         .into_iter()
-        .map(|row| SharedLog {
-            id: row.0,
-            url: row.1,
-            raw: row.2,
-            token: row.3,
-            provider: row.4,
-            instance_id: row.5,
-            instance_name: row.6,
-            truncated: row.7 != 0,
-            created_at: row.8,
+        .map(|(id, record)| SharedLog {
+            id,
+            url: record.url,
+            raw: record.raw,
+            token: record.token,
+            provider: record.provider,
+            instance_id: record.instance_id,
+            instance_name: record.instance_name,
+            truncated: record.truncated,
+            created_at: record.created_at,
         })
         .collect())
 }
 
 pub async fn record_shared_log(log: SharedLog) -> crate::Result<()> {
     let state = State::get().await?;
-    let created_at = log.created_at.max(now_seconds());
-    sqlx::query(
-        "INSERT INTO shared_logs (id, url, raw, token, provider, instance_id, instance_name, truncated, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET url = excluded.url, raw = excluded.raw, token = excluded.token, provider = excluded.provider, instance_id = excluded.instance_id, instance_name = excluded.instance_name, truncated = excluded.truncated",
-    )
-    .bind(&log.id)
-    .bind(&log.url)
-    .bind(&log.raw)
-    .bind(&log.token)
-    .bind(&log.provider)
-    .bind(&log.instance_id)
-    .bind(&log.instance_name)
-    .bind(log.truncated)
-    .bind(created_at)
-    .execute(&state.pool)
-    .await?;
-    Ok(())
+    let record = SharedLogRecord {
+        url: log.url,
+        raw: log.raw,
+        token: log.token,
+        provider: log.provider,
+        instance_id: log.instance_id,
+        instance_name: log.instance_name,
+        truncated: log.truncated,
+        created_at: log.created_at.max(now_seconds()),
+    };
+    SharedLogs::set(&state.data, &log.id, Some(&record)).await
 }
 
 async fn remove_shared_log_record(id: &str) -> crate::Result<()> {
     let state = State::get().await?;
-    sqlx::query("DELETE FROM shared_logs WHERE id = ?")
-        .bind(id)
-        .execute(&state.pool)
-        .await?;
-    Ok(())
+    SharedLogs::set(&state.data, &id.to_string(), None).await
 }
 
 pub async fn delete_shared_log(id: String, token: String) -> crate::Result<()> {

@@ -394,7 +394,9 @@ async fn validate(
             retained_paths.insert(path_identity(&path));
         }
     }
-    let current_paths: Vec<String> = sqlx::query_scalar("SELECT file.relative_path FROM instance_files file JOIN instance_content_entries entry ON entry.file_id = file.id WHERE file.instance_id = ? UNION ALL SELECT relative_path FROM store_instance_files WHERE instance_id = ?").bind(&plan.instance_id).bind(&plan.instance_id).fetch_all(&state.pool).await.map_err(db)?;
+    let current_paths = crate::state::instances::adapters::sqlite::content_store_files::get_current_paths(&plan.instance_id, &state.pool)
+        .await
+        .map_err(|error| ResourceError::Database(error.to_string()))?;
     let current_paths: HashSet<_> = current_paths
         .into_iter()
         .map(|path| path_identity(&path))
@@ -505,11 +507,11 @@ pub(crate) async fn execute_with_state(
                 &plan.instance_id,
             )
             .await?;
-            sqlx::query("DELETE FROM store_retained_refs WHERE reason = ?")
-                .bind(format!("resource-history:{}", history_id.as_str()))
-                .execute(&mut *tx)
-                .await
-                .map_err(db)?;
+            crate::state::store::store_retained_refs::release(
+                &mut *tx,
+                &format!("resource-history:{}", history_id.as_str()),
+            )
+            .await?;
         }
         draft.committed = true;
         ResourceHistoryCleanupPlans::consume_in(
