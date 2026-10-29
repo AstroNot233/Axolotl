@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { describeBannerMaterials } from './materials.ts'
 import {
     BannerParseError,
+    MAX_IMPORT_BYTES,
     parseBannerText,
     toDesignJson,
     toGiveCommand,
@@ -256,6 +257,14 @@ describe('banner import', () => {
     it('rejects text far larger than a design', () => {
         const huge = `{BlockEntityTag:{Base:0b,Patterns:[${'{Pattern:"cross",Color:0b},'.repeat(20000)}]}}`
         expect(codes(() => parseBannerText(huge))).toBe('too-large')
+    })
+
+    it('measures the import cap in bytes rather than UTF-16 code units', () => {
+        // Two bytes each once encoded, so this is under the cap as a string
+        // length and over it as a payload.
+        const wide = 'ä'.repeat(MAX_IMPORT_BYTES / 2 + 1)
+        expect(wide.length).toBeLessThan(MAX_IMPORT_BYTES)
+        expect(codes(() => parseBannerText(wide))).toBe('too-large')
     })
 
     it('caps imported layers at the survival limit', () => {

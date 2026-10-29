@@ -176,8 +176,14 @@ function clampLayers(layers: BannerLayer[]): BannerLayer[] {
 export function parseBannerText(text: string): BannerDesign {
     const trimmed = text.trim()
     if (!trimmed) throw new BannerParseError('empty')
+    // `length` counts UTF-16 code units, which is never more than the encoded
+    // size, so this rejects the worst offenders before anything is encoded.
     if (trimmed.length > MAX_IMPORT_BYTES) {
         throw new BannerParseError('too-large', String(trimmed.length))
+    }
+    const byteLength = new TextEncoder().encode(trimmed).length
+    if (byteLength > MAX_IMPORT_BYTES) {
+        throw new BannerParseError('too-large', String(byteLength))
     }
 
     if (/^\/?\s*give\b/i.test(trimmed)) return parseGiveCommand(trimmed)
