@@ -10,6 +10,7 @@
 
 use sqlx::Row;
 use sqlx::SqliteConnection;
+use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteRow;
 
 use super::Collection;
@@ -164,6 +165,26 @@ pub(crate) struct SettingsRecord {
     pub doh_enabled: bool,
     pub resource_chinese_filenames: bool,
     pub resource_preserve_filenames: bool,
+}
+
+impl Settings {
+    /// Changes the settings row inside the caller's unit, so the row the
+    /// change is applied to cannot be replaced between the read and the write.
+    pub(crate) async fn update_in(
+        unit: &mut super::Atom,
+        change: impl FnOnce(&mut SettingsRecord),
+    ) -> crate::Result<()> {
+        let mut record = <Self as Collection>::atom_get(unit, &Singleton)
+            .await?
+            .ok_or_else(|| -> crate::Error {
+                crate::ErrorKind::OtherError(
+                    "The launcher settings row is missing".to_string(),
+                )
+                .into()
+            })?;
+        change(&mut record);
+        <Self as Collection>::atom_set(unit, &Singleton, Some(&record)).await
+    }
 }
 
 impl Collection for Settings {
@@ -671,7 +692,6 @@ fn to_layout(layout: &str) -> HomeLayout {
         HomeLayout::Standard
     })
 }
-use sqlx::SqlitePool;
 
 /// The rows the settings documents hand over from.
 ///

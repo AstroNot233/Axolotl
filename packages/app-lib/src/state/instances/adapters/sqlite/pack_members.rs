@@ -985,3 +985,66 @@ pub(crate) async fn detach_members_for_file_in_transaction(
 
     Ok(())
 }
+
+/// Records a member of the shared pack `pack_id`, replacing what its member
+/// key held.
+pub(crate) async fn upsert_shared_pack_member_in_transaction(
+    pack_id: &str,
+    content_set_id: &str,
+    content_entry_id: &str,
+    project_type: &str,
+    expected_relative_path: &str,
+    expected_sha1: &str,
+    expected_size: i64,
+    modified_at: i64,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "INSERT INTO instance_pack_members
+         (id, content_set_id, content_entry_id, member_key, project_type,
+          expected_relative_path, required, expected_sha1, expected_size,
+          materialization_state, override_kind, reconciled, created_at, modified_at)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'present', 'none', 1, ?, ?)
+         ON CONFLICT(content_set_id, member_key) DO UPDATE SET
+           content_entry_id=excluded.content_entry_id,
+           expected_sha1=excluded.expected_sha1, expected_size=excluded.expected_size,
+           materialization_state='present', override_kind='none',
+           reconciled=1, modified_at=excluded.modified_at",
+    )
+    .bind(format!("pack-member:{pack_id}"))
+    .bind(content_set_id)
+    .bind(content_entry_id)
+    .bind(format!("shared:{pack_id}"))
+    .bind(project_type)
+    .bind(expected_relative_path)
+    .bind(expected_sha1)
+    .bind(expected_size)
+    .bind(modified_at)
+    .bind(modified_at)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+/// Forgets the member the shared pack `pack_id` left in one instance's
+/// content sets.
+pub(crate) async fn delete_shared_member_in_transaction(
+    pack_id: &str,
+    instance_id: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "DELETE FROM instance_pack_members
+         WHERE member_key = ?
+           AND content_set_id IN (
+             SELECT id FROM instance_content_sets WHERE instance_id = ?
+           )",
+    )
+    .bind(format!("shared:{pack_id}"))
+    .bind(instance_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}

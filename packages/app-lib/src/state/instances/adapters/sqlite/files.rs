@@ -641,3 +641,25 @@ pub(crate) async fn rename_file_in_place_in_transaction(
 
     Ok(())
 }
+
+/// Drops one indexed file of an instance unless an entry still names it.
+pub(crate) async fn delete_unreferenced_file_in_transaction(
+    instance_id: &str,
+    relative_path: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "DELETE FROM instance_files
+         WHERE instance_id = ? AND relative_path = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM instance_content_entries
+             WHERE file_id = instance_files.id
+           )",
+    )
+    .bind(instance_id)
+    .bind(relative_path)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}

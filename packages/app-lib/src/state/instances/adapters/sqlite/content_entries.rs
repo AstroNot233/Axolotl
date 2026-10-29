@@ -1308,3 +1308,27 @@ pub(crate) async fn get_provider_project_keys_for_present_files(
         })
         .collect()
 }
+
+/// Forgets the entries a shared pack left in `instance_id` for one path.
+pub(crate) async fn delete_shared_entries_for_path_in_transaction(
+    instance_id: &str,
+    relative_path: &str,
+    tx: &mut Transaction<'_, Sqlite>,
+) -> crate::Result<()> {
+    sqlx::query(
+        "DELETE FROM instance_content_entries
+         WHERE instance_id = ?
+           AND source_kind = 'shared_instance'
+           AND file_id IN (
+             SELECT id FROM instance_files
+             WHERE instance_id = ? AND relative_path = ?
+           )",
+    )
+    .bind(instance_id)
+    .bind(instance_id)
+    .bind(relative_path)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
