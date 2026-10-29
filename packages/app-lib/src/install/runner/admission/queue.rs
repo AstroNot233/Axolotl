@@ -17,26 +17,19 @@ pub(super) async fn wait_for_slot<'a>(
     job: &store::InstallJobRecord,
     step: Duration,
 ) -> crate::Result<Option<Slot<'a>>> {
-    let instance = job
-        .instance_id
-        .clone()
-        .or_else(|| request_instance(&job.state.request));
-    let execution = match instance {
-        Some(instance) => {
-            let lock = state
-                .install_execution_locks
-                .entry(instance)
-                .or_default()
-                .clone();
-            let Some(guard) =
-                wait_in_line(state, job.id, step, lock.lock_owned()).await?
-            else {
-                return Ok(None);
-            };
-            Some(guard)
-        }
-        None => None,
+    // The same key worker recovery locks, so a waiting worker and a
+    // recovery of the same job always exclude each other.
+    let lock = state
+        .install_execution_locks
+        .entry(execution_lock_key(job))
+        .or_default()
+        .clone();
+    let Some(execution) =
+        wait_in_line(state, job.id, step, lock.lock_owned()).await?
+    else {
+        return Ok(None);
     };
+    let execution = Some(execution);
     let Some(global) = wait_in_line(
         state,
         job.id,

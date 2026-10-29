@@ -222,6 +222,10 @@ pub struct State {
     /// What the collections of [`store`] are read and written through.
     pub(crate) data: store::Handle,
 
+    /// The rebuildable records, in a database of their own. Disabled, not
+    /// fatal, when it cannot be opened.
+    pub(crate) derived: store::derived_db::DerivedDb,
+
     resource_service: OnceCell<Arc<crate::resources::ResourceService>>,
     pub(crate) file_fingerprints: crate::resources::fingerprints::FileFingerprints,
     pub(crate) content_refresh: crate::resources::refresh::RefreshCoordinator,
@@ -266,6 +270,17 @@ impl State {
             crate::ErrorKind::OtherError("Database connections did not close before shutdown; next startup will run a full integrity check".into())
         })?;
         db_backup::mark_clean_shutdown(&database).await
+    }
+
+    /// Where the cache table lives: the derived database, which is a memory
+    /// database while the file is unavailable, so callers always have a pool.
+    pub(crate) fn cache_pool(&self) -> &SqlitePool {
+        self.derived.pool()
+    }
+
+    /// The same database, as the handle its collections are read through.
+    pub(crate) fn cache_handle(&self) -> store::Handle {
+        self.derived.handle()
     }
 
     pub async fn resources(
@@ -1256,7 +1271,8 @@ impl State {
         let pool = db::connect(&app_identifier).await?;
         let data = store::Handle::new(pool.clone());
 
-        legacy_converter::migrate_legacy_data(&data, &pool).await?;
+        let legacy_cache =
+            legacy_converter::migrate_legacy_data(&data, &pool).await?;
 
         tracing::info!("Fetching app settings");
         let mut settings = Settings::get(&data).await?;
@@ -1298,6 +1314,12 @@ impl State {
 
         let directories =
             DirectoryInfo::init(settings.custom_dir, &app_identifier).await?;
+
+        let derived = store::derived_db::DerivedDb::open(
+            directories.caches_dir().join(store::derived_db::FILE_NAME),
+        )
+        .await;
+        CachedEntry::store_best_effort(&legacy_cache, derived.pool()).await;
 
         let discord_rpc = DiscordGuard::init()?;
 
@@ -1364,6 +1386,7 @@ impl State {
             restart_after_pending_update: AtomicBool::new(false),
             instance_locks: Arc::new(InstanceLockManager::default()),
             data,
+            derived,
             pool,
             resource_service: OnceCell::new(),
             file_fingerprints: Default::default(),
@@ -1451,6 +1474,10 @@ pub(crate) async fn test_state(
         settings.ignore_ssl_errors,
         settings.doh_enabled,
     )?;
+    let derived = store::derived_db::DerivedDb::open(
+        directories.caches_dir().join(store::derived_db::FILE_NAME),
+    )
+    .await;
 
     Ok(Arc::new(State {
         directories,
@@ -1491,6 +1518,7 @@ pub(crate) async fn test_state(
         restart_after_pending_update: AtomicBool::new(false),
         instance_locks: Arc::new(InstanceLockManager::default()),
         data: store::Handle::new(pool.clone()),
+        derived,
         pool,
         resource_service: OnceCell::new(),
         file_fingerprints: Default::default(),
