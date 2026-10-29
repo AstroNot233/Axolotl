@@ -224,6 +224,12 @@ jobs:
       - name: Test CurseForge content pipeline
         if: runner.os == 'Linux'
         run: cargo test --package theseus curseforge
+      # The rebuildable database: an unknown migration version and an
+      # unreadable file both leave it disabled, keeping the file, without
+      # failing startup. Hermetic (temp dirs + sqlite).
+      - name: Test derived database
+        if: runner.os == 'Linux'
+        run: cargo test --package theseus derived_db
       # Provider-neutral resource layer: catalog, plans, execution, providers.
       # Hermetic (in-memory sqlite + temp dirs); Linux only for matrix cost.
       - name: Test provider-neutral resource layer
