@@ -1,6 +1,7 @@
 //! Clear rebuildable downloads without removing installed content or recovery data.
 
 use super::*;
+use crate::state::store::derived_db::FILE_NAME as DERIVED_DB_FILE;
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::fs::{Dir, OpenOptions};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -87,6 +88,16 @@ fn disposable(path: &str, retained: &HashSet<String>) -> bool {
         }),
         _ => false,
     }
+}
+
+/// The database holding the rebuildable records, and the sidecars SQLite keeps
+/// beside it. Rebuilding it is an explicit action, so a cache sweep leaves the
+/// files alone and does not count them as cleared space.
+fn derived_db_file(path: &str) -> bool {
+    path.rsplit('/')
+        .next()
+        .and_then(|name| name.strip_prefix(DERIVED_DB_FILE))
+        .is_some_and(|suffix| matches!(suffix, "" | "-wal" | "-shm"))
 }
 
 fn cache_root(directories: &DirectoryInfo) -> std::io::Result<Dir> {
@@ -176,6 +187,9 @@ fn walk(
             if !kind.is_file() {
                 return Ok(0);
             }
+            if derived_db_file(&path) {
+                return Ok(0);
+            }
             let mut options = OpenOptions::new();
             options.read(true).follow(FollowSymlinks::No);
             let file = dir.open_with(&name, &options)?;
@@ -249,7 +263,7 @@ pub async fn clear_cache() -> crate::Result<CacheCleanupResult> {
             Kind::ModpackFiles,
             Kind::ProjectVersions,
         ],
-        &state.pool,
+        state.cache_pool(),
     )
     .await
     {

@@ -623,46 +623,24 @@ async fn recognize(
     }
     recognition.ambiguous |=
         projects.values().any(|projects| projects.len() > 1);
-    let selected = if let Some(origin) = &work.origin {
-        let matches = recognition
-            .matches
-            .iter()
-            .filter(|artifact| {
-                &artifact.reference.release.project.source == origin
-            })
-            .collect::<Vec<_>>();
-        (matches.len() == 1).then(|| (*matches[0]).clone())
-    } else if !recognition.ambiguous {
-        recognition
-            .matches
-            .iter()
-            .find(|artifact| {
-                artifact.reference.release.project.source
-                    == work.context.preferred_source
-            })
-            .or(recognition.matches.first())
-            .cloned()
-    } else {
-        None
-    };
+    let selected = service
+        .select_recognized_artifact(
+            &recognition.matches,
+            work.entry.artifact.as_ref(),
+            work.origin.as_ref(),
+            &work.context.preferred_source,
+            work.entry.resource_type,
+            recognition.ambiguous,
+            policy,
+            cancel,
+        )
+        .await?;
     if selected.is_none() && !recognition.failures.is_empty() {
         return Err(recognition.failures[0].1.clone());
     }
-    let Some(artifact) = selected else {
+    let Some((artifact, project)) = selected else {
         return Ok(None);
     };
-    let project = service
-        .project_document_with_policy(
-            &artifact.reference.release.project,
-            None,
-            cancel,
-            policy,
-        )
-        .await?
-        .metadata;
-    if !project.types.contains(&work.entry.resource_type) {
-        return Ok(None);
-    }
     if let Some(store) = service.store() {
         work.entry.resource_id = Some(
             store
@@ -685,7 +663,7 @@ async fn recognize(
             {
                 continue;
             }
-            if let Ok(other) = service
+            let other = match service
                 .project_document_with_policy(
                     &matched.reference.release.project,
                     None,
@@ -694,15 +672,22 @@ async fn recognize(
                 )
                 .await
             {
-                store
-                    .confirm_projects(
-                        &project,
-                        &other.metadata,
-                        &artifact,
-                        matched,
-                    )
-                    .await?;
-            }
+                Ok(other) => other,
+                Err(
+                    error @ (ResourceError::Canceled
+                    | ResourceError::Database(_)),
+                ) => return Err(error),
+                Err(_) => continue,
+            };
+            identity::try_confirm_projects(
+                store,
+                &project,
+                &other.metadata,
+                &artifact,
+                matched,
+                cancel,
+            )
+            .await?;
         }
     }
     work.entry.artifact = Some(artifact.reference.clone());

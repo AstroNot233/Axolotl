@@ -98,6 +98,7 @@ mod legacy_converter;
 pub mod attached_world_data;
 pub(crate) mod content_store;
 pub(crate) mod content_types;
+pub(crate) mod documents;
 pub mod instance_groups;
 pub(crate) mod store;
 
@@ -222,6 +223,10 @@ pub struct State {
     /// What the collections of [`store`] are read and written through.
     pub(crate) data: store::Handle,
 
+    /// The rebuildable records, in a database of their own. Disabled, not
+    /// fatal, when it cannot be opened.
+    pub(crate) derived: store::derived_db::DerivedDb,
+
     resource_service: OnceCell<Arc<crate::resources::ResourceService>>,
     pub(crate) file_fingerprints: crate::resources::fingerprints::FileFingerprints,
     pub(crate) content_refresh: crate::resources::refresh::RefreshCoordinator,
@@ -266,6 +271,17 @@ impl State {
             crate::ErrorKind::OtherError("Database connections did not close before shutdown; next startup will run a full integrity check".into())
         })?;
         db_backup::mark_clean_shutdown(&database).await
+    }
+
+    /// Where the cache table lives: the derived database, which is a memory
+    /// database while the file is unavailable, so callers always have a pool.
+    pub(crate) fn cache_pool(&self) -> &SqlitePool {
+        self.derived.pool()
+    }
+
+    /// The same database, as the handle its collections are read through.
+    pub(crate) fn cache_handle(&self) -> store::Handle {
+        self.derived.handle()
     }
 
     pub async fn resources(
@@ -1252,11 +1268,31 @@ impl State {
     async fn initialize_state(
         app_identifier: String,
     ) -> crate::Result<Arc<Self>> {
+        // The directory the rows live in names the entries that hold their
+        // secrets, so it is settled before the first secret is read or written.
+        // It is the one `DirectoryInfo` resolves to, which is not yet built
+        // here: nothing may reach the store ahead of it.
+        let settings_dir = DirectoryInfo::initial_settings_dir_path(
+            &app_identifier,
+        )
+        .ok_or(crate::ErrorKind::FSError(
+            "Could not find valid settings dir".to_string(),
+        ))?;
+        store::secrets::identify(&settings_dir);
+
         tracing::info!("Connecting to app database");
         let pool = db::connect(&app_identifier).await?;
         let data = store::Handle::new(pool.clone());
 
-        legacy_converter::migrate_legacy_data(&data, &pool).await?;
+        let legacy =
+            legacy_converter::migrate_legacy_data(&data, &pool).await?;
+
+        if let Err(error) = store::secrets::externalize(&data).await {
+            tracing::warn!(
+                %error,
+                "Failed to move the account secrets into the system credential store"
+            );
+        }
 
         tracing::info!("Fetching app settings");
         let mut settings = Settings::get(&data).await?;
@@ -1298,6 +1334,31 @@ impl State {
 
         let directories =
             DirectoryInfo::init(settings.custom_dir, &app_identifier).await?;
+
+        documents::hand_over(&pool, &directories.settings_dir).await;
+
+        if !legacy.java_versions.is_empty() {
+            let documents = documents::Documents::at(
+                directories.settings_dir.join(documents::DIR_NAME),
+                &pool,
+            );
+            if let Err(error) =
+                JavaVersion::save_all(&documents, &legacy.java_versions).await
+            {
+                tracing::warn!(
+                    %error,
+                    "Failed to record the imported Java runtimes"
+                );
+            }
+        }
+
+        let derived = store::derived_db::DerivedDb::open(
+            directories.caches_dir().join(store::derived_db::FILE_NAME),
+        )
+        .await;
+        CachedEntry::store_best_effort(&legacy.cached_entries, derived.pool())
+            .await;
+        forget_removed_instances(&pool, &derived).await;
 
         let discord_rpc = DiscordGuard::init()?;
 
@@ -1364,6 +1425,7 @@ impl State {
             restart_after_pending_update: AtomicBool::new(false),
             instance_locks: Arc::new(InstanceLockManager::default()),
             data,
+            derived,
             pool,
             resource_service: OnceCell::new(),
             file_fingerprints: Default::default(),
@@ -1437,6 +1499,70 @@ impl State {
     }
 }
 
+/// Drops the derived rows whose instance is gone. They left the database that
+/// owns `instances`, so no foreign key removes them: the deletion path does,
+/// and this pass at startup catches what a deletion that never finished left
+/// behind. It reads the two derived tables once and asks about the instances
+/// they name, so a database with no left-over rows costs two reads.
+async fn forget_removed_instances(
+    pool: &SqlitePool,
+    derived: &store::derived_db::DerivedDb,
+) {
+    let mut instance_ids =
+        match store::content_refresh_pack::ContentRefreshPacks::instance_ids(
+            derived,
+        )
+        .await
+        {
+            Ok(instance_ids) => instance_ids,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "Failed to read the instances the saved pack metadata names"
+                );
+                return;
+            }
+        };
+    match store::content_refresh_scan_failures::ContentRefreshScanFailures::instance_ids(
+        derived,
+    )
+    .await
+    {
+        Ok(failures) => instance_ids.extend(failures),
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "Failed to read the instances the scan failures name"
+            );
+        }
+    }
+    instance_ids.sort();
+    instance_ids.dedup();
+    for instance_id in instance_ids {
+        match instances::adapters::sqlite::instance_rows::get_instance_path_by_id(
+            &instance_id,
+            pool,
+        )
+        .await
+        {
+            Ok(Some(_)) => continue,
+            Ok(None) => tracing::debug!(
+                instance_id,
+                "Dropping the derived records of a removed instance"
+            ),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    instance_id,
+                    "Failed to check whether a derived record's instance exists"
+                );
+                continue;
+            }
+        }
+        instances::commands::forget_derived_rows(&instance_id, derived).await;
+    }
+}
+
 #[cfg(test)]
 pub(crate) async fn test_state(
     directories: DirectoryInfo,
@@ -1451,6 +1577,10 @@ pub(crate) async fn test_state(
         settings.ignore_ssl_errors,
         settings.doh_enabled,
     )?;
+    let derived = store::derived_db::DerivedDb::open(
+        directories.caches_dir().join(store::derived_db::FILE_NAME),
+    )
+    .await;
 
     Ok(Arc::new(State {
         directories,
@@ -1491,6 +1621,7 @@ pub(crate) async fn test_state(
         restart_after_pending_update: AtomicBool::new(false),
         instance_locks: Arc::new(InstanceLockManager::default()),
         data: store::Handle::new(pool.clone()),
+        derived,
         pool,
         resource_service: OnceCell::new(),
         file_fingerprints: Default::default(),
