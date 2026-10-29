@@ -1,7 +1,6 @@
-mod backend;
 mod commands;
 mod config;
-mod interface;
+use super::tools::interface;
 mod service;
 
 use service::McpService;
@@ -20,7 +19,7 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         ])
         .setup(|app, _| {
             app.manage(McpService::default());
-            app.manage(interface::UiBridge::default());
+            super::tools::initialize(app);
             Ok(())
         })
         .build()

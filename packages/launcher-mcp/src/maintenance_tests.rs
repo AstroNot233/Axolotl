@@ -147,7 +147,7 @@ async fn maintenance_tools_dispatch_and_async_capabilities_agree_without_real_mu
         arguments["session_id"] = json!(session);
         let mut typed = arguments.clone();
         typed.as_object_mut().unwrap().remove("session_id");
-        let command: Command = serde_json::from_value(
+        let _command: Command = serde_json::from_value(
             json!({"name":entry.tool.name,"arguments":typed}),
         )
         .unwrap();
@@ -158,13 +158,12 @@ async fn maintenance_tools_dispatch_and_async_capabilities_agree_without_real_mu
             .find(|v| v["name"] == entry.tool.name.as_ref())
             .unwrap();
         assert_eq!(
-            info["returns_operation_id"],
-            command.deferred(),
+            info["returns_operation_id"], entry.deferred,
             "{}",
             entry.tool.name
         );
         let result = client.tool(&entry.tool.name, arguments).await;
-        if command.deferred() {
+        if entry.deferred {
             let id = result["result"]["structuredContent"]["operation_id"]
                 .as_str()
                 .unwrap_or_else(|| panic!("{} {result}", entry.tool.name));

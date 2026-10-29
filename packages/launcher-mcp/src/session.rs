@@ -45,9 +45,7 @@ pub(crate) struct Inner {
 }
 
 pub(crate) struct Shared {
-    pub(crate) operations: Mutex<crate::operations::Operations>,
-    pub(crate) backend: Arc<dyn crate::Backend>,
-    pub(crate) mutations: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) runtime: Arc<crate::ToolRuntime>,
     pub(crate) inner: Mutex<Inner>,
     pub(crate) changed: Arc<dyn Fn(Snapshot) + Send + Sync>,
     pub(crate) sessions: Arc<LocalSessionManager>,

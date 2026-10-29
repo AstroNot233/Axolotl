@@ -3601,6 +3601,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures",
+ "launcher-tools",
  "reqwest 0.12.28",
  "rmcp",
  "serde",
@@ -3608,6 +3609,18 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid 1.24.0",
+]
+
+[[package]]
+name = "launcher-tools"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
  "uuid 1.24.0",
 ]
 
@@ -7393,6 +7406,7 @@ dependencies = [
  "image",
  "keyring",
  "launcher-mcp",
+ "launcher-tools",
  "libc",
  "libloading",
  "native-dialog",

@@ -85,11 +85,11 @@ fn workflow_schemas_match_typed_dispatch_and_enforce_bounds() {
         args["session_id"] = json!("session");
         catalog::validate(entry, args.as_object().unwrap()).unwrap();
         args.as_object_mut().unwrap().remove("session_id");
-        let command = serde_json::from_value::<Command>(
+        let _command = serde_json::from_value::<Command>(
             json!({"name":name,"arguments":args}),
         )
         .unwrap();
-        assert_eq!(command.deferred(), !name.starts_with("ui_"), "{name}");
+        assert_eq!(entry.deferred, !name.starts_with("ui_"), "{name}");
     }
     for (name, mut args) in [
         (

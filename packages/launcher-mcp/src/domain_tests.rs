@@ -169,7 +169,7 @@ async fn domain_dispatch_deferred_metadata_and_large_payloads_are_consistent() {
         args["session_id"] = json!(session);
         let mut typed = args.clone();
         typed.as_object_mut().unwrap().remove("session_id");
-        let command: Command = serde_json::from_value(
+        let _command: Command = serde_json::from_value(
             json!({"name":entry.tool.name,"arguments":typed}),
         )
         .unwrap();
@@ -179,7 +179,7 @@ async fn domain_dispatch_deferred_metadata_and_large_payloads_are_consistent() {
             .iter()
             .find(|t| t["name"] == entry.tool.name.as_ref())
             .unwrap();
-        assert_eq!(tool["returns_operation_id"], command.deferred());
+        assert_eq!(tool["returns_operation_id"], entry.deferred);
         if entry.tool.name == "screenshot_get" {
             continue;
         }
@@ -187,7 +187,7 @@ async fn domain_dispatch_deferred_metadata_and_large_payloads_are_consistent() {
             args["content"] = json!("x".repeat(70000));
         }
         let result = client.tool(&entry.tool.name, args).await;
-        if command.deferred() {
+        if entry.deferred {
             let id = result["result"]["structuredContent"]["operation_id"]
                 .as_str()
                 .unwrap_or_else(|| panic!("{}: {result}", entry.tool.name));

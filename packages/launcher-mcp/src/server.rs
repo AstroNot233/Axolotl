@@ -33,6 +33,25 @@ impl Server {
         backend: Arc<dyn crate::Backend>,
         changed: impl Fn(Snapshot) + Send + Sync + 'static,
     ) -> std::io::Result<Self> {
+        Self::start_with_runtime(
+            port,
+            token,
+            full_access,
+            require_auth,
+            Arc::new(crate::ToolRuntime::new(info, backend)),
+            changed,
+        )
+        .await
+    }
+
+    pub async fn start_with_runtime(
+        port: u16,
+        token: String,
+        full_access: bool,
+        require_auth: bool,
+        runtime: Arc<crate::ToolRuntime>,
+        changed: impl Fn(Snapshot) + Send + Sync + 'static,
+    ) -> std::io::Result<Self> {
         let listener =
             TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
         let port = listener.local_addr()?.port();
@@ -40,9 +59,8 @@ impl Server {
         sessions.session_config.init_timeout = Some(Duration::from_secs(60));
         sessions.session_config.keep_alive = Some(Duration::from_secs(90));
         let shared = Arc::new(Shared {
-            operations: Mutex::new(Default::default()),
-            backend,
-            mutations: Arc::new(tokio::sync::Mutex::new(())),
+            info: runtime.info().clone(),
+            runtime,
             inner: Mutex::new(Inner {
                 snapshot: Snapshot {
                     running: true,
@@ -57,7 +75,6 @@ impl Server {
             changed: Arc::new(changed),
             sessions: Arc::new(sessions),
             token,
-            info,
             shutdown: CancellationToken::new(),
             admission: Semaphore::new(1),
         });
