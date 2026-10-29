@@ -15,6 +15,8 @@
 
 pub(crate) mod cache;
 pub(crate) mod content_dependencies;
+// Production writes the retired table through the resource layer's mirror.
+#[cfg(test)]
 pub(crate) mod content_favorites;
 pub(crate) mod content_file_fingerprints;
 pub(crate) mod content_file_operations;
