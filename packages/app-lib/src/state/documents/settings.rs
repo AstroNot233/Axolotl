@@ -115,6 +115,7 @@ const DOMAINS: &[(&str, &[&str], u32)] = &[
         &[
             "auto_set_java_high_performance_mode",
             "custom_env_vars",
+            "default_game_language",
             "enter_lightweight_mode_on_game_launch",
             "extra_launch_args",
             "force_fullscreen",

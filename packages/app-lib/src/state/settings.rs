@@ -406,6 +406,9 @@ impl Default for Settings {
             hide_on_process_start: false,
             enter_lightweight_mode_on_game_launch: false,
             auto_set_java_high_performance_mode: true,
+            // The column is added defaulting to empty, which means the launcher
+            // picks the language rather than the user naming one.
+            default_game_language: String::new(),
             hooks: Hooks::default(),
             custom_dir: None,
             prev_custom_dir: None,
