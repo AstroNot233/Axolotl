@@ -1123,8 +1123,6 @@ mod tests {
             ("world", "saves/My World/level.dat"),
             ("plugin", "plugins/example.jar"),
             ("disabled-plugin", "plugins/example.jar.disabled"),
-            ("plugin", "plugins/example.jar"),
-            ("disabled-plugin", "plugins/disabled.jar.disabled"),
         ] {
             let file = InstanceFile {
                 id: format!("{}-{id}", instance.id),
