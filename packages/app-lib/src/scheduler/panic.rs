@@ -13,6 +13,9 @@ pub const PANIC_LOG_FILE: &str = "panic.log";
 pub const PANIC_LOG_MAX_BYTES: u64 = 1024 * 1024;
 const PANIC_LOG_PREVIOUS_FILE: &str = "panic.old.log";
 const TRUNCATED: &str = " [truncated]\n";
+/// Serializes the size check, rotation and append of threads that panic at
+/// the same time.
+static PANIC_LOG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Installs the hook; call it once, as early in `main` as the log folder is known.
 pub fn install_panic_hook(app_identifier: &str) {
@@ -51,6 +54,9 @@ pub(crate) fn append_panic_record(
     location: &str,
     message: &str,
 ) -> std::io::Result<PathBuf> {
+    let _serial = PANIC_LOG_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     std::fs::create_dir_all(dir)?;
     let path = dir.join(PANIC_LOG_FILE);
     let mut line = format!(
@@ -125,6 +131,47 @@ mod tests {
         assert!(previous.contains(": third") && previous.contains(": fourth"));
         assert!(!previous.contains(": first"), "only one old log is kept");
         assert!(current.len() as u64 <= CAP && previous.len() as u64 <= CAP);
+    }
+
+    #[test]
+    fn concurrent_records_rotate_without_failing() {
+        // Each record is about 60 bytes, so the log rotates every few writes.
+        const CAP: u64 = 200;
+        let dir = tempfile::tempdir().unwrap();
+        let failures: usize = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|worker| {
+                    let dir = dir.path();
+                    scope.spawn(move || {
+                        (0..40)
+                            .filter(|record| {
+                                append_panic_record(
+                                    dir,
+                                    CAP,
+                                    &format!("w{worker}"),
+                                    "src/a.rs:1",
+                                    &format!("r{record}"),
+                                )
+                                .is_err()
+                            })
+                            .count()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap())
+                .sum()
+        });
+        assert_eq!(failures, 0, "no record may be dropped by a rotation race");
+        for file in [PANIC_LOG_FILE, PANIC_LOG_PREVIOUS_FILE] {
+            let log = std::fs::read_to_string(dir.path().join(file)).unwrap();
+            assert!(log.len() as u64 <= CAP, "{file} outgrew the cap");
+            assert!(
+                log.lines().all(|line| line.contains(" panic thread=w")),
+                "{file} holds a torn record: {log:?}"
+            );
+        }
     }
 
     #[test]

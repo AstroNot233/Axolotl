@@ -53,6 +53,11 @@
       "ident": "theseus::logger::RotatingLogWriter.state",
       "rule": "D4",
       "reason": "log write lock: leaf primitive only (spec §5.2 leaf table), held for one bounded write"
+    },
+    {
+      "ident": "theseus::scheduler::panic::PANIC_LOG_LOCK",
+      "rule": "D4",
+      "reason": "panic-log append lock: synchronous, held for one bounded append, takes no other lock"
     }
   ],
   "recallGap": {
