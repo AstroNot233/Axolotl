@@ -1102,13 +1102,11 @@ fn from_home_layout(layout: HomeLayout) -> StoredHomeLayout {
     }
 }
 #[cfg(test)]
-#[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
-    use sqlx::sqlite::SqlitePoolOptions;
-
     use super::*;
+    use crate::state::store::tests::support::migrated_pool;
 
     /// The keys where two settings carry different values, written out so a
     /// failure names them instead of printing two whole `Settings`.
@@ -1152,12 +1150,7 @@ mod tests {
     /// as.
     #[tokio::test]
     async fn default_matches_the_row_a_fresh_database_creates() {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
+        let pool = migrated_pool().await;
         let row = Settings::get(&Handle::new(pool)).await.unwrap();
 
         let differing = differences(&Settings::default(), &row);

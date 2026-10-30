@@ -28,7 +28,10 @@
 //!
 //! `personalized_ads` is in no document: it is the one `Settings` field marked
 //! `#[serde(skip)]`, it stays a column of the row alone, and listing it here
-//! would promise a document that never carries it.
+//! would promise a document that never carries it. The row is therefore read on
+//! every read and this key always comes from it: the layers above answer no part
+//! of it, so a document that exists cannot lower it to the default and no
+//! document's absence is needed to reach it (Q5).
 //!
 //! Nothing reads these documents yet: `Settings::get` still answers from the
 //! row, and nothing writes them either. Both arrive with the wiring that
@@ -172,7 +175,7 @@ pub(crate) async fn read(
     // Layer 1: the build defaults, which every key starts at.
     let mut values = default_values()?;
     // Layer 2 is answered per domain, so which domains it answers is collected
-    // first: the row itself is read once, and only if some domain needs it.
+    // first: the row is read once, and only for the keys that need it.
     let mut without_a_document: Vec<&[&str]> = Vec::new();
 
     for &(name, keys, schema_version) in DOMAINS {
@@ -194,14 +197,18 @@ pub(crate) async fn read(
         }
     }
 
-    if !without_a_document.is_empty() {
-        let row = row_values(handle).await?;
-        for keys in without_a_document {
-            contribute(&mut values, keys, &row);
-        }
+    // The row is read whether or not a domain needs it, because
+    // `personalized_ads` is in no document and only it can answer that key.
+    let (row_settings, row) = row_values(handle).await?;
+    for keys in without_a_document {
+        contribute(&mut values, keys, &row);
     }
 
-    Ok(serde_json::from_value(Value::Object(values))?)
+    let mut settings: Settings = serde_json::from_value(Value::Object(values))?;
+    // `personalized_ads` is skipped when deserializing, so the map above cannot
+    // carry it back; it is taken from the row the read already made.
+    settings.personalized_ads = row_settings.personalized_ads;
+    Ok(settings)
 }
 
 /// The settings a build starts from, keyed the way a document keys them.
@@ -210,10 +217,14 @@ fn default_values() -> crate::Result<Map<String, Value>> {
     Ok(serde_json::from_value(default)?)
 }
 
-/// The settings as the row holds them, keyed the way a document keys them.
-async fn row_values(handle: &Handle) -> crate::Result<Map<String, Value>> {
+/// The settings as the row holds them, and the same ones keyed the way a
+/// document keys them.
+async fn row_values(
+    handle: &Handle,
+) -> crate::Result<(Settings, Map<String, Value>)> {
     let settings = Settings::get(handle).await?;
-    Ok(serde_json::from_value(serde_json::to_value(&settings)?)?)
+    let values = serde_json::from_value(serde_json::to_value(&settings)?)?;
+    Ok((settings, values))
 }
 
 /// Lays the row's values for `keys` over `values`.
@@ -269,22 +280,8 @@ fn overlay(
 mod tests {
     use std::collections::BTreeSet;
 
-    use sqlx::SqlitePool;
-    use sqlx::sqlite::SqlitePoolOptions;
-
     use super::*;
-
-    /// An installation the migrations have set up, whose row is the only whole
-    /// `Settings` this build can put together.
-    async fn migrated_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
-        pool
-    }
+    use crate::state::store::tests::support::migrated_pool;
 
     fn document_keys() -> BTreeSet<&'static str> {
         DOMAINS
@@ -348,7 +345,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             root.path().join("appearance.json"),
-            r#"{"schema_version":1,"data":{"custom_background_blur":"lots"}}"#,
+            r#"{"schema_version":1,"data":{"custom_background_blur":"lots","theme":"light"}}"#,
         )
         .unwrap();
 
@@ -361,9 +358,82 @@ mod tests {
             "a key the document carries is read from it"
         );
         assert_eq!(
+            settings.theme.as_str(),
+            "light",
+            "a key beside an unreadable one still comes from the same document"
+        );
+        assert_ne!(
+            settings.theme.as_str(),
+            Settings::default().theme.as_str(),
+            "the document answers that key, not the default"
+        );
+        assert_eq!(
             settings.custom_background_blur,
             Settings::default().custom_background_blur,
             "a value the type cannot take costs its own key only"
+        );
+    }
+
+    /// A document that leaves `data` out is a file this build cannot read, not
+    /// an empty authority: the rows keep answering the domain.
+    #[tokio::test]
+    async fn a_document_without_data_is_unreadable() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let mut row = Settings::get(&handle).await.unwrap();
+        row.locale = "zh_cn".to_string();
+        row.update(&handle).await.unwrap();
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("appearance.json");
+        let without_data = br#"{"schema_version":1}"#;
+        std::fs::write(&path, without_data).unwrap();
+
+        let documents = Documents::at(root.path().to_path_buf(), &pool);
+        let settings = read(&documents, &handle).await.unwrap();
+
+        assert_eq!(
+            settings.locale, "zh_cn",
+            "a document without `data` is unreadable, so the row answers the domain"
+        );
+        assert_ne!(
+            settings.locale,
+            Settings::default().locale,
+            "the row answers that key rather than the default"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap().as_slice(),
+            without_data.as_slice(),
+            "a document that cannot be read is left alone"
+        );
+    }
+
+    /// `personalized_ads` is in no document, so the row answers it even when
+    /// every domain has one: the layering the other keys follow never reaches
+    /// it (Q5).
+    #[tokio::test]
+    async fn the_ads_preference_comes_from_the_row() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let mut row = Settings::get(&handle).await.unwrap();
+        row.personalized_ads = true;
+        row.update(&handle).await.unwrap();
+
+        let root = tempfile::tempdir().unwrap();
+        for (name, _, _) in DOMAINS {
+            std::fs::write(
+                root.path().join(format!("{name}.json")),
+                r#"{"schema_version":1,"data":{}}"#,
+            )
+            .unwrap();
+        }
+
+        let documents = Documents::at(root.path().to_path_buf(), &pool);
+        let settings = read(&documents, &handle).await.unwrap();
+
+        assert!(
+            settings.personalized_ads,
+            "every domain has a document, and the ads preference still comes from the row"
         );
     }
 

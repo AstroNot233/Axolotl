@@ -118,7 +118,8 @@ impl<'a> Documents<'a> {
     }
 
     /// Replaces a document with a temporary file and a rename, so a reader
-    /// never sees half of one.
+    /// never sees half of one. A write that would change no value, or that
+    /// would lower a document a newer build wrote, leaves the file as it is.
     pub(crate) async fn write<T>(
         &self,
         name: &str,
@@ -129,6 +130,30 @@ impl<'a> Documents<'a> {
         T: Serialize,
     {
         let path = self.path(name);
+        // `WRITES` only serializes this process, so the file is read again
+        // here: a second instance, or a build that took longer than the
+        // caller's own read, can have replaced it meanwhile.
+        if let Some(existing) = written_document(&path).await {
+            // The version records the last write of this document, so a write
+            // that leaves the data as it stands must not touch it: raising it
+            // for a value the user did not change would lock a build that
+            // knows the same shape out of the document from then on.
+            if serde_json::to_value(document)? == existing.data {
+                return Ok(());
+            }
+            // The same rule `stored` applies to a read applies to the write
+            // that follows it, whatever the caller checked before: writing a
+            // document a newer build wrote would lower it to the keys this
+            // build knows.
+            if existing.schema_version > schema_version {
+                tracing::warn!(
+                    path = %path.display(),
+                    schema_version = existing.schema_version,
+                    "Leaving a settings document a newer build wrote alone"
+                );
+                return Ok(());
+            }
+        }
         let contents = serde_json::to_vec_pretty(&NewDocument {
             schema_version,
             data: document,
@@ -139,6 +164,14 @@ impl<'a> Documents<'a> {
         crate::util::io::write(&path, contents).await?;
         Ok(())
     }
+}
+
+/// What a document on disk already holds, when there is a file there that can
+/// be parsed. Nothing means the write has nothing to compare against and goes
+/// ahead: a file this build cannot interpret is not one it can lower.
+async fn written_document(path: &Path) -> Option<WrittenDocument> {
+    let contents = tokio::fs::read(path).await.ok()?;
+    serde_json::from_slice(&contents).ok()
 }
 
 pub(crate) enum Stored<T> {
@@ -173,10 +206,21 @@ struct NewDocument<'a, T: Serialize> {
     data: &'a T,
 }
 
+/// The two fields of a stored document a write has to look at before it lands.
+/// They are parsed without the domain type, so a document this build cannot
+/// read as its own still answers whether the write would change anything.
+#[derive(serde::Deserialize)]
+struct WrittenDocument {
+    schema_version: u32,
+    data: serde_json::Value,
+}
+
 #[derive(serde::Deserialize)]
 struct StoredDocument<T> {
     schema_version: u32,
-    #[serde(default)]
+    /// No default: a document that leaves `data` out is not an empty
+    /// authority but a file this build cannot interpret, so it reads as
+    /// `Unreadable` and the rows keep answering the domain.
     data: T,
 }
 
@@ -251,16 +295,10 @@ pub(super) fn is_false(value: &bool) -> bool {
 #[cfg(test)]
 pub(crate) mod test_support {
     use sqlx::SqlitePool;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    /// One connection, so every statement sees the same in-memory database.
-    pub(crate) async fn pool() -> SqlitePool {
-        SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .expect("in-memory SQLite pool")
-    }
+    /// An empty in-memory database, opened where `sqlx` may be spelled: this
+    /// module only lays the tables its own domains used to have over it.
+    pub(crate) use crate::state::store::tests::support::empty_pool as pool;
 
     /// The three AI tables, as the migrations leave them.
     pub(crate) async fn create_ai_tables(pool: &SqlitePool) {
@@ -528,6 +566,52 @@ mod tests {
         assert!(
             ai::read(&documents).await.unwrap().enabled,
             "an existing document is authoritative, so the handover must not rewrite it"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_write_leaves_a_document_a_newer_build_wrote() {
+        let pool = pool().await;
+        let settings_dir = tempfile::tempdir().unwrap();
+        let root = settings_dir.path().join("settings");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("java.json");
+        let newer = br#"{"schema_version":99,"data":{"runtimes":[{"path":"/old/java/bin/java","major_version":21,"full_version":"21.0.1"}]}}"#;
+        std::fs::write(&path, newer).unwrap();
+
+        // The move reads the newer document and writes it back without asking
+        // for its version again, which is the race `write` has to answer for.
+        let documents = Documents::at(root, &pool);
+        java::move_installations(&documents, "/old", "/new", |_| false)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(&path).unwrap().as_slice(),
+            newer.as_slice(),
+            "a write must leave a document a newer build wrote byte for byte"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_write_that_changes_nothing_leaves_the_document_alone() {
+        let pool = pool().await;
+        let settings_dir = tempfile::tempdir().unwrap();
+        let root = settings_dir.path().join("settings");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("ai.json");
+        // Written the way another build left it, so a rewrite would show as
+        // different bytes although it carried the same values.
+        let untouched = br#"{"data":{},"schema_version":1}"#;
+        std::fs::write(&path, untouched).unwrap();
+
+        let documents = Documents::at(root, &pool);
+        ai::set_enabled(&documents, true).await.unwrap();
+
+        assert_eq!(
+            std::fs::read(&path).unwrap().as_slice(),
+            untouched.as_slice(),
+            "a write that changes no value must leave the file and its version as they stand"
         );
     }
 }

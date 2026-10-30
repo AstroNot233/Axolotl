@@ -79,7 +79,7 @@ pub(crate) mod telemetry_outbox;
 pub(crate) mod translation_cache;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use sqlx::{Sqlite, SqliteConnection, SqlitePool};
 
