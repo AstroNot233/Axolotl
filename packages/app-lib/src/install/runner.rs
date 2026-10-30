@@ -328,7 +328,7 @@ pub async fn queue_resource_plan(
     let _writer = state.acquire_install_db_permit().await?;
     let mut tx = state.pool.begin().await?;
     let existing =
-        ResourceOperationPlans::job_at_in(&mut *tx, plan_id.as_str(), revision)
+        ResourceOperationPlans::job_at_in(&mut tx, plan_id.as_str(), revision)
             .await?;
     if let Some(existing) = existing {
         drop(tx);
@@ -343,7 +343,7 @@ pub async fn queue_resource_plan(
             });
     }
     let payload = ResourceOperationPlans::queueable_payload_in(
-        &mut *tx,
+        &mut tx,
         plan_id.as_str(),
         revision,
     )
@@ -417,7 +417,7 @@ pub async fn queue_resource_plan(
     });
     let now = chrono::Utc::now().timestamp();
     InstallJobs::insert_in(
-        &mut *tx,
+        &mut tx,
         &id.to_string(),
         &StoredJob {
             instance_id: Some(plan.instance_id.clone()),
@@ -432,7 +432,7 @@ pub async fn queue_resource_plan(
     )
     .await?;
     let updated = ResourceOperationPlans::queue_in(
-        &mut *tx,
+        &mut tx,
         plan_id.as_str(),
         revision,
         &id.to_string(),

@@ -787,12 +787,10 @@ impl ResourceProvider for CurseForgeProvider {
                 project_id,
                 page_size,
                 ..
-            } => {
-                if *project_id == 0 || !(1..=50).contains(page_size) {
-                    return Err(ResourceError::InvalidRequest(
-                        "invalid CurseForge file page".into(),
-                    ));
-                }
+            } if (*project_id == 0 || !(1..=50).contains(page_size)) => {
+                return Err(ResourceError::InvalidRequest(
+                    "invalid CurseForge file page".into(),
+                ));
             }
             ProviderQuery::UpdateCandidates {
                 project_id,
