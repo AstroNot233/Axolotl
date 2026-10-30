@@ -1121,13 +1121,17 @@ mod tests {
         for (id, relative_path) in [
             ("stale", "shaderpacks/BSL_v10.1.3.zip.txt"),
             ("world", "saves/My World/level.dat"),
+            ("plugin", "plugins/example.jar"),
+            ("disabled-plugin", "plugins/example.jar.disabled"),
+            ("plugin", "plugins/example.jar"),
+            ("disabled-plugin", "plugins/disabled.jar.disabled"),
         ] {
             let file = InstanceFile {
                 id: format!("{}-{id}", instance.id),
                 instance_id: instance.id.clone(),
                 relative_path: relative_path.into(),
                 file_name: relative_path.rsplit('/').next().unwrap().into(),
-                enabled: true,
+                enabled: !relative_path.ends_with(".disabled"),
                 sha1: format!("seeded-{id}"),
                 size: 4,
                 missing: false,
@@ -1163,6 +1167,13 @@ mod tests {
             remaining.iter().any(|id| id == "saves/My World/level.dat"),
             "tracked world rows must survive reconciliation, got: {remaining:?}",
         );
+        for retained in ["plugins/example.jar", "plugins/example.jar.disabled"]
+        {
+            assert!(
+                remaining.iter().any(|path| path == retained),
+                "installed plugins must survive reconciliation: {retained}"
+            );
+        }
     }
 
     #[tokio::test]

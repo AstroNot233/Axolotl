@@ -278,7 +278,7 @@ pub(crate) fn is_scannable_project_path(
     }
 }
 
-/// Whether a tracked row can be refreshed by the content scan.
+/// Whether reconciliation must retain a tracked row.
 ///
 /// The scan starts at each content folder and only recurses into subfolders for
 /// schematics, so scannability has to be decided by the *root* content folder
@@ -292,10 +292,18 @@ pub(crate) fn is_scannable_project_path(
 /// the packs; a tracked row for one of them would stay marked missing forever
 /// and surface as phantom content.
 ///
-/// Rows under a folder this scanner never walks are kept: worlds live in
-/// `saves/` and are tracked through `worlds.rs`, so dropping their rows here
-/// would remove worlds that still exist on disk from the content list.
-pub(crate) fn is_scannable_instance_file_path(relative_path: &str) -> bool {
+/// Independently managed content is kept: worlds in `saves/` are tracked by
+/// `worlds.rs`, while `plugins/` is owned by resource installation. The scanner
+/// visits world datapack archives, but absence from that scan cannot invalidate
+/// the other world rows or independently installed plugins.
+pub(crate) fn should_retain_instance_file_path(relative_path: &str) -> bool {
+    if Path::new(relative_path)
+        .components()
+        .next()
+        .is_some_and(|component| component.as_os_str() == "plugins")
+    {
+        return true;
+    }
     let Some((project_type, nested)) = root_content_folder_of(relative_path)
     else {
         return false;
@@ -429,41 +437,56 @@ mod tests {
 
     #[test]
     fn tracked_rows_outside_the_scan_scope_are_recognised() {
-        assert!(is_scannable_instance_file_path("mods/example.jar"));
-        assert!(is_scannable_instance_file_path("mods/example.jar.disabled"));
-        assert!(is_scannable_instance_file_path(
+        assert!(should_retain_instance_file_path("mods/example.jar"));
+        assert!(should_retain_instance_file_path(
+            "mods/example.jar.disabled"
+        ));
+        assert!(should_retain_instance_file_path(
             "shaderpacks/BSL_v10.1.3.zip"
         ));
-        assert!(is_scannable_instance_file_path(
+        assert!(should_retain_instance_file_path(
             "schematics/redstone/house.litematic"
         ));
-        assert!(!is_scannable_instance_file_path(
+        assert!(!should_retain_instance_file_path(
             "shaderpacks/BSL_v10.1.3.zip.txt"
         ));
-        assert!(!is_scannable_instance_file_path(
+        assert!(!should_retain_instance_file_path(
             "mods/Mod-2.jar_Mod-1.jar.old"
         ));
-        assert!(!is_scannable_instance_file_path("config/example.json"));
+        assert!(!should_retain_instance_file_path("config/example.json"));
     }
 
     #[test]
     fn tracked_row_scope_follows_the_scanner_recursion_rules() {
         // A schematic nested under a subfolder is scanned, even when an
         // ancestor directory happens to share a content folder name.
-        assert!(is_scannable_instance_file_path(
+        assert!(should_retain_instance_file_path(
             "schematics/mods/house.schem"
         ));
         // Non-schematic folders are only scanned at the top level, so a nested
         // file there can never be reported again.
-        assert!(!is_scannable_instance_file_path("mods/subdir/example.jar"));
+        assert!(!should_retain_instance_file_path("mods/subdir/example.jar"));
         // Worlds are tracked through `worlds.rs`, not by this scanner, so their
         // rows must survive reconciliation.
-        assert!(is_scannable_instance_file_path("saves/My World/level.dat"));
-        assert!(is_scannable_instance_file_path(
+        assert!(should_retain_instance_file_path("saves/My World/level.dat"));
+        assert!(should_retain_instance_file_path(
             "saves/My World/region/r.0.0.mca"
         ));
+        assert!(should_retain_instance_file_path(
+            "saves/My World/datapacks/example.zip"
+        ));
+        assert!(should_retain_instance_file_path(
+            "saves/My World/datapacks/example.zip.disabled"
+        ));
+        assert!(should_retain_instance_file_path("plugins/example.jar"));
+        assert!(should_retain_instance_file_path(
+            "plugins/example.jar.disabled"
+        ));
+        assert!(should_retain_instance_file_path(
+            "plugins/nested/example.jar"
+        ));
         // A path with no content folder is out of scope as well.
-        assert!(!is_scannable_instance_file_path("options.txt"));
+        assert!(!should_retain_instance_file_path("options.txt"));
     }
 
     #[test]

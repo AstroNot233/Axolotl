@@ -79,7 +79,7 @@ pub(crate) async fn remove_untracked_instance_files(
     let stale_ids: Vec<String> = rows
         .into_iter()
         .filter(|(_, relative_path)| {
-            !super::super::filesystem::is_scannable_instance_file_path(
+            !super::super::filesystem::should_retain_instance_file_path(
                 relative_path,
             )
         })
