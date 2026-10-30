@@ -71,7 +71,7 @@ in
     cargoLock = {
       lockFile = ../Cargo.lock;
       outputHashes = {
-        "tauri-plugin-updater-2.10.1" = "sha256-NiORbFiK91SGrAIfQtUCLwomKO5ZIX+nvW8/8ZODaB4=";
+        "tauri-plugin-updater-2.10.1" = "sha256-LcnavYjT6nK0fQ/Gtb5HnkVzUuFuIL/9ewUq3PaTJTo=";
         "tauri-plugin-window-state-2.4.1" = "sha256-WPZ5HvSY5NCwjHXVgovBK4Xvf8Zl4Z8vJinKZvRJPhQ=";
       };
     };
