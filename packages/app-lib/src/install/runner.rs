@@ -23,6 +23,15 @@ use crate::api::pack::install_mrpack::{
 };
 use crate::event::InstancePayloadType;
 use crate::event::emit::emit_instance;
+use crate::state::instances::adapters::sqlite::content_sets;
+use crate::state::store::Collection as _;
+use crate::state::store::content_update_jobs::{
+    ContentUpdateJobRecord, ContentUpdateJobs,
+};
+use crate::state::store::install_jobs::{
+    InstallJobRecord as StoredJob, InstallJobs,
+};
+use crate::state::store::resource_operation_plans::ResourceOperationPlans;
 use crate::state::{
     ContentProvider, ContentProviderRef, InstanceInstallStage, InstanceLink,
     InstanceUpgradeAction, InstanceUpgradeDependencyChangeKind,
@@ -309,13 +318,18 @@ pub async fn queue_resource_plan(
     revision: u32,
 ) -> crate::Result<InstallJobSnapshot> {
     let state = State::get().await?;
-    let instance: String = sqlx::query_scalar("SELECT instance_id FROM resource_operation_plans WHERE id = ? AND revision = ?")
-        .bind(plan_id.as_str()).bind(revision).fetch_one(&state.pool).await?;
+    let instance = ResourceOperationPlans::instance_at(
+        &state.data,
+        plan_id.as_str(),
+        revision,
+    )
+    .await?;
     let _admission = admission::lock(&state, Some(&instance)).await?;
     let _writer = state.acquire_install_db_permit().await?;
     let mut tx = state.pool.begin().await?;
-    let existing: Option<String> = sqlx::query_scalar("SELECT job_id FROM resource_operation_plans WHERE id = ? AND revision = ?")
-        .bind(plan_id.as_str()).bind(revision).fetch_optional(&mut *tx).await?.flatten();
+    let existing =
+        ResourceOperationPlans::job_at_in(&mut *tx, plan_id.as_str(), revision)
+            .await?;
     if let Some(existing) = existing {
         drop(tx);
         return store::get(Uuid::parse_str(&existing)?, &state)
@@ -328,8 +342,17 @@ pub async fn queue_resource_plan(
                 .into()
             });
     }
-    let payload: String = sqlx::query_scalar("SELECT payload FROM resource_operation_plans WHERE id = ? AND revision = ? AND queued = 0 AND job_id IS NULL")
-        .bind(plan_id.as_str()).bind(revision).fetch_optional(&mut *tx).await?.ok_or_else(|| crate::ErrorKind::InputError("resource plan was revised or already queued".into()))?;
+    let payload = ResourceOperationPlans::queueable_payload_in(
+        &mut *tx,
+        plan_id.as_str(),
+        revision,
+    )
+    .await?
+    .ok_or_else(|| {
+        crate::ErrorKind::InputError(
+            "resource plan was revised or already queued".into(),
+        )
+    })?;
     let draft: crate::resources::plans::OperationDraft =
         serde_json::from_str(&payload)?;
     let plan = draft.plan;
@@ -343,8 +366,15 @@ pub async fn queue_resource_plan(
     let _lock = state
         .lock_instance_content_exclusive(&plan.instance_id)
         .await;
-    let current_revision: i64 = sqlx::query_scalar("SELECT content.revision FROM instances instance JOIN instance_content_sets content ON content.id = instance.applied_content_set_id WHERE instance.id = ?").bind(&plan.instance_id).fetch_one(&mut *tx).await?;
-    if u64::try_from(current_revision).ok() != Some(plan.instance_revision) {
+    let current_revision = content_sets::get_applied_content_set_revision(
+        &plan.instance_id,
+        &mut *tx,
+    )
+    .await?
+    .map(|(_, revision)| revision);
+    if current_revision.and_then(|revision| u64::try_from(revision).ok())
+        != Some(plan.instance_revision)
+    {
         return Err(crate::ErrorKind::InputError(
             "instance changed after review".into(),
         )
@@ -386,9 +416,29 @@ pub async fn queue_resource_plan(
         icon: None,
     });
     let now = chrono::Utc::now().timestamp();
-    sqlx::query("INSERT INTO install_jobs(id, instance_id, kind, status, state, created, modified, finished, dismissed) VALUES (?, ?, ?, 'queued', ?, ?, ?, NULL, 0)").bind(id.to_string()).bind(&plan.instance_id).bind(job.request.kind().as_str()).bind(serde_json::to_string(&job)?).bind(now).bind(now).execute(&mut *tx).await?;
-    let updated = sqlx::query("UPDATE resource_operation_plans SET job_id = ?, queued = 1 WHERE id = ? AND revision = ? AND queued = 0 AND job_id IS NULL").bind(id.to_string()).bind(plan_id.as_str()).bind(revision).execute(&mut *tx).await?;
-    if updated.rows_affected() != 1 {
+    InstallJobs::insert_in(
+        &mut *tx,
+        &id.to_string(),
+        &StoredJob {
+            instance_id: Some(plan.instance_id.clone()),
+            kind: job.request.kind().as_str().to_string(),
+            status: InstallJobStatus::Queued.as_str().to_string(),
+            state: serde_json::to_string(&job)?,
+            created: now,
+            modified: now,
+            finished: None,
+            dismissed: false,
+        },
+    )
+    .await?;
+    let updated = ResourceOperationPlans::queue_in(
+        &mut *tx,
+        plan_id.as_str(),
+        revision,
+        &id.to_string(),
+    )
+    .await?;
+    if updated != 1 {
         return Err(crate::ErrorKind::InputError(
             "resource plan changed concurrently".into(),
         )
@@ -488,7 +538,11 @@ pub async fn job_support_details(job_id: Uuid) -> crate::Result<String> {
 pub async fn retry_job(job_id: Uuid) -> crate::Result<InstallJobSnapshot> {
     let state = State::get().await?;
     let mut job = store::get_required(job_id, &state).await?;
-    let instance = admission::request_instance(&job.state.request);
+    let instance = if job.state.retry_from_checkpoint {
+        current_instance_id(&job.state)
+    } else {
+        admission::request_instance(&job.state.request)
+    };
     let _admission = admission::lock(&state, instance.as_deref()).await?;
     job = store::get_required(job_id, &state).await?;
     if matches!(
@@ -499,9 +553,19 @@ pub async fn retry_job(job_id: Uuid) -> crate::Result<InstallJobSnapshot> {
     ) {
         return Ok(job.snapshot());
     }
-    if let Some(existing) =
-        admission::existing(&state, &job.state.request, Some(job_id)).await?
-    {
+    let existing = match instance.as_deref() {
+        Some(instance) => {
+            admission::existing_for_instance(
+                &state,
+                instance,
+                &job.state.request,
+                Some(job_id),
+            )
+            .await?
+        }
+        None => None,
+    };
+    if let Some(existing) = existing {
         return Ok(existing);
     }
 
@@ -516,9 +580,12 @@ pub async fn retry_job(job_id: Uuid) -> crate::Result<InstallJobSnapshot> {
         .into());
     }
 
-    job.state.target = job.state.request.target();
-    job.state.cleanup = job.state.request.cleanup();
-    job.state.rollback = None;
+    let resume_checkpoint = prepare_pack_retry(&mut job.state, &state).await?;
+    if !resume_checkpoint {
+        job.state.target = job.state.request.target();
+        job.state.cleanup = job.state.request.cleanup();
+        job.state.rollback = None;
+    }
     job.state.error = None;
     job.state.rollback_error = None;
     job.state.pause_reason = None;
@@ -530,7 +597,9 @@ pub async fn retry_job(job_id: Uuid) -> crate::Result<InstallJobSnapshot> {
     job.state.progress.progress = None;
     job.state.progress.details = InstallPhaseDetails::Empty;
     job.state.progress.parallel = None;
-    init::prepare_initial_instance(&mut job.state, &state).await?;
+    if !resume_checkpoint {
+        init::prepare_initial_instance(&mut job.state, &state).await?;
+    }
     job.state.record_event(InstallJobEventKind::JobQueued {
         kind: job.state.request.kind(),
     });
@@ -543,12 +612,48 @@ pub async fn retry_job(job_id: Uuid) -> crate::Result<InstallJobSnapshot> {
     )
     .await?;
     InstallProgressReporter::reset_job(job_id);
-    emit_install_job(&record.snapshot()).await?;
+    lifecycle::emit_job_best_effort(&record.snapshot()).await;
     lifecycle::spawn_job(job_id);
 
     // The spawned job may already have progressed (or finished) by the time
     // the command returns; hand the caller the freshest stored state.
     Ok(store::get_required(job_id, &state).await?.snapshot())
+}
+
+async fn prepare_pack_retry(
+    job: &mut InstallJobState,
+    state: &State,
+) -> crate::Result<bool> {
+    if !job.retry_from_checkpoint {
+        return Ok(false);
+    }
+    let Some(id) = current_instance_id(job) else {
+        job.retry_from_checkpoint = false;
+        return Ok(false);
+    };
+    let Some(instance) = crate::state::get_instance(&id, &state.pool).await?
+    else {
+        job.retry_from_checkpoint = false;
+        return Ok(false);
+    };
+    if !job.is_new_pack_checkpoint()
+        || instance.instance.install_stage == InstanceInstallStage::Installed
+    {
+        return Err(ErrorKind::InputError("This partial installation no longer matches its download task; start a new installation".into()).into());
+    }
+    if let InstallRequest::CreateModpackInstance {
+        location: CreatePackLocation::FromFile { path },
+        ..
+    } = &job.request
+    {
+        let current =
+            crate::api::pack::install_from::local_pack_retry_identity(path)
+                .await?;
+        if job.local_pack_retry_identity.as_ref() != Some(&current) {
+            return Err(ErrorKind::InputError("The local modpack archive changed after installation started; select it again to start a new installation".into()).into());
+        }
+    }
+    Ok(true)
 }
 
 pub async fn repair_cache_and_retry_job(
@@ -581,9 +686,11 @@ pub async fn repair_cache_and_retry_job(
         return Err(crate::resources::protocol::error(error));
     }
 
-    if let Err(error) =
-        crate::state::CachedEntry::purge_cache_types(&cache_types, &state.pool)
-            .await
+    if let Err(error) = crate::state::CachedEntry::purge_cache_types(
+        &cache_types,
+        state.cache_pool(),
+    )
+    .await
     {
         operation.cache_repair_started = false;
         return Err(crate::ErrorKind::OtherError(format!(
@@ -760,7 +867,7 @@ async fn queue_waiting_job(
         .into());
     };
     InstallProgressReporter::reset_job(job_id);
-    emit_install_job(&record.snapshot()).await?;
+    lifecycle::emit_job_best_effort(&record.snapshot()).await;
     lifecycle::spawn_job(job_id);
     Ok(store::get_required(job_id, state).await?.snapshot())
 }
@@ -877,30 +984,19 @@ pub(super) async fn cancel_job_with_state(
                     tracing::warn!(%job_id, %error, "Could not emit accepted install cancellation");
                 }
                 tracing::info!(%job_id, status = record.status.as_str(), elapsed_ms = started.elapsed().as_millis() as u64, "Install cancellation accepted");
+                schedule_cancel_cleanup(job_id, state.clone());
                 return Ok(record.snapshot());
             }
-            // Accepted, but the cleanup that accepted it may have failed: the job
-            // then waits in `Canceling` with nothing left to finish it, and every
-            // later cancellation used to answer "already accepted" forever.
-            // Restarting the cleanup is what "recoverable" is supposed to mean.
-            InstallJobStatus::Canceling => {
-                let snapshot = job.snapshot();
-                // The lifecycle worker owns the cleanup while it is still alive:
-                // it removes its own cancellation registration once the
-                // execution stopped, and it runs `finish_canceled_job` itself.
-                // Running a second cleanup next to that one would apply the
-                // rollback twice and leave the instance inconsistent, so the
-                // retry only takes over after the worker is gone.
-                if state.install_job_cancellations.contains_key(&job_id) {
-                    tracing::info!(%job_id, "Install cancellation cleanup is still owned by the running job");
-                } else {
-                    tracing::info!(%job_id, "Install cancellation cleanup restarted");
-                    spawn_cancel_cleanup(job_id, state);
+            InstallJobStatus::Canceling | InstallJobStatus::Canceled => {
+                tracing::info!(%job_id, status = job.status.as_str(), "Install cancellation already accepted");
+                if job.status == InstallJobStatus::Canceling {
+                    if let Some(token) =
+                        state.install_job_cancellations.get(&job_id)
+                    {
+                        token.value().cancel();
+                    }
+                    schedule_cancel_cleanup(job_id, state.clone());
                 }
-                return Ok(snapshot);
-            }
-            InstallJobStatus::Canceled => {
-                tracing::info!(%job_id, "Install cancellation already finished");
                 return Ok(job.snapshot());
             }
             InstallJobStatus::Queued | InstallJobStatus::WaitingForUser => {
@@ -922,7 +1018,7 @@ pub(super) async fn cancel_job_with_state(
                     tracing::warn!(%job_id, %error, "Could not emit accepted install cancellation");
                 }
                 tracing::info!(%job_id, status = record.status.as_str(), elapsed_ms = started.elapsed().as_millis() as u64, "Install cancellation accepted; cleanup continues in background");
-                spawn_cancel_cleanup(job_id, state);
+                schedule_cancel_cleanup(job_id, state.clone());
                 return Ok(snapshot);
             }
             _ => {
@@ -933,108 +1029,46 @@ pub(super) async fn cancel_job_with_state(
     }
 }
 
-/// Jobs whose post-cancellation cleanup is currently running.
-///
-/// A cleanup that fails leaves its job in `Canceling`, and cancelling again has
-/// to be able to finish it. Two cleanups at once would fight over the same files,
-/// so only the first caller may start one.
-fn cleanups_in_flight()
--> &'static std::sync::Mutex<std::collections::HashSet<Uuid>> {
-    static IN_FLIGHT: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashSet<Uuid>>,
-    > = std::sync::OnceLock::new();
-    IN_FLIGHT.get_or_init(Default::default)
-}
-
-/// Jobs that were cancelled again while their cleanup was already running.
-///
-/// The request must not be dropped: the running cleanup works from the state it
-/// read when it started, so a cancellation that arrives in the meantime would
-/// otherwise never be acted on.
-fn cleanups_requested_again()
--> &'static std::sync::Mutex<std::collections::HashSet<Uuid>> {
-    static REQUESTED: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashSet<Uuid>>,
-    > = std::sync::OnceLock::new();
-    REQUESTED.get_or_init(Default::default)
-}
-
-/// Finish a canceled job's cleanup in the background, at most once at a time.
-///
-/// The record passed in was read before this call, so it can already be stale by
-/// the time the cleanup runs: another attempt may have finished the job, or a
-/// newer job may have changed the instance. The cleanup therefore re-reads the
-/// durable state and only proceeds while the job is still `Canceling`.
-///
-/// Returns whether this call started the cleanup; `false` means another one is
-/// still running for the same job.
-fn spawn_cancel_cleanup(job_id: Uuid, state: std::sync::Arc<State>) -> bool {
-    let started = cleanups_in_flight()
-        .lock()
-        .map(|mut in_flight| in_flight.insert(job_id))
-        .unwrap_or(false);
-    if !started {
-        // A cleanup is already running for this job. Remember the request so
-        // the running cleanup can pick it up instead of the cancellation being
-        // silently dropped.
-        if let Ok(mut requested) = cleanups_requested_again().lock() {
-            requested.insert(job_id);
+fn schedule_cancel_cleanup(job_id: Uuid, state: std::sync::Arc<State>) {
+    static CLEANUPS: std::sync::LazyLock<dashmap::DashSet<Uuid>> =
+        std::sync::LazyLock::new(dashmap::DashSet::new);
+    struct Registration(Uuid);
+    impl Drop for Registration {
+        fn drop(&mut self) {
+            CLEANUPS.remove(&self.0);
         }
-        return false;
     }
+    if !CLEANUPS.insert(job_id) {
+        return;
+    }
+    let registration = Registration(job_id);
     tokio::spawn(async move {
-        let result = retry_canceling_cleanup(job_id, &state).await;
-        if let Err(error) = result {
-            tracing::error!(%job_id, %error, "Canceled install cleanup could not finish; a later cancellation will retry it");
-        }
-        // The slot is released even when the cleanup failed, otherwise the
-        // failure could never be retried.
-        if let Ok(mut in_flight) = cleanups_in_flight().lock() {
-            in_flight.remove(&job_id);
-        }
-        // Another cancellation arrived while this cleanup was running: run it
-        // once more so the newer request is not lost.
-        let again = cleanups_requested_again()
-            .lock()
-            .map(|mut requested| requested.remove(&job_id))
-            .unwrap_or(false);
-        if again {
-            tracing::info!(%job_id, "Install cancellation was requested again during cleanup; retrying");
-            spawn_cancel_cleanup(job_id, state);
+        let _registration = registration;
+        if let Err(error) = finish_canceling_job(job_id, &state).await {
+            tracing::error!(%job_id, %error, "Canceled install cleanup could not finish; durable canceling state remains recoverable");
         }
     });
-    true
-}
-
-/// Re-read the durable job state and finish the cleanup if it still needs it.
-async fn retry_canceling_cleanup(
-    job_id: Uuid,
-    state: &State,
-) -> crate::Result<()> {
-    let job = store::get_required(job_id, state).await?;
-    if job.status != InstallJobStatus::Canceling {
-        // Someone else finished the cancellation in the meantime; applying the
-        // old snapshot now would roll the instance back over newer changes.
-        tracing::info!(%job_id, status = job.status.as_str(), "Install cancellation no longer needs a cleanup retry");
-        return Ok(());
-    }
-    finish_canceling_job(job, state).await
 }
 
 async fn finish_canceling_job(
-    mut job: store::InstallJobRecord,
+    job_id: Uuid,
     state: &State,
 ) -> crate::Result<()> {
     let _metadata_usage = crate::storage::usage::lease().await?;
-    let job_id = job.id;
+    let initial = store::get_required(job_id, state).await?;
+    let _execution = admission::execution_lock(state, &initial).await;
+    let mut job = store::get_required(job_id, state).await?;
+    if job.status != InstallJobStatus::Canceling {
+        return Ok(());
+    }
+    if lifecycle::complete_committed_job(job_id, &mut job.state, state).await? {
+        return Ok(());
+    }
+    if job.state.progress.phase != InstallPhaseId::RollingBack {
+        begin_canceling_job(&mut job.state);
+    }
     let started = std::time::Instant::now();
     tracing::info!(%job_id, phase = ?job.state.progress.phase, "Canceled install cleanup started");
-    // A job whose worker stopped before it recorded the cancellation still has
-    // to end up with the terminal details: the canceled error, the cleared
-    // pause reason and the `JobCanceled` event. The worker does this itself when
-    // it is the one finishing the job; a retry has to do it too, or the finished
-    // snapshot and the diagnostics stay incomplete.
-    begin_canceling_job(&mut job.state);
     let cleanup_succeeded =
         match recovery::apply_cleanup(&mut job.state, state).await {
             Ok(()) => true,
@@ -1055,21 +1089,23 @@ async fn finish_canceling_job(
     if cleanup_succeeded {
         clear_deleted_new_instance_id(&mut job.state);
     }
-    let record = store::update_status(
+    let record = store::update_status_if(
         job_id,
+        InstallJobStatus::Canceling,
         InstallJobStatus::Canceled,
         &job.state,
         state,
     )
     .await?;
-    if let Err(error) = emit_install_job(&record.snapshot()).await {
-        tracing::warn!(%job_id, %error, "Canceled install was persisted but its terminal event could not be emitted");
+    if let Some(record) = record {
+        lifecycle::emit_job_best_effort(&record.snapshot()).await;
     }
     tracing::info!(%job_id, cleanup_succeeded, elapsed_ms = started.elapsed().as_millis() as u64, "Canceled install cleanup finished");
     Ok(())
 }
 
 fn begin_canceling_job(job_state: &mut InstallJobState) {
+    job_state.retry_from_checkpoint = false;
     let canceled_phase = job_state.progress.phase;
     job_state.error = Some(InstallErrorView::from_message(
         "canceled",
@@ -1155,8 +1191,14 @@ async fn enqueue_with_content_plan(
     }
     if let Some(existing) = admission::existing(state, &request, None).await? {
         if let Some((plan_id, _)) = content_plan {
-            sqlx::query("INSERT INTO content_update_jobs(plan_id, job_id) VALUES (?, ?)")
-                .bind(plan_id).bind(existing.job_id.to_string()).execute(&state.pool).await?;
+            ContentUpdateJobs::insert_in(
+                &state.pool,
+                &plan_id.to_string(),
+                &ContentUpdateJobRecord {
+                    job_id: Some(existing.job_id.to_string()),
+                },
+            )
+            .await?;
         }
         return Ok(existing);
     }
@@ -1221,16 +1263,16 @@ pub(crate) async fn content_plan_job(
     plan_id: &str,
     state: &State,
 ) -> crate::Result<Option<InstallJobSnapshot>> {
-    let saved: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT job_id FROM content_update_jobs WHERE plan_id = ?",
-    )
-    .bind(plan_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    let saved =
+        ContentUpdateJobs::get(&state.data, &plan_id.to_string()).await?;
     match saved {
         None => Ok(None),
-        Some(Some(id)) => Ok(Some(store::get_required(Uuid::parse_str(&id)?, state).await?.snapshot())),
-        Some(None) => Err(ErrorKind::InputError("The accepted task was removed from history; create a new update plan".into()).into()),
+        Some(ContentUpdateJobRecord { job_id: Some(id) }) => Ok(Some(
+            store::get_required(Uuid::parse_str(&id)?, state)
+                .await?
+                .snapshot(),
+        )),
+        Some(ContentUpdateJobRecord { job_id: None }) => Err(ErrorKind::InputError("The accepted task was removed from history; create a new update plan".into()).into()),
     }
 }
 
@@ -1527,7 +1569,7 @@ async fn update_progress(
 ) -> crate::Result<()> {
     job_state.set_progress(phase, None, details);
     let record = store::update_state(job_id, job_state, state).await?;
-    emit_install_job(&record.snapshot()).await?;
+    lifecycle::emit_job_best_effort(&record.snapshot()).await;
     Ok(())
 }
 
