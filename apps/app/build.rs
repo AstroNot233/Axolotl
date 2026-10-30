@@ -923,6 +923,8 @@ fn main() {
                         "mcp_configure",
                         "mcp_respond",
                         "mcp_disconnect",
+                        "mcp_ui_claim",
+                        "mcp_ui_respond",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
