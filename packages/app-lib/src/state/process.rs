@@ -2,6 +2,8 @@ use crate::event::emit::{emit_instance, emit_process};
 use crate::event::{InstancePayloadType, ProcessPayloadType};
 #[cfg(feature = "tauri")]
 use crate::event::{LogEvent, LogPayload};
+use crate::state::store::Collection as _;
+use crate::state::store::join_log::{JoinLog, JoinLogEntry, JoinLogKey};
 use crate::util::io::IOError;
 use crate::util::rpc::RpcServer;
 use chrono::{DateTime, Duration, NaiveDateTime, TimeZone, Utc};
@@ -1167,13 +1169,17 @@ impl Process {
         };
 
         let state = crate::State::get().await?;
-        crate::state::server_join_log::JoinLogEntry {
-            instance_id: instance_id.to_owned(),
-            host: host.to_string(),
-            port,
-            join_time: timestamp,
-        }
-        .upsert(&state.pool)
+        JoinLog::set(
+            &state.data,
+            &JoinLogKey {
+                instance_id: instance_id.to_owned(),
+                host: host.to_string(),
+                port,
+            },
+            Some(&JoinLogEntry {
+                join_time: timestamp,
+            }),
+        )
         .await?;
         {
             let instance_id = instance_id.to_owned();

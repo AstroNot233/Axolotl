@@ -411,7 +411,7 @@ fn settings_params(
 // 特权双闸：两开关均开启才放行，取不到状态时拒绝
 async fn require_privileged() -> crate::Result<()> {
     let allowed = match crate::State::get().await {
-        Ok(state) => match Settings::get(&state.pool).await {
+        Ok(state) => match Settings::get(&state.data).await {
             Ok(settings) => {
                 settings.allow_external_scheme
                     && settings.allow_privileged_scheme
@@ -454,6 +454,7 @@ fn valid_privileged_setting(key: &str, value: &str) -> bool {
         "collapsed_navigation"
         | "toggle_sidebar"
         | "hide_nametag_skins_page"
+        | "nametag_uses_app_font"
         | "advanced_rendering"
         | "native_decorations"
         | "auto_hide_downloads_button"
@@ -511,6 +512,16 @@ fn valid_privileged_setting(key: &str, value: &str) -> bool {
         | "transparent_background_opacity" => in_range(value, 0, 100),
         "locale" | "default_window_title" => {
             !value.trim().is_empty() && value.len() <= 128 && no_control(value)
+        }
+        "default_game_language" => {
+            value.len() <= 32
+                && no_control(value)
+                && (value.trim().is_empty()
+                    || value.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric()
+                            || byte == b'_'
+                            || byte == b'-'
+                    }))
         }
         // 空串表示清空
         "hooks_pre_launch"
@@ -585,7 +596,7 @@ fn decoded(raw: &str) -> String {
 
 async fn external_scheme_allowed() -> bool {
     match crate::State::get().await {
-        Ok(state) => match Settings::get(&state.pool).await {
+        Ok(state) => match Settings::get(&state.data).await {
             Ok(settings) => settings.allow_external_scheme,
             Err(_) => true,
         },

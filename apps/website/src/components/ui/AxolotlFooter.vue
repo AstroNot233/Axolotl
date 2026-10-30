@@ -2,6 +2,8 @@
 import { defineMessages, useVIntl } from '@modrinth/ui'
 
 const { formatMessage } = useVIntl()
+const config = useRuntimeConfig()
+const githubUrl = config.public.githubUrl
 
 const messages = defineMessages({
     features: { id: 'axolotl-site.navigation.features', defaultMessage: 'Features' },
@@ -19,6 +21,12 @@ const messages = defineMessages({
     openSourceLink: {
         id: 'axolotl-site.footer.open-source-link',
         defaultMessage: 'open source',
+    },
+    // The hero used to carry the tech stack; it lives here now, where a visitor
+    // looking for implementation details will scroll to.
+    techStack: {
+        id: 'axolotl-site.footer.tech-stack',
+        defaultMessage: 'Built with Tauri v2, Rust, and Vue 3',
     },
     disclaimer: {
         id: 'axolotl-site.footer.minecraft-disclaimer',
@@ -40,15 +48,12 @@ const messages = defineMessages({
                 <p class="open-source">
                     <span>
                         {{ formatMessage(messages.openSourcePrefix) }}
-                        <a
-                            href="https://github.com/Mystic-Stars/Axolotl"
-                            target="_blank"
-                            rel="noopener"
-                        >
+                        <a :href="githubUrl" target="_blank" rel="noopener">
                             {{ formatMessage(messages.openSourceLink) }} </a
                         >.
                     </span>
                 </p>
+                <p>{{ formatMessage(messages.techStack) }}</p>
             </div>
 
             <nav

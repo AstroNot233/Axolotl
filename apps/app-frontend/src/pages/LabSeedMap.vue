@@ -65,7 +65,6 @@ import SeedMapStructureDetails from '@/components/lab/seed-map/SeedMapStructureD
 import SeedMapWorldImportModal, {
     type SeedMapWorldImport,
 } from '@/components/lab/seed-map/SeedMapWorldImportModal.vue'
-import { loadMinecraftItemImage } from '@/lab/recipe-generator/item-images'
 import {
     applyShareQuery,
     clearSeedMapHistory,
@@ -145,6 +144,7 @@ import {
     seedMapTileLevel,
     type SeedMapTileView,
 } from '@/lab/seed-map/tile-layer'
+import { loadMinecraftItemImage } from '@/lab/shared/minecraft/item-images'
 
 const SeedMapUndergroundPreview = defineAsyncComponent(
     () => import('@/components/lab/seed-map/SeedMapUndergroundPreview.vue'),

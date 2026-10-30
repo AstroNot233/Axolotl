@@ -19,12 +19,9 @@ import advancementsData from '@/lab/command-generator/data/advancements.json'
 import effectsData from '@/lab/command-generator/data/effects.json'
 import type { SlotDisplay } from '@/lab/recipe-generator/display'
 import { getSlotDisplay } from '@/lab/recipe-generator/display'
-import {
-    buildSlotContext,
-    loadVersionResources,
-    TEXTURE_ATLAS,
-} from '@/lab/recipe-generator/resources'
+import { buildSlotContext } from '@/lab/recipe-generator/slot-context'
 import type { JavaVersionId, SlotValue } from '@/lab/recipe-generator/types'
+import { loadVersionResources, TEXTURE_ATLAS } from '@/lab/shared/minecraft/resources'
 
 import CommandGeneratorItemPickerModal from './CommandGeneratorItemPickerModal.vue'
 import CommandGeneratorNbtEditor from './CommandGeneratorNbtEditor.vue'

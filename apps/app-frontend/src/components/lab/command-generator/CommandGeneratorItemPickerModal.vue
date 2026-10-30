@@ -4,16 +4,16 @@ import { ref, useTemplateRef } from 'vue'
 
 import advancementsData from '@/lab/command-generator/data/advancements.json'
 import effectsData from '@/lab/command-generator/data/effects.json'
-import itemNameIndexData from '@/lab/recipe-generator/assets/vanilla/item-name-index.json' with { type: 'json' }
 import { getSlotDisplay } from '@/lab/recipe-generator/display'
-import { resolveRecipeItemName } from '@/lab/recipe-generator/item-names.ts'
+import { buildSlotContext } from '@/lab/recipe-generator/slot-context'
+import type { JavaVersionId, SlotValue } from '@/lab/recipe-generator/types'
+import itemNameIndexData from '@/lab/shared/minecraft/assets/vanilla/item-name-index.json' with { type: 'json' }
+import { resolveRecipeItemName } from '@/lab/shared/minecraft/item-names.ts'
 import {
-    buildSlotContext,
     loadVersionResources,
     TEXTURE_ATLAS,
     type TextureAtlas,
-} from '@/lab/recipe-generator/resources'
-import type { JavaVersionId, SlotValue } from '@/lab/recipe-generator/types'
+} from '@/lab/shared/minecraft/resources'
 
 import CommandGeneratorItemPicker, { type CommandItemEntry } from './CommandGeneratorItemPicker.vue'
 

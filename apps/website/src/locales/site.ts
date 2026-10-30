@@ -5,6 +5,8 @@ export const siteLocaleMessages: Record<string, Record<string, string>> = {
         'axolotl-marketing.download.package-unavailable': '此版本暂无对应安装包。',
         'axolotl-marketing.download.view-options': '查看下载选项',
         'axolotl-marketing.download.retry': '重试',
+        'axolotl-marketing.download.timeout-note':
+            '暂时无法获取版本信息，可直接在下方选择平台下载。',
         'axolotl-site.structured-data.feature.export': '支持 Modrinth MRPACK、CurseForge ZIP 与通用 ZIP 整合包导出',
         'axolotl-site.structured-data.feature.storage': '磁盘占用分析与缓存清理，保留已安装游戏、存档和备份',
         'axolotl-site.structured-data.feature.backups': '为支持的本地实例创建快照备份，恢复前预览文件变化',
@@ -85,8 +87,7 @@ export const siteLocaleMessages: Record<string, Record<string, string>> = {
             'Axolotl Launcher 是一款免费、开源、无广告的跨平台 Minecraft Java 版启动器。发现并安装 Modrinth 与 CurseForge 的模组和整合包，沿用已有游戏目录，在一个地方完成下载、更新与备份，轻松开始下一次冒险。',
         'axolotl-marketing.hero.screenshot-alt': 'Axolotl Launcher 主界面。',
         'axolotl-marketing.highlights.eyebrow': '为你的下一个世界准备好',
-        'axolotl-marketing.highlights.title': '管理 Minecraft 内容',
-        'axolotl-marketing.highlights.title-second': '不再绕路',
+        'axolotl-marketing.highlights.title-combined': '管理 Minecraft 内容，不再绕路',
         'axolotl-marketing.highlights.description':
             '找一个模组，装一套整合包，或回到熟悉的世界。来自 Modrinth 与 CurseForge 的内容集中呈现，安装、依赖和更新都能在启动器中完成。',
         'axolotl-marketing.highlights.ad-free.title': '免费、开源且独立',
@@ -167,7 +168,7 @@ export const siteLocaleMessages: Record<string, Record<string, string>> = {
         'app-marketing.download.linux-disclaimer':
             '每个版本都会发布 Linux 软件包。请在<issues-link>发布页面</issues-link>查看架构详情；如果你的发行版需要额外配置，也可以<prism-link>报告问题</prism-link>。',
         'app-marketing.hero.app-screenshot-alt': 'Axolotl Launcher 实例内容预览。',
-        'axolotl-marketing.hero.open-source': 'Tauri v2 · Rust · Vue 3',
+        'axolotl-marketing.hero.trust-line': '开源 · GPL-3.0 · 免费 · 无广告 · Windows / macOS / Linux',
         'axolotl-marketing.demo.one-launcher': '一个启动器，承载每一个世界。',
         'axolotl-marketing.demo.everything-together': '配置、模组、存档和设置始终井然有序。',
         'axolotl-marketing.demo.included-mods': '包含的模组',
@@ -221,6 +222,7 @@ export const siteLocaleMessages: Record<string, Record<string, string>> = {
         'axolotl-site.footer.copying-guidelines': '复制指南',
         'axolotl-site.footer.open-source-prefix': 'Axolotl 是',
         'axolotl-site.footer.open-source-link': '开源软件',
+        'axolotl-site.footer.tech-stack': '基于 Tauri v2、Rust 与 Vue 3 构建',
         'axolotl-site.footer.minecraft-disclaimer':
             '非 Minecraft 官方服务。未经 Mojang 或 Microsoft 批准，亦与其无关联。',
         'axolotl-site.footer.cta-eyebrow': '免费、开源，为 Minecraft 而生。',

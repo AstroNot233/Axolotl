@@ -14,8 +14,8 @@ use tokio::sync::Semaphore;
 
 use super::constants::{
     HDD_RANGE_CONCURRENCY, HTTP1_SSD_RANGE_CONCURRENCY,
-    PRESSURE_RANGE_CONCURRENCY, SSD_RANGE_CONCURRENCY,
-    UNKNOWN_DISK_RANGE_CONCURRENCY,
+    HTTP1_UNKNOWN_DISK_RANGE_CONCURRENCY, PRESSURE_RANGE_CONCURRENCY,
+    SSD_RANGE_CONCURRENCY, UNKNOWN_DISK_RANGE_CONCURRENCY,
 };
 
 static FALLBACK_WRITES: LazyLock<Arc<Semaphore>> = LazyLock::new(|| {
@@ -152,16 +152,31 @@ pub(crate) fn disk_range_limit(kind: sysinfo::DiskKind) -> usize {
 }
 
 pub(crate) async fn range_limit(path: &Path) -> usize {
-    range_limit_with_ssd_cap(path, SSD_RANGE_CONCURRENCY).await
+    range_limit_with_disk_caps(
+        path,
+        SSD_RANGE_CONCURRENCY,
+        UNKNOWN_DISK_RANGE_CONCURRENCY,
+    )
+    .await
 }
 
 /// Buffered network ranges share the I/O semaphore; socket and write counts
-/// need not be equal on an SSD.
+/// need not be equal. Virtual disks often have no media type, so measured
+/// write pressure limits their buffered network ranges instead.
 pub(crate) async fn http1_range_limit(path: &Path) -> usize {
-    range_limit_with_ssd_cap(path, HTTP1_SSD_RANGE_CONCURRENCY).await
+    range_limit_with_disk_caps(
+        path,
+        HTTP1_SSD_RANGE_CONCURRENCY,
+        HTTP1_UNKNOWN_DISK_RANGE_CONCURRENCY,
+    )
+    .await
 }
 
-async fn range_limit_with_ssd_cap(path: &Path, ssd_cap: usize) -> usize {
+async fn range_limit_with_disk_caps(
+    path: &Path,
+    ssd_cap: usize,
+    unknown_cap: usize,
+) -> usize {
     initialize_disks().await;
     #[cfg(test)]
     let test_kind = TEST_DISK_KINDS.lock().get(path).copied();
@@ -176,12 +191,10 @@ async fn range_limit_with_ssd_cap(path: &Path, ssd_cap: usize) -> usize {
             .max_by_key(|(mount, _)| mount.as_os_str().len())
             .map(|(_, kind)| *kind)
     });
-    let limit = kind.map_or(UNKNOWN_DISK_RANGE_CONCURRENCY, |kind| {
-        if kind == sysinfo::DiskKind::SSD {
-            ssd_cap
-        } else {
-            disk_range_limit(kind)
-        }
+    let limit = kind.map_or(unknown_cap, |kind| match kind {
+        sysinfo::DiskKind::SSD => ssd_cap,
+        sysinfo::DiskKind::Unknown(_) => unknown_cap,
+        sysinfo::DiskKind::HDD => disk_range_limit(kind),
     });
     if pressure(path).blocks_expansion() {
         limit.min(PRESSURE_RANGE_CONCURRENCY)
@@ -342,7 +355,7 @@ mod tests {
             (sysinfo::DiskKind::HDD, HDD_RANGE_CONCURRENCY),
             (
                 sysinfo::DiskKind::Unknown(0),
-                UNKNOWN_DISK_RANGE_CONCURRENCY,
+                HTTP1_UNKNOWN_DISK_RANGE_CONCURRENCY,
             ),
         ] {
             let _disk = set_test_disk_kind(&path, kind);
@@ -350,6 +363,8 @@ mod tests {
         }
         let _disk = set_test_disk_kind(&path, sysinfo::DiskKind::SSD);
         assert_eq!(range_limit(&path).await, SSD_RANGE_CONCURRENCY);
+        let _disk = set_test_disk_kind(&path, sysinfo::DiskKind::Unknown(0));
+        assert_eq!(range_limit(&path).await, UNKNOWN_DISK_RANGE_CONCURRENCY);
         let key = volume(&path);
         let previous = WRITE_SAMPLES.lock().insert(
             key.clone(),

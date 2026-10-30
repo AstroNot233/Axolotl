@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -61,7 +60,9 @@ final class MinecraftLaunchTest {
             final Matcher matcher =
                     Pattern.compile("gameDir\\s(.+?)(?:\\s--|$)").matcher(System.getProperty("sun.java.command"));
             assertTrue(matcher.find());
-            assertEquals(Paths.get(gameDir), Paths.get(matcher.group(1)));
+            // Compared as plain strings: Paths.get() encodes with the JVM's native
+            // charset, which cannot represent this name when the locale is unset.
+            assertEquals(gameDir, matcher.group(1));
         } finally {
             if (previousCommand == null) {
                 System.clearProperty("sun.java.command");

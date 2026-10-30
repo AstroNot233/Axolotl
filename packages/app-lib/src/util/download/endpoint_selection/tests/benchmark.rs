@@ -569,7 +569,9 @@ async fn range_recovery_replenishes_the_last_quarter_during_an_endpoint_trial()
     .await;
     let clients =
         fixtures::clients(SelectionMode::Off, &server, &server, false);
-    let request = fixtures::request(size, 0).with_range_connection_floor(32);
+    let request = fixtures::request(size, 0)
+        .with_segmented_download(true)
+        .with_range_connection_floor(32);
     let directory = tempfile::tempdir().unwrap();
     let destination = directory.path().join("last-quarter.bin");
     let part = destination.with_extension("bin.part");
