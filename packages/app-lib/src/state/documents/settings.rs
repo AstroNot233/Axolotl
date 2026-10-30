@@ -16,11 +16,11 @@
 //! from a value the row froze. The row is only asked for a domain with no
 //! document at all, so one damaged file costs that domain and nothing else.
 //!
-//! Two layers are not in place yet. `Settings` has no `Default` — its defaults
-//! are the migration's column defaults — so the row stands in for the first
-//! layer and for the second at once: a key a document leaves out reads the row
-//! today, which is the one place this read promises less than the layering
-//! above. The deployment's documents are not read at all.
+//! The first two layers are in place: `Settings::default()` is the baseline
+//! every key starts at, and it holds what the migrations make a fresh row hold,
+//! so a key a document leaves out reads the same value a new installation
+//! starts with. The third layer, the deployment's documents, is not read at
+//! all.
 //!
 //! The domains are written one at a time, so a launcher stopped between two of
 //! them leaves the domains a generation apart. They carry unrelated settings,
@@ -168,12 +168,11 @@ pub(crate) async fn read(
     documents: &Documents<'_>,
     handle: &Handle,
 ) -> crate::Result<Settings> {
-    // Layers 1 and 2 are the build defaults and the row. `Settings` has no
-    // `Default` yet — its defaults live in the migration's column defaults — so
-    // the row stands in for both: a domain that keeps it reads what the row
-    // says, and so does a key a document leaves out. The row is read once and
-    // projected by domain below, not once per domain.
-    let mut values = row_values(handle).await?;
+    // Layer 1: the build defaults, which every key starts at.
+    let mut values = default_values()?;
+    // Layer 2 is answered per domain, so which domains it answers is collected
+    // first: the row itself is read once, and only if some domain needs it.
+    let mut without_a_document: Vec<&[&str]> = Vec::new();
 
     for &(name, keys, schema_version) in DOMAINS {
         let stored = documents.stored::<Document>(name, schema_version).await;
@@ -187,18 +186,49 @@ pub(crate) async fn read(
                 overlay(&mut values, keys, &document, name);
             }
             // Layer 2 reaches the result here: a domain with no document is the
-            // only kind the row answers, and `values` still holds its values.
-            Stored::Missing | Stored::Unreadable => {}
+            // only kind the row answers, and only for its own keys.
+            Stored::Missing | Stored::Unreadable => {
+                without_a_document.push(keys);
+            }
+        }
+    }
+
+    if !without_a_document.is_empty() {
+        let row = row_values(handle).await?;
+        for keys in without_a_document {
+            contribute(&mut values, keys, &row);
         }
     }
 
     Ok(serde_json::from_value(Value::Object(values))?)
 }
 
+/// The settings a build starts from, keyed the way a document keys them.
+fn default_values() -> crate::Result<Map<String, Value>> {
+    let default = serde_json::to_value(Settings::default())?;
+    Ok(serde_json::from_value(default)?)
+}
+
 /// The settings as the row holds them, keyed the way a document keys them.
 async fn row_values(handle: &Handle) -> crate::Result<Map<String, Value>> {
     let settings = Settings::get(handle).await?;
     Ok(serde_json::from_value(serde_json::to_value(&settings)?)?)
+}
+
+/// Lays the row's values for `keys` over `values`.
+///
+/// Unlike a document, nothing here can be unreadable: these values come from a
+/// `Settings`, so they already carry the types their keys take.
+fn contribute(
+    values: &mut Map<String, Value>,
+    keys: &[&str],
+    row: &Map<String, Value>,
+) {
+    for &key in keys {
+        if let Some(value) = row.get(key) {
+            values.insert(key.to_string(), value.clone());
+        }
+    }
 }
 
 /// Lays one layer over `values`, for the keys `keys` lists only: a key outside
@@ -306,9 +336,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_stored_key_is_read_and_the_rest_stay_with_the_row() {
+    async fn a_stored_key_is_read_and_an_unreadable_value_costs_one_key() {
         let pool = migrated_pool().await;
-        let row = Settings::get(&Handle::new(pool.clone())).await.unwrap();
+        let handle = Handle::new(pool.clone());
         let root = tempfile::tempdir().unwrap();
         std::fs::write(
             root.path().join("backup.json"),
@@ -322,8 +352,7 @@ mod tests {
         .unwrap();
 
         let documents = Documents::at(root.path().to_path_buf(), &pool);
-        let settings =
-            read(&documents, &Handle::new(pool.clone())).await.unwrap();
+        let settings = read(&documents, &handle).await.unwrap();
 
         assert_eq!(
             settings.backup_repository_path.as_deref(),
@@ -331,12 +360,44 @@ mod tests {
             "a key the document carries is read from it"
         );
         assert_eq!(
-            settings.custom_background_blur, row.custom_background_blur,
+            settings.custom_background_blur,
+            Settings::default().custom_background_blur,
             "a value the type cannot take costs its own key only"
         );
+    }
+
+    /// The row reaches the domains that have no document and stops there, so a
+    /// key a document exists for cannot come back from a value the row froze.
+    #[tokio::test]
+    async fn the_row_answers_only_the_domains_without_a_document() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let mut row = Settings::get(&handle).await.unwrap();
+        row.locale = "zh_cn".to_string();
+        row.backup_repository_path = Some("/from-the-row".to_string());
+        row.update(&handle).await.unwrap();
+
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("appearance.json"),
+            r#"{"schema_version":1,"data":{"theme":"light"}}"#,
+        )
+        .unwrap();
+
+        let documents = Documents::at(root.path().to_path_buf(), &pool);
+        let settings = read(&documents, &handle).await.unwrap();
+
+        assert_eq!(settings.theme.as_str(), "light", "the document answers");
         assert_eq!(
-            settings.locale, row.locale,
-            "a domain whose document leaves a key out reads the row for it"
+            settings.locale,
+            Settings::default().locale,
+            "appearance has a document, so a key it leaves out reads the \
+             default rather than the row"
+        );
+        assert_eq!(
+            settings.backup_repository_path.as_deref(),
+            Some("/from-the-row"),
+            "backup has no document, so the row answers for it"
         );
     }
 }
