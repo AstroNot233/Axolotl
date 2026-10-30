@@ -47,14 +47,19 @@ pub(super) async fn recover_stopped_job(
     // Absence of a token can be a registration race. Ownership, followed by a
     // fresh status read, proves that no worker can still publish these files.
     let _execution = admission::execution_lock(state, &initial).await;
-    recover_owned_job(job_id, state, reporter, error).await
+    recover_owned_job(job_id, state, reporter, error, false).await
 }
 
-async fn recover_owned_job(
+/// `cancel_requested` is a cancellation this process signaled to the worker.
+/// Its `Canceling` checkpoint can time out and leave the row `Running`, and
+/// the worker's `Canceled` write can time out too; the job is still canceled,
+/// never failed.
+pub(super) async fn recover_owned_job(
     job_id: Uuid,
     state: &State,
     reporter: Option<&InstallProgressReporter>,
     error: &crate::Error,
+    cancel_requested: bool,
 ) -> crate::Result<()> {
     let mut job = store::get_required(job_id, state).await?;
     if !needs_worker_recovery(job.status) {
@@ -77,7 +82,9 @@ async fn recover_owned_job(
     if complete_committed_job(job_id, &mut job.state, state).await? {
         return Ok(());
     }
-    if job.status == InstallJobStatus::Canceling {
+    if job.status == InstallJobStatus::Canceling
+        || (cancel_requested && job.status == InstallJobStatus::Running)
+    {
         finish_canceled_job(job_id, &mut job.state, state).await?;
         return Ok(());
     }
@@ -321,17 +328,32 @@ async fn run_job(job_id: Uuid) -> crate::Result<()> {
             }
         };
     let reporter = InstallProgressReporter::new(job_id, job.state.clone());
-    let result = worker_result(run_owned_job(job_id, &state)).await;
+    // Kept here so recovery still sees a cancellation the worker was given
+    // after the worker has unregistered it.
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    let result =
+        worker_result(run_owned_job(job_id, &state, &cancellation)).await;
     if let Err(error) = &result {
+        let cancel_requested = cancellation.is_cancelled();
         retry_recovery(job_id, || {
-            recover_owned_job(job_id, &state, Some(&reporter), error)
+            recover_owned_job(
+                job_id,
+                &state,
+                Some(&reporter),
+                error,
+                cancel_requested,
+            )
         })
         .await?;
     }
     result
 }
 
-async fn run_owned_job(job_id: Uuid, state: &State) -> crate::Result<()> {
+async fn run_owned_job(
+    job_id: Uuid,
+    state: &State,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> crate::Result<()> {
     let job = store::get_required(job_id, state).await?;
 
     if job.status != InstallJobStatus::Queued {
@@ -352,7 +374,7 @@ async fn run_owned_job(job_id: Uuid, state: &State) -> crate::Result<()> {
         return Ok(());
     };
     tracing::info!(%job_id, status = record.status.as_str(), phase = ?job_state.progress.phase, "Install job execution started");
-    let cancellation = tokio_util::sync::CancellationToken::new();
+    let cancellation = cancellation.clone();
     state
         .install_job_cancellations
         .insert(job_id, cancellation.clone());
