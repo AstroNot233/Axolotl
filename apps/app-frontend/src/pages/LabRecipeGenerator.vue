@@ -1638,7 +1638,10 @@ function slotEditorSlots(type: RecipeType): RecipeSlot[] {
                             </div>
                             <div
                                 v-else
-                                v-tooltip="resultWheelHint(entry.targetSlot)"
+                                v-tooltip="
+                                    resultWheelHint(entry.targetSlot) ??
+                                    slotDisplayFor(entry.targetSlot)?.label
+                                "
                                 class="recipe-layout-hotspot"
                                 :data-recipe-slot="entry.targetSlot"
                                 :style="slotBoxStyle(entry.box)"
@@ -1823,6 +1826,7 @@ function slotEditorSlots(type: RecipeType): RecipeSlot[] {
                         class="recipe-custom-item-row"
                     >
                         <RecipeItemIcon
+                            v-tooltip="item.name"
                             :display="{
                                 label: item.name,
                                 texture: item.texture || null,
