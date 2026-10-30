@@ -5,16 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-launcher-tools = { workspace = true }
 axum = { workspace = true }
 futures = { workspace = true }
+launcher-tools = { workspace = true }
 rmcp = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true, features = ["v4", "serde"] }
+uuid = { workspace = true, features = ["serde", "v4"] }
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["json", "stream"] }

@@ -8,11 +8,11 @@ homepage = "https://www.ghs.red"
 license = "GPL-3.0-only"
 
 [dependencies]
-base64 = { workspace = true }
 async_zip = { workspace = true, features = ["deflate", "tokio-fs"] }
+base64 = { workspace = true }
 bytes = { workspace = true }
-cap-std = { workspace = true }
 cap-fs-ext = { workspace = true }
+cap-std = { workspace = true }
 chrono = { workspace = true }
 daedalus = { workspace = true }
 dashmap = { workspace = true }
