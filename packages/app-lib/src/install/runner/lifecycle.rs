@@ -65,19 +65,19 @@ pub(super) async fn recover_owned_job(
     if !needs_worker_recovery(job.status) {
         return Ok(());
     }
-    if let Some(reporter) = reporter {
-        if let Ok(live) = reporter.current_state().await {
-            if job.status == InstallJobStatus::Queued
-                && live.events.iter().any(|event| {
-                    matches!(event.kind, InstallJobEventKind::JobStarted)
-                })
-            {
-                // A failed generation may already have been explicitly retried.
-                // Its retained reporter must not clean up that new queue entry.
-                return Ok(());
-            }
-            job.state = live;
+    if let Some(reporter) = reporter
+        && let Ok(live) = reporter.current_state().await
+    {
+        if job.status == InstallJobStatus::Queued
+            && live.events.iter().any(|event| {
+                matches!(event.kind, InstallJobEventKind::JobStarted)
+            })
+        {
+            // A failed generation may already have been explicitly retried.
+            // Its retained reporter must not clean up that new queue entry.
+            return Ok(());
         }
+        job.state = live;
     }
     if complete_committed_job(job_id, &mut job.state, state).await? {
         return Ok(());
@@ -367,7 +367,7 @@ async fn run_owned_job(
         InstallJobStatus::Queued,
         InstallJobStatus::Running,
         &job_state,
-        &state,
+        state,
     )
     .await?
     else {
@@ -383,7 +383,7 @@ async fn run_owned_job(
         id: job_id,
     };
     emit_job_best_effort(&record.snapshot()).await;
-    if store::get_required(job_id, &state).await?.status
+    if store::get_required(job_id, state).await?.status
         == InstallJobStatus::Canceling
     {
         cancellation.cancel();
@@ -401,7 +401,7 @@ async fn run_owned_job(
     let result =
         if matches!(job_state.request, InstallRequest::ExportResource { .. }) {
             let result =
-                Box::pin(request::run_request(job_id, &mut job_state, &state))
+                Box::pin(request::run_request(job_id, &mut job_state, state))
                     .await;
             if result.is_err() && cancellation.is_cancelled() {
                 RunResult::Canceled
@@ -413,13 +413,13 @@ async fn run_owned_job(
             InstallRequest::ChangeContent { .. }
         ) {
             RunResult::Completed(
-                Box::pin(request::run_request(job_id, &mut job_state, &state))
+                Box::pin(request::run_request(job_id, &mut job_state, state))
                     .await,
             )
         } else {
             match crate::install::critical_section::run_cancelable(
                 &cancellation,
-                Box::pin(request::run_request(job_id, &mut job_state, &state)),
+                Box::pin(request::run_request(job_id, &mut job_state, state)),
             )
             .await
             {
@@ -445,7 +445,7 @@ async fn run_owned_job(
                 job_id,
                 InstallJobStatus::Interrupted,
                 &job_state,
-                &state,
+                state,
             )
             .await?;
             emit_install_job(&record.snapshot()).await?;
@@ -478,7 +478,7 @@ async fn run_owned_job(
                     InstallRequest::ExportResource { .. }
                 )
             {
-                finish_canceled_job(job_id, &mut job_state, &state).await?;
+                finish_canceled_job(job_id, &mut job_state, state).await?;
                 return Ok(());
             }
             job_state.record_event(InstallJobEventKind::JobSucceeded {
@@ -511,13 +511,13 @@ async fn run_owned_job(
             let mut completed_state = job_state.clone();
             completed_state.rollback = None;
             let Some(record) =
-                store::complete_running_job(job_id, &completed_state, &state)
+                store::complete_running_job(job_id, &completed_state, state)
                     .await?
             else {
-                if store::get_required(job_id, &state).await?.status
+                if store::get_required(job_id, state).await?.status
                     == InstallJobStatus::Canceling
                 {
-                    finish_canceled_job(job_id, &mut job_state, &state).await?;
+                    finish_canceled_job(job_id, &mut job_state, state).await?;
                 }
                 return Ok(());
             };
@@ -543,7 +543,7 @@ async fn run_owned_job(
                 tracing::warn!(%error, instance_id, "Could not emit committed resource content change");
             }
             if let Err(error) =
-                recovery::discard_content_rollback(&mut job_state, &state).await
+                recovery::discard_content_rollback(&mut job_state, state).await
             {
                 tracing::warn!(
                     job_id = %job_id,
@@ -569,25 +569,25 @@ async fn run_owned_job(
                 InstallJobStatus::Running,
                 InstallJobStatus::WaitingForUser,
                 &waiting_state,
-                &state,
+                state,
             )
             .await?
             else {
-                if store::get_required(job_id, &state).await?.status
+                if store::get_required(job_id, state).await?.status
                     == InstallJobStatus::Canceling
                 {
-                    finish_canceled_job(job_id, &mut job_state, &state).await?;
+                    finish_canceled_job(job_id, &mut job_state, state).await?;
                 }
                 return Ok(());
             };
             emit_install_job(&record.snapshot()).await?;
         }
         RunResult::Canceled => {
-            finish_canceled_job(job_id, &mut job_state, &state).await?;
+            finish_canceled_job(job_id, &mut job_state, state).await?;
         }
         RunResult::Completed(Err(error)) => {
             if cancellation.is_cancelled() {
-                finish_canceled_job(job_id, &mut job_state, &state).await?;
+                finish_canceled_job(job_id, &mut job_state, state).await?;
                 return Ok(());
             }
             job_state.progress.phase = failure_phase;
@@ -627,7 +627,7 @@ async fn run_owned_job(
             }
             let cleanup_succeeded = match recovery::apply_cleanup(
                 &mut job_state,
-                &state,
+                state,
             )
             .await
             {
