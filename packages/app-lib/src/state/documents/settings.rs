@@ -7,8 +7,7 @@
 //! 1. the build defaults, which every key starts at;
 //! 2. the settings row, for the domains whose document is missing or cannot be
 //!    read;
-//! 3. the deployment's own documents, which a build ships and never writes
-//!    (not read yet);
+//! 3. the deployment's own documents, which a build ships and never writes;
 //! 4. the local documents, the only layer ever written.
 //!
 //! A domain that has a document is answered by that document alone: the row
@@ -16,11 +15,10 @@
 //! from a value the row froze. The row is only asked for a domain with no
 //! document at all, so one damaged file costs that domain and nothing else.
 //!
-//! The first two layers are in place: `Settings::default()` is the baseline
-//! every key starts at, and it holds what the migrations make a fresh row hold,
-//! so a key a document leaves out reads the same value a new installation
-//! starts with. The third layer, the deployment's documents, is not read at
-//! all.
+//! The deployment's layer answers above the row rather than below it: a value a
+//! deployment pins must not be shadowed by a row value frozen before it was
+//! deployed. It answers whatever the local documents do, since it carries keys
+//! for domains that have a local document too, and a local key wins over it.
 //!
 //! The domains are written one at a time, so a launcher stopped between two of
 //! them leaves the domains a generation apart. They carry unrelated settings,
@@ -33,13 +31,14 @@
 //! of it, so a document that exists cannot lower it to the default and no
 //! document's absence is needed to reach it (Q5).
 //!
-//! Nothing reads these documents yet: `Settings::get` still answers from the
-//! row, and nothing writes them either. Both arrive with the wiring that
-//! follows.
+//! `Settings::get` still answers from the row, and nothing writes these
+//! documents: both arrive with the wiring that follows. What is in place is the
+//! composition a read makes, and the value a key has before a local document is
+//! asked (`provided`), which is what the write path will compare against.
 
 use serde_json::{Map, Value};
 
-use super::{Documents, Stored};
+use super::{Documents, Stored, WRITES};
 use crate::state::settings::Settings;
 use crate::state::store::Handle;
 
@@ -174,20 +173,24 @@ pub(crate) async fn read(
 ) -> crate::Result<Settings> {
     // Layer 1: the build defaults, which every key starts at.
     let mut values = default_values()?;
-    // Layer 2 is answered per domain, so which domains it answers is collected
-    // first: the row is read once, and only for the keys that need it.
+    // The layers above the row are laid down after it, so what they carry is
+    // collected first: the row is read once, and only for the keys that need
+    // it.
     let mut without_a_document: Vec<&[&str]> = Vec::new();
+    let mut shipped: Vec<(&str, &[&str], Document)> = Vec::new();
+    let mut local: Vec<(&str, &[&str], Document)> = Vec::new();
 
     for &(name, keys, schema_version) in DOMAINS {
-        let stored = documents.stored::<Document>(name, schema_version).await;
-        // Layer 3, the deployment's documents, would come first and is not read
-        // yet; it would contribute keys for every domain, not just the ones
-        // without a local document.
-        match stored {
+        // Layer 3 contributes to every domain it carries a document for, not
+        // only the ones with no local document.
+        if let Some(document) = documents.shipped(name, schema_version).await {
+            shipped.push((name, keys, document));
+        }
+        match documents.stored::<Document>(name, schema_version).await {
             // Layer 4: a document is the authority for the domain it exists
             // for, whichever build wrote it.
             Stored::Ready { document, .. } | Stored::Newer { document, .. } => {
-                overlay(&mut values, keys, &document, name);
+                local.push((name, keys, document));
             }
             // Layer 2 reaches the result here: a domain with no document is the
             // only kind the row answers, and only for its own keys.
@@ -204,6 +207,16 @@ pub(crate) async fn read(
         contribute(&mut values, keys, &row);
     }
 
+    // The deployment's documents sit above the row and below the local ones: a
+    // value it pins must not be shadowed by a value the row froze before the
+    // deployment existed, and the user's own document is the last word.
+    for (name, keys, document) in shipped {
+        overlay(&mut values, keys, &document, name);
+    }
+    for (name, keys, document) in local {
+        overlay(&mut values, keys, &document, name);
+    }
+
     let mut settings: Settings = serde_json::from_value(Value::Object(values))?;
     // `personalized_ads` is skipped when deserializing, so the map above cannot
     // carry it back; it is taken from the row the read already made.
@@ -217,6 +230,68 @@ pub(crate) async fn read(
 fn default_values() -> crate::Result<Map<String, Value>> {
     let default = serde_json::to_value(Settings::default())?;
     Ok(serde_json::from_value(default)?)
+}
+
+/// The value a key has before any local document is asked: what the deployment
+/// ships for it, and what this build defaults to when the deployment ships
+/// nothing.
+///
+/// This is what a local document is compared against, because a key holding
+/// exactly this value says nothing: leaving it out of the local document reads
+/// the same value and lets a later change of the deployment's document arrive.
+fn provided<'a>(
+    key: &str,
+    config: &'a Map<String, Value>,
+    defaults: &'a Map<String, Value>,
+) -> Option<&'a Value> {
+    config.get(key).or_else(|| defaults.get(key))
+}
+
+/// Drops what a local document repeats of a value the deployment or the build
+/// already provides. Writing a value into a deployment's own document is how
+/// its owner says a key should follow it, so the local copy stops shadowing it
+/// as soon as the two agree, and a later change of that value still arrives.
+///
+/// A start runs this once, after the handover. It is not part of a read: a read
+/// never writes to disk.
+pub(crate) async fn prune_redundant(
+    documents: &Documents<'_>,
+) -> crate::Result<()> {
+    // With no deployment there is nothing a local copy could shadow: what it
+    // repeats is the value the build default gives it anyway.
+    if !documents.ships_documents() {
+        return Ok(());
+    }
+    let defaults = default_values()?;
+    let _writing = WRITES.lock().await;
+    for &(name, keys, schema_version) in DOMAINS {
+        let config = documents
+            .shipped::<Document>(name, schema_version)
+            .await
+            .unwrap_or_default();
+        // A domain with no local document has nothing to drop, and one a newer
+        // build wrote is not this build's to rewrite.
+        let Stored::Ready { document } =
+            documents.stored::<Document>(name, schema_version).await
+        else {
+            continue;
+        };
+        let mut pruned = document;
+        let before = pruned.len();
+        for &key in keys {
+            let Some(value) = pruned.get(key).cloned() else {
+                continue;
+            };
+            if provided(key, &config, &defaults) == Some(&value) {
+                pruned.remove(key);
+            }
+        }
+        if pruned.len() == before {
+            continue;
+        }
+        documents.write(name, schema_version, &pruned).await?;
+    }
+    Ok(())
 }
 
 /// The settings as the row holds them, and the same ones keyed the way a
@@ -311,6 +386,11 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+    use crate::state::documents::{
+        ai,
+        test_support::{create_ai_tables, pool as empty_pool},
+    };
+    use crate::state::settings::Theme;
     use crate::state::store::tests::support::migrated_pool;
 
     fn document_keys() -> BTreeSet<&'static str> {
@@ -318,6 +398,17 @@ mod tests {
             .iter()
             .flat_map(|(_, keys, _)| keys.iter().copied())
             .collect()
+    }
+
+    /// The pair of directories a launcher reads: the one it writes, and the one
+    /// a deployment ships.
+    fn layered<'a>(
+        local: &tempfile::TempDir,
+        deployment: &tempfile::TempDir,
+        pool: &'a sqlx::SqlitePool,
+    ) -> Documents<'a> {
+        Documents::at(local.path().to_path_buf(), pool)
+            .with_config_root(Some(deployment.path().to_path_buf()))
     }
 
     #[tokio::test]
@@ -563,6 +654,270 @@ mod tests {
             settings.backup_repository_path.as_deref(),
             Some("/from-the-row"),
             "backup has no document, so the row answers for it"
+        );
+    }
+
+    /// A deployment's document answers a domain no local document covers, and
+    /// it answers above the row: a value the row froze cannot shadow it.
+    #[tokio::test]
+    async fn a_deployment_document_applies_without_a_local_one() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let mut row = Settings::get(&handle).await.unwrap();
+        row.theme = Theme::System;
+        row.update(&handle).await.unwrap();
+
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        std::fs::write(
+            deployment.path().join("appearance.json"),
+            r#"{"schema_version":1,"data":{"theme":"light"}}"#,
+        )
+        .unwrap();
+
+        let documents = layered(&local, &deployment, &pool);
+        let settings = read(&documents, &handle).await.unwrap();
+
+        assert_eq!(
+            settings.theme.as_str(),
+            "light",
+            "the deployment's document answers the domain the row would"
+        );
+        assert!(
+            !local.path().join("appearance.json").exists(),
+            "a read must not write the local directory"
+        );
+    }
+
+    /// The local document is the last word for the keys it carries: what the
+    /// deployment ships is a value below it, per key rather than per domain.
+    #[tokio::test]
+    async fn a_local_document_wins_over_the_deployment_one() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        std::fs::write(
+            local.path().join("appearance.json"),
+            r#"{"schema_version":1,"data":{"theme":"oled"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            deployment.path().join("appearance.json"),
+            r#"{"schema_version":1,"data":{"theme":"light","locale":"zh_cn"}}"#,
+        )
+        .unwrap();
+
+        let documents = layered(&local, &deployment, &pool);
+        let settings = read(&documents, &handle).await.unwrap();
+
+        assert_eq!(
+            settings.theme.as_str(),
+            "oled",
+            "the key the local document carries overrides the deployment's"
+        );
+        assert_eq!(
+            settings.locale, "zh_cn",
+            "a key it leaves out still comes from the deployment"
+        );
+    }
+
+    /// A deployment's document this build cannot read is a layer that is not
+    /// there: the row answers that domain and the file is left as it stands.
+    #[tokio::test]
+    async fn a_corrupt_deployment_document_is_ignored() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let row = Settings::get(&handle).await.unwrap();
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        let without_data = br#"{"schema_version":1,"theme":"light"}"#;
+        std::fs::write(deployment.path().join("appearance.json"), without_data)
+            .unwrap();
+        std::fs::write(
+            deployment.path().join("download.json"),
+            r#"{"schema_version":1,"data":"nonsense"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            deployment.path().join("backup.json"),
+            r#"{"schema_version":1,"data":{"backup_repository_path":"/shipped"}}"#,
+        )
+        .unwrap();
+
+        let documents = layered(&local, &deployment, &pool);
+        let settings = read(&documents, &handle).await.unwrap();
+
+        assert_eq!(
+            settings.backup_repository_path.as_deref(),
+            Some("/shipped"),
+            "one document this build cannot read costs its own domain only"
+        );
+        assert_eq!(
+            settings.theme.as_str(),
+            row.theme.as_str(),
+            "a document without `data` is unreadable, so the row answers"
+        );
+        assert_eq!(
+            settings.max_concurrent_downloads, row.max_concurrent_downloads,
+            "`data` that is not an object is unreadable too"
+        );
+        assert_eq!(
+            std::fs::read(deployment.path().join("appearance.json"))
+                .unwrap()
+                .as_slice(),
+            without_data.as_slice(),
+            "a read leaves a document it cannot interpret as it stands"
+        );
+    }
+
+    /// The value a key reads before a local document is asked: what the
+    /// deployment ships, and the build's own default when it ships nothing.
+    #[test]
+    fn provided_prefers_the_deployment_value() {
+        let defaults = default_values().unwrap();
+        let config =
+            Map::from_iter([("theme".to_string(), Value::from("light"))]);
+
+        assert_ne!(
+            config.get("theme"),
+            defaults.get("theme"),
+            "the two layers disagree about the key"
+        );
+        assert_eq!(
+            provided("theme", &config, &defaults),
+            config.get("theme"),
+            "the deployment's value comes first"
+        );
+        assert_eq!(
+            provided("locale", &config, &defaults),
+            defaults.get("locale"),
+            "a key it ships nothing for falls back to the build's default"
+        );
+        assert_eq!(
+            provided("no_such_key", &config, &defaults),
+            None,
+            "a key no layer carries has no provided value"
+        );
+    }
+
+    /// The deployment's directory belongs to the deployment: a write lands in
+    /// the local one, even for a domain the deployment ships a document for.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn writing_never_touches_the_deployment_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let pool = empty_pool().await;
+        create_ai_tables(&pool).await;
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        let shipped = deployment.path().join("ai.json");
+        let contents = br#"{"schema_version":1,"data":{"enabled":false}}"#;
+        std::fs::write(&shipped, contents).unwrap();
+        let modified = std::fs::metadata(&shipped).unwrap().modified().unwrap();
+        std::fs::set_permissions(
+            deployment.path(),
+            std::fs::Permissions::from_mode(0o555),
+        )
+        .unwrap();
+
+        let documents = layered(&local, &deployment, &pool);
+        let written = ai::set_enabled(&documents, true).await;
+
+        // Restored before anything is asserted: a directory left read-only
+        // would keep the temporary one from being removed afterwards.
+        std::fs::set_permissions(
+            deployment.path(),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+
+        written.unwrap();
+        assert!(
+            local.path().join("ai.json").is_file(),
+            "the write lands in the local directory"
+        );
+        assert!(ai::read(&documents).await.unwrap().enabled);
+        assert_eq!(
+            std::fs::read(&shipped).unwrap().as_slice(),
+            contents.as_slice(),
+            "a write must leave the deployment's document byte for byte"
+        );
+        assert_eq!(
+            std::fs::metadata(&shipped).unwrap().modified().unwrap(),
+            modified,
+            "a write must not touch the deployment's document at all"
+        );
+        let listed = std::fs::read_dir(deployment.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(listed, [std::ffi::OsString::from("ai.json")]);
+    }
+
+    /// A start drops the local entries a provided value already covers, so a
+    /// change of that value reaches the settings again.
+    #[tokio::test]
+    async fn startup_drops_the_entries_a_deployment_value_provides() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        let written = local.path().join("appearance.json");
+        std::fs::write(
+            &written,
+            r#"{"schema_version":1,"data":{"theme":"light","locale":"zh_cn"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            deployment.path().join("appearance.json"),
+            r#"{"schema_version":1,"data":{"theme":"light"}}"#,
+        )
+        .unwrap();
+
+        let documents = layered(&local, &deployment, &pool);
+        prune_redundant(&documents).await.unwrap();
+
+        let stored: Value =
+            serde_json::from_slice(&std::fs::read(&written).unwrap()).unwrap();
+        let data = stored["data"].as_object().unwrap();
+        assert!(
+            !data.contains_key("theme"),
+            "the key the deployment provides is dropped from the local document"
+        );
+        assert_eq!(
+            data.get("locale"),
+            Some(&Value::from("zh_cn")),
+            "a key only the user set stays where it is"
+        );
+
+        let settings =
+            read(&documents, &Handle::new(pool.clone())).await.unwrap();
+        assert_eq!(
+            settings.theme.as_str(),
+            "light",
+            "the deployment still answers the key the local copy stopped carrying"
+        );
+        assert_eq!(settings.locale, "zh_cn");
+    }
+
+    /// With no deployment there is nothing a local copy could shadow, so a
+    /// start rewrites nothing: the value it repeats is the default's own.
+    #[tokio::test]
+    async fn startup_leaves_the_documents_alone_without_a_deployment() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let written = local.path().join("appearance.json");
+        let contents = br#"{"schema_version":1,"data":{"theme":"dark"}}"#;
+        std::fs::write(&written, contents).unwrap();
+
+        let documents = Documents::at(local.path().to_path_buf(), &pool);
+        prune_redundant(&documents).await.unwrap();
+
+        assert_eq!(
+            std::fs::read(&written).unwrap().as_slice(),
+            contents.as_slice(),
+            "no deployment means no repeated value to drop"
         );
     }
 }

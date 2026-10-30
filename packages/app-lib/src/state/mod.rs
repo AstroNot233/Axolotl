@@ -1336,11 +1336,25 @@ impl State {
 
         documents::hand_over(&pool, &directories.settings_dir).await;
 
-        if !legacy.java_versions.is_empty() {
-            let documents = documents::Documents::at(
-                directories.settings_dir.join(documents::DIR_NAME),
-                &pool,
+        let documents = documents::Documents::at(
+            directories.settings_dir.join(documents::DIR_NAME),
+            &pool,
+        )
+        .with_config_root(documents::config_root());
+        // A deployment changes a value by changing its own document, so a local
+        // copy that repeats the old one has to go: it would shadow the change
+        // forever. This is the one place that drops them, because a read must
+        // never write to disk.
+        if let Err(error) =
+            documents::settings::prune_redundant(&documents).await
+        {
+            tracing::warn!(
+                %error,
+                "Failed to drop the settings entries a provided value covers"
             );
+        }
+
+        if !legacy.java_versions.is_empty() {
             if let Err(error) =
                 JavaVersion::save_all(&documents, &legacy.java_versions).await
             {

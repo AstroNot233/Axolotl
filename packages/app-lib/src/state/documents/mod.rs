@@ -17,6 +17,13 @@
 //! wrote is read as it stands and never written back, so a build that knows
 //! less shows the values the user chose without lowering the document to the
 //! shape it knows.
+//!
+//! `AXOLOTL_SETTINGS_CONFIG_DIR` names a directory the deployment provides —
+//! a package manager such as Nix' home-manager, for instance — and which the
+//! launcher only ever reads. Its documents are read before the local ones and
+//! never written: only the local directory is. They sit directly in that
+//! directory rather than under a `settings` subdirectory, so the two layers are
+//! two depths.
 
 use std::path::{Path, PathBuf};
 
@@ -36,13 +43,31 @@ pub(crate) mod translation;
 pub(crate) const DIR_NAME: &str = "settings";
 const HANDOVER_MARKER: &str = ".handed-over";
 
+/// The variable the deployment names the directory of documents it provides
+/// in.
+const CONFIG_DIR_ENV: &str = "AXOLOTL_SETTINGS_CONFIG_DIR";
+
 /// Serializes the writers, which each read a document before writing it back:
 /// two settings changing at once would otherwise lose one of them.
 static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// The directory a deployment ships its own documents in, when the environment
+/// names one. An empty value is how a shell clears a variable rather than a
+/// directory, so it reads as no deployment at all.
+pub(crate) fn config_root() -> Option<PathBuf> {
+    config_root_from(std::env::var_os(CONFIG_DIR_ENV))
+}
+
+fn config_root_from(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    value.filter(|dir| !dir.is_empty()).map(PathBuf::from)
+}
+
 /// Where the documents of one launch live, and what the fallback reads.
 pub(crate) struct Documents<'a> {
     root: PathBuf,
+    /// The documents a deployment ships. Only the reads reach it: every write
+    /// lands in `root`, so a deployment's document is never touched here.
+    config_root: Option<PathBuf>,
     pool: &'a SqlitePool,
 }
 
@@ -50,6 +75,7 @@ impl<'a> Documents<'a> {
     pub(crate) fn new(state: &'a State) -> Self {
         Self {
             root: state.directories.settings_dir.join(DIR_NAME),
+            config_root: config_root(),
             pool: &state.pool,
         }
     }
@@ -57,11 +83,37 @@ impl<'a> Documents<'a> {
     /// A launcher whose state is not built yet: the directory move rewrites
     /// what the documents carry before `State` exists.
     pub(crate) fn at(root: PathBuf, pool: &'a SqlitePool) -> Self {
-        Self { root, pool }
+        Self {
+            root,
+            config_root: None,
+            pool,
+        }
+    }
+
+    /// The same documents, with a deployment's own directory to read beside
+    /// them. Nothing passes it to a write: a deployment owns that directory.
+    pub(crate) fn with_config_root(
+        mut self,
+        config_root: Option<PathBuf>,
+    ) -> Self {
+        self.config_root = config_root;
+        self
     }
 
     pub(crate) fn path(&self, name: &str) -> PathBuf {
         self.root.join(format!("{name}.json"))
+    }
+
+    fn config_path(&self, name: &str) -> Option<PathBuf> {
+        self.config_root
+            .as_ref()
+            .map(|root| root.join(format!("{name}.json")))
+    }
+
+    /// Whether a deployment ships documents, which is the only case a local
+    /// copy of a provided value can go on shadowing a later change of it.
+    pub(crate) fn ships_documents(&self) -> bool {
+        self.config_root.is_some()
     }
 
     pub(crate) fn pool(&self) -> &'a SqlitePool {
@@ -79,41 +131,27 @@ impl<'a> Documents<'a> {
     where
         T: DeserializeOwned + Default,
     {
-        let path = self.path(name);
-        let contents = match tokio::fs::read(&path).await {
-            Ok(contents) => contents,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Stored::Missing;
+        read_document(&self.path(name), name, schema_version).await
+    }
+
+    /// The document a deployment ships for a domain, when it ships one, and
+    /// nothing when it has no directory or no file for it. A document of a
+    /// shape this build does not know is still read: the values it carries are
+    /// the deployment's answer for its keys, and nothing here writes it back.
+    pub(crate) async fn shipped<T>(
+        &self,
+        name: &str,
+        schema_version: u32,
+    ) -> Option<T>
+    where
+        T: DeserializeOwned + Default,
+    {
+        let path = self.config_path(name)?;
+        match read_document(&path, name, schema_version).await {
+            Stored::Ready { document } | Stored::Newer { document } => {
+                Some(document)
             }
-            Err(error) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    %error,
-                    "Could not read a settings document"
-                );
-                return Stored::Unreadable;
-            }
-        };
-        let Ok(stored) = serde_json::from_slice::<StoredDocument<T>>(&contents)
-        else {
-            tracing::warn!(
-                path = %path.display(),
-                "Ignoring a settings document that cannot be read"
-            );
-            return Stored::Unreadable;
-        };
-        if stored.schema_version > schema_version {
-            tracing::debug!(
-                name,
-                schema_version = stored.schema_version,
-                "Found a settings document a newer build wrote"
-            );
-            return Stored::Newer {
-                document: stored.data,
-            };
-        }
-        Stored::Ready {
-            document: stored.data,
+            Stored::Missing | Stored::Unreadable => None,
         }
     }
 
@@ -163,6 +201,52 @@ impl<'a> Documents<'a> {
         }
         crate::util::io::write(&path, contents).await?;
         Ok(())
+    }
+}
+
+/// What the document at `path` holds, whichever layer it belongs to.
+async fn read_document<T>(
+    path: &Path,
+    name: &str,
+    schema_version: u32,
+) -> Stored<T>
+where
+    T: DeserializeOwned + Default,
+{
+    let contents = match tokio::fs::read(path).await {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Stored::Missing;
+        }
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "Could not read a settings document"
+            );
+            return Stored::Unreadable;
+        }
+    };
+    let Ok(stored) = serde_json::from_slice::<StoredDocument<T>>(&contents)
+    else {
+        tracing::warn!(
+            path = %path.display(),
+            "Ignoring a settings document that cannot be read"
+        );
+        return Stored::Unreadable;
+    };
+    if stored.schema_version > schema_version {
+        tracing::debug!(
+            name,
+            schema_version = stored.schema_version,
+            "Found a settings document a newer build wrote"
+        );
+        return Stored::Newer {
+            document: stored.data,
+        };
+    }
+    Stored::Ready {
+        document: stored.data,
     }
 }
 
@@ -235,6 +319,9 @@ struct StoredDocument<T> {
 pub(crate) async fn hand_over(pool: &SqlitePool, settings_dir: &Path) -> bool {
     let documents = Documents {
         root: settings_dir.join(DIR_NAME),
+        // The handover only fills in what the rows hold, which is what the
+        // local documents carry: a deployment's documents are not its.
+        config_root: None,
         pool,
     };
     let marker = documents.root.join(HANDOVER_MARKER);
@@ -406,8 +493,24 @@ mod tests {
         create_official_login_proof_table, create_translation_tables, pool,
     };
     use super::{
-        Documents, ai, hand_over, java, log_share, login_proof, translation,
+        Documents, ai, config_root_from, hand_over, java, log_share,
+        login_proof, translation,
     };
+
+    /// An empty variable is how a shell clears one, so a deployment that sets
+    /// it to nothing must read the same as one that never set it at all: a
+    /// directory named by nothing would make every domain look deployed.
+    #[test]
+    fn an_empty_config_dir_variable_is_the_same_as_unset() {
+        let directory = std::path::PathBuf::from("/deploy/settings");
+
+        assert_eq!(config_root_from(None), None);
+        assert_eq!(config_root_from(Some(std::ffi::OsString::new())), None);
+        assert_eq!(
+            config_root_from(Some(directory.clone().into_os_string())),
+            Some(directory)
+        );
+    }
 
     async fn installed_pool() -> sqlx::SqlitePool {
         let pool = pool().await;
