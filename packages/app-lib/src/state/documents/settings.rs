@@ -247,7 +247,8 @@ fn contribute(
 
 /// Lays one layer over `values`, for the keys `keys` lists only: a key outside
 /// that list is ignored, and so is a value the type cannot take, which costs
-/// that key and leaves what the layer below gave it.
+/// that key and leaves what the layer below gave it. A negative number is
+/// retried as zero first, so it costs no key at all.
 fn overlay(
     values: &mut Map<String, Value>,
     keys: &[&str],
@@ -259,9 +260,25 @@ fn overlay(
             continue;
         };
         let kept = values.insert(key.to_string(), value.clone());
-        let unreadable =
-            serde_json::from_value::<Settings>(Value::Object(values.clone()))
-                .err();
+        let mut unreadable = settings_error(values);
+
+        // A negative number is the one value the type cannot take that still
+        // has a nearest value inside its range. Read as zero it lands on that
+        // field's lower bound once `normalize` runs, where dropping the key
+        // would put back the default, which is not the nearest value to it.
+        if unreadable.is_some() && is_negative_integer(value) {
+            values.insert(key.to_string(), Value::from(0));
+            unreadable = settings_error(values);
+            if unreadable.is_none() {
+                tracing::warn!(
+                    document = name,
+                    key,
+                    "Reading a negative settings value as its lower bound"
+                );
+                continue;
+            }
+        }
+
         if let Some(error) = unreadable {
             if let Some(kept) = kept {
                 values.insert(key.to_string(), kept);
@@ -276,6 +293,17 @@ fn overlay(
             );
         }
     }
+}
+
+/// Why `values` does not read as `Settings`, when they do not.
+fn settings_error(values: &Map<String, Value>) -> Option<serde_json::Error> {
+    serde_json::from_value::<Settings>(Value::Object(values.clone())).err()
+}
+
+/// Whether a document holds a signed integer below zero. `as_i64` also rules
+/// out every other kind of value, so a string or a bool is not retried.
+fn is_negative_integer(value: &Value) -> bool {
+    value.as_i64().is_some_and(|number| number < 0)
 }
 
 #[cfg(test)]
@@ -409,6 +437,34 @@ mod tests {
         assert_eq!(
             settings.max_concurrent_downloads, 1,
             "a download count below its lowest value reads as that value"
+        );
+    }
+
+    /// A negative number is the one out-of-range value a document can hold that
+    /// has a nearest value inside its field: it reads as that field's lower
+    /// bound, not as the default the key would fall back to if it were dropped.
+    #[tokio::test]
+    async fn a_negative_document_value_reads_as_the_lower_bound() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("download.json"),
+            r#"{"schema_version":1,"data":{"max_concurrent_downloads":-5}}"#,
+        )
+        .unwrap();
+
+        let documents = Documents::at(root.path().to_path_buf(), &pool);
+        let settings = read(&documents, &handle).await.unwrap();
+
+        assert_eq!(
+            settings.max_concurrent_downloads, 1,
+            "a negative download count reads as its lowest value"
+        );
+        assert_ne!(
+            settings.max_concurrent_downloads,
+            Settings::default().max_concurrent_downloads,
+            "the key is read rather than dropped back to its default"
         );
     }
 

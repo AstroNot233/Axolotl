@@ -459,9 +459,9 @@ impl Settings {
         self.max_concurrent_downloads = self
             .max_concurrent_downloads
             .clamp(1, DOWNLOAD_CONCURRENCY_HARD_MAX);
-        self.max_concurrent_writes = self
-            .max_concurrent_writes
-            .clamp(1, DOWNLOAD_CONCURRENCY_HARD_MAX);
+        // The upper bound above is the download engine's; how many writes run
+        // at once never had one, so a value past it keeps what the user set.
+        self.max_concurrent_writes = self.max_concurrent_writes.max(1);
         self.custom_background_blur = self.custom_background_blur.min(40);
         self.custom_background_opacity =
             self.custom_background_opacity.clamp(10, 100);
@@ -484,6 +484,12 @@ impl Settings {
         self
     }
 
+    /// The numeric columns are `i64` where the setting they carry is unsigned,
+    /// and SQLite does not check a column's type: a negative number left by a
+    /// hand edit or an older bug would convert to a huge unsigned value, which
+    /// the range check below then reads as the upper bound. Clamping in the
+    /// column's own domain keeps such a value at the lower bound, where a
+    /// number below the range belongs; `normalize` then applies the real range.
     fn from_record(record: SettingsRecord) -> Self {
         let hidden_nav_items: Vec<String> =
             serde_json::from_str(&record.hidden_nav_items).unwrap_or_default();
@@ -491,8 +497,9 @@ impl Settings {
         Self {
             resource_chinese_filenames: record.resource_chinese_filenames,
             resource_preserve_filenames: record.resource_preserve_filenames,
-            max_concurrent_downloads: record.max_concurrent_downloads as usize,
-            max_concurrent_writes: record.max_concurrent_writes as usize,
+            max_concurrent_downloads: record.max_concurrent_downloads.max(0)
+                as usize,
+            max_concurrent_writes: record.max_concurrent_writes.max(1) as usize,
             auto_concurrent_downloads: record.auto_concurrent_downloads,
             minecraft_metadata_source: to_source_mode(
                 record.minecraft_metadata_source,
@@ -520,19 +527,20 @@ impl Settings {
             native_decorations: record.native_decorations,
             toggle_sidebar: record.toggle_sidebar,
             custom_background_path: record.custom_background_path,
-            custom_background_blur: record.custom_background_blur as u32,
-            custom_background_opacity: record.custom_background_opacity as u32,
+            custom_background_blur: record.custom_background_blur.max(0) as u32,
+            custom_background_opacity: record.custom_background_opacity.max(0)
+                as u32,
             custom_background_component_opacity: record
                 .custom_background_component_opacity
-                as u32,
+                .max(0) as u32,
             ui_font: record.ui_font,
             mono_font: record.mono_font,
             transparent_background: record.transparent_background,
             transparent_background_opacity: record
                 .transparent_background_opacity
-                as u32,
+                .max(0) as u32,
             transparent_background_blur: record.transparent_background_blur,
-            sidebar_instance_count: record.sidebar_instance_count as u32,
+            sidebar_instance_count: record.sidebar_instance_count.max(0) as u32,
             close_behavior: record.close_behavior,
             log_level: record.log_level,
             auto_hide_downloads_button: record.auto_hide_downloads_button,
@@ -544,7 +552,7 @@ impl Settings {
                 .and_then(|value| serde_json::from_str(value).ok()),
             home_widget_background_opacity: record
                 .home_widget_background_opacity
-                as u32,
+                .max(0) as u32,
             hidden_nav_items,
             custom_window_title_enabled: record.custom_window_title_enabled,
             default_window_title: record.default_window_title,
@@ -554,12 +562,13 @@ impl Settings {
             .ok()
             .unwrap_or_else(default_terracotta_public_nodes),
             telemetry: record.telemetry,
-            telemetry_consent_version: record.telemetry_consent_version as u32,
+            telemetry_consent_version: record.telemetry_consent_version.max(0)
+                as u32,
             discord_rpc: record.discord_rpc,
             developer_mode: record.developer_mode,
             personalized_ads: record.personalized_ads,
             onboarded: record.onboarded,
-            onboarding_version: record.onboarding_version as usize,
+            onboarding_version: record.onboarding_version.max(0) as usize,
             onboarding_instance_tour_completed: record
                 .onboarding_instance_tour_completed,
             extra_launch_args: serde_json::from_str(&record.extra_launch_args)
@@ -569,7 +578,7 @@ impl Settings {
                 .ok()
                 .unwrap_or_default(),
             memory: MemorySettings {
-                maximum: record.mc_memory_max as u32,
+                maximum: record.mc_memory_max.max(0) as u32,
                 automatic: record.mc_memory_auto,
                 optimize_before_launch: record.mc_memory_optimize,
             },
@@ -608,7 +617,7 @@ impl Settings {
             auto_download_updates: record.auto_download_updates,
             allow_external_scheme: record.allow_external_scheme,
             allow_privileged_scheme: record.allow_privileged_scheme,
-            version: record.version as usize,
+            version: record.version.max(0) as usize,
         }
         .normalize()
     }
@@ -1135,6 +1144,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+    use crate::state::store::Collection as _;
     use crate::state::store::tests::support::migrated_pool;
 
     /// The keys where two settings carry different values, written out so a
@@ -1186,6 +1196,73 @@ mod tests {
         assert!(
             differing.is_empty(),
             "settings a fresh row disagrees with: {differing:#?}"
+        );
+    }
+
+    /// A row can hold a number below zero where the setting takes none: SQLite
+    /// does not check a column's type, so a hand edit or an older bug can leave
+    /// one. Converting it before bounding it would make it a huge unsigned
+    /// value, which the range check reads as the upper bound rather than the
+    /// lower one.
+    #[tokio::test]
+    async fn a_negative_row_value_reads_as_the_lower_bound() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool);
+        let mut record = StoredSettings::get(&handle, &Singleton)
+            .await
+            .unwrap()
+            .unwrap();
+        record.max_concurrent_downloads = -5;
+        record.custom_background_opacity = -5;
+        record.sidebar_instance_count = -5;
+
+        let settings = Settings::from_record(record);
+
+        assert_eq!(
+            settings.custom_background_opacity, 10,
+            "an opacity below its range reads as its lowest value"
+        );
+        assert_eq!(
+            settings.sidebar_instance_count, 0,
+            "a sidebar count below its range reads as its lowest value"
+        );
+        assert_eq!(
+            settings.max_concurrent_downloads, 1,
+            "a download count below its range reads as its lowest value"
+        );
+    }
+
+    /// The download limit's upper bound belongs to the download engine, not to
+    /// the write limit: how many writes run at once was never bounded above, so
+    /// a row holding more than the download limit keeps its value.
+    #[tokio::test]
+    async fn a_write_limit_above_the_download_bound_is_kept() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool);
+        let mut record = StoredSettings::get(&handle, &Singleton)
+            .await
+            .unwrap()
+            .unwrap();
+
+        record.max_concurrent_writes = 512;
+        assert_eq!(
+            Settings::from_record(record.clone()).max_concurrent_writes,
+            512,
+            "a write limit past the download limit keeps its value"
+        );
+
+        record.max_concurrent_writes = 0;
+        assert_eq!(
+            Settings::from_record(record.clone()).max_concurrent_writes,
+            1,
+            "a write limit of zero reads as its lowest value"
+        );
+
+        record.max_concurrent_writes = -5;
+        assert_eq!(
+            Settings::from_record(record).max_concurrent_writes,
+            1,
+            "a write limit below zero reads as its lowest value"
         );
     }
 
