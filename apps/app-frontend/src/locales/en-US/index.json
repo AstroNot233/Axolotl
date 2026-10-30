@@ -10685,6 +10685,18 @@
   "app.settings.defaults.fullscreen-description": {
     "message": "Overwrites the options.txt file to start in full screen when launched."
   },
+  "app.settings.defaults.game-language.description": {
+    "message": "Used the first time an instance launches. Instances that have already been played keep their in-game language."
+  },
+  "app.settings.defaults.game-language.follow-launcher": {
+    "message": "Follow launcher language"
+  },
+  "app.settings.defaults.game-language.search": {
+    "message": "Minecraft game language locale language region"
+  },
+  "app.settings.defaults.game-language.title": {
+    "message": "Default game language"
+  },
   "app.settings.defaults.height": {
     "message": "Height"
   },
@@ -10744,6 +10756,9 @@
   },
   "app.settings.defaults.sections.environment": {
     "message": "Environment variables"
+  },
+  "app.settings.defaults.sections.game-language": {
+    "message": "Game language"
   },
   "app.settings.defaults.sections.launch-hooks": {
     "message": "Launch hooks"

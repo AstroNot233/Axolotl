@@ -9368,6 +9368,18 @@
   "app.settings.defaults.environment-variables-placeholder": {
     "message": "输入环境变量……"
   },
+  "app.settings.defaults.game-language.description": {
+    "message": "用于实例首次启动。已经游玩过的实例会保留游戏内语言。"
+  },
+  "app.settings.defaults.game-language.follow-launcher": {
+    "message": "跟随启动器语言"
+  },
+  "app.settings.defaults.game-language.search": {
+    "message": "Minecraft 游戏语言 区域 语言 locale"
+  },
+  "app.settings.defaults.game-language.title": {
+    "message": "默认游戏语言"
+  },
   "app.settings.defaults.fullscreen": {
     "message": "全屏"
   },
@@ -14644,6 +14656,9 @@
   },
   "app.settings.defaults.sections.environment": {
     "message": "环境变量"
+  },
+  "app.settings.defaults.sections.game-language": {
+    "message": "游戏语言"
   },
   "app.settings.defaults.sections.launch-hooks": {
     "message": "启动钩子"
