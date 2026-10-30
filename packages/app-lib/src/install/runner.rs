@@ -23,6 +23,15 @@ use crate::api::pack::install_mrpack::{
 };
 use crate::event::InstancePayloadType;
 use crate::event::emit::emit_instance;
+use crate::state::instances::adapters::sqlite::content_sets;
+use crate::state::store::Collection as _;
+use crate::state::store::content_update_jobs::{
+    ContentUpdateJobRecord, ContentUpdateJobs,
+};
+use crate::state::store::install_jobs::{
+    InstallJobRecord as StoredJob, InstallJobs,
+};
+use crate::state::store::resource_operation_plans::ResourceOperationPlans;
 use crate::state::{
     ContentProvider, ContentProviderRef, InstanceInstallStage, InstanceLink,
     InstanceUpgradeAction, InstanceUpgradeDependencyChangeKind,
@@ -309,13 +318,18 @@ pub async fn queue_resource_plan(
     revision: u32,
 ) -> crate::Result<InstallJobSnapshot> {
     let state = State::get().await?;
-    let instance: String = sqlx::query_scalar("SELECT instance_id FROM resource_operation_plans WHERE id = ? AND revision = ?")
-        .bind(plan_id.as_str()).bind(revision).fetch_one(&state.pool).await?;
+    let instance = ResourceOperationPlans::instance_at(
+        &state.data,
+        plan_id.as_str(),
+        revision,
+    )
+    .await?;
     let _admission = admission::lock(&state, Some(&instance)).await?;
     let _writer = state.acquire_install_db_permit().await?;
     let mut tx = state.pool.begin().await?;
-    let existing: Option<String> = sqlx::query_scalar("SELECT job_id FROM resource_operation_plans WHERE id = ? AND revision = ?")
-        .bind(plan_id.as_str()).bind(revision).fetch_optional(&mut *tx).await?.flatten();
+    let existing =
+        ResourceOperationPlans::job_at_in(&mut *tx, plan_id.as_str(), revision)
+            .await?;
     if let Some(existing) = existing {
         drop(tx);
         return store::get(Uuid::parse_str(&existing)?, &state)
@@ -328,8 +342,17 @@ pub async fn queue_resource_plan(
                 .into()
             });
     }
-    let payload: String = sqlx::query_scalar("SELECT payload FROM resource_operation_plans WHERE id = ? AND revision = ? AND queued = 0 AND job_id IS NULL")
-        .bind(plan_id.as_str()).bind(revision).fetch_optional(&mut *tx).await?.ok_or_else(|| crate::ErrorKind::InputError("resource plan was revised or already queued".into()))?;
+    let payload = ResourceOperationPlans::queueable_payload_in(
+        &mut *tx,
+        plan_id.as_str(),
+        revision,
+    )
+    .await?
+    .ok_or_else(|| {
+        crate::ErrorKind::InputError(
+            "resource plan was revised or already queued".into(),
+        )
+    })?;
     let draft: crate::resources::plans::OperationDraft =
         serde_json::from_str(&payload)?;
     let plan = draft.plan;
@@ -343,8 +366,15 @@ pub async fn queue_resource_plan(
     let _lock = state
         .lock_instance_content_exclusive(&plan.instance_id)
         .await;
-    let current_revision: i64 = sqlx::query_scalar("SELECT content.revision FROM instances instance JOIN instance_content_sets content ON content.id = instance.applied_content_set_id WHERE instance.id = ?").bind(&plan.instance_id).fetch_one(&mut *tx).await?;
-    if u64::try_from(current_revision).ok() != Some(plan.instance_revision) {
+    let current_revision = content_sets::get_applied_content_set_revision(
+        &plan.instance_id,
+        &mut *tx,
+    )
+    .await?
+    .map(|(_, revision)| revision);
+    if current_revision.and_then(|revision| u64::try_from(revision).ok())
+        != Some(plan.instance_revision)
+    {
         return Err(crate::ErrorKind::InputError(
             "instance changed after review".into(),
         )
@@ -386,9 +416,29 @@ pub async fn queue_resource_plan(
         icon: None,
     });
     let now = chrono::Utc::now().timestamp();
-    sqlx::query("INSERT INTO install_jobs(id, instance_id, kind, status, state, created, modified, finished, dismissed) VALUES (?, ?, ?, 'queued', ?, ?, ?, NULL, 0)").bind(id.to_string()).bind(&plan.instance_id).bind(job.request.kind().as_str()).bind(serde_json::to_string(&job)?).bind(now).bind(now).execute(&mut *tx).await?;
-    let updated = sqlx::query("UPDATE resource_operation_plans SET job_id = ?, queued = 1 WHERE id = ? AND revision = ? AND queued = 0 AND job_id IS NULL").bind(id.to_string()).bind(plan_id.as_str()).bind(revision).execute(&mut *tx).await?;
-    if updated.rows_affected() != 1 {
+    InstallJobs::insert_in(
+        &mut *tx,
+        &id.to_string(),
+        &StoredJob {
+            instance_id: Some(plan.instance_id.clone()),
+            kind: job.request.kind().as_str().to_string(),
+            status: InstallJobStatus::Queued.as_str().to_string(),
+            state: serde_json::to_string(&job)?,
+            created: now,
+            modified: now,
+            finished: None,
+            dismissed: false,
+        },
+    )
+    .await?;
+    let updated = ResourceOperationPlans::queue_in(
+        &mut *tx,
+        plan_id.as_str(),
+        revision,
+        &id.to_string(),
+    )
+    .await?;
+    if updated != 1 {
         return Err(crate::ErrorKind::InputError(
             "resource plan changed concurrently".into(),
         )
@@ -979,25 +1029,87 @@ pub(super) async fn cancel_job_with_state(
     }
 }
 
-fn schedule_cancel_cleanup(job_id: Uuid, state: std::sync::Arc<State>) {
-    static CLEANUPS: std::sync::LazyLock<dashmap::DashSet<Uuid>> =
-        std::sync::LazyLock::new(dashmap::DashSet::new);
-    struct Registration(Uuid);
-    impl Drop for Registration {
-        fn drop(&mut self) {
-            CLEANUPS.remove(&self.0);
+static CANCEL_CLEANUPS: std::sync::LazyLock<dashmap::DashMap<Uuid, bool>> =
+    std::sync::LazyLock::new(dashmap::DashMap::new);
+
+struct CancelCleanupRegistration {
+    job_id: Uuid,
+    active: bool,
+}
+
+impl CancelCleanupRegistration {
+    fn request(job_id: Uuid) -> Option<Self> {
+        match CANCEL_CLEANUPS.entry(job_id) {
+            dashmap::mapref::entry::Entry::Occupied(mut entry) => {
+                *entry.get_mut() = true;
+                None
+            }
+            dashmap::mapref::entry::Entry::Vacant(entry) => {
+                entry.insert(false);
+                Some(Self {
+                    job_id,
+                    active: true,
+                })
+            }
         }
     }
-    if !CLEANUPS.insert(job_id) {
-        return;
+
+    fn retry_requested(&mut self) -> bool {
+        match CANCEL_CLEANUPS.entry(self.job_id) {
+            dashmap::mapref::entry::Entry::Occupied(mut entry)
+                if *entry.get() =>
+            {
+                *entry.get_mut() = false;
+                true
+            }
+            dashmap::mapref::entry::Entry::Occupied(entry) => {
+                entry.remove();
+                self.active = false;
+                false
+            }
+            dashmap::mapref::entry::Entry::Vacant(_) => unreachable!(),
+        }
     }
-    let registration = Registration(job_id);
+}
+
+impl Drop for CancelCleanupRegistration {
+    fn drop(&mut self) {
+        if self.active {
+            CANCEL_CLEANUPS.remove(&self.job_id);
+        }
+    }
+}
+
+fn schedule_cancel_cleanup(job_id: Uuid, state: std::sync::Arc<State>) {
+    let Some(registration) = CancelCleanupRegistration::request(job_id) else {
+        return;
+    };
     tokio::spawn(async move {
-        let _registration = registration;
-        if let Err(error) = finish_canceling_job(job_id, &state).await {
+        run_cancel_cleanup(registration, || {
+            finish_canceling_job(job_id, &state)
+        })
+        .await;
+    });
+}
+
+async fn run_cancel_cleanup<F, Fut>(
+    mut registration: CancelCleanupRegistration,
+    mut cleanup: F,
+) where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = crate::Result<()>>,
+{
+    loop {
+        if let Err(error) = cleanup().await {
+            let job_id = registration.job_id;
             tracing::error!(%job_id, %error, "Canceled install cleanup could not finish; durable canceling state remains recoverable");
         }
-    });
+        // Consume a pending request or release ownership under the same entry
+        // lock, so a request arriving during cleanup cannot be stranded.
+        if !registration.retry_requested() {
+            break;
+        }
+    }
 }
 
 async fn finish_canceling_job(
@@ -1141,8 +1253,14 @@ async fn enqueue_with_content_plan(
     }
     if let Some(existing) = admission::existing(state, &request, None).await? {
         if let Some((plan_id, _)) = content_plan {
-            sqlx::query("INSERT INTO content_update_jobs(plan_id, job_id) VALUES (?, ?)")
-                .bind(plan_id).bind(existing.job_id.to_string()).execute(&state.pool).await?;
+            ContentUpdateJobs::insert_in(
+                &state.pool,
+                &plan_id.to_string(),
+                &ContentUpdateJobRecord {
+                    job_id: Some(existing.job_id.to_string()),
+                },
+            )
+            .await?;
         }
         return Ok(existing);
     }
@@ -1207,16 +1325,16 @@ pub(crate) async fn content_plan_job(
     plan_id: &str,
     state: &State,
 ) -> crate::Result<Option<InstallJobSnapshot>> {
-    let saved: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT job_id FROM content_update_jobs WHERE plan_id = ?",
-    )
-    .bind(plan_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    let saved =
+        ContentUpdateJobs::get(&state.data, &plan_id.to_string()).await?;
     match saved {
         None => Ok(None),
-        Some(Some(id)) => Ok(Some(store::get_required(Uuid::parse_str(&id)?, state).await?.snapshot())),
-        Some(None) => Err(ErrorKind::InputError("The accepted task was removed from history; create a new update plan".into()).into()),
+        Some(ContentUpdateJobRecord { job_id: Some(id) }) => Ok(Some(
+            store::get_required(Uuid::parse_str(&id)?, state)
+                .await?
+                .snapshot(),
+        )),
+        Some(ContentUpdateJobRecord { job_id: None }) => Err(ErrorKind::InputError("The accepted task was removed from history; create a new update plan".into()).into()),
     }
 }
 
