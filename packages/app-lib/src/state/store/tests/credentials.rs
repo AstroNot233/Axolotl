@@ -596,3 +596,37 @@ async fn two_handles_read_the_same_accounts() {
             .is_some()
     );
 }
+
+#[tokio::test]
+async fn signing_in_clears_the_account_that_was_active() {
+    let pool = support::pool().await;
+    let handle = handle_of(&pool);
+
+    let first = Uuid::new_v4();
+    let second = Uuid::new_v4();
+    let mut signed_in = account_record(first, AccountType::Microsoft);
+    signed_in.active = true;
+    MinecraftUsers::set(&handle, &user_key(first), Some(&signed_in))
+        .await
+        .unwrap();
+    let mut next = account_record(second, AccountType::Microsoft);
+    next.active = true;
+    MinecraftUsers::set(&handle, &user_key(second), Some(&next))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        MinecraftUsers::get(&handle, &user_key(first))
+            .await
+            .unwrap()
+            .map(|record| record.active),
+        Some(false)
+    );
+    assert_eq!(
+        MinecraftUsers::get(&handle, &user_key(second))
+            .await
+            .unwrap()
+            .map(|record| record.active),
+        Some(true)
+    );
+}

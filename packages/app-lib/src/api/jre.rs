@@ -23,7 +23,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use sysinfo::{MemoryRefreshKind, RefreshKind};
 
-use crate::state::store::atom;
+use crate::state::documents;
 use crate::util::io;
 use crate::util::jre::extract_java_version;
 use crate::{
@@ -42,9 +42,10 @@ pub struct RegisteredJavaVersions {
 pub async fn get_registered_java_versions()
 -> crate::Result<RegisteredJavaVersions> {
     let state = State::get().await?;
+    let documents = documents::Documents::new(&state);
     Ok(RegisteredJavaVersions {
-        runtimes: JavaVersion::get_all(&state.data).await?,
-        defaults: JavaVersion::get_all_defaults(&state.data).await?,
+        runtimes: JavaVersion::get_all(&documents).await?,
+        defaults: JavaVersion::get_all_defaults(&documents).await?,
     })
 }
 
@@ -52,10 +53,11 @@ pub async fn get_java_versions() -> crate::Result<Vec<JavaVersion>> {
     let state = State::get().await?;
     register_managed_java_versions(&state).await?;
 
-    JavaVersion::get_all(&state.data).await
+    JavaVersion::get_all(&documents::Documents::new(&state)).await
 }
 
 async fn register_managed_java_versions(state: &State) -> crate::Result<()> {
+    let documents = documents::Documents::new(state);
     let root = state.directories.java_versions_dir();
     let mut entries = match tokio::fs::read_dir(&root).await {
         Ok(entries) => entries,
@@ -101,22 +103,16 @@ async fn register_managed_java_versions(state: &State) -> crate::Result<()> {
                 .rsplit_once("-jdk-")
                 .and_then(|(_, version)| version.parse::<u32>().ok())
                 == Some(java.parsed_version)
-                && JavaVersion::get(java.parsed_version, &state.data)
+                && JavaVersion::get(java.parsed_version, &documents)
                     .await?
                     .is_none();
-            let mut unit = atom(&state.data).await?;
-            java.upsert_in(&mut unit).await?;
             if set_default {
-                JavaVersion::set_default_in(
-                    &mut unit,
-                    java.parsed_version,
-                    &java.path,
-                )
-                .await?;
+                java.upsert_as_default(&documents).await?;
+            } else {
+                java.upsert(&documents).await?;
             }
-            unit.commit().await?;
             if let Some(discovered) = DiscoveredJava::from_java(java) {
-                discovered.upsert(&state.pool).await?;
+                discovered.upsert(&state.derived).await?;
             }
             break;
         }
@@ -129,7 +125,7 @@ pub async fn get_java_default_versions() -> crate::Result<Vec<JavaVersion>> {
     let state = State::get().await?;
     register_managed_java_versions(&state).await?;
 
-    JavaVersion::get_all_defaults(&state.data).await
+    JavaVersion::get_all_defaults(&documents::Documents::new(&state)).await
 }
 
 #[cfg(feature = "tauri")]
@@ -161,7 +157,6 @@ pub async fn list_java_distribution_versions(
                 None,
                 None,
                 &state.api_semaphore,
-                &state.pool,
             )
             .await?;
             let mut versions: Vec<u32> = packages
@@ -182,7 +177,9 @@ pub async fn list_java_distribution_versions(
 
 pub async fn set_java_version(java_version: JavaVersion) -> crate::Result<()> {
     let state = State::get().await?;
-    java_version.upsert(&state.data).await?;
+    java_version
+        .upsert(&documents::Documents::new(&state))
+        .await?;
     Ok(())
 }
 
@@ -200,11 +197,9 @@ pub async fn set_java_default_version(
     }
 
     let state = State::get().await?;
-    let mut unit = atom(&state.data).await?;
-    java_version.upsert_in(&mut unit).await?;
-    JavaVersion::set_default_in(&mut unit, major_version, &java_version.path)
+    java_version
+        .upsert_as_default(&documents::Documents::new(&state))
         .await?;
-    unit.commit().await?;
 
     Ok(java_version)
 }
@@ -213,17 +208,17 @@ pub async fn remove_java_default_version(
     major_version: u32,
 ) -> crate::Result<()> {
     let state = State::get().await?;
-    JavaVersion::remove_default(major_version, &state.data).await
+    JavaVersion::remove_default(
+        major_version,
+        &documents::Documents::new(&state),
+    )
+    .await
 }
 
 /// Removes a configured Java version by its executable path.
 pub async fn remove_java_version(path: String) -> crate::Result<()> {
     let state = State::get().await?;
-    let mut unit = atom(&state.data).await?;
-    JavaVersion::remove_default_for_path_in(&mut unit, &path).await?;
-    JavaVersion::delete_in(&mut unit, &path).await?;
-    unit.commit().await?;
-    Ok(())
+    JavaVersion::delete(&path, &documents::Documents::new(&state)).await
 }
 
 const JAVA_RESCAN_DEBOUNCE: Duration = Duration::from_secs(60);
@@ -248,7 +243,7 @@ pub async fn find_filtered_jres(
     }
 
     let state = State::get().await?;
-    let jres = JavaVersion::get_all(&state.data).await?;
+    let jres = JavaVersion::get_all(&documents::Documents::new(&state)).await?;
 
     Ok(if let Some(java_version) = java_version {
         jres.into_iter()
@@ -315,7 +310,7 @@ pub async fn get_available_jres(
 async fn validate_cached_javas(
     state: &State,
 ) -> crate::Result<Vec<JavaVersion>> {
-    let entries = DiscoveredJava::get_all(&state.pool).await?;
+    let entries = DiscoveredJava::get_all(&state.derived).await?;
     let mut valid = Vec::new();
 
     for entry in entries {
@@ -331,15 +326,16 @@ async fn validate_cached_javas(
                     && let Some(refreshed) =
                         DiscoveredJava::from_java(java.clone())
                 {
-                    refreshed.upsert(&state.pool).await?;
+                    refreshed.upsert(&state.derived).await?;
                     valid.push(java);
                 } else {
-                    DiscoveredJava::remove(&entry.java.path, &state.pool)
+                    DiscoveredJava::remove(&entry.java.path, &state.derived)
                         .await?;
                 }
             }
             None => {
-                DiscoveredJava::remove(&entry.java.path, &state.pool).await?;
+                DiscoveredJava::remove(&entry.java.path, &state.derived)
+                    .await?;
             }
         }
     }
@@ -358,7 +354,7 @@ async fn refresh_discovered_javas(
     let jres = jre::get_all_jre(full_scan, exhaustive).await?;
 
     let previous: HashSet<(String, String)> =
-        DiscoveredJava::get_all(&state.pool)
+        DiscoveredJava::get_all(&state.derived)
             .await?
             .into_iter()
             .map(|entry| (entry.java.path, entry.java.version))
@@ -368,16 +364,13 @@ async fn refresh_discovered_javas(
         .iter()
         .filter_map(|java| DiscoveredJava::from_java(java.clone()))
         .collect();
-    DiscoveredJava::replace_all(&state.pool, &entries).await?;
+    DiscoveredJava::replace_all(&state.derived, &entries).await?;
 
-    // Also upsert into java_versions so they appear in the settings list
-    for java in &jres {
-        if let Err(e) = java.upsert(&state.data).await {
-            tracing::warn!(
-                "Failed to upsert discovered Java {} into java_versions: {e}",
-                java.parsed_version
-            );
-        }
+    // Also record them in the Java document so they appear in the settings list
+    if let Err(e) =
+        JavaVersion::save_all(&documents::Documents::new(state), &jres).await
+    {
+        tracing::warn!("Failed to record the discovered Java runtimes: {e}");
     }
 
     let current: HashSet<(String, String)> = entries
@@ -419,7 +412,7 @@ pub async fn find_cached_java(
 ) -> crate::Result<Option<JavaVersion>> {
     let state = State::get().await?;
 
-    for entry in DiscoveredJava::get_all(&state.pool).await? {
+    for entry in DiscoveredJava::get_all(&state.derived).await? {
         if entry.java.parsed_version != major_version {
             continue;
         }
@@ -441,14 +434,15 @@ pub async fn find_java_for_version(
     major_version: u32,
 ) -> crate::Result<Option<JavaVersion>> {
     let state = State::get().await?;
+    let documents = documents::Documents::new(&state);
     if let Some(configured) =
-        JavaVersion::get(major_version, &state.data).await?
+        JavaVersion::get(major_version, &documents).await?
     {
         let path = PathBuf::from(&configured.path);
         if let Ok(java) = jre::check_java_at_filepath(&path).await
             && java.parsed_version == major_version
         {
-            java.upsert(&state.data).await?;
+            java.upsert(&documents).await?;
             return Ok(Some(java));
         }
 
@@ -457,7 +451,7 @@ pub async fn find_java_for_version(
             path = %configured.path,
             "Configured Java default is no longer valid"
         );
-        JavaVersion::remove_default(major_version, &state.data).await?;
+        JavaVersion::remove_default(major_version, &documents).await?;
     }
 
     if let Some(java) = find_cached_java(major_version).await? {
@@ -523,7 +517,9 @@ pub async fn find_compatible_java_for_version(
 
     let state = State::get().await?;
     let mut jres = get_available_jres(false, false, false).await?;
-    jres.extend(JavaVersion::get_all(&state.data).await?);
+    jres.extend(
+        JavaVersion::get_all(&documents::Documents::new(&state)).await?,
+    );
     Ok(closest_compatible_java(jres.iter(), major_version))
 }
 
@@ -1005,7 +1001,6 @@ async fn install_mojang_runtime(
         None,
         None,
         &state.api_semaphore,
-        &state.pool,
     )
     .await?;
     let Some(release) = index
@@ -1057,7 +1052,6 @@ async fn install_mojang_runtime(
         request,
         &manifest_path,
         &state.download_semaphore,
-        &state.pool,
         None,
     )
     .await?;
@@ -1225,7 +1219,6 @@ async fn install_mojang_runtime(
                         request,
                         &path,
                         &state.download_semaphore,
-                        &state.pool,
                         Some(&mut progress as &mut FetchProgressFn<'_>),
                     )
                     .await?;
@@ -1294,18 +1287,26 @@ fn extract_azul_archive(
             "Failed to read Java archive: {error}"
         ))
     })?;
-    let root = archive
-        .file_names()
-        .find_map(|name| {
-            name.split('/').find(|component| !component.is_empty())
-        })
-        .map(PathBuf::from)
-        .ok_or_else(|| {
-            crate::ErrorKind::InputError(
-                "Java archive does not contain an install directory"
-                    .to_string(),
-            )
+    let mut root = None;
+    for name in archive.file_names() {
+        let name = name.map_err(|error| {
+            crate::ErrorKind::InputError(format!(
+                "Failed to read Java archive entry name: {error}"
+            ))
         })?;
+        root = name
+            .split('/')
+            .find(|component| !component.is_empty())
+            .map(PathBuf::from);
+        if root.is_some() {
+            break;
+        }
+    }
+    let root = root.ok_or_else(|| {
+        crate::ErrorKind::InputError(
+            "Java archive does not contain an install directory".to_string(),
+        )
+    })?;
     validate_archive_file_name(&root)?;
     archive.extract(staging_root).map_err(|error| {
         crate::ErrorKind::InputError(format!(
@@ -1346,7 +1347,6 @@ async fn install_azul_runtime(
         None,
         None,
         &state.api_semaphore,
-        &state.pool,
     )
     .await?;
     let summary = packages.first().ok_or_else(|| {
@@ -1368,7 +1368,6 @@ async fn install_azul_runtime(
         None,
         None,
         &state.api_semaphore,
-        &state.pool,
     )
     .await?;
     validate_archive_file_name(&download.name)?;
@@ -1460,7 +1459,6 @@ async fn install_azul_runtime(
         request,
         &archive_path,
         &state.download_semaphore,
-        &state.pool,
         Some(&mut progress as &mut FetchProgressFn<'_>),
     )
     .await?;
@@ -1852,7 +1850,6 @@ async fn download_java_from_feed_inner(
         request,
         &archive_path,
         &state.download_semaphore,
-        &state.pool,
         Some(&mut progress as &mut FetchProgressFn<'_>),
     )
     .await
@@ -1930,13 +1927,11 @@ async fn download_java_from_feed_inner(
     .await?;
 
     let result = check_jre(executable).await?;
-    let mut unit = atom(&state.data).await?;
-    result.upsert_in(&mut unit).await?;
-    JavaVersion::set_default_in(&mut unit, result.parsed_version, &result.path)
+    result
+        .upsert_as_default(&documents::Documents::new(&state))
         .await?;
-    unit.commit().await?;
     if let Some(discovered) = DiscoveredJava::from_java(result.clone()) {
-        discovered.upsert(&state.pool).await?;
+        discovered.upsert(&state.derived).await?;
     }
 
     // Complete the remaining 10 % of the bar

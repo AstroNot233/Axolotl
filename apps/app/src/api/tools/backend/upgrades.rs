@@ -135,10 +135,15 @@ pub(super) async fn execute(
                 _ => ShaderRuntime::Unknown,
             },
         };
-        let plan =
-            theseus::instance::plan_instance_upgrade(&instance_id, target)
-                .await
-                .map_err(business_error)?;
+        // Accepted MCP operations finish independently of their connection.
+        let plan = theseus::instance::plan_instance_upgrade(
+            &instance_id,
+            target,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .map_err(business_error)?;
         return review(backend, &context.session_id, plan, 1);
     }
     let (id, revision) = match &command {

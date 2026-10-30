@@ -11,7 +11,7 @@ use sqlx::Row;
 use sqlx::SqliteConnection;
 use sqlx::sqlite::SqliteRow;
 
-use super::Collection;
+use super::{Collection, Handle};
 
 /// The queued events.
 pub(crate) struct TelemetryOutbox;
@@ -206,6 +206,45 @@ impl Collection for TelemetryOutbox {
     }
 }
 
+impl TelemetryOutbox {
+    /// Trimming keeps the newest events within an age, a count and a byte
+    /// budget, which no record-by-record replacement can say.
+    pub(crate) async fn trim(
+        handle: &Handle,
+        oldest: i64,
+        max_events: i64,
+        max_bytes: i64,
+    ) -> crate::Result<()> {
+        sqlx::query("DELETE FROM telemetry_outbox WHERE created_at < ?")
+            .bind(oldest)
+            .execute(handle.pool())
+            .await?;
+        sqlx::query(
+            "DELETE FROM telemetry_outbox WHERE event_id IN (SELECT event_id FROM telemetry_outbox ORDER BY created_at DESC LIMIT -1 OFFSET ?)",
+        )
+        .bind(max_events)
+        .execute(handle.pool())
+        .await?;
+        sqlx::query(
+            r#"
+            DELETE FROM telemetry_outbox
+            WHERE event_id IN (
+                SELECT event_id FROM (
+                    SELECT event_id,
+                        SUM(size_bytes) OVER (ORDER BY created_at DESC, event_id DESC) AS running_bytes
+                    FROM telemetry_outbox
+                )
+                WHERE running_bytes > ?
+            )
+            "#,
+        )
+        .bind(max_bytes)
+        .execute(handle.pool())
+        .await?;
+        Ok(())
+    }
+}
+
 fn to_records(
     rows: Vec<SqliteRow>,
 ) -> crate::Result<Vec<(TelemetryOutboxKey, TelemetryOutboxRecord)>> {
@@ -367,21 +406,48 @@ async fn ensure_keys_belong_to_scope(
     scope: &TelemetryOutboxScope,
     records: &[(TelemetryOutboxKey, TelemetryOutboxRecord)],
 ) -> crate::Result<()> {
-    for (key, _) in records {
-        let Some(existing) = TelemetryOutbox::read(conn, key).await? else {
-            continue;
-        };
-        let in_scope = match scope {
-            TelemetryOutboxScope::Kind(kind) => existing.event_type == *kind,
-            TelemetryOutboxScope::Due { kind, .. } => {
-                existing.event_type == *kind
+    for (key, record) in records {
+        // Every row this write would replace: the one under its own id, and any
+        // row already holding its dedupe key, whichever id that row has. Both
+        // are read as stored text, so a row this build cannot read is still
+        // checked rather than mistaken for an absent one.
+        let stored: Vec<(String, String, i64)> = sqlx::query_as(
+            "
+            SELECT event_id, event_type, next_attempt_at
+            FROM telemetry_outbox
+            WHERE event_id = ? OR dedupe_key = ?
+            ",
+        )
+        .bind(key)
+        .bind(&record.dedupe_key)
+        .fetch_all(&mut *conn)
+        .await?;
+
+        for (stored_id, stored_kind, next_attempt_at) in stored {
+            let Some(event_type) = TelemetryEventType::parse(&stored_kind)
+            else {
+                tracing::warn!(
+                    event_id = %stored_id,
+                    stored = %stored_kind,
+                    "Refusing to replace a queued telemetry event of a kind this build does not know"
+                );
+                return Err(crate::ErrorKind::InputError(format!(
+                    "Telemetry event {stored_id} was written by another build"
+                ))
+                .into());
+            };
+            let in_scope = match scope {
+                TelemetryOutboxScope::Kind(kind) => event_type == *kind,
+                TelemetryOutboxScope::Due { kind, at } => {
+                    event_type == *kind && next_attempt_at <= *at
+                }
+            };
+            if !in_scope {
+                return Err(crate::ErrorKind::InputError(format!(
+                    "Telemetry event {stored_id} belongs to another part of the queue"
+                ))
+                .into());
             }
-        };
-        if !in_scope {
-            return Err(crate::ErrorKind::InputError(format!(
-                "Telemetry event {key} belongs to another kind"
-            ))
-            .into());
         }
     }
 

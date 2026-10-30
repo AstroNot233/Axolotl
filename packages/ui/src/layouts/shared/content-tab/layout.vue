@@ -16,6 +16,7 @@ import Button from '#ui/components/base/buttons/Button.vue'
 import type { Option as OverflowMenuOption } from '#ui/components/base/OverflowMenu.vue'
 import PopoutMenu from '#ui/components/base/PopoutMenu.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
+import { useScrollToTopVisibility } from '#ui/composables/scroll-to-top-visibility'
 import { commonMessages, normalizeProjectType } from '#ui/utils/common-messages'
 
 import ContentCardTable from './components/ContentCardTable.vue'
@@ -225,6 +226,12 @@ const sortMode = ref<ContentSortMode>(
             ? (sortMemory.get(ctx.instanceId) ?? 'project-name-asc')
             : 'project-name-asc'),
 )
+const sortRevision = ref(0)
+
+function selectSort(mode: ContentSortMode) {
+    sortMode.value = mode
+    sortRevision.value += 1
+}
 
 watch(sortMode, (val) => {
     if (ctx.instanceId) sortMemory.set(ctx.instanceId, val)
@@ -278,6 +285,7 @@ const {
     modpackItems: ctx.modpackItems,
     duplicateItems: ctx.duplicateItems,
     sortItems,
+    sortKey: computed(() => JSON.stringify([sortMode.value, locale.value, sortRevision.value])),
     getItemId,
     showTypeFilters: true,
     showUpdateFilter: ctx.hasUpdateSupport,
@@ -359,7 +367,8 @@ const bulkItemCount = ref(0)
 // 整合包分组展开状态（导航切换保留，关软件丢弃）
 const expandedGroupsMemory = getContentTabMap<string, Set<string>>('expandedGroups')
 
-const refreshing = ref(false)
+const refreshSubmitting = ref(false)
+const refreshing = computed(() => refreshSubmitting.value || !!ctx.refreshStatus?.value)
 
 const expandedGroups = ref<Set<string>>(
     ctx.instanceId
@@ -411,7 +420,7 @@ function togglePinnedView() {
 }
 
 function resetView() {
-    sortMode.value = 'project-name-asc'
+    selectSort('project-name-asc')
     searchQuery.value = ''
     selectedTypeFilter.value = []
     selectedStatusFilters.value = []
@@ -435,12 +444,12 @@ watch(
     { deep: true },
 )
 
-const showScrollToTop = ref(false)
-const SCROLL_THRESHOLD = 300
-
 function getScrollContainer(): Element | null {
     return document.querySelector('.app-viewport')
 }
+
+const { visible: showScrollToTop, update: updateScrollToTopVisibility } =
+    useScrollToTopVisibility(getScrollContainer)
 
 function captureContentViewScroll() {
     if (!ctx.instanceId) return
@@ -493,10 +502,7 @@ function restoreContentViewScroll() {
 }
 
 function handleScroll() {
-    const container = getScrollContainer()
-    if (container) {
-        showScrollToTop.value = container.scrollTop > SCROLL_THRESHOLD
-    }
+    updateScrollToTopVisibility()
 }
 
 function scrollToTop() {
@@ -524,11 +530,11 @@ onBeforeUnmount(() => {
 
 async function handleRefresh() {
     if (refreshing.value) return
-    refreshing.value = true
+    refreshSubmitting.value = true
     try {
         await ctx.refresh()
     } finally {
-        refreshing.value = false
+        refreshSubmitting.value = false
     }
 }
 
@@ -1138,6 +1144,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
                     :disable-add-content="ctx.disableAddContent?.value"
                     :disable-add-content-tooltip="ctx.disableAddContentTooltip"
                     :refreshing="refreshing"
+                    :refresh-status="ctx.refreshStatus?.value"
                     :view-dependencies="!!ctx.viewDependencies"
                     @browse="ctx.browse"
                     @refresh="handleRefresh"
@@ -1242,7 +1249,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
                                 formatMessage(messages.updateAll)
                             "
                             :is-bulk-operating="isBulkOperating"
-                            @select-sort="(mode) => (sortMode = mode)"
+                            @select-sort="selectSort"
                             @toggle-pin="togglePinnedView"
                             @reset-view="resetView"
                             @update-all="promptUpdateAll"
@@ -1260,6 +1267,7 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
                 :busy="ctx.isBusy.value"
                 :busy-tooltip="ctx.busyMessage?.value"
                 :refreshing="refreshing"
+                :refresh-status="ctx.refreshStatus?.value"
                 :disable-add-content="ctx.disableAddContent?.value"
                 :disable-add-content-tooltip="ctx.disableAddContentTooltip"
                 @browse="ctx.browse"
@@ -1435,7 +1443,11 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 
 <style scoped>
 .scroll-to-top-btn {
-    @apply fixed bottom-10 left-24 z-50 flex items-center justify-center rounded-full bg-brand p-3 text-brand-inverted shadow-lg transition-all duration-200 hover:brightness-110 hover:shadow-xl active:scale-95;
+    @apply flex items-center justify-center rounded-full bg-brand p-3 text-brand-inverted shadow-lg transition-all duration-200 hover:brightness-110 hover:shadow-xl active:scale-95;
+    position: fixed;
+    right: calc(var(--right-bar-width, 0px) + 1.5rem);
+    bottom: calc(max(4rem, 4dvh) + var(--floating-action-bar-clearance, 0px));
+    z-index: 60;
 }
 
 .scroll-to-top-enter-active,

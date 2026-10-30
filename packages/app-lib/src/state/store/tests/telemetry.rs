@@ -3,7 +3,6 @@
 
 use super::support;
 use crate::state::store::Collection as _;
-use crate::state::store::Handle;
 use crate::state::store::telemetry_identity::{
     Installation, TelemetryIdentity, TelemetryIdentityRecord,
 };
@@ -11,10 +10,6 @@ use crate::state::store::telemetry_outbox::{
     TelemetryEventType, TelemetryOutbox, TelemetryOutboxRecord,
     TelemetryOutboxScope,
 };
-
-fn handle_of(pool: &sqlx::SqlitePool) -> Handle {
-    Handle::new(pool.clone())
-}
 
 fn identity(day: Option<&str>) -> TelemetryIdentityRecord {
     TelemetryIdentityRecord {
@@ -247,8 +242,7 @@ async fn an_event_outside_the_scope_is_refused() {
 
 #[tokio::test]
 async fn an_event_kind_the_table_does_not_trust_is_no_event() {
-    let pool = support::pool().await;
-    let handle = handle_of(&pool);
+    let handle = support::handle().await;
     sqlx::raw_sql(
         "PRAGMA ignore_check_constraints = ON;
          INSERT INTO telemetry_outbox (
@@ -260,7 +254,7 @@ async fn an_event_kind_the_table_does_not_trust_is_no_event() {
          );
          PRAGMA ignore_check_constraints = OFF;",
     )
-    .execute(&pool)
+    .execute(handle.pool())
     .await
     .unwrap();
 
@@ -269,4 +263,91 @@ async fn an_event_kind_the_table_does_not_trust_is_no_event() {
         None
     );
     assert!(TelemetryOutbox::get_all(&handle).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_row_another_part_of_the_queue_owns_is_refused() {
+    let handle = support::handle().await;
+    // An error event under one id, and one this build cannot read under another.
+    sqlx::raw_sql(
+        "PRAGMA ignore_check_constraints = ON;
+         INSERT INTO telemetry_outbox (
+             event_id, event_type, payload, created_at, next_attempt_at,
+             attempts, size_bytes, dedupe_key
+         ) VALUES
+             ('taken', 'error', jsonb('{\"type\":\"error\"}'), 1, 1, 0, 17,
+              'shared'),
+             ('legacy', 'legacy', jsonb('{\"type\":\"legacy\"}'), 1, 100, 0,
+              19, 'legacy')",
+    )
+    .execute(handle.pool())
+    .await
+    .unwrap();
+
+    // Another kind already holds the dedupe key this write would take.
+    let mut stolen = event(30);
+    stolen.dedupe_key = "shared".to_string();
+    let dedupe_taken = TelemetryOutbox::set_scoped(
+        &handle,
+        &TelemetryOutboxScope::Kind(TelemetryEventType::Heartbeat),
+        &[(key("fresh"), stolen)],
+    )
+    .await;
+    assert!(dedupe_taken.is_err());
+
+    // A row written by a newer build is not the same as no row at all.
+    let unreadable = TelemetryOutbox::set_scoped(
+        &handle,
+        &TelemetryOutboxScope::Kind(TelemetryEventType::Heartbeat),
+        &[(key("legacy"), event(30))],
+    )
+    .await;
+    assert!(unreadable.is_err());
+
+    // A row scheduled after the moment the scope names is not in it either.
+    let early = TelemetryOutbox::set_scoped(
+        &handle,
+        &TelemetryOutboxScope::Due {
+            kind: TelemetryEventType::Error,
+            at: 50,
+        },
+        &[(key("taken"), {
+            let mut due = event(10);
+            due.event_type = TelemetryEventType::Error;
+            due
+        })],
+    )
+    .await;
+    assert!(early.is_err());
+}
+
+#[tokio::test]
+async fn a_due_replacement_keeps_the_events_that_are_not_due_yet() {
+    let handle = support::handle().await;
+    TelemetryOutbox::set(&handle, &key("due"), Some(&event(10)))
+        .await
+        .unwrap();
+    let mut later = event(20);
+    later.next_attempt_at = 100;
+    TelemetryOutbox::set(&handle, &key("later"), Some(&later))
+        .await
+        .unwrap();
+
+    TelemetryOutbox::set_scoped(
+        &handle,
+        &TelemetryOutboxScope::Due {
+            kind: TelemetryEventType::Heartbeat,
+            at: 50,
+        },
+        &[(key("due"), event(10))],
+    )
+    .await
+    .unwrap();
+
+    let mut later = event(20);
+    later.next_attempt_at = 100;
+    assert_eq!(
+        TelemetryOutbox::get_all(&handle).await.unwrap(),
+        vec![(key("later"), later)]
+    );
 }

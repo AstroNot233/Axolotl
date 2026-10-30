@@ -28,6 +28,9 @@ use crate::state::store::resource_cache_entries::{
 use crate::state::store::resource_cache_state::{
     ResourceCacheState, ResourceCacheStateRecord,
 };
+use crate::state::store::resource_legacy_import::{
+    ResourceLegacyImport, ResourceLegacyImportRecord, Singleton as Checkpoint,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct CacheKey {
@@ -193,33 +196,50 @@ impl ResourceCache {
     }
 
     pub(crate) async fn get(&self, key: &CacheKey) -> Option<ProviderValue> {
-        self.get_cached(key, true).await.map(|(value, _)| value)
+        self.get_cached(key, true, None)
+            .await
+            .map(|(value, _)| value)
     }
 
     pub(crate) async fn get_any(
         &self,
         key: &CacheKey,
     ) -> Option<ProviderValue> {
-        self.get_cached(key, false).await.map(|(value, _)| value)
+        self.get_cached(key, false, None)
+            .await
+            .map(|(value, _)| value)
+    }
+
+    pub(crate) async fn get_since(
+        &self,
+        key: &CacheKey,
+        since: i64,
+    ) -> Option<ProviderValue> {
+        self.get_cached(key, true, Some(since))
+            .await
+            .map(|(value, _)| value)
     }
 
     pub(crate) async fn get_with_freshness(
         &self,
         key: &CacheKey,
     ) -> Option<(ProviderValue, bool)> {
-        self.get_cached(key, false).await
+        self.get_cached(key, false, None).await
     }
 
     async fn get_cached(
         &self,
         key: &CacheKey,
         fresh: bool,
+        since: Option<i64>,
     ) -> Option<(ProviderValue, bool)> {
         let _guard = self.gate.read().await;
         let data = self.data()?;
         let key = entry_key(key);
         let record = ResourceCacheEntries::get(&data, &key).await.ok()??;
-        if record.value_version != i64::from(RESOURCE_CONTRACT_VERSION) {
+        if record.value_version != i64::from(RESOURCE_CONTRACT_VERSION)
+            || since.is_some_and(|since| record.retrieved_at < since)
+        {
             return None;
         }
         let expires = record
@@ -300,14 +320,25 @@ impl ResourceCache {
         let Some(pool) = &self.pool else {
             return Ok(());
         };
-        sqlx::query(
-            "UPDATE resource_legacy_import SET completed = 1 WHERE id = 1",
-        )
-        .execute(pool)
-        .await
-        .map_err(cache_error)?;
         let data = Handle::new(pool.clone());
         let mut unit = atom(&data).await.map_err(cache_error)?;
+        let checkpoint = ResourceLegacyImport::atom_get(&mut unit, &Checkpoint)
+            .await
+            .map_err(cache_error)?
+            .unwrap_or(ResourceLegacyImportRecord {
+                last_rowid: 0,
+                completed: false,
+            });
+        ResourceLegacyImport::atom_set(
+            &mut unit,
+            &Checkpoint,
+            Some(&ResourceLegacyImportRecord {
+                completed: true,
+                ..checkpoint
+            }),
+        )
+        .await
+        .map_err(cache_error)?;
         let current = ResourceCacheState::atom_get(&mut unit, &())
             .await
             .map_err(cache_error)?;

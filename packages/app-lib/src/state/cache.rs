@@ -294,12 +294,6 @@ fn cache_read_failure(
 
 /// The cache rows of `pool`, named the way the store names them.
 ///
-/// The callers of this module are handed the pool itself, so the handle they
-/// will pass once they name one is built here in the meantime.
-fn cache_rows(pool: &SqlitePool) -> Handle {
-    Handle::new(pool.clone())
-}
-
 /// Cached modpack file hashes for filtering content
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CachedModpackFiles {
@@ -2238,7 +2232,7 @@ impl CachedEntry {
                         type_,
                         expired_keys,
                         &state.api_semaphore,
-                        &state.pool,
+                        state.cache_pool(),
                         false,
                     )
                     .await?
@@ -2249,7 +2243,7 @@ impl CachedEntry {
                     Self::persist_fetched_cache_best_effort(
                         type_,
                         &values,
-                        &state.pool,
+                        state.cache_pool(),
                         CacheRefreshSource::Background,
                     )
                     .await;
@@ -2286,7 +2280,7 @@ impl CachedEntry {
             uri_path: Option<&'static str>,
             keys: &DashSet<impl Display + Eq + Hash + Serialize>,
             fetch_semaphore: &FetchSemaphore,
-            pool: &SqlitePool,
+            _pool: &SqlitePool,
         ) -> crate::Result<Vec<T>> {
             const MAX_REQUEST_SIZE: usize = 800;
 
@@ -2308,7 +2302,6 @@ impl CachedEntry {
                     None,
                     uri_path,
                     fetch_semaphore,
-                    pool,
                 )
             }))
             .await?;
@@ -2388,7 +2381,6 @@ impl CachedEntry {
                             None,
                             $uri_path,
                             &fetch_semaphore,
-                            pool,
                         )
                         .await?,
                     )
@@ -2550,7 +2542,6 @@ impl CachedEntry {
                             game_version.as_deref(),
                             url,
                             fetch_semaphore,
-                            pool,
                             force_refresh,
                         )
                     },
@@ -2582,7 +2573,6 @@ impl CachedEntry {
                         None,
                         None,
                         fetch_semaphore,
-                        pool,
                     ),
                 )
                 .await;
@@ -2601,7 +2591,6 @@ impl CachedEntry {
                             None,
                             None,
                             fetch_semaphore,
-                            pool,
                         )
                         .await?
                     }
@@ -2617,7 +2606,6 @@ impl CachedEntry {
                             None,
                             None,
                             fetch_semaphore,
-                            pool,
                         )
                         .await?
                     }
@@ -2889,6 +2877,44 @@ impl CachedEntry {
         Ok(value)
     }
 
+    /// Writes entries outside any open unit. A cache is derived data, so a
+    /// failure here is logged rather than carried to a caller whose own
+    /// transaction has already committed.
+    pub(crate) async fn store_best_effort(items: &[Self], pool: &SqlitePool) {
+        if items.is_empty() {
+            return;
+        }
+        if let Err(error) = Self::upsert_many(items, pool).await {
+            tracing::warn!(
+                error = %error,
+                entry_count = items.len(),
+                "Failed to persist cache entries; continuing without them"
+            );
+        }
+    }
+
+    /// Drops entries outside any open unit. A hash entry is dropped before the
+    /// write that replaces it commits, so a run stopping between the two reads
+    /// a miss instead of the metadata of the file it replaced.
+    pub(crate) async fn forget_best_effort(items: &[Self], pool: &SqlitePool) {
+        if items.is_empty() {
+            return;
+        }
+        let handle = Handle::new(pool.clone());
+        for item in items {
+            let key = CacheKey {
+                data_type: item.type_.as_str().to_string(),
+                id: item.id.clone(),
+            };
+            if let Err(error) = Cache::set(&handle, &key, None).await {
+                tracing::warn!(
+                    error = %error,
+                    "Failed to drop a cache entry; continuing without it"
+                );
+            }
+        }
+    }
+
     pub(crate) async fn upsert_many(
         items: &[Self],
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
@@ -2986,7 +3012,6 @@ impl CachedEntry {
         version_id: &str,
         file_hashes: Vec<String>,
         project_ids: Vec<String>,
-        _pool: &SqlitePool,
     ) -> crate::Result<()> {
         let state = crate::State::get().await?;
         let service = state
@@ -3009,24 +3034,18 @@ impl CachedEntry {
         version_id: &str,
         file_hashes: Vec<String>,
         project_ids: Vec<String>,
-        pool: &SqlitePool,
     ) {
-        if let Err(error) = Self::cache_modpack_files(
-            version_id,
-            file_hashes,
-            project_ids,
-            pool,
-        )
-        .await
+        if let Err(error) =
+            Self::cache_modpack_files(version_id, file_hashes, project_ids)
+                .await
         {
             tracing::warn!(%error, "Pack index cache write failed");
         }
     }
 
-    pub async fn get_modpack_files(
+    pub(crate) async fn get_modpack_files(
         version_id: &str,
-        pool: &SqlitePool,
-        _fetch_semaphore: &FetchSemaphore,
+        handle: &Handle,
     ) -> crate::Result<Option<CachedModpackFiles>> {
         let state = crate::State::get().await?;
         let service = state
@@ -3042,7 +3061,7 @@ impl CachedEntry {
             return Ok(None);
         }
         let data = Cache::get(
-            &cache_rows(pool),
+            handle,
             &CacheKey {
                 data_type: CacheValueType::ModpackFiles.as_str().to_string(),
                 id: version_id.to_string(),
@@ -3094,14 +3113,14 @@ impl CachedEntry {
     }
 }
 
-pub async fn cache_file_hash(
+pub(crate) async fn cache_file_hash(
     bytes: bytes::Bytes,
     instance_path: &str,
     path: &str,
     known_hash: Option<&str>,
     project_type: Option<ProjectType>,
     known_modrinth_file: Option<KnownModrinthFile<'_>>,
-    pool: &SqlitePool,
+    handle: &Handle,
 ) -> crate::Result<()> {
     let size = bytes.len();
 
@@ -3118,19 +3137,19 @@ pub async fn cache_file_hash(
         hash,
         project_type,
         known_modrinth_file,
-        pool,
+        handle,
     )
     .await
 }
 
-pub async fn cache_file_hash_metadata(
+pub(crate) async fn cache_file_hash_metadata(
     instance_path: &str,
     path: &str,
     size: u64,
     hash: String,
     project_type: Option<ProjectType>,
     known_modrinth_file: Option<KnownModrinthFile<'_>>,
-    pool: &SqlitePool,
+    handle: &Handle,
 ) -> crate::Result<()> {
     let (project_id, version_id) =
         known_modrinth_file.map_or((None, None), |metadata| {
@@ -3152,7 +3171,7 @@ pub async fn cache_file_hash_metadata(
     .get_entry()
     .stored()?;
 
-    Cache::set(&cache_rows(pool), &key, Some(&record)).await?;
+    Cache::set(handle, &key, Some(&record)).await?;
 
     Ok(())
 }

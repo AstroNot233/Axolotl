@@ -875,7 +875,6 @@ async fn load_assets_index(
         None,
         None,
         &state.api_semaphore,
-        &state.pool,
     )
     .await
 }

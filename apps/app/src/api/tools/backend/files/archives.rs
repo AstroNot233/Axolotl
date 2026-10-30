@@ -60,7 +60,11 @@ pub(super) fn execute(
             let mut total = 0;
             for i in 0..zip.len() {
                 let mut entry = zip.by_index(i).map_err(error)?;
-                let path = entry.name().trim_end_matches('/').to_owned();
+                let path = entry
+                    .name()
+                    .map_err(error)?
+                    .trim_end_matches('/')
+                    .to_owned();
                 valid(&path, false)?;
                 if !seen.insert(path.clone()) || entry.is_symlink() {
                     return Err(error("unsafe archive"));
