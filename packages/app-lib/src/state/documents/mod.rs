@@ -30,6 +30,7 @@ pub(crate) mod ai;
 pub(crate) mod java;
 pub(crate) mod log_share;
 pub(crate) mod login_proof;
+pub(crate) mod settings;
 pub(crate) mod translation;
 
 pub(crate) const DIR_NAME: &str = "settings";
