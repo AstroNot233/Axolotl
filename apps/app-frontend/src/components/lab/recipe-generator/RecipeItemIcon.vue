@@ -106,9 +106,9 @@ watch(
 
 <template>
     <div
+        v-tooltip="display?.label"
         class="relative inline-block flex-none overflow-hidden border border-surface-5 box-border"
         :style="{ width: `${size}px`, height: `${size}px` }"
-        :title="display?.label"
     >
         <canvas
             v-if="display?.texture"
