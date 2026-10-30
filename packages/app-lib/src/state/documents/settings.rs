@@ -247,10 +247,49 @@ fn provided<'a>(
     config.get(key).or_else(|| defaults.get(key))
 }
 
+/// The value a key reads as, rather than the one a file happens to say.
+///
+/// A document is read through `Settings`, and every read normalizes: a count
+/// written as `0` where its range starts at `1` reads as `1`, so a file saying
+/// `0` and a file saying `1` are the same setting and must compare equal here.
+/// The projection is `Settings`' own shape, so the value is judged by the type
+/// the key belongs to; a key the type does not carry, or a value it cannot
+/// take, keeps the value it came in with.
+///
+/// This costs one deserialization and one normalization per value that is
+/// compared, which a start pays a couple of dozen times over its documents.
+fn effective(
+    key: &str,
+    value: &Value,
+    projection: &Map<String, Value>,
+) -> Value {
+    if !projection.contains_key(key) {
+        return value.clone();
+    }
+    let mut values = projection.clone();
+    values.insert(key.to_string(), value.clone());
+    let Ok(settings) =
+        serde_json::from_value::<Settings>(Value::Object(values))
+    else {
+        return value.clone();
+    };
+    let Ok(Value::Object(mut normalized)) =
+        serde_json::to_value(settings.normalize())
+    else {
+        return value.clone();
+    };
+    normalized.remove(key).unwrap_or_else(|| value.clone())
+}
+
 /// Drops what a local document repeats of a value the deployment or the build
 /// already provides. Writing a value into a deployment's own document is how
 /// its owner says a key should follow it, so the local copy stops shadowing it
 /// as soon as the two agree, and a later change of that value still arrives.
+///
+/// Only a domain the deployment ships a readable document for is touched: with
+/// no document of its own a domain has nothing a later change could be
+/// shadowed from, and a local entry there is the user pinning the value, even
+/// when what it pins is the build's default.
 ///
 /// A start runs this once, after the handover. It is not part of a read: a read
 /// never writes to disk.
@@ -265,10 +304,11 @@ pub(crate) async fn prune_redundant(
     let defaults = default_values()?;
     let _writing = WRITES.lock().await;
     for &(name, keys, schema_version) in DOMAINS {
-        let config = documents
-            .shipped::<Document>(name, schema_version)
-            .await
-            .unwrap_or_default();
+        let Some(config) =
+            documents.shipped::<Document>(name, schema_version).await
+        else {
+            continue;
+        };
         // A domain with no local document has nothing to drop, and one a newer
         // build wrote is not this build's to rewrite.
         let Stored::Ready { document } =
@@ -282,14 +322,34 @@ pub(crate) async fn prune_redundant(
             let Some(value) = pruned.get(key).cloned() else {
                 continue;
             };
-            if provided(key, &config, &defaults) == Some(&value) {
+            let Some(provided) = provided(key, &config, &defaults) else {
+                continue;
+            };
+            // Two values that are equal before normalisation are equal after
+            // it too, and that is the common case, so the projection is only
+            // built when the documents disagree.
+            let redundant = provided == &value
+                || effective(key, provided, &defaults)
+                    == effective(key, &value, &defaults);
+            if redundant {
                 pruned.remove(key);
             }
         }
         if pruned.len() == before {
             continue;
         }
-        documents.write(name, schema_version, &pruned).await?;
+        // A domain whose document this build cannot replace costs that domain
+        // and no other: the rest still lose their repeated entries, and a
+        // failed cleanup never keeps a start from coming up.
+        if let Err(error) = documents.write(name, schema_version, &pruned).await
+        {
+            tracing::warn!(
+                document = name,
+                %error,
+                "Failed to drop the settings entries a provided value covers"
+            );
+            continue;
+        }
     }
     Ok(())
 }
@@ -899,6 +959,168 @@ mod tests {
             "the deployment still answers the key the local copy stopped carrying"
         );
         assert_eq!(settings.locale, "zh_cn");
+    }
+
+    /// A local entry is only redundant against a document the deployment
+    /// really ships: a domain it ships nothing for has nothing a later change
+    /// could be shadowed from, so what the local document carries there is the
+    /// user pinning the value, even when the value is the build's own default.
+    #[tokio::test]
+    async fn a_domain_without_a_shipped_document_keeps_its_local_entries() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        let written = local.path().join("appearance.json");
+        let contents = br#"{"schema_version":1,"data":{"theme":"dark"}}"#;
+        std::fs::write(&written, contents).unwrap();
+        // One document is enough for the deployment to count as one, and it
+        // belongs to another domain.
+        std::fs::write(
+            deployment.path().join("backup.json"),
+            r#"{"schema_version":1,"data":{"backup_repository_path":"/shipped"}}"#,
+        )
+        .unwrap();
+
+        let documents = layered(&local, &deployment, &pool);
+        prune_redundant(&documents).await.unwrap();
+
+        assert_eq!(
+            Settings::default().theme.as_str(),
+            "dark",
+            "the entry pins the value the build defaults to, so only the \
+             shipped document can make it redundant"
+        );
+        assert_eq!(
+            std::fs::read(&written).unwrap().as_slice(),
+            contents.as_slice(),
+            "a domain the deployment ships no document for keeps its local entries"
+        );
+    }
+
+    /// Two files that say different numbers can be the same setting: a value
+    /// is read through `normalize`, so a download count of `0` reads as the
+    /// lower bound of `1`. A local `1` therefore repeats what the deployment
+    /// provides and has to go, or it would keep answering after the deployment
+    /// raises its own value.
+    #[tokio::test]
+    async fn a_redundant_entry_is_pruned_after_normalisation() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        let written = local.path().join("download.json");
+        std::fs::write(
+            &written,
+            r#"{"schema_version":1,"data":{"max_concurrent_downloads":1}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            deployment.path().join("download.json"),
+            r#"{"schema_version":1,"data":{"max_concurrent_downloads":0}}"#,
+        )
+        .unwrap();
+
+        let documents = layered(&local, &deployment, &pool);
+        prune_redundant(&documents).await.unwrap();
+
+        let stored: Value =
+            serde_json::from_slice(&std::fs::read(&written).unwrap()).unwrap();
+        assert!(
+            !stored["data"]
+                .as_object()
+                .unwrap()
+                .contains_key("max_concurrent_downloads"),
+            "the entry repeats a value the deployment provides once it is read"
+        );
+        let settings =
+            read(&documents, &Handle::new(pool.clone())).await.unwrap();
+        assert_eq!(
+            settings.max_concurrent_downloads, 1,
+            "the key reads the same without the local copy"
+        );
+    }
+
+    /// A document a start cannot replace costs that domain and no other, and
+    /// never keeps the launcher from coming up.
+    ///
+    /// A write replaces a document with a file it creates beside it, so a
+    /// document's own mode does not stop it: the directory is what can refuse
+    /// the write, and it then refuses every domain at once. The failure is
+    /// therefore checked where it is observable — the call reports no error,
+    /// leaves both documents as they stand, and the next start prunes as if
+    /// nothing had happened.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_prune_does_not_stop_the_other_domains() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        let appearance = local.path().join("appearance.json");
+        let download = local.path().join("download.json");
+        let theme = br#"{"schema_version":1,"data":{"theme":"light"}}"#;
+        let writes =
+            br#"{"schema_version":1,"data":{"max_concurrent_writes":3}}"#;
+        std::fs::write(&appearance, theme).unwrap();
+        std::fs::write(&download, writes).unwrap();
+        std::fs::write(
+            deployment.path().join("appearance.json"),
+            br#"{"schema_version":1,"data":{"theme":"light"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            deployment.path().join("download.json"),
+            br#"{"schema_version":1,"data":{"max_concurrent_writes":3}}"#,
+        )
+        .unwrap();
+
+        let documents = layered(&local, &deployment, &pool);
+        std::fs::set_permissions(
+            local.path(),
+            std::fs::Permissions::from_mode(0o555),
+        )
+        .unwrap();
+        let pruned = prune_redundant(&documents).await;
+        // Restored before anything is asserted: a directory left read-only
+        // would keep the temporary one from being removed afterwards.
+        std::fs::set_permissions(
+            local.path(),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+
+        pruned.expect(
+            "a start is not stopped by a document it could not drop entries from",
+        );
+        assert_eq!(
+            std::fs::read(&appearance).unwrap().as_slice(),
+            theme.as_slice(),
+            "a document that could not be replaced is left as it stands"
+        );
+        assert_eq!(
+            std::fs::read(&download).unwrap().as_slice(),
+            writes.as_slice(),
+            "the domains after it are left as they stand too"
+        );
+
+        prune_redundant(&documents).await.unwrap();
+
+        let stored: Value =
+            serde_json::from_slice(&std::fs::read(&download).unwrap()).unwrap();
+        assert!(
+            !stored["data"]
+                .as_object()
+                .unwrap()
+                .contains_key("max_concurrent_writes"),
+            "the second domain is pruned once a write can land"
+        );
+        let stored: Value =
+            serde_json::from_slice(&std::fs::read(&appearance).unwrap())
+                .unwrap();
+        assert!(
+            !stored["data"].as_object().unwrap().contains_key("theme"),
+            "and so is the domain whose write failed before it"
+        );
     }
 
     /// With no deployment there is nothing a local copy could shadow, so a

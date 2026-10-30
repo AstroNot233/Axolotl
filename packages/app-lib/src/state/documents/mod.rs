@@ -47,6 +47,13 @@ const HANDOVER_MARKER: &str = ".handed-over";
 /// in.
 const CONFIG_DIR_ENV: &str = "AXOLOTL_SETTINGS_CONFIG_DIR";
 
+/// The largest a settings document may be. A document is a few dozen keys, so
+/// a megabyte is far past a real one; the cap is here because that directory
+/// belongs to the deployment, and a path in it that is not a document — a
+/// device, a FIFO, a file with no end — would otherwise be read into memory or
+/// never finish reading, at every start.
+const MAX_DOCUMENT_BYTES: u64 = 1 << 20;
+
 /// Serializes the writers, which each read a document before writing it back:
 /// two settings changing at once would otherwise lose one of them.
 static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -213,6 +220,35 @@ async fn read_document<T>(
 where
     T: DeserializeOwned + Default,
 {
+    // The shape is checked before anything is read: reading first and judging
+    // afterwards would already have paid the cost the check exists to avoid.
+    // `std::fs::metadata` follows a symbolic link, so a document a package
+    // manager links into a store is judged by the file it points at, which is
+    // the only thing the read would reach either.
+    match std::fs::metadata(path) {
+        Ok(metadata)
+            if !metadata.is_file() || metadata.len() > MAX_DOCUMENT_BYTES =>
+        {
+            tracing::warn!(
+                path = %path.display(),
+                len = metadata.len(),
+                "Ignoring a settings document that is not a regular file of a bounded size"
+            );
+            return Stored::Unreadable;
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Stored::Missing;
+        }
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "Could not inspect a settings document"
+            );
+            return Stored::Unreadable;
+        }
+    }
     let contents = match tokio::fs::read(path).await {
         Ok(contents) => contents,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -493,9 +529,111 @@ mod tests {
         create_official_login_proof_table, create_translation_tables, pool,
     };
     use super::{
-        Documents, ai, config_root_from, hand_over, java, log_share,
-        login_proof, translation,
+        Documents, MAX_DOCUMENT_BYTES, ai, config_root_from, hand_over, java,
+        log_share, login_proof, translation,
     };
+
+    /// A deployment's directory is its own file tree, so a path in it is not
+    /// promised to be a document: a device or a FIFO would block the read
+    /// forever or never end it, and a start would never come up. The shape is
+    /// judged before the read, and the domain falls back the way it does for
+    /// any other document that cannot be read.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_document_that_is_not_a_regular_file_is_unreadable() {
+        // `/dev/zero` is the case a read cannot answer: it never ends one.
+        if !std::path::Path::new("/dev/zero").exists() {
+            eprintln!(
+                "skipped: /dev/zero is not available here, so a device cannot stand in for a document"
+            );
+            return;
+        }
+        let pool = pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(
+            "/dev/zero",
+            deployment.path().join("ai.json"),
+        )
+        .unwrap();
+
+        let documents = Documents::at(local.path().to_path_buf(), &pool)
+            .with_config_root(Some(deployment.path().to_path_buf()));
+        let started = std::time::Instant::now();
+        let shipped = documents.shipped::<serde_json::Value>("ai", 1).await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            shipped.is_none(),
+            "a device is not a document, so the domain falls back to the local layers"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "a read of the device would not have ended, so the check has to come first"
+        );
+    }
+
+    /// A package manager links a document rather than copying it, so a link is
+    /// a document when the file it points at is one: the shape is judged after
+    /// following it, which is where the read would go too.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_document_reached_through_a_symbolic_link_is_read() {
+        let pool = pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        let target = deployment.path().join("in-a-store-appearance.json");
+        std::fs::write(
+            &target,
+            r#"{"schema_version":1,"data":{"theme":"oled"}}"#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            &target,
+            deployment.path().join("appearance.json"),
+        )
+        .unwrap();
+
+        let documents = Documents::at(local.path().to_path_buf(), &pool)
+            .with_config_root(Some(deployment.path().to_path_buf()));
+        let shipped = documents
+            .shipped::<serde_json::Value>("appearance", 1)
+            .await
+            .expect("a link to a document is the document it points at");
+
+        assert_eq!(
+            shipped["theme"],
+            serde_json::Value::from("oled"),
+            "the document behind the link is read as it stands"
+        );
+    }
+
+    /// A document past the cap is refused by its size alone: the file here is
+    /// valid JSON with trailing space, so the size is the only thing that can
+    /// refuse it.
+    #[tokio::test]
+    async fn a_document_over_the_size_limit_is_unreadable() {
+        let pool = pool().await;
+        let root = tempfile::tempdir().unwrap();
+        let documents = Documents::at(root.path().to_path_buf(), &pool);
+        let path = documents.path("ai");
+        let mut oversized =
+            br#"{"schema_version":1,"data":{"enabled":false}}"#.to_vec();
+        oversized.resize(MAX_DOCUMENT_BYTES as usize + 1, b' ');
+        std::fs::write(&path, &oversized).unwrap();
+
+        let stored = documents.stored::<serde_json::Value>("ai", 1).await;
+
+        assert!(
+            !stored.is_present(),
+            "a document past the cap is unreadable rather than parsed"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            oversized,
+            "a document that is too large to read is left as it stands"
+        );
+    }
 
     /// An empty variable is how a shell clears one, so a deployment that sets
     /// it to nothing must read the same as one that never set it at all: a
