@@ -55,6 +55,16 @@
       "reason": "log write lock: leaf primitive only (spec §5.2 leaf table), held for one bounded write"
     },
     {
+      "ident": "theseus::install::runner::CANCEL_CLEANUPS",
+      "rule": "D4",
+      "reason": "cancel-cleanup dedup map (upstream CancelCleanupRegistration, renamed from CLEANUPS): leaf primitive only, one shard lock per request, retry check or drop, takes no other lock"
+    },
+    {
+      "ident": "theseus::install::events::InstallProgressReporter.parallel_context",
+      "rule": "D2",
+      "reason": "per-job reporter, unreachable from statics, State fields and Tauri-managed state; its only construction is inside InstallProgressReporter::new (install/events.rs:243, fn body). The generator also counts four -> Self { signatures as construction outside functions (a known false positive), so it cannot apply D2 itself"
+    },
+    {
       "ident": "theseus::scheduler::panic::PANIC_LOG_LOCK",
       "rule": "D4",
       "reason": "panic-log append lock: synchronous, held for one bounded append, takes no other lock"
