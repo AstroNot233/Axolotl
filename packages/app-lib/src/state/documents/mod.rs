@@ -12,6 +12,11 @@
 //! alone. `.handed-over` records that one start saw every domain of that build
 //! in place; it does not stand in for a domain, so a build that takes over
 //! another domain still reaches an installation that ran an older one.
+//!
+//! A document carries the shape version it was written in. One a newer build
+//! wrote is read as it stands and never written back, so a build that knows
+//! less shows the values the user chose without lowering the document to the
+//! shape it knows.
 
 use std::path::{Path, PathBuf};
 
@@ -62,7 +67,14 @@ impl<'a> Documents<'a> {
         self.pool
     }
 
-    pub(crate) async fn stored<T>(&self, name: &str) -> Stored<T>
+    /// Reads one document, and tells apart the one this build can write from
+    /// the one a newer build wrote. The version the caller knows is what the
+    /// comparison is made against, so the answer is the domain's own.
+    pub(crate) async fn stored<T>(
+        &self,
+        name: &str,
+        schema_version: u32,
+    ) -> Stored<T>
     where
         T: DeserializeOwned + Default,
     {
@@ -89,8 +101,17 @@ impl<'a> Documents<'a> {
             );
             return Stored::Unreadable;
         };
+        if stored.schema_version > schema_version {
+            tracing::debug!(
+                name,
+                schema_version = stored.schema_version,
+                "Found a settings document a newer build wrote"
+            );
+            return Stored::Newer {
+                document: stored.data,
+            };
+        }
         Stored::Ready {
-            schema_version: stored.schema_version,
             document: stored.data,
         }
     }
@@ -126,9 +147,23 @@ pub(crate) enum Stored<T> {
     /// rows, so a damaged file does not silently empty the settings.
     Unreadable,
     Ready {
-        schema_version: u32,
         document: T,
     },
+    /// A document a newer build wrote. It is still read, so a build that knows
+    /// less keeps showing the values the user chose rather than what the rows
+    /// froze; only a write is refused. The comparison that lands here happens in
+    /// `stored`, so the variant carries no version of its own.
+    Newer {
+        document: T,
+    },
+}
+
+impl<T> Stored<T> {
+    /// Whether the domain has a document at all, whichever build wrote it: the
+    /// handover only fills in a domain that has none.
+    pub(crate) fn is_present(&self) -> bool {
+        matches!(self, Self::Ready { .. } | Self::Newer { .. })
+    }
 }
 
 #[derive(Serialize)]
