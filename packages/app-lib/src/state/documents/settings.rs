@@ -208,7 +208,9 @@ pub(crate) async fn read(
     // `personalized_ads` is skipped when deserializing, so the map above cannot
     // carry it back; it is taken from the row the read already made.
     settings.personalized_ads = row_settings.personalized_ads;
-    Ok(settings)
+    // A document is text the user can edit by hand, so a value out of range is
+    // pulled back into it rather than handed on as it stands.
+    Ok(settings.normalize())
 }
 
 /// The settings a build starts from, keyed the way a document keys them.
@@ -371,6 +373,42 @@ mod tests {
             settings.custom_background_blur,
             Settings::default().custom_background_blur,
             "a value the type cannot take costs its own key only"
+        );
+    }
+
+    /// A document is text the user can edit by hand, so a number outside the
+    /// range its setting holds reads back as the nearest value inside it rather
+    /// than as what the file says.
+    #[tokio::test]
+    async fn a_hand_edited_out_of_range_value_reads_as_the_bounded_one() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("appearance.json"),
+            r#"{"schema_version":1,"data":{"custom_background_blur":999,"sidebar_instance_count":999}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("download.json"),
+            r#"{"schema_version":1,"data":{"max_concurrent_downloads":0}}"#,
+        )
+        .unwrap();
+
+        let documents = Documents::at(root.path().to_path_buf(), &pool);
+        let settings = read(&documents, &handle).await.unwrap();
+
+        assert_eq!(
+            settings.custom_background_blur, 40,
+            "a blur past its highest value reads as that value"
+        );
+        assert_eq!(
+            settings.sidebar_instance_count, 50,
+            "a sidebar count past its highest value reads as that value"
+        );
+        assert_eq!(
+            settings.max_concurrent_downloads, 1,
+            "a download count below its lowest value reads as that value"
         );
     }
 
