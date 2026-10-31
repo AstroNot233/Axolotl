@@ -44,6 +44,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
+#[cfg(not(test))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Map, Value};
@@ -64,6 +65,14 @@ thread_local! {
     /// the thread a test runs on keeps its own instead.
     static TEST_ROOT: std::cell::RefCell<Option<PathBuf>> =
         const { std::cell::RefCell::new(None) };
+    /// The cache and version a test gives itself for the same reason as the
+    /// root: shared entries would let a test running beside it overwrite the
+    /// cache or invalidate it between two reads that assert it is reused.
+    static TEST_CACHE: std::cell::RefCell<
+        Option<(u64, PathBuf, Arc<Settings>)>,
+    > = const { std::cell::RefCell::new(None) };
+    static TEST_VERSION: std::cell::Cell<u64> =
+        const { std::cell::Cell::new(0) };
 }
 
 /// Names the directory the documents of this launch live in: the settings
@@ -91,6 +100,7 @@ pub(crate) fn root() -> Option<PathBuf> {
 /// What the last read composed, with what it was composed from: the directory
 /// its documents live in, and the version everything that could change them was
 /// at when it was composed.
+#[cfg(not(test))]
 static CACHE: tokio::sync::RwLock<Option<(u64, PathBuf, Arc<Settings>)>> =
     tokio::sync::RwLock::const_new(None);
 
@@ -103,7 +113,19 @@ static CACHE: tokio::sync::RwLock<Option<(u64, PathBuf, Arc<Settings>)>> =
 /// for the very documents it is replacing. `invalidate` therefore takes no lock
 /// at all, and the cache's own lock is only ever taken by a read, which takes no
 /// `WRITES`.
+#[cfg(not(test))]
 static VERSION: AtomicU64 = AtomicU64::new(0);
+
+fn current_version() -> u64 {
+    #[cfg(not(test))]
+    {
+        VERSION.load(Ordering::SeqCst)
+    }
+    #[cfg(test)]
+    {
+        TEST_VERSION.with(|version| version.get())
+    }
+}
 
 /// Says that what a read composes from has changed, so the next read composes
 /// again.
@@ -113,7 +135,16 @@ static VERSION: AtomicU64 = AtomicU64::new(0);
 /// row inside a unit asks the unit to say it instead, so the invalidation lands
 /// when the commit does — see `Atom::invalidate_settings_after_commit`.
 pub(crate) fn invalidate() {
-    VERSION.fetch_add(1, Ordering::SeqCst);
+    #[cfg(not(test))]
+    {
+        VERSION.fetch_add(1, Ordering::SeqCst);
+    }
+    #[cfg(test)]
+    {
+        TEST_VERSION.with(|version| {
+            version.set(version.get().wrapping_add(1));
+        });
+    }
 }
 
 /// The domains with the keys their document carries. A key belongs to exactly
@@ -251,34 +282,74 @@ pub(crate) async fn cached(
     documents: &Documents<'_>,
     handle: &Handle,
 ) -> crate::Result<Settings> {
-    // The version is read with the cache's own lock held rather than before it,
-    // so nothing can move between reading it and comparing it: no await sits
-    // between the two, and a writer's `invalidate` can therefore not land in
-    // the middle and be missed. It narrows the window rather than closing it —
-    // a writer takes no cache lock, so one that moved just after this load is
-    // still answered from the entry this read saw. What guarantees a read after
-    // a write is fresh is the write's own invalidation, which lands once its
-    // change is in place.
-    let version = {
-        let cached = CACHE.read().await;
-        let version = VERSION.load(Ordering::SeqCst);
-        if let Some((stored, root, settings)) = cached.as_ref() {
-            if *stored == version && root == &documents.root {
-                return Ok((**settings).clone());
-            }
-        }
-        version
-    };
+    let (version, cached) = cached_for(&documents.root).await;
+    if let Some(settings) = cached {
+        return Ok((*settings).clone());
+    }
     let settings = Arc::new(read(documents, handle).await?);
     // A write that landed while this read composed moved the version, and the
     // row it read may be the one that write replaced: what was composed is kept
     // only when nothing moved under it.
-    let mut cached = CACHE.write().await;
-    if VERSION.load(Ordering::SeqCst) == version {
-        *cached =
-            Some((version, documents.root.clone(), Arc::clone(&settings)));
-    }
+    remember(&documents.root, version, &settings).await;
     Ok((*settings).clone())
+}
+
+/// The last composition for `root`, with the version it was checked against.
+///
+/// In production the version is read with the cache's own lock held rather than
+/// before it, so nothing can move between reading it and comparing it: no await
+/// sits between the two, and a writer's `invalidate` can therefore not land in
+/// the middle and be missed. It narrows the window rather than closing it — a
+/// writer takes no cache lock, so one that moved just after this load is still
+/// answered from the entry this read saw. What guarantees a read after a write
+/// is fresh is the write's own invalidation, which lands once its change is in
+/// place.
+async fn cached_for(root: &Path) -> (u64, Option<Arc<Settings>>) {
+    #[cfg(not(test))]
+    {
+        let cached = CACHE.read().await;
+        let version = current_version();
+        let settings =
+            cached.as_ref().and_then(|(stored, cached_root, settings)| {
+                (*stored == version && cached_root == root)
+                    .then(|| Arc::clone(settings))
+            });
+        (version, settings)
+    }
+    #[cfg(test)]
+    {
+        let version = current_version();
+        let settings = TEST_CACHE.with(|cached| {
+            cached.borrow().as_ref().and_then(
+                |(stored, cached_root, settings)| {
+                    (*stored == version && cached_root == root)
+                        .then(|| Arc::clone(settings))
+                },
+            )
+        });
+        (version, settings)
+    }
+}
+
+/// Keeps `settings` for `root` when nothing that composes it moved during the
+/// read.
+async fn remember(root: &Path, version: u64, settings: &Arc<Settings>) {
+    #[cfg(not(test))]
+    {
+        let mut cached = CACHE.write().await;
+        if current_version() == version {
+            *cached = Some((version, root.to_path_buf(), Arc::clone(settings)));
+        }
+    }
+    #[cfg(test)]
+    {
+        if current_version() == version {
+            TEST_CACHE.with(|cached| {
+                *cached.borrow_mut() =
+                    Some((version, root.to_path_buf(), Arc::clone(settings)));
+            });
+        }
+    }
 }
 
 /// The settings the documents and the row together describe.
