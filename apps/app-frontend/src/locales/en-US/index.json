@@ -7769,8 +7769,29 @@
   "app.lab.seed-map.zoom-to-show": {
     "message": "Zoom in to show {layer}"
   },
+  "app.lab.skin-editor.auto-save.error": {
+    "message": "Auto-save failed"
+  },
+  "app.lab.skin-editor.auto-save.off": {
+    "message": "Auto-save off"
+  },
+  "app.lab.skin-editor.auto-save.saved": {
+    "message": "Draft saved {time}"
+  },
+  "app.lab.skin-editor.auto-save.saving": {
+    "message": "Saving draft…"
+  },
+  "app.lab.skin-editor.auto-save.unsaved": {
+    "message": "Unsaved changes"
+  },
+  "app.lab.skin-editor.auto-save.up-to-date": {
+    "message": "Up to date"
+  },
   "app.lab.skin-editor.description": {
     "message": "Create and edit Minecraft player skins locally."
+  },
+  "app.lab.skin-editor.discard-draft-failed": {
+    "message": "The recovery draft could not be discarded. Stay on this page and try again."
   },
   "app.lab.skin-editor.export-skin": {
     "message": "Minecraft skin PNG"
@@ -7784,11 +7805,71 @@
   "app.lab.skin-editor.loading": {
     "message": "Loading skin editor"
   },
+  "app.lab.skin-editor.recovery.body": {
+    "message": "A recovery draft was saved on {date}."
+  },
+  "app.lab.skin-editor.recovery.continue": {
+    "message": "Continue"
+  },
+  "app.lab.skin-editor.recovery.start-new": {
+    "message": "Start new"
+  },
+  "app.lab.skin-editor.recovery.title": {
+    "message": "Continue last skin?"
+  },
   "app.lab.skin-editor.retry": {
     "message": "Try again"
   },
+  "app.lab.skin-editor.save": {
+    "message": "Save PNG"
+  },
+  "app.lab.skin-editor.settings.auto-save": {
+    "message": "Automatically save a recovery draft"
+  },
+  "app.lab.skin-editor.settings.auto-save-description": {
+    "message": "Recovery drafts stay on this device and are separate from exported PNG files."
+  },
+  "app.lab.skin-editor.settings.cancel": {
+    "message": "Cancel"
+  },
+  "app.lab.skin-editor.settings.interval": {
+    "message": "Save interval (seconds)"
+  },
+  "app.lab.skin-editor.settings.interval-description": {
+    "message": "Use a value between 5 and 600 seconds."
+  },
+  "app.lab.skin-editor.settings.save": {
+    "message": "Save settings"
+  },
+  "app.lab.skin-editor.settings.title": {
+    "message": "Editor settings"
+  },
+  "app.lab.skin-editor.settings.tooltip": {
+    "message": "Skin editor settings"
+  },
+  "app.lab.skin-editor.settings.warn-before-leave": {
+    "message": "Warn before leaving with unsaved changes"
+  },
+  "app.lab.skin-editor.settings.warn-before-leave-description": {
+    "message": "When auto-save is off, this warning is always enabled to protect your work."
+  },
   "app.lab.skin-editor.title": {
     "message": "Skin editor"
+  },
+  "app.lab.skin-editor.unsaved.body": {
+    "message": "Save your skin before leaving, or discard the current changes."
+  },
+  "app.lab.skin-editor.unsaved.discard": {
+    "message": "Discard"
+  },
+  "app.lab.skin-editor.unsaved.save": {
+    "message": "Save PNG"
+  },
+  "app.lab.skin-editor.unsaved.stay": {
+    "message": "Stay"
+  },
+  "app.lab.skin-editor.unsaved.title": {
+    "message": "Unsaved skin"
   },
   "app.lab.title": {
     "message": "Lab"

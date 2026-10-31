@@ -271,11 +271,13 @@ const forceSidebar = computed(
     () => route.path.startsWith('/browse') || route.path.startsWith('/project'),
 )
 const forceSidebarHidden = computed(() => route.path === '/settings')
+const hideSidebarForPage = computed(() => route.name === 'SkinEditor')
 /** Console fullscreen collapses the account sidebar so its controls stay reachable. */
 const consoleFullscreenActive = ref(false)
 const sidebarVisible = computed(
     () =>
         !forceSidebarHidden.value &&
+        !hideSidebarForPage.value &&
         !consoleFullscreenActive.value &&
         (sidebarToggled.value || forceSidebar.value),
 )
@@ -3230,7 +3232,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
             class="app-sidebar mt-px shrink-0 flex flex-col border-0 border-l-[1px] border-[--brand-gradient-border] border-solid"
         >
             <button
-                v-if="!forceSidebar && !forceSidebarHidden"
+                v-if="!forceSidebar && !forceSidebarHidden && !hideSidebarForPage"
                 v-tooltip.left="
                     sidebarToggled
                         ? formatMessage(messages.collapseSidebar)

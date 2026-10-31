@@ -7505,8 +7505,29 @@
   "app.lab.command-generator.version.use-data-components": {
     "message": "使用 1.20.5+ 数据组件"
   },
+  "app.lab.skin-editor.auto-save.error": {
+    "message": "自动保存失败"
+  },
+  "app.lab.skin-editor.auto-save.off": {
+    "message": "自动保存已关闭"
+  },
+  "app.lab.skin-editor.auto-save.saved": {
+    "message": "草稿已保存 {time}"
+  },
+  "app.lab.skin-editor.auto-save.saving": {
+    "message": "正在保存草稿…"
+  },
+  "app.lab.skin-editor.auto-save.unsaved": {
+    "message": "有未保存的更改"
+  },
+  "app.lab.skin-editor.auto-save.up-to-date": {
+    "message": "已是最新"
+  },
   "app.lab.skin-editor.description": {
     "message": "在本地创建和编辑 Minecraft 玩家皮肤。"
+  },
+  "app.lab.skin-editor.discard-draft-failed": {
+    "message": "无法删除恢复草稿。请留在当前页面后重试。"
   },
   "app.lab.skin-editor.export-skin": {
     "message": "Minecraft 皮肤 PNG"
@@ -7520,11 +7541,71 @@
   "app.lab.skin-editor.loading": {
     "message": "正在加载皮肤编辑器"
   },
+  "app.lab.skin-editor.recovery.body": {
+    "message": "恢复草稿保存于 {date}。"
+  },
+  "app.lab.skin-editor.recovery.continue": {
+    "message": "继续"
+  },
+  "app.lab.skin-editor.recovery.start-new": {
+    "message": "新建"
+  },
+  "app.lab.skin-editor.recovery.title": {
+    "message": "继续上次的皮肤？"
+  },
   "app.lab.skin-editor.retry": {
     "message": "重试"
   },
+  "app.lab.skin-editor.save": {
+    "message": "保存 PNG"
+  },
+  "app.lab.skin-editor.settings.auto-save": {
+    "message": "自动保存恢复草稿"
+  },
+  "app.lab.skin-editor.settings.auto-save-description": {
+    "message": "恢复草稿仅保存在本设备，与导出的 PNG 文件相互独立。"
+  },
+  "app.lab.skin-editor.settings.cancel": {
+    "message": "取消"
+  },
+  "app.lab.skin-editor.settings.interval": {
+    "message": "保存间隔（秒）"
+  },
+  "app.lab.skin-editor.settings.interval-description": {
+    "message": "请输入 5 到 600 秒之间的数值。"
+  },
+  "app.lab.skin-editor.settings.save": {
+    "message": "保存设置"
+  },
+  "app.lab.skin-editor.settings.title": {
+    "message": "编辑器设置"
+  },
+  "app.lab.skin-editor.settings.tooltip": {
+    "message": "皮肤编辑器设置"
+  },
+  "app.lab.skin-editor.settings.warn-before-leave": {
+    "message": "离开前提醒未保存的更改"
+  },
+  "app.lab.skin-editor.settings.warn-before-leave-description": {
+    "message": "关闭自动保存时，为保护你的作品，此提醒会始终启用。"
+  },
   "app.lab.skin-editor.title": {
     "message": "皮肤编辑器"
+  },
+  "app.lab.skin-editor.unsaved.body": {
+    "message": "离开前保存皮肤，或放弃当前更改。"
+  },
+  "app.lab.skin-editor.unsaved.discard": {
+    "message": "放弃"
+  },
+  "app.lab.skin-editor.unsaved.save": {
+    "message": "保存 PNG"
+  },
+  "app.lab.skin-editor.unsaved.stay": {
+    "message": "留下"
+  },
+  "app.lab.skin-editor.unsaved.title": {
+    "message": "皮肤尚未保存"
   },
   "app.lab.title": {
     "message": "实验室"
