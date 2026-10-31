@@ -436,7 +436,24 @@ impl Default for Settings {
 impl Settings {
     const CURRENT_VERSION: usize = 3;
 
+    /// The settings this launch runs with.
+    ///
+    /// A start that has named the directory of the settings documents gets them
+    /// composed with the row; one that has not — and a unit test that builds a
+    /// handle of its own — reads the row alone, which is what it always did. The
+    /// signature carries no part of that decision: these settings are read at
+    /// every turn, from every module.
     pub async fn get(handle: &Handle) -> crate::Result<Self> {
+        let Some(documents) = handle.settings_documents() else {
+            return Self::read_row(handle).await;
+        };
+        super::documents::settings::cached(&documents, handle).await
+    }
+
+    /// The settings the row alone holds: the whole answer while no document
+    /// directory is named, and what a read falls back on for a domain whose
+    /// document is missing or cannot be read.
+    pub(crate) async fn read_row(handle: &Handle) -> crate::Result<Self> {
         let Some(record) = StoredSettings::get(handle, &Singleton).await?
         else {
             return Err(crate::ErrorKind::OtherError(
@@ -623,7 +640,12 @@ impl Settings {
     }
 
     pub async fn update(&self, handle: &Handle) -> crate::Result<()> {
-        StoredSettings::set(handle, &Singleton, Some(&self.to_record()?)).await
+        StoredSettings::set(handle, &Singleton, Some(&self.to_record()?))
+            .await?;
+        // A read composes the row with the documents, so the row changing is a
+        // reason for the next read to compose again.
+        super::documents::settings::invalidate();
+        Ok(())
     }
 
     fn to_record(&self) -> crate::Result<SettingsRecord> {
@@ -771,7 +793,13 @@ impl Settings {
     /// Writes these settings inside `unit`.
     pub(crate) async fn save_in(&self, unit: &mut Atom) -> crate::Result<()> {
         StoredSettings::atom_set(unit, &Singleton, Some(&self.to_record()?))
-            .await
+            .await?;
+        // Said before the unit commits rather than after it: a read that
+        // composed while the write was in flight is one a later read must not
+        // inherit, and a cache entry from before this point is stale either
+        // way.
+        super::documents::settings::invalidate();
+        Ok(())
     }
 
     pub fn effective_max_concurrent_downloads(&self) -> usize {

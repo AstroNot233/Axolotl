@@ -101,6 +101,14 @@ impl Handle {
         &self.pool
     }
 
+    /// The settings documents of this launch, for a caller composing the
+    /// settings from them and the row this handle reaches.
+    pub(crate) fn settings_documents(
+        &self,
+    ) -> Option<crate::state::documents::Documents<'_>> {
+        crate::state::documents::Documents::of_launch(&self.pool)
+    }
+
     async fn connection(
         &self,
     ) -> crate::Result<sqlx::pool::PoolConnection<Sqlite>> {

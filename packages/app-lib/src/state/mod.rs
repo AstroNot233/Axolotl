@@ -1278,6 +1278,11 @@ impl State {
             "Could not find valid settings dir".to_string(),
         ))?;
         store::secrets::identify(&settings_dir);
+        // The settings are composed from the documents in this directory from
+        // here on, and the read below sizes the semaphores and the client the
+        // launcher starts with: a root named after it would leave the launch
+        // running on the rows.
+        documents::settings::identify(&settings_dir);
 
         tracing::info!("Connecting to app database");
         let pool = db::connect(&app_identifier).await?;

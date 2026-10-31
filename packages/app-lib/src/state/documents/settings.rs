@@ -31,17 +31,84 @@
 //! of it, so a document that exists cannot lower it to the default and no
 //! document's absence is needed to reach it (Q5).
 //!
-//! `Settings::get` still answers from the row, and nothing calls the writers
-//! below yet: both arrive with the wiring that follows. What is in place is the
-//! composition a read makes, the value a key has before a local document is
-//! asked (`provided`), and the writes that keep a document to the keys that
-//! differ from that value.
+//! `Settings::get` composes these documents with the row once a start has named
+//! the directory they live in (`identify`), and answers from the row alone until
+//! it has. A read is cached, because a setting is read at every turn and
+//! composing one reads eight documents and the row: `invalidate` is what a
+//! writer says when what a read composes from has changed.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Map, Value};
 
 use super::{Documents, Stored, WRITES};
 use crate::state::settings::Settings;
 use crate::state::store::Handle;
+
+/// The documents of this launch, once a start has named the directory they live
+/// in. A read that has no root composes nothing and answers from the row, which
+/// is what a unit test that builds its own handle sees.
+static ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+#[cfg(test)]
+thread_local! {
+    /// The root one test gives itself. The tests of a crate run as one process,
+    /// so a root set for one of them would answer the tests running beside it:
+    /// the thread a test runs on keeps its own instead.
+    static TEST_ROOT: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Names the directory the documents of this launch live in: the settings
+/// directory, whose `settings` subdirectory is the local layer.
+///
+/// Called once at startup, before the first setting is read. Until it is, no
+/// document answers and every read is the row's.
+pub(crate) fn identify(settings_dir: &Path) {
+    let root = settings_dir.join(super::DIR_NAME);
+    #[cfg(test)]
+    TEST_ROOT.with(|test| *test.borrow_mut() = Some(root));
+    #[cfg(not(test))]
+    let _ = ROOT.set(root);
+}
+
+/// The documents of this launch, when a start has named their directory.
+pub(crate) fn root() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(root) = TEST_ROOT.with(|test| test.borrow().clone()) {
+        return Some(root);
+    }
+    ROOT.get().cloned()
+}
+
+/// What the last read composed, with what it was composed from: the directory
+/// its documents live in, and the version everything that could change them was
+/// at when it was composed.
+static CACHE: tokio::sync::RwLock<Option<(u64, PathBuf, Arc<Settings>)>> =
+    tokio::sync::RwLock::const_new(None);
+
+/// Moves whenever something a read composes from changes: a document is
+/// written, or the row is.
+///
+/// A count rather than a lock, which is what keeps the order `WRITES → cache`
+/// acyclic: every document writer holds `WRITES` while it says that a document
+/// changed, and a lock taken there would have it wait on a read that composes
+/// for the very documents it is replacing. `invalidate` therefore takes no lock
+/// at all, and the cache's own lock is only ever taken by a read, which takes no
+/// `WRITES`.
+static VERSION: AtomicU64 = AtomicU64::new(0);
+
+/// Says that what a read composes from has changed, so the next read composes
+/// again.
+///
+/// A writer calls it once its change is in place: the document writers below,
+/// and `Settings::update`, `Settings::save_in` and the row writers for the row.
+pub(crate) fn invalidate() {
+    VERSION.fetch_add(1, Ordering::SeqCst);
+}
 
 /// The domains with the keys their document carries. A key belongs to exactly
 /// one of them, and a key none of them lists is not stored in a document at
@@ -166,6 +233,37 @@ const DOMAINS: &[(&str, &[&str], u32)] = &[
 /// One document as it stands on disk. Its keys are not interpreted yet, so a
 /// value this build cannot read costs only that key.
 type Document = Map<String, Value>;
+
+/// The settings a read composes, reusing the last composition while nothing
+/// that goes into it has changed.
+///
+/// This is the entry `Settings::get` takes. A read is not cheap — eight
+/// documents and the row — and it is made at every turn, so an answer nothing
+/// has moved under is kept until a writer says otherwise.
+pub(crate) async fn cached(
+    documents: &Documents<'_>,
+    handle: &Handle,
+) -> crate::Result<Settings> {
+    let version = VERSION.load(Ordering::SeqCst);
+    {
+        let cached = CACHE.read().await;
+        if let Some((stored, root, settings)) = cached.as_ref() {
+            if *stored == version && root == &documents.root {
+                return Ok((**settings).clone());
+            }
+        }
+    }
+    let settings = Arc::new(read(documents, handle).await?);
+    // A write that landed while this read composed moved the version, and the
+    // row it read may be the one that write replaced: what was composed is kept
+    // only when nothing moved under it.
+    let mut cached = CACHE.write().await;
+    if VERSION.load(Ordering::SeqCst) == version {
+        *cached =
+            Some((version, documents.root.clone(), Arc::clone(&settings)));
+    }
+    Ok((*settings).clone())
+}
 
 /// The settings the documents and the row together describe.
 pub(crate) async fn read(
@@ -342,7 +440,8 @@ pub(crate) async fn prune_redundant(
         // A domain whose document this build cannot replace costs that domain
         // and no other: the rest still lose their repeated entries, and a
         // failed cleanup never keeps a start from coming up.
-        if let Err(error) = documents.write(name, schema_version, &pruned).await
+        if let Err(error) =
+            write(documents, name, schema_version, &pruned).await
         {
             tracing::warn!(
                 document = name,
@@ -419,7 +518,8 @@ pub(crate) async fn store(
             continue;
         }
         // A domain this build cannot write costs that domain and no other.
-        if let Err(error) = documents.write(name, schema_version, &target).await
+        if let Err(error) =
+            write(documents, name, schema_version, &target).await
         {
             tracing::warn!(
                 document = name,
@@ -490,7 +590,7 @@ pub(crate) async fn store_key(
     if !changed {
         return Ok(());
     }
-    documents.write(name, schema_version, &document).await
+    write(documents, name, schema_version, &document).await
 }
 
 /// Clears `key` while the document still holds exactly `expected`, which is
@@ -522,7 +622,7 @@ pub(crate) async fn clear_key_if(
         return Ok(());
     }
     document.remove(key);
-    documents.write(name, schema_version, &document).await
+    write(documents, name, schema_version, &document).await
 }
 
 /// The domain whose document lists `key`, with that document's shape version.
@@ -534,6 +634,21 @@ fn domain_of(
         .iter()
         .find(|(_, keys, _)| keys.contains(&key))
         .copied()
+}
+
+/// Writes one document, and says that what a read composes from has changed.
+///
+/// Every writer of a settings document goes through here, so a change one
+/// carries reaches the next read without a caller having to say so.
+async fn write(
+    documents: &Documents<'_>,
+    name: &str,
+    schema_version: u32,
+    document: &Document,
+) -> crate::Result<()> {
+    documents.write(name, schema_version, document).await?;
+    invalidate();
+    Ok(())
 }
 
 /// The local document a single-key writer starts from, or nothing when the
@@ -586,10 +701,13 @@ fn same_setting(
 
 /// The settings as the row holds them, and the same ones keyed the way a
 /// document keys them.
+///
+/// The row is read directly rather than through `Settings::get`, which composes
+/// these documents and would come back here.
 async fn row_values(
     handle: &Handle,
 ) -> crate::Result<(Settings, Map<String, Value>)> {
-    let settings = Settings::get(handle).await?;
+    let settings = Settings::read_row(handle).await?;
     let values = serde_json::from_value(serde_json::to_value(&settings)?)?;
     Ok((settings, values))
 }
@@ -677,7 +795,7 @@ mod tests {
 
     use super::*;
     use crate::state::documents::{
-        ai,
+        DIR_NAME, ai,
         test_support::{create_ai_tables, pool as empty_pool},
     };
     use crate::state::settings::Theme;
@@ -1660,6 +1778,176 @@ mod tests {
             data(local.path(), "appearance").get("locale"),
             Some(&Value::from("zh_cn")),
             "the same store writes its documents once the directory accepts them"
+        );
+    }
+
+    /// The document a test leaves behind for a domain, in the directory a start
+    /// would have named.
+    fn write_document(settings_dir: &std::path::Path, name: &str, data: &str) {
+        let root = settings_dir.join(DIR_NAME);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(format!("{name}.json")),
+            format!(r#"{{"schema_version":1,"data":{{{data}}}}}"#),
+        )
+        .unwrap();
+    }
+
+    /// A start names the document directory before it reads anything, and from
+    /// then on the documents answer: a key one of them carries comes from it
+    /// rather than from the row, a domain they do not cover still comes from the
+    /// row, and a document that goes away gives its domain back to it.
+    #[tokio::test]
+    async fn a_document_answers_before_the_row() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let mut row = Settings::read_row(&handle).await.unwrap();
+        row.theme = Theme::Light;
+        row.backup_repository_path = Some("/from-the-row".to_string());
+        row.update(&handle).await.unwrap();
+
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        write_document(settings_dir.path(), "appearance", r#""theme":"oled""#);
+
+        let answered = Settings::get(&handle).await.unwrap();
+        assert_eq!(
+            answered.theme.as_str(),
+            "oled",
+            "the document answers the domain the row would"
+        );
+        assert_eq!(
+            answered.backup_repository_path.as_deref(),
+            Some("/from-the-row"),
+            "a domain with no document is still answered by the row"
+        );
+
+        std::fs::remove_file(
+            settings_dir.path().join(DIR_NAME).join("appearance.json"),
+        )
+        .unwrap();
+        // Removing a file is something no writer of the documents here does, so
+        // nothing has said that the settings changed: a start would compose them
+        // afresh, and the removal is told to the cache the same way.
+        invalidate();
+
+        let fell_back = Settings::get(&handle).await.unwrap();
+        assert_eq!(
+            fell_back.theme.as_str(),
+            "light",
+            "a domain whose document is gone is answered by the row again"
+        );
+    }
+
+    /// A handle that no start has named a document directory for — which is
+    /// every unit test that builds its own — reads the row, whatever is on disk
+    /// where a document would be.
+    #[tokio::test]
+    async fn without_a_root_the_row_still_answers() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let mut row = Settings::read_row(&handle).await.unwrap();
+        row.theme = Theme::Light;
+        row.update(&handle).await.unwrap();
+
+        let settings_dir = tempfile::tempdir().unwrap();
+        write_document(settings_dir.path(), "appearance", r#""theme":"oled""#);
+
+        assert_eq!(
+            root(),
+            None,
+            "a root is named by a start, and this test names none"
+        );
+        let settings = Settings::get(&handle).await.unwrap();
+        assert_eq!(
+            settings.theme.as_str(),
+            "light",
+            "with no root the row answers, as it always did"
+        );
+    }
+
+    /// A read is composed once and kept: a document changed behind the cache's
+    /// back — by a hand edit, or another build — is not seen until a writer says
+    /// the settings changed.
+    #[tokio::test]
+    async fn a_cached_read_does_not_re_read_the_documents() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        write_document(settings_dir.path(), "appearance", r#""theme":"oled""#);
+
+        assert_eq!(
+            Settings::get(&handle).await.unwrap().theme.as_str(),
+            "oled",
+            "the first read composes the documents"
+        );
+
+        write_document(settings_dir.path(), "appearance", r#""theme":"light""#);
+        assert_eq!(
+            Settings::get(&handle).await.unwrap().theme.as_str(),
+            "oled",
+            "a cached read does not go back to the documents"
+        );
+
+        invalidate();
+        assert_eq!(
+            Settings::get(&handle).await.unwrap().theme.as_str(),
+            "light",
+            "a read after an invalidation composes them again"
+        );
+    }
+
+    /// A document write is one of the two things a read composes from, so the
+    /// read after it composes again without anything else saying so.
+    #[tokio::test]
+    async fn writing_through_store_refreshes_the_next_read() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        let documents =
+            Documents::at(settings_dir.path().join(DIR_NAME), &pool);
+
+        assert_eq!(
+            Settings::get(&handle).await.unwrap().locale,
+            Settings::default().locale,
+            "the row answers before a document exists"
+        );
+
+        let mut settings = Settings::default();
+        settings.locale = "zh_cn".to_string();
+        store(&documents, &settings).await.unwrap();
+
+        assert_eq!(
+            Settings::get(&handle).await.unwrap().locale,
+            "zh_cn",
+            "a store says the documents changed, so the next read composes again"
+        );
+    }
+
+    /// The row is the other thing a read composes from, and the writers of it are
+    /// what say so: `personalized_ads` is in no document and is read from the row
+    /// on every read, so it shows a stale row at once.
+    #[tokio::test]
+    async fn writing_the_row_refreshes_the_next_read() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+
+        let mut settings = Settings::get(&handle).await.unwrap();
+        assert!(
+            !settings.personalized_ads,
+            "the preference is off in a fresh row"
+        );
+
+        settings.personalized_ads = true;
+        settings.update(&handle).await.unwrap();
+
+        assert!(
+            Settings::get(&handle).await.unwrap().personalized_ads,
+            "the row changed, so the next read composes again"
         );
     }
 }

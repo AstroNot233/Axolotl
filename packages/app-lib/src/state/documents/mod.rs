@@ -107,6 +107,17 @@ impl<'a> Documents<'a> {
         self
     }
 
+    /// The documents of this launch, read with the ones a deployment ships
+    /// beside them, and nothing while no start has named their directory.
+    ///
+    /// The settings are composed from these, and the callers that compose them
+    /// hold a handle that knows nothing of documents: this is where a handle
+    /// reaches them.
+    pub(crate) fn of_launch(pool: &'a SqlitePool) -> Option<Self> {
+        let root = settings::root()?;
+        Some(Self::at(root, pool).with_config_root(config_root()))
+    }
+
     pub(crate) fn path(&self, name: &str) -> PathBuf {
         self.root.join(format!("{name}.json"))
     }

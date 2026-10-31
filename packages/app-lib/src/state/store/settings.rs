@@ -195,7 +195,11 @@ impl Settings {
             .await?
             .ok_or_else(missing_row)?;
         change(&mut record);
-        <Self as Collection>::atom_set(unit, &Singleton, Some(&record)).await
+        <Self as Collection>::atom_set(unit, &Singleton, Some(&record)).await?;
+        // The row a settings read composes with the documents has changed, and
+        // `update`/`save_in` are not the only writer of it.
+        crate::state::documents::settings::invalidate();
+        Ok(())
     }
 
     /// Reads the columns the proxy and the CurseForge key live in.
