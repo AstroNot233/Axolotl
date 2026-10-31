@@ -101,7 +101,7 @@ const metrics = computed(() => {
         </p>
         <template v-else-if="fileOptions.length">
             <p class="m-0 text-sm text-[var(--color-text-tertiary)]">
-                  {{ formatMessage(messages.fileSelectionGuide) }}
+                {{ formatMessage(messages.fileSelectionGuide) }}
             </p>
             <div class="flex min-w-0 flex-wrap items-center gap-3">
                 <label :for="`diagnostic-file-${jobId}`" class="font-semibold">{{
