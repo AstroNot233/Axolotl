@@ -289,6 +289,18 @@ async fn a_cancellation_whose_writes_both_timed_out_still_ends_canceled() {
     let snapshot = cancel_job_with_state(id, state.clone()).await.unwrap();
     assert_eq!(snapshot.status, InstallJobStatus::Running);
     assert!(token.is_cancelled());
+    // The worker's Canceled write is blocked by the same writer. Bound this
+    // simulated wait so the test need not wait for the 20 s permit timeout.
+    let worker_write = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        store::update_status(id, InstallJobStatus::Canceled, &job, &state),
+    )
+    .await;
+    assert!(worker_write.is_err());
+    assert_eq!(
+        store::get_required(id, &state).await.unwrap().status,
+        InstallJobStatus::Running
+    );
     drop(writer);
     state.install_job_cancellations.remove(&id);
     // The worker's Canceled write then timed out as well; recovery receives
