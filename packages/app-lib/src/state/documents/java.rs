@@ -295,6 +295,12 @@ pub(crate) async fn forget(
 ///
 /// A launcher that has no document yet is answered by its rows, and the move
 /// leaves the document holding their rewritten paths.
+///
+/// The draft this writes is a composed document, so a domain with no local one
+/// of its own carries the keys the deployment answers as well: copied into the
+/// local document they would shadow every later change of the deployment's own.
+/// They are dropped before the write, the way `hand_over_if_missing` drops them
+/// from the rows.
 pub(crate) async fn move_installations(
     documents: &Documents<'_>,
     from: &str,
@@ -304,6 +310,17 @@ pub(crate) async fn move_installations(
     let _writing = WRITES.lock().await;
     let mut document = read(documents).await?;
     let dropped = document.move_installations(from, to, &is_incomplete)?;
+    let document = if documents
+        .stored::<JavaDocument>(DOCUMENT, SCHEMA_VERSION)
+        .await
+        .is_present()
+    {
+        // A local document is the user's own, so what it carries is stated back
+        // as it stands rather than measured against the deployment.
+        document
+    } else {
+        without_shipped(documents, DOCUMENT, SCHEMA_VERSION, document).await
+    };
     documents.write(DOCUMENT, SCHEMA_VERSION, &document).await?;
 
     Ok(dropped)

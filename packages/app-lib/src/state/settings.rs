@@ -609,8 +609,8 @@ impl Settings {
             force_fullscreen: record.mc_force_fullscreen,
             maximize_window: record.mc_maximize_window,
             game_resolution: WindowSize(
-                record.mc_game_resolution_x as u16,
-                record.mc_game_resolution_y as u16,
+                record.mc_game_resolution_x.clamp(0, u16::MAX as i64) as u16,
+                record.mc_game_resolution_y.clamp(0, u16::MAX as i64) as u16,
             ),
             hide_on_process_start: record.hide_on_process_start,
             enter_lightweight_mode_on_game_launch: record
@@ -655,8 +655,8 @@ impl Settings {
         // after that commit: unlike a caller's own unit, there is no window
         // between the write and the commit to defer it for.
         super::documents::settings::invalidate();
-        // The row has landed, so the domain that reads from its document is
-        // written after it: a start stopped between the two finds the document
+        // The row has landed, so the domains that read from their documents are
+        // written after it: a start stopped between the two finds a document
         // behind the row, and a commit that failed never reached this. The row
         // is read again there rather than taken from `self`, so a writer that
         // landed in between is not undone by this one.
@@ -665,15 +665,12 @@ impl Settings {
         // the log: this is the whole-row writer a start reaches through the
         // directory move and the settings migrations, so it must not keep a
         // start from coming up.
-        if let Some(documents) = handle.settings_documents()
-            && let Err(error) = super::documents::settings::store_domain(
-                &documents, "network", handle,
-            )
-            .await
+        if let Err(error) =
+            super::documents::settings::store_cut_over(handle).await
         {
             tracing::warn!(
                 %error,
-                "Failed to write the settings document of a domain"
+                "Failed to write the settings documents of the domains that have moved"
             );
         }
         Ok(())

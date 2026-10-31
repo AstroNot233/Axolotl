@@ -40,6 +40,11 @@
 //! it has. A read is cached, because a setting is read at every turn and
 //! composing one reads eight documents and the row: `invalidate` is what a
 //! writer says when what a read composes from has changed.
+//!
+//! A writer of the settings row calls `store_cut_over` once the row has landed,
+//! and that is the only thing it has to call: every domain whose writes have
+//! moved is stated from the row there, so a row write that reached no document
+//! cannot happen through a caller forgetting one.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -268,6 +273,23 @@ const DOMAINS: &[(&str, &[&str], u32)] = &[
     ),
 ];
 
+/// The domains whose writes have moved to their document.
+///
+/// A write of the row reaches the domains listed here by stating each of them
+/// from the row as it stands, which is what `store_cut_over` does. A domain not
+/// listed here is still answered by the row alone, so stating it would write a
+/// file nothing reads yet.
+pub(crate) const CUT_OVER: &[&str] = &[
+    "appearance",
+    "download",
+    "game",
+    "backup",
+    "state",
+    "bootstrap",
+    "privacy",
+    "network",
+];
+
 /// One document as it stands on disk. Its keys are not interpreted yet, so a
 /// value this build cannot read costs only that key.
 type Document = Map<String, Value>;
@@ -469,6 +491,98 @@ fn effective(
         return value.clone();
     };
     normalized.remove(key).unwrap_or_else(|| value.clone())
+}
+
+/// Turns the settings row over to the documents of its domains, and reports
+/// whether the handover is done.
+///
+/// A launcher that already carries a document of its own has been handed over
+/// already: writing the row above it would undo what the user set since, so a
+/// single document is enough to call this finished.
+///
+/// The draft is the row, stated the way `store` states it: a key holding what
+/// the domain is provided with is left out, because leaving it out reads the
+/// same value and lets a later change of that value still arrive. The keys the
+/// deployment answers are left out as well and not merely compared: a local copy
+/// of one would be the last word for that key, so the deployment's own change
+/// would never reach the user.
+pub(crate) async fn hand_over_if_missing(documents: &Documents<'_>) -> bool {
+    // A local document of its own is the sign a start has already handed this
+    // over: stating the row above it would undo what the user set since.
+    for &(name, _, schema_version) in DOMAINS {
+        if documents
+            .stored::<Document>(name, schema_version)
+            .await
+            .is_present()
+        {
+            return true;
+        }
+    }
+    let handle = Handle::new(documents.pool().clone());
+    let row = match Settings::read_row(&handle).await {
+        Ok(row) => row,
+        // Nothing to hand over: a database whose row cannot be read has no
+        // values a document could state, and a start reaches this after the row
+        // exists.
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "Skipping the settings handover: the row cannot be read"
+            );
+            return true;
+        }
+    };
+    let values = match serde_json::to_value(row.normalize())
+        .and_then(serde_json::from_value::<Document>)
+    {
+        Ok(values) => values,
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "Skipping the settings handover: the row does not read as a document"
+            );
+            return false;
+        }
+    };
+    let defaults = match default_values() {
+        Ok(defaults) => defaults,
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "Skipping the settings handover: the defaults cannot be read"
+            );
+            return false;
+        }
+    };
+    let _writing = WRITES.lock().await;
+    let mut ready = true;
+    for &(name, keys, schema_version) in DOMAINS {
+        let shipped = documents
+            .shipped_keys(name, schema_version)
+            .await
+            .unwrap_or_default();
+        let mut target = domain_values(keys, &values, &shipped, &defaults);
+        target.retain(|key, _| !shipped.contains_key(key));
+        // A domain with nothing of its own to say keeps being answered by the
+        // row: an empty document would take that answer away before any writer
+        // fills it.
+        if target.is_empty() {
+            continue;
+        }
+        // A domain that cannot be written costs that domain and no other, and
+        // keeps the start from calling the handover finished.
+        if let Err(error) =
+            write(documents, name, schema_version, &target).await
+        {
+            tracing::warn!(
+                document = name,
+                %error,
+                "Failed to hand a settings domain over to its document"
+            );
+            ready = false;
+        }
+    }
+    ready
 }
 
 /// Drops what a local document repeats of a value the deployment or the build
@@ -710,6 +824,27 @@ pub(crate) async fn store_domain(
         write(documents, domain, schema_version, &target),
     )
     .await
+}
+
+/// States the document of every domain whose writes have moved, from the row as
+/// it stands.
+///
+/// This is the one thing a writer of the settings row has to call once the row
+/// has landed: the domains in `CUT_OVER` are answered by their documents, so a
+/// row write that did not reach them would show the value before it. The row is
+/// read again by each domain rather than handed through, so a writer that
+/// committed in between is the newer of the two and the file it wrote stands.
+pub(crate) async fn store_cut_over(handle: &Handle) -> crate::Result<()> {
+    // With no document directory named, a start reads the row alone, which is
+    // what a unit test that builds its own handle does: there is no document to
+    // state and nothing is missing.
+    let Some(documents) = handle.settings_documents() else {
+        return Ok(());
+    };
+    for &name in CUT_OVER {
+        store_domain(&documents, name, handle).await?;
+    }
+    Ok(())
 }
 
 /// A domain's write along with what a failed one leaves behind.

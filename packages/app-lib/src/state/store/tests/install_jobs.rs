@@ -117,7 +117,11 @@ async fn a_job_that_names_an_instance_round_trips() {
 
 #[tokio::test]
 async fn a_plan_link_round_trips_and_clears() {
-    let handle = support::handle().await;
+    let pool = support::pool().await;
+    // The link names the job it was queued as through a foreign key, so the
+    // job has to be there before the link is written.
+    support::seed_install_job(&pool, "job", None).await;
+    let handle = handle_of(&pool);
     ContentUpdateJobs::set(
         &handle,
         &"plan".to_string(),
@@ -286,8 +290,10 @@ async fn the_guards_see_the_jobs_that_still_occupy_an_instance() {
             .await
             .unwrap()
     );
+    // Neither job is queued and neither holds a rollback, so nothing occupies
+    // the runtime under those terms. The job that does is the next test's.
     assert!(
-        InstallJobs::unfinished_or_rollback(&mut *connection, &["queued"])
+        !InstallJobs::unfinished_or_rollback(&mut *connection, &["queued"])
             .await
             .unwrap()
     );

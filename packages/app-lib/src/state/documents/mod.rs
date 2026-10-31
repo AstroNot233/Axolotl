@@ -562,11 +562,16 @@ pub(crate) async fn hand_over(pool: &SqlitePool, settings_dir: &Path) -> bool {
     let translation_ready = translation::hand_over_if_missing(&documents).await;
     let login_proof_ready = login_proof::hand_over_if_missing(&documents).await;
     let java_ready = java::hand_over_if_missing(&documents).await;
+    // The settings go last: their domains read a document of their own rather
+    // than the rows, so the handover that fills them in is what ends the rows'
+    // answer for them.
+    let settings_ready = settings::hand_over_if_missing(&documents).await;
     if !ai_ready
         || !log_share_ready
         || !translation_ready
         || !login_proof_ready
         || !java_ready
+        || !settings_ready
     {
         tracing::warn!(
             "The settings handover is incomplete; the next start retries it"

@@ -275,7 +275,7 @@ async fn a_row_another_part_of_the_queue_owns_is_refused() {
              event_id, event_type, payload, created_at, next_attempt_at,
              attempts, size_bytes, dedupe_key
          ) VALUES
-             ('taken', 'error', jsonb('{\"type\":\"error\"}'), 1, 1, 0, 17,
+             ('taken', 'error', jsonb('{\"type\":\"error\"}'), 1, 100, 0, 17,
               'shared'),
              ('legacy', 'legacy', jsonb('{\"type\":\"legacy\"}'), 1, 100, 0,
               19, 'legacy')",
@@ -344,10 +344,12 @@ async fn a_due_replacement_keeps_the_events_that_are_not_due_yet() {
     .await
     .unwrap();
 
+    // The row the write named is still queued, and the one scheduled after the
+    // moment the scope names was outside it, so the replacement left it alone.
     let mut later = event(20);
     later.next_attempt_at = 100;
     assert_eq!(
         TelemetryOutbox::get_all(&handle).await.unwrap(),
-        vec![(key("later"), later)]
+        vec![(key("due"), event(10)), (key("later"), later)]
     );
 }
