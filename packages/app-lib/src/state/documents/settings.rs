@@ -623,6 +623,78 @@ pub(crate) async fn store(
     Ok(())
 }
 
+/// Writes the document of one domain from `settings`, and no other domain's.
+///
+/// This is what a writer calls for a domain whose writes have moved to its
+/// document: the domains still answered by the row have the row as their only
+/// place, so stating them here as well would write files nothing reads yet.
+/// The rules are `store`'s, applied to one domain rather than to all of them: a
+/// key holding what the domain is provided with is left out, a document that
+/// already holds what would be written is not touched, and a domain with
+/// nothing to say and no document of its own keeps being answered by the row.
+///
+/// A document this build cannot replace — one a newer build wrote, one it
+/// cannot read — is left as it stands and reported in the log, the way a store
+/// leaves it: what it holds is not this write's to lower.
+///
+/// The name is a domain `DOMAINS` lists, so one it does not is a mistake in the
+/// caller rather than something a user can cause, and it is answered as one.
+pub(crate) async fn store_domain(
+    documents: &Documents<'_>,
+    name: &str,
+    settings: &Settings,
+) -> crate::Result<()> {
+    let Some(&(domain, keys, schema_version)) =
+        DOMAINS.iter().find(|(domain, _, _)| *domain == name)
+    else {
+        return Err(crate::ErrorKind::OtherError(format!(
+            "No settings domain is named {name}"
+        ))
+        .into());
+    };
+    let defaults = default_values()?;
+    let values: Document = serde_json::from_value(serde_json::to_value(
+        settings.clone().normalize(),
+    )?)?;
+    let _writing = WRITES.lock().await;
+    let config = documents
+        .shipped::<Document>(domain, schema_version)
+        .await
+        .unwrap_or_default();
+    let target = domain_values(keys, &values, &config, &defaults);
+    let existing =
+        match documents.stored::<Document>(domain, schema_version).await {
+            Stored::Ready { document } => Some(document),
+            // Nothing to compare against is a document this write creates, which
+            // `write` then skips when it would change no value.
+            Stored::Missing => None,
+            Stored::Newer { .. } => {
+                tracing::warn!(
+                    document = domain,
+                    "Leaving a settings document a newer build wrote alone"
+                );
+                return Ok(());
+            }
+            Stored::Unreadable => {
+                tracing::warn!(
+                    document = domain,
+                    "Leaving a settings document that cannot be read alone"
+                );
+                return Ok(());
+            }
+        };
+    if existing.as_ref() == Some(&target) {
+        return Ok(());
+    }
+    // A domain with nothing to record and no document of its own keeps being
+    // answered by the row: creating an empty one would take that answer away
+    // before the domain's values have all been written to it.
+    if existing.is_none() && target.is_empty() {
+        return Ok(());
+    }
+    write(documents, domain, schema_version, &target).await
+}
+
 /// The keys of one domain as its document should carry them, taken from a
 /// whole `Settings` keyed the way a document keys them.
 fn domain_values(
@@ -913,6 +985,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+    use crate::api::settings::patch_with;
     use crate::state::documents::{
         DIR_NAME, ai,
         test_support::{create_ai_tables, pool as empty_pool},
@@ -2291,6 +2364,176 @@ mod tests {
         assert!(
             Settings::get(&handle).await.unwrap().personalized_ads,
             "the read after the commit composes the row the unit wrote"
+        );
+    }
+
+    /// The `network` document as it stands: its bytes, and when they were last
+    /// written, so a rewrite that happened to produce the same bytes shows too.
+    fn network_document(
+        root: &std::path::Path,
+    ) -> (Option<Vec<u8>>, Option<std::time::SystemTime>) {
+        let path = root.join("network.json");
+        (
+            std::fs::read(&path).ok(),
+            std::fs::metadata(&path)
+                .ok()
+                .and_then(|metadata| metadata.modified().ok()),
+        )
+    }
+
+    /// Rewrites a document the way another build could have left it: the same
+    /// values in another shape, so a rewrite of it shows as different bytes
+    /// although it stores the same settings.
+    fn reshape(path: &std::path::Path) {
+        let stored: Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_vec(&stored).unwrap()).unwrap();
+    }
+
+    /// The write a setting goes through is the patch, and the domain it names is
+    /// answered by its document from the patch that changes it.
+    #[tokio::test]
+    async fn a_network_patch_writes_the_document() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        let root = settings_dir.path().join(DIR_NAME);
+
+        patch_with(&handle, serde_json::json!({ "ignore_ssl_errors": true }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            data(&root, "network").get("ignore_ssl_errors"),
+            Some(&Value::from(true)),
+            "the key the patch named is in the document of its domain"
+        );
+        assert!(
+            Settings::get(&handle).await.unwrap().ignore_ssl_errors,
+            "and the read answers it from there"
+        );
+    }
+
+    /// A patch states the domain it names and no other: a domain with nothing
+    /// to say keeps being answered by the row rather than being given an empty
+    /// document, and one that already holds what the patch computes is left
+    /// byte for byte.
+    #[tokio::test]
+    async fn a_patch_outside_the_network_leaves_its_document_alone() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        let root = settings_dir.path().join(DIR_NAME);
+
+        patch_with(&handle, serde_json::json!({ "theme": "light" }))
+            .await
+            .unwrap();
+
+        assert!(
+            !root.join("network.json").exists(),
+            "a domain with nothing to record is left without a document"
+        );
+
+        patch_with(&handle, serde_json::json!({ "ignore_ssl_errors": true }))
+            .await
+            .unwrap();
+        reshape(&root.join("network.json"));
+        let before = network_document(&root);
+
+        patch_with(&handle, serde_json::json!({ "theme": "oled" }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            network_document(&root),
+            before,
+            "a patch outside the domain must not rewrite or touch its document"
+        );
+    }
+
+    /// The domain is switched to its document rather than moved: the row keeps
+    /// the value, so a document that goes away gives the domain back to the row
+    /// and the setting still reads as the user chose.
+    #[tokio::test]
+    async fn the_row_keeps_the_value_as_a_fallback() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        let root = settings_dir.path().join(DIR_NAME);
+
+        patch_with(&handle, serde_json::json!({ "ignore_ssl_errors": true }))
+            .await
+            .unwrap();
+
+        assert!(
+            Settings::read_row(&handle).await.unwrap().ignore_ssl_errors,
+            "the row a domain without a document is answered by carries the value"
+        );
+
+        std::fs::remove_file(root.join("network.json")).unwrap();
+        // Removing a file is something no writer of the documents here does, so
+        // nothing has said that the settings changed: a start would compose them
+        // afresh, and the removal is told to the cache the same way.
+        invalidate();
+
+        assert!(
+            Settings::get(&handle).await.unwrap().ignore_ssl_errors,
+            "a domain whose document is gone is answered by the row again, \
+             with the value the user set rather than the default"
+        );
+    }
+
+    /// A patch that changes nothing changes no document: the second of two
+    /// identical patches computes the same domain and leaves the file alone.
+    #[tokio::test]
+    async fn a_second_patch_without_changes_does_not_rewrite() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        let root = settings_dir.path().join(DIR_NAME);
+        let patch = serde_json::json!({ "ignore_ssl_errors": true });
+
+        patch_with(&handle, patch.clone()).await.unwrap();
+        reshape(&root.join("network.json"));
+        let before = network_document(&root);
+
+        patch_with(&handle, patch).await.unwrap();
+
+        assert_eq!(
+            network_document(&root),
+            before,
+            "a patch with nothing to change must not rewrite or touch the document"
+        );
+    }
+
+    /// `update` is the whole-row write a start reaches through the directory
+    /// move and the settings migrations, so the domain that reads from its
+    /// document is written from what it stores: a value changed there is in the
+    /// document too, and not only in a row that domain no longer reads.
+    #[tokio::test]
+    async fn an_update_writes_the_document_too() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        let root = settings_dir.path().join(DIR_NAME);
+
+        let mut settings = Settings::read_row(&handle).await.unwrap();
+        settings.ignore_ssl_errors = true;
+        settings.update(&handle).await.unwrap();
+
+        assert_eq!(
+            data(&root, "network").get("ignore_ssl_errors"),
+            Some(&Value::from(true)),
+            "a whole-row write reaches the document of the domain it carries"
+        );
+        assert!(
+            Settings::get(&handle).await.unwrap().ignore_ssl_errors,
+            "and the read answers the value that write carried"
         );
     }
 }

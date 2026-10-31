@@ -655,6 +655,25 @@ impl Settings {
         // after that commit: unlike a caller's own unit, there is no window
         // between the write and the commit to defer it for.
         super::documents::settings::invalidate();
+        // The row has landed, so the domain that reads from its document is
+        // written after it: a start stopped between the two finds the document
+        // behind the row, and a commit that failed never reached this.
+        //
+        // A document that cannot be written costs that domain and is left in
+        // the log: this is the whole-row writer a start reaches through the
+        // directory move and the settings migrations, so it must not keep a
+        // start from coming up.
+        if let Some(documents) = handle.settings_documents()
+            && let Err(error) = super::documents::settings::store_domain(
+                &documents, "network", self,
+            )
+            .await
+        {
+            tracing::warn!(
+                %error,
+                "Failed to write the settings document of a domain"
+            );
+        }
         Ok(())
     }
 

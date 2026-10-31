@@ -80,6 +80,22 @@ pub(crate) async fn patch_with(
     settings.save_in(&mut unit).await?;
     let saved = Settings::load_in(&mut unit).await?;
     unit.commit().await?;
+    // The document is written once the unit has committed, and not before: the
+    // row is the fallback a domain with no document is answered by, so a start
+    // stopped between the two must find the document behind the row rather than
+    // ahead of it. Written after, a crash leaves the old value in the document
+    // the domain is read from; written before, it would leave a value the user
+    // never got to keep in the authority for that domain, and a unit that then
+    // fails to commit would report an error for a change that had landed.
+    //
+    // The whole domain is stated, so a patch of another domain writes the same
+    // document back and `store_domain` leaves the file alone.
+    if let Some(documents) = handle.settings_documents() {
+        crate::state::documents::settings::store_domain(
+            &documents, "network", &saved,
+        )
+        .await?;
+    }
     Ok(saved)
 }
 
