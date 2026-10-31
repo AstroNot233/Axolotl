@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use super::{Documents, Stored, WRITES, composed, is_false};
+use super::{Documents, Stored, WRITES, composed, is_false, without_shipped};
 use crate::state::store;
 
 pub(crate) const DOCUMENT: &str = "translation";
@@ -149,6 +149,8 @@ pub(crate) async fn hand_over_if_missing(documents: &Documents<'_>) -> bool {
             return false;
         }
     };
+    let document =
+        without_shipped(documents, DOCUMENT, SCHEMA_VERSION, document).await;
     match documents.write(DOCUMENT, SCHEMA_VERSION, &document).await {
         Ok(()) => true,
         Err(error) => {
@@ -176,7 +178,8 @@ pub(crate) async fn update(
         Stored::Newer { .. } => return Ok(()),
         Stored::Ready { document, .. } => document,
         Stored::Missing | Stored::Unreadable => {
-            from_database(documents.pool()).await?
+            let draft = from_database(documents.pool()).await?;
+            without_shipped(documents, DOCUMENT, SCHEMA_VERSION, draft).await
         }
     };
     apply(&mut document);
@@ -352,5 +355,86 @@ mod tests {
         let document = read(&documents).await.unwrap();
         assert_eq!(document.target_language, "zh-CN");
         assert_eq!(document.provider, "google");
+    }
+
+    /// A key the deployment answers is not copied out of the row into the local
+    /// document by the handover: the local copy would be the last word for it,
+    /// and the deployment's answer would never arrive there again.
+    #[tokio::test]
+    async fn a_deployment_value_is_not_copied_into_the_local_document() {
+        let pool = installed_pool().await;
+        sqlx::query(
+            "UPDATE translation_settings SET target_language = 'zh-CN'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        ship(&deployment, DOCUMENT, r#"{"target_language":"ja"}"#);
+        let documents = layered(&local, &deployment, &pool);
+
+        assert!(hand_over_if_missing(&documents).await);
+
+        let stored: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(documents.path(DOCUMENT)).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !stored["data"]
+                .as_object()
+                .unwrap()
+                .contains_key("target_language"),
+            "the key the deployment answers is left out of the local document"
+        );
+        assert_eq!(
+            read(&documents).await.unwrap().target_language,
+            "ja",
+            "and the answer the deployment gives is the one the domain reads"
+        );
+    }
+
+    /// The draft a write of a domain with no document starts from is the row,
+    /// and the same keys are left out of it: the update that gives the document
+    /// its first key does not copy the deployment's key beside it.
+    #[tokio::test]
+    async fn an_update_does_not_copy_a_deployment_value() {
+        let pool = installed_pool().await;
+        sqlx::query(
+            "UPDATE translation_settings SET target_language = 'zh-CN'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        ship(&deployment, DOCUMENT, r#"{"target_language":"ja"}"#);
+        let documents = layered(&local, &deployment, &pool);
+
+        update(&documents, |document| {
+            document.deepl_api_key = Some("key".into());
+        })
+        .await
+        .unwrap();
+
+        let stored: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(documents.path(DOCUMENT)).unwrap(),
+        )
+        .unwrap();
+        let data = stored["data"].as_object().unwrap();
+        assert!(
+            !data.contains_key("target_language"),
+            "the key the deployment answers is not copied out of the row: {data:?}"
+        );
+        assert_eq!(
+            data.get("deepl_api_key"),
+            Some(&serde_json::Value::from("key")),
+            "the key the update named is written"
+        );
+        assert_eq!(
+            read(&documents).await.unwrap().target_language,
+            "ja",
+            "the domain reads the deployment's answer for the key it leaves out"
+        );
     }
 }

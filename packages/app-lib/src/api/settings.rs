@@ -89,10 +89,13 @@ pub(crate) async fn patch_with(
     // fails to commit would report an error for a change that had landed.
     //
     // The whole domain is stated, so a patch of another domain writes the same
-    // document back and `store_domain` leaves the file alone.
+    // document back and `store_domain` leaves the file alone. The row it states
+    // is read again there rather than handed over from here: a writer that
+    // committed in between is the newer of the two, and the file it wrote is
+    // the one that stands.
     if let Some(documents) = handle.settings_documents() {
         crate::state::documents::settings::store_domain(
-            &documents, "network", &saved,
+            &documents, "network", handle,
         )
         .await?;
     }

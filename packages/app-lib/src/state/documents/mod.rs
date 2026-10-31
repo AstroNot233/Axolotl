@@ -314,6 +314,48 @@ where
     Ok(serde_json::from_value(Value::Object(values))?)
 }
 
+/// The document a local write starts from, with the keys the deployment already
+/// answers left out.
+///
+/// A local document is the last word for every key it carries, so a copy of a
+/// value the deployment provides would shadow it: the file would go on answering
+/// that key after the deployment changed its own, and the change would never
+/// arrive. Leaving those keys out is what keeps the deployment's answer visible
+/// until the user changes that key, which the write that changes it states.
+///
+/// Only a draft taken from the rows is passed here: a document that already
+/// exists carries what the user chose, and stating it back is not a copy of the
+/// rows.
+pub(super) async fn without_shipped<T>(
+    documents: &Documents<'_>,
+    name: &str,
+    schema_version: u32,
+    draft: T,
+) -> T
+where
+    T: Serialize + DeserializeOwned,
+{
+    let Some(shipped) = documents.shipped_keys(name, schema_version).await
+    else {
+        return draft;
+    };
+    let Ok(Value::Object(values)) = serde_json::to_value(&draft) else {
+        return draft;
+    };
+    let kept: Map<String, Value> = values
+        .into_iter()
+        .filter(|(key, _)| !shipped.contains_key(key))
+        .collect();
+    serde_json::from_value(Value::Object(kept)).unwrap_or_else(|error| {
+        tracing::warn!(
+            document = name,
+            %error,
+            "Could not read back a settings document written without the deployment's keys"
+        );
+        draft
+    })
+}
+
 /// The keys a domain's type carries, which is what the layers are laid over.
 fn keys_of<T: Serialize>(document: &T) -> crate::Result<Map<String, Value>> {
     match serde_json::to_value(document)? {
@@ -508,9 +550,10 @@ struct StoredDocument<T> {
 pub(crate) async fn hand_over(pool: &SqlitePool, settings_dir: &Path) -> bool {
     let documents = Documents {
         root: settings_dir.join(DIR_NAME),
-        // The handover only fills in what the rows hold, which is what the
-        // local documents carry: a deployment's documents are not its.
-        config_root: None,
+        // The handover fills in what the rows hold, but not for a key the
+        // deployment already answers: a local copy of one would shadow the
+        // deployment's answer, so what it ships is read here as well.
+        config_root: config_root(),
         pool,
     };
     let marker = documents.root.join(HANDOVER_MARKER);
@@ -705,6 +748,12 @@ mod tests {
         Documents, MAX_DOCUMENT_BYTES, ai, config_root_from, hand_over, java,
         log_share, login_proof, translation,
     };
+    use crate::state::store::Collection;
+    use crate::state::store::Handle;
+    use crate::state::store::java_versions::{JavaVersionRecord, JavaVersions};
+    use crate::state::store::official_login_proof::{
+        Installation, OfficialLoginProof, OfficialLoginProofRecord,
+    };
 
     /// A deployment's directory is its own file tree, so a path in it is not
     /// promised to be a document: a device or a FIFO would block the read
@@ -836,6 +885,10 @@ mod tests {
     #[tokio::test]
     async fn a_handover_stops_the_rows_from_being_read() {
         let pool = installed_pool().await;
+        let handle = Handle::new(pool.clone());
+        // The display of three legacy rows is stated here because the store
+        // only reads them; the proof and the runtimes are written through the
+        // collections that own those rows.
         sqlx::query("UPDATE ai_settings SET enabled = FALSE")
             .execute(&pool)
             .await
@@ -850,16 +903,26 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO official_login_proof (id, verified, version, mac) VALUES (0, 1, 1, 'stored-mac')",
+        OfficialLoginProof::set(
+            &handle,
+            &Installation,
+            Some(&OfficialLoginProofRecord {
+                mac: "stored-mac".to_string(),
+            }),
         )
-        .execute(&pool)
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO java_versions (major_version, full_version, architecture, path) VALUES (21, '21.0.1', 'x86_64', '/java/21/bin/java')",
+        let runtime = "/java/21/bin/java".to_string();
+        JavaVersions::set(
+            &handle,
+            &runtime,
+            Some(&JavaVersionRecord {
+                major_version: 21,
+                full_version: "21.0.1".to_string(),
+                architecture: "x86_64".to_string(),
+                distribution: None,
+            }),
         )
-        .execute(&pool)
         .await
         .unwrap();
 
@@ -904,14 +967,10 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("DELETE FROM official_login_proof")
-            .execute(&pool)
+        OfficialLoginProof::set(&handle, &Installation, None)
             .await
             .unwrap();
-        sqlx::query("DELETE FROM java_versions")
-            .execute(&pool)
-            .await
-            .unwrap();
+        JavaVersions::set(&handle, &runtime, None).await.unwrap();
 
         assert!(!ai::read(&documents).await.unwrap().enabled);
         assert_eq!(

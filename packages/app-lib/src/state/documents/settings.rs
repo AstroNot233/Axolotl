@@ -623,11 +623,20 @@ pub(crate) async fn store(
     Ok(())
 }
 
-/// Writes the document of one domain from `settings`, and no other domain's.
+/// Writes the document of one domain from the row, and no other domain's.
 ///
 /// This is what a writer calls for a domain whose writes have moved to its
 /// document: the domains still answered by the row have the row as their only
 /// place, so stating them here as well would write files nothing reads yet.
+///
+/// The row is read here, inside `WRITES`, rather than handed in: two writers
+/// reach this in either order, and settings read before the lock are a snapshot
+/// the other one may already have replaced — the older of the two would then be
+/// the one the file states. What is written is the row as it stands at the
+/// write, so the file states the latest committed settings whatever order the
+/// writers arrived in, and another process writing the same domain states the
+/// latest row it can see for the same reason.
+///
 /// The rules are `store`'s, applied to one domain rather than to all of them: a
 /// key holding what the domain is provided with is left out, a document that
 /// already holds what would be written is not touched, and a domain with
@@ -637,12 +646,18 @@ pub(crate) async fn store(
 /// cannot read — is left as it stands and reported in the log, the way a store
 /// leaves it: what it holds is not this write's to lower.
 ///
+/// A write that fails takes the domain's document with it, and the failure is
+/// reported in the log rather than to the caller: the row is already committed,
+/// so the change has landed, and a document left behind would go on answering
+/// the domain with the value it froze. Removing it gives the domain back to the
+/// row, which is the value that just landed.
+///
 /// The name is a domain `DOMAINS` lists, so one it does not is a mistake in the
 /// caller rather than something a user can cause, and it is answered as one.
 pub(crate) async fn store_domain(
     documents: &Documents<'_>,
     name: &str,
-    settings: &Settings,
+    handle: &Handle,
 ) -> crate::Result<()> {
     let Some(&(domain, keys, schema_version)) =
         DOMAINS.iter().find(|(domain, _, _)| *domain == name)
@@ -653,15 +668,12 @@ pub(crate) async fn store_domain(
         .into());
     };
     let defaults = default_values()?;
-    let values: Document = serde_json::from_value(serde_json::to_value(
-        settings.clone().normalize(),
-    )?)?;
     let _writing = WRITES.lock().await;
     let config = documents
         .shipped::<Document>(domain, schema_version)
         .await
         .unwrap_or_default();
-    let target = domain_values(keys, &values, &config, &defaults);
+    let target = row_values_of_domain(handle, keys, &config, &defaults).await?;
     let existing =
         match documents.stored::<Document>(domain, schema_version).await {
             Stored::Ready { document } => Some(document),
@@ -692,7 +704,54 @@ pub(crate) async fn store_domain(
     if existing.is_none() && target.is_empty() {
         return Ok(());
     }
-    write(documents, domain, schema_version, &target).await
+    write_or_discard(
+        documents,
+        domain,
+        write(documents, domain, schema_version, &target),
+    )
+    .await
+}
+
+/// A domain's write along with what a failed one leaves behind.
+async fn write_or_discard(
+    documents: &Documents<'_>,
+    name: &str,
+    write: impl Future<Output = crate::Result<()>>,
+) -> crate::Result<()> {
+    match write.await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            discard(documents, name, &error).await;
+            Ok(())
+        }
+    }
+}
+
+/// Removes a domain's document after the write meant to replace it failed, so
+/// the domain is answered by the row again rather than by the file the failed
+/// write left behind.
+///
+/// The row is already committed when this runs, so the value that just landed is
+/// the one the read has to answer with. A document that cannot be removed
+/// either is left where it is and reported: what it holds is in the log, and the
+/// change itself is in the row, which the next write of the domain states again.
+async fn discard(documents: &Documents<'_>, name: &str, error: &crate::Error) {
+    let path = documents.path(name);
+    match tokio::fs::remove_file(&path).await {
+        Ok(()) => invalidate(),
+        Err(remove) if remove.kind() == std::io::ErrorKind::NotFound => {}
+        Err(remove) => tracing::warn!(
+            path = %path.display(),
+            %remove,
+            "Failed to remove a settings document whose write failed"
+        ),
+    }
+    tracing::warn!(
+        document = name,
+        path = %path.display(),
+        %error,
+        "Failed to write a settings document, so its domain is answered by the row"
+    );
 }
 
 /// The keys of one domain as its document should carry them, taken from a
@@ -766,8 +825,9 @@ pub(crate) async fn store_key(
     write(documents, name, schema_version, &document).await
 }
 
-/// The keys of one domain as the row holds them, for a domain that has no
-/// document to read them from.
+/// The keys of one domain as the row holds them, read afresh rather than handed
+/// in: both the single-key writer of a domain with no document and the writer
+/// that states a whole domain start from it.
 ///
 /// It goes through `domain_values` rather than copying the row: a key holding
 /// what the domain is provided with is left out, exactly as `store` leaves it
@@ -2534,6 +2594,94 @@ mod tests {
         assert!(
             Settings::get(&handle).await.unwrap().ignore_ssl_errors,
             "and the read answers the value that write carried"
+        );
+    }
+
+    /// The store states the row as it stands when it writes rather than what a
+    /// writer read before it: two writers reach the store in either order, and
+    /// the older of the two would otherwise be the value the file is left with.
+    #[tokio::test]
+    async fn a_domain_write_states_the_row_as_it_stands_then() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        let root = settings_dir.path().join(DIR_NAME);
+
+        let before_the_other_writer =
+            Settings::read_row(&handle).await.unwrap();
+        assert!(
+            !before_the_other_writer.ignore_ssl_errors,
+            "the settings this test holds are the ones before the writer below"
+        );
+        patch_with(&handle, serde_json::json!({ "ignore_ssl_errors": true }))
+            .await
+            .unwrap();
+
+        let documents = Documents::at(root.clone(), &pool);
+        store_domain(&documents, "network", &handle).await.unwrap();
+
+        assert_eq!(
+            data(&root, "network").get("ignore_ssl_errors"),
+            Some(&Value::from(true)),
+            "the store states the row, not the snapshot its caller took before it"
+        );
+        assert!(
+            Settings::get(&handle).await.unwrap().ignore_ssl_errors,
+            "and the domain still reads the value the newer writer stored"
+        );
+    }
+
+    /// A write that cannot land takes the domain's document with it: the row is
+    /// already committed, so the file would go on answering with the value it
+    /// froze rather than with the change that landed. Removing it gives the
+    /// domain back to the row, and the failure stays in the log.
+    ///
+    /// The write is handed in so the failure can be one: a directory refuses a
+    /// document and its removal alike, so no file system of this test would be
+    /// the state a committed row beside a document that could not be replaced
+    /// describes.
+    #[tokio::test]
+    async fn a_failed_domain_write_leaves_the_domain_to_the_row() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        let root = settings_dir.path().join(DIR_NAME);
+
+        let mut unit = crate::state::store::atom(&handle).await.unwrap();
+        let mut row = Settings::load_in(&mut unit).await.unwrap();
+        row.ignore_ssl_errors = true;
+        row.save_in(&mut unit).await.unwrap();
+        unit.commit().await.unwrap();
+        write_document(
+            settings_dir.path(),
+            "network",
+            r#""ignore_ssl_errors":false"#,
+        );
+        let documents = Documents::at(root.clone(), &pool);
+        assert_eq!(
+            data(&root, "network").get("ignore_ssl_errors"),
+            Some(&Value::from(false)),
+            "the document the failed write leaves behind states the old value"
+        );
+
+        write_or_discard(&documents, "network", async {
+            Err(crate::ErrorKind::OtherError(
+                "a document that cannot be written".to_string(),
+            )
+            .into())
+        })
+        .await
+        .expect("a failed write is reported in the log, not to its caller");
+
+        assert!(
+            !root.join("network.json").exists(),
+            "the document is removed rather than left answering for the domain"
+        );
+        assert!(
+            Settings::get(&handle).await.unwrap().ignore_ssl_errors,
+            "the domain falls back to the row, which holds the change that landed"
         );
     }
 }

@@ -8,6 +8,7 @@ use sqlx::SqlitePool;
 
 use super::{
     Documents, Stored, WRITES, composed, default_true, is_false, is_true,
+    without_shipped,
 };
 use crate::state::store;
 
@@ -127,6 +128,8 @@ pub(crate) async fn hand_over_if_missing(documents: &Documents<'_>) -> bool {
             return false;
         }
     };
+    let document =
+        without_shipped(documents, DOCUMENT, SCHEMA_VERSION, document).await;
     match documents.write(DOCUMENT, SCHEMA_VERSION, &document).await {
         Ok(()) => true,
         Err(error) => {
@@ -198,7 +201,8 @@ async fn update(
         Stored::Newer { .. } => return Ok(()),
         Stored::Ready { document, .. } => document,
         Stored::Missing | Stored::Unreadable => {
-            from_database(documents.pool()).await?
+            let draft = from_database(documents.pool()).await?;
+            without_shipped(documents, DOCUMENT, SCHEMA_VERSION, draft).await
         }
     };
     apply(&mut document);
@@ -379,5 +383,45 @@ mod tests {
         assert_eq!(document.crash_analysis.model_id, "gpt-x");
         assert!(!document.auto_upload);
         assert!(document.no_storage);
+    }
+
+    /// A key the deployment answers is not copied out of the rows into the local
+    /// document: the local copy is the last word for the keys it carries, so the
+    /// deployment's answer would never arrive at this key again.
+    #[tokio::test]
+    async fn a_deployment_value_is_not_copied_into_the_local_document() {
+        let pool = installed_pool().await;
+        // A value the document carries without holding the default, so the copy
+        // this test looks for is one it can see.
+        sqlx::query(
+            "UPDATE log_share_settings SET share_provider = 'paste-gg'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        ship(&deployment, DOCUMENT, r#"{"share_provider":"mclogs"}"#);
+        let documents = layered(&local, &deployment, &pool);
+
+        assert!(hand_over_if_missing(&documents).await);
+
+        let stored: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(documents.path(DOCUMENT)).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !stored["data"]
+                .as_object()
+                .unwrap()
+                .contains_key("share_provider"),
+            "the key the deployment answers is left out of the local document: {}",
+            stored["data"]
+        );
+        assert_eq!(
+            read(&documents).await.unwrap().share_provider,
+            "mclogs",
+            "and the answer the deployment gives is the one the domain reads"
+        );
     }
 }

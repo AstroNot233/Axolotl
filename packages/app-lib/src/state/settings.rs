@@ -657,7 +657,9 @@ impl Settings {
         super::documents::settings::invalidate();
         // The row has landed, so the domain that reads from its document is
         // written after it: a start stopped between the two finds the document
-        // behind the row, and a commit that failed never reached this.
+        // behind the row, and a commit that failed never reached this. The row
+        // is read again there rather than taken from `self`, so a writer that
+        // landed in between is not undone by this one.
         //
         // A document that cannot be written costs that domain and is left in
         // the log: this is the whole-row writer a start reaches through the
@@ -665,7 +667,7 @@ impl Settings {
         // start from coming up.
         if let Some(documents) = handle.settings_documents()
             && let Err(error) = super::documents::settings::store_domain(
-                &documents, "network", self,
+                &documents, "network", handle,
             )
             .await
         {
