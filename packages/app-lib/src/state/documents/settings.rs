@@ -31,10 +31,11 @@
 //! of it, so a document that exists cannot lower it to the default and no
 //! document's absence is needed to reach it (Q5).
 //!
-//! `Settings::get` still answers from the row, and nothing writes these
-//! documents: both arrive with the wiring that follows. What is in place is the
-//! composition a read makes, and the value a key has before a local document is
-//! asked (`provided`), which is what the write path will compare against.
+//! `Settings::get` still answers from the row, and nothing calls the writers
+//! below yet: both arrive with the wiring that follows. What is in place is the
+//! composition a read makes, the value a key has before a local document is
+//! asked (`provided`), and the writes that keep a document to the keys that
+//! differ from that value.
 
 use serde_json::{Map, Value};
 
@@ -352,6 +353,235 @@ pub(crate) async fn prune_redundant(
         }
     }
     Ok(())
+}
+
+/// Writes a document for every domain from `settings`, leaving out the keys
+/// that hold the value the domain is provided with.
+///
+/// A document is the authority for its domain, so a write states the whole
+/// domain rather than the keys that changed: a key equal to the provided value
+/// is dropped instead of written, because leaving it out reads the same value
+/// and lets a later change of a provided value still arrive.
+///
+/// A domain's target is compared against what its document already holds
+/// before that document is serialized, so a store that changes nothing in it
+/// touches no file: storing the same settings twice leaves every document as
+/// the first store left it, down to the version it records.
+///
+/// A domain whose document cannot be replaced costs that domain and no other:
+/// the rest are still written, and a failed write is left in the log rather
+/// than handed to the caller, which is what a start can act on.
+pub(crate) async fn store(
+    documents: &Documents<'_>,
+    settings: &Settings,
+) -> crate::Result<()> {
+    let defaults = default_values()?;
+    let values: Document = serde_json::from_value(serde_json::to_value(
+        settings.clone().normalize(),
+    )?)?;
+    let _writing = WRITES.lock().await;
+    for &(name, keys, schema_version) in DOMAINS {
+        let config = documents
+            .shipped::<Document>(name, schema_version)
+            .await
+            .unwrap_or_default();
+        let target = domain_values(keys, &values, &config, &defaults);
+        let existing =
+            match documents.stored::<Document>(name, schema_version).await {
+                Stored::Ready { document } => Some(document),
+                // Nothing to compare against is a document the write creates.
+                Stored::Missing => None,
+                // Writing either would lose what it holds: a shape a newer build
+                // wrote is never lowered, and a file this build cannot read is
+                // left for its owner rather than replaced.
+                Stored::Newer { .. } => {
+                    tracing::warn!(
+                        document = name,
+                        "Leaving a settings document a newer build wrote alone"
+                    );
+                    continue;
+                }
+                Stored::Unreadable => {
+                    tracing::warn!(
+                        document = name,
+                        "Leaving a settings document that cannot be read alone"
+                    );
+                    continue;
+                }
+            };
+        if existing.as_ref() == Some(&target) {
+            continue;
+        }
+        // A domain with nothing to record and no document of its own keeps being
+        // answered by the row: creating an empty one would take that answer away
+        // before the domain has a writer that fills it.
+        if existing.is_none() && target.is_empty() {
+            continue;
+        }
+        // A domain this build cannot write costs that domain and no other.
+        if let Err(error) = documents.write(name, schema_version, &target).await
+        {
+            tracing::warn!(
+                document = name,
+                %error,
+                "Failed to write a settings document"
+            );
+            continue;
+        }
+    }
+    Ok(())
+}
+
+/// The keys of one domain as its document should carry them, taken from a
+/// whole `Settings` keyed the way a document keys them.
+fn domain_values(
+    keys: &[&str],
+    values: &Document,
+    config: &Document,
+    defaults: &Document,
+) -> Document {
+    let mut target = Document::new();
+    for &key in keys {
+        let Some(value) = values.get(key) else {
+            continue;
+        };
+        if provided(key, config, defaults).is_some_and(|provided| {
+            same_setting(key, provided, value, defaults)
+        }) {
+            continue;
+        }
+        target.insert(key.to_string(), value.clone());
+    }
+    target
+}
+
+/// Writes one key into the document of the domain that lists it, leaving the
+/// rest of that document as it stands.
+pub(crate) async fn store_key(
+    documents: &Documents<'_>,
+    key: &str,
+    value: Value,
+) -> crate::Result<()> {
+    let Some((name, _, schema_version)) = domain_of(key) else {
+        // A key no domain lists is not stored in a document at all: the row is
+        // the only place it can live, so there is nothing to write here.
+        tracing::debug!(key, "Ignoring a settings key no domain lists");
+        return Ok(());
+    };
+    let defaults = default_values()?;
+    let _writing = WRITES.lock().await;
+    let config = documents
+        .shipped::<Document>(name, schema_version)
+        .await
+        .unwrap_or_default();
+    let Some(mut document) =
+        writable_document(documents, name, schema_version).await
+    else {
+        return Ok(());
+    };
+    let says_nothing = provided(key, &config, &defaults)
+        .is_some_and(|provided| same_setting(key, provided, &value, &defaults));
+    let changed = if says_nothing {
+        document.remove(key).is_some()
+    } else {
+        let previous = document.insert(key.to_string(), value.clone());
+        previous.as_ref() != Some(&value)
+    };
+    if !changed {
+        return Ok(());
+    }
+    documents.write(name, schema_version, &document).await
+}
+
+/// Clears `key` while the document still holds exactly `expected`, which is
+/// what keeps a setting from referring to something that no longer exists.
+///
+/// A document carries no foreign key to null the reference the way the row's
+/// `minimal_home_instance_id` column does, so the writer that removes the
+/// thing a key names clears it here. The value is compared rather than simply
+/// dropped: a reference the user has already pointed elsewhere is theirs to
+/// keep, and clearing it would undo their choice.
+pub(crate) async fn clear_key_if(
+    documents: &Documents<'_>,
+    key: &str,
+    expected: &str,
+) -> crate::Result<()> {
+    let Some((name, _, schema_version)) = domain_of(key) else {
+        tracing::debug!(key, "Ignoring a settings key no domain lists");
+        return Ok(());
+    };
+    let _writing = WRITES.lock().await;
+    // Only a document this build can rewrite is cleared: one it cannot read
+    // and one a newer build wrote are both read-only here.
+    let Some(mut document) =
+        writable_document(documents, name, schema_version).await
+    else {
+        return Ok(());
+    };
+    if document.get(key).and_then(Value::as_str) != Some(expected) {
+        return Ok(());
+    }
+    document.remove(key);
+    documents.write(name, schema_version, &document).await
+}
+
+/// The domain whose document lists `key`, with that document's shape version.
+/// A key no domain lists is not stored in a document at all.
+fn domain_of(
+    key: &str,
+) -> Option<(&'static str, &'static [&'static str], u32)> {
+    DOMAINS
+        .iter()
+        .find(|(_, keys, _)| keys.contains(&key))
+        .copied()
+}
+
+/// The local document a single-key writer starts from, or nothing when the
+/// document must not be written.
+async fn writable_document(
+    documents: &Documents<'_>,
+    name: &str,
+    schema_version: u32,
+) -> Option<Document> {
+    match documents.stored::<Document>(name, schema_version).await {
+        Stored::Ready { document } => Some(document),
+        // The write of a domain with no document creates it.
+        Stored::Missing => Some(Document::new()),
+        // Writing either would lose what it holds: a shape a newer build wrote
+        // is never lowered, and a file this build cannot read is left for its
+        // owner rather than replaced.
+        Stored::Newer { .. } => {
+            tracing::warn!(
+                document = name,
+                "Leaving a settings document a newer build wrote alone"
+            );
+            None
+        }
+        Stored::Unreadable => {
+            tracing::warn!(
+                document = name,
+                "Leaving a settings document that cannot be read alone"
+            );
+            None
+        }
+    }
+}
+
+/// Whether two documents say the same thing about `key`.
+///
+/// Two values that differ as written can still be one setting: a count of `0`
+/// reads as the lower bound its type holds, so a document saying `0` and one
+/// saying that bound are the same answer. This is the comparison
+/// `prune_redundant` makes, which keeps a writer from storing a key a start
+/// would then drop as redundant.
+fn same_setting(
+    key: &str,
+    left: &Value,
+    right: &Value,
+    defaults: &Map<String, Value>,
+) -> bool {
+    left == right
+        || effective(key, left, defaults) == effective(key, right, defaults)
 }
 
 /// The settings as the row holds them, and the same ones keyed the way a
@@ -1140,6 +1370,296 @@ mod tests {
             std::fs::read(&written).unwrap().as_slice(),
             contents.as_slice(),
             "no deployment means no repeated value to drop"
+        );
+    }
+
+    /// The `data` a document a test reads back carries.
+    fn data(root: &std::path::Path, name: &str) -> Map<String, Value> {
+        let contents =
+            std::fs::read(root.join(format!("{name}.json"))).unwrap();
+        let stored: Value = serde_json::from_slice(&contents).unwrap();
+        stored["data"].as_object().unwrap().clone()
+    }
+
+    /// Every domain document as it stands: its bytes, and when they were last
+    /// written, so a rewrite that happened to produce the same bytes shows too.
+    ///
+    /// A domain without a document is part of the picture rather than an error:
+    /// a store leaves a domain that has nothing to say without one.
+    fn snapshot(
+        root: &std::path::Path,
+    ) -> Vec<(String, Option<Vec<u8>>, Option<std::time::SystemTime>)> {
+        DOMAINS
+            .iter()
+            .map(|(name, _, _)| {
+                let path = root.join(format!("{name}.json"));
+                let contents = std::fs::read(&path).ok();
+                let modified = std::fs::metadata(&path)
+                    .ok()
+                    .and_then(|metadata| metadata.modified().ok());
+                (name.to_string(), contents, modified)
+            })
+            .collect()
+    }
+
+    /// A key holding the value the build defaults to says nothing: the read
+    /// already answers it, so the document leaves it out even when another key
+    /// beside it is written.
+    #[tokio::test]
+    async fn a_key_that_matches_the_baseline_leaves_the_document() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let documents = Documents::at(local.path().to_path_buf(), &pool);
+        let mut settings = Settings::default();
+        settings.locale = "zh_cn".to_string();
+        assert_eq!(
+            settings.theme.as_str(),
+            Settings::default().theme.as_str(),
+            "the key under test holds the value the build defaults to"
+        );
+
+        store(&documents, &settings).await.unwrap();
+
+        let data = data(local.path(), "appearance");
+        assert!(
+            !data.contains_key("theme"),
+            "a key equal to the default is left out of the document"
+        );
+        assert_eq!(
+            data.get("locale"),
+            Some(&Value::from("zh_cn")),
+            "a key the user set beside it is written"
+        );
+    }
+
+    /// A key the deployment ships is a value the deployment decides, so the
+    /// local document must not carry it: leaving it out is what lets a later
+    /// change of the deployment's value reach the user.
+    #[tokio::test]
+    async fn a_key_the_deployment_ships_stays_out_of_the_document() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        std::fs::write(
+            deployment.path().join("appearance.json"),
+            r#"{"schema_version":1,"data":{"theme":"light"}}"#,
+        )
+        .unwrap();
+        let mut settings = Settings::default();
+        settings.theme = Theme::Light;
+        settings.locale = "zh_cn".to_string();
+
+        let documents = layered(&local, &deployment, &pool);
+        store(&documents, &settings).await.unwrap();
+
+        let data = data(local.path(), "appearance");
+        assert!(
+            !data.contains_key("theme"),
+            "a key equal to the value the deployment ships stays out"
+        );
+        assert_eq!(
+            data.get("locale"),
+            Some(&Value::from("zh_cn")),
+            "the deployment ships nothing for the key beside it"
+        );
+    }
+
+    /// A domain with nothing of its own to say is left without a document, so
+    /// the row keeps answering it. Creating an empty one would end that answer
+    /// for a domain whose write has not moved to documents yet.
+    #[tokio::test]
+    async fn a_store_creates_no_document_for_a_domain_with_nothing_to_say() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let documents = Documents::at(local.path().to_path_buf(), &pool);
+
+        store(&documents, &Settings::default()).await.unwrap();
+
+        let written: Vec<String> = std::fs::read_dir(local.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(
+            written.is_empty(),
+            "a default settings left documents behind: {written:?}"
+        );
+    }
+
+    /// A store whose document already holds what it would write touches no
+    /// file, so storing the same settings twice leaves the documents as the
+    /// first store left them.
+    #[tokio::test]
+    async fn a_store_with_nothing_to_change_writes_nothing() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let documents = Documents::at(local.path().to_path_buf(), &pool);
+        let mut settings = Settings::default();
+        settings.locale = "zh_cn".to_string();
+        settings.theme = Theme::Light;
+        store(&documents, &settings).await.unwrap();
+
+        // Rewritten the way another build could have left it: the same values
+        // in another shape, so a rewrite shows as different bytes although it
+        // stores the same settings.
+        let appearance = local.path().join("appearance.json");
+        let stored: Value =
+            serde_json::from_slice(&std::fs::read(&appearance).unwrap())
+                .unwrap();
+        std::fs::write(&appearance, serde_json::to_vec(&stored).unwrap())
+            .unwrap();
+        let before = snapshot(local.path());
+
+        store(&documents, &settings).await.unwrap();
+
+        assert_eq!(
+            snapshot(local.path()),
+            before,
+            "a store with nothing to change must not rewrite or touch a document"
+        );
+        assert_eq!(
+            data(local.path(), "appearance").get("theme"),
+            Some(&Value::from("light")),
+            "the document a store left alone still carries what it was given"
+        );
+    }
+
+    /// A single-key write reads the document it changes and writes it back
+    /// with that one key changed: the rest of the document is not this
+    /// writer's to lower.
+    #[tokio::test]
+    async fn a_single_key_write_keeps_the_rest_of_the_document() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        std::fs::write(
+            local.path().join("appearance.json"),
+            r#"{"schema_version":1,"data":{"locale":"zh_cn","theme":"oled"}}"#,
+        )
+        .unwrap();
+        let documents = Documents::at(local.path().to_path_buf(), &pool);
+
+        store_key(&documents, "theme", Value::from("light"))
+            .await
+            .unwrap();
+
+        let data = data(local.path(), "appearance");
+        assert_eq!(
+            data.get("theme"),
+            Some(&Value::from("light")),
+            "the key the write names carries the value it was given"
+        );
+        assert_eq!(
+            data.get("locale"),
+            Some(&Value::from("zh_cn")),
+            "a key beside it keeps what the document held"
+        );
+    }
+
+    /// A document carries no foreign key, so the writer that removes the thing
+    /// a reference names clears it here — and only while the document still
+    /// holds the value that was seen, or a reference the user has already
+    /// pointed elsewhere would be lost.
+    #[tokio::test]
+    async fn a_reference_to_something_removed_is_cleared() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        std::fs::write(
+            local.path().join("appearance.json"),
+            r#"{"schema_version":1,"data":{"locale":"zh_cn","minimal_home_instance_id":"gone"}}"#,
+        )
+        .unwrap();
+        let documents = Documents::at(local.path().to_path_buf(), &pool);
+
+        clear_key_if(&documents, "minimal_home_instance_id", "gone")
+            .await
+            .unwrap();
+
+        let data = data(local.path(), "appearance");
+        assert!(
+            !data.contains_key("minimal_home_instance_id"),
+            "the reference to what was removed is cleared"
+        );
+        assert_eq!(
+            data.get("locale"),
+            Some(&Value::from("zh_cn")),
+            "the rest of the document is left as it stands"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reference_to_something_else_stays() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let written = local.path().join("appearance.json");
+        let contents = br#"{"schema_version":1,"data":{"minimal_home_instance_id":"kept"}}"#;
+        std::fs::write(&written, contents).unwrap();
+        let documents = Documents::at(local.path().to_path_buf(), &pool);
+
+        clear_key_if(&documents, "minimal_home_instance_id", "gone")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            data(local.path(), "appearance").get("minimal_home_instance_id"),
+            Some(&Value::from("kept")),
+            "a reference that already points elsewhere is the user's choice"
+        );
+        assert_eq!(
+            std::fs::read(&written).unwrap().as_slice(),
+            contents.as_slice(),
+            "a document with nothing to clear is not written at all"
+        );
+    }
+
+    /// A domain whose write fails costs that domain and no other, and the
+    /// caller is not handed a failure a start cannot act on.
+    ///
+    /// A write replaces a document with a file it creates beside it, so the
+    /// directory is what refuses it, and it then refuses every domain at once:
+    /// one domain failing while the rest land cannot be built here. What the
+    /// caller can observe is checked instead — the call reports no error and
+    /// leaves no document behind, and the same call writes every document once
+    /// the directory accepts them.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_domain_does_not_stop_the_others() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let documents = Documents::at(local.path().to_path_buf(), &pool);
+        let mut settings = Settings::default();
+        settings.locale = "zh_cn".to_string();
+
+        std::fs::set_permissions(
+            local.path(),
+            std::fs::Permissions::from_mode(0o555),
+        )
+        .unwrap();
+        let stored = store(&documents, &settings).await;
+        // Restored before anything is asserted: a directory left read-only
+        // would keep the temporary one from being removed afterwards.
+        std::fs::set_permissions(
+            local.path(),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+
+        stored.expect(
+            "a document that could not be written is reported in the log, not to the caller",
+        );
+        assert_eq!(
+            std::fs::read_dir(local.path()).unwrap().count(),
+            0,
+            "no document is left behind while the directory refuses one"
+        );
+
+        store(&documents, &settings).await.unwrap();
+
+        assert_eq!(
+            data(local.path(), "appearance").get("locale"),
+            Some(&Value::from("zh_cn")),
+            "the same store writes its documents once the directory accepts them"
         );
     }
 }
