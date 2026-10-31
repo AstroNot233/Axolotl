@@ -263,26 +263,40 @@ impl<'a> Documents<'a> {
         // `WRITES` only serializes this process, so the file is read again
         // here: a second instance, or a build that took longer than the
         // caller's own read, can have replaced it meanwhile.
-        if let Some(existing) = written_document(&path).await {
-            // The version records the last write of this document, so a write
-            // that leaves the data as it stands must not touch it: raising it
-            // for a value the user did not change would lock a build that
-            // knows the same shape out of the document from then on.
-            if serde_json::to_value(document)? == existing.data {
-                return Ok(());
-            }
-            // The same rule `stored` applies to a read applies to the write
-            // that follows it, whatever the caller checked before: writing a
-            // document a newer build wrote would lower it to the keys this
-            // build knows.
-            if existing.schema_version > schema_version {
+        match written_document(&path).await {
+            // A file this build cannot read is a shape it does not know, and
+            // replacing it would lose the keys it cannot see — the same reason a
+            // document a newer build wrote is left alone.
+            OnDisk::Unreadable => {
                 tracing::warn!(
                     path = %path.display(),
-                    schema_version = existing.schema_version,
-                    "Leaving a settings document a newer build wrote alone"
+                    "Leaving a settings document that cannot be read alone"
                 );
                 return Ok(());
             }
+            OnDisk::Ready(existing) => {
+                // The version records the last write of this document, so a
+                // write that leaves the data as it stands must not touch it:
+                // raising it for a value the user did not change would lock a
+                // build that knows the same shape out of the document from then
+                // on.
+                if serde_json::to_value(document)? == existing.data {
+                    return Ok(());
+                }
+                // The same rule `stored` applies to a read applies to the write
+                // that follows it, whatever the caller checked before: writing a
+                // document a newer build wrote would lower it to the keys this
+                // build knows.
+                if existing.schema_version > schema_version {
+                    tracing::warn!(
+                        path = %path.display(),
+                        schema_version = existing.schema_version,
+                        "Leaving a settings document a newer build wrote alone"
+                    );
+                    return Ok(());
+                }
+            }
+            OnDisk::Missing => {}
         }
         let contents = serde_json::to_vec_pretty(&NewDocument {
             schema_version,
@@ -511,12 +525,29 @@ where
     }
 }
 
-/// What a document on disk already holds, when there is a file there that can
-/// be parsed. Nothing means the write has nothing to compare against and goes
-/// ahead: a file this build cannot interpret is not one it can lower.
-async fn written_document(path: &Path) -> Option<WrittenDocument> {
-    let contents = tokio::fs::read(path).await.ok()?;
-    serde_json::from_slice(&contents).ok()
+/// What a write finds where its document belongs.
+///
+/// `Missing` and `Unreadable` answer differently on purpose: no file is a
+/// document the write creates, while a file this build cannot parse holds keys it
+/// cannot see and is left as it stands.
+enum OnDisk {
+    Missing,
+    Unreadable,
+    Ready(WrittenDocument),
+}
+
+async fn written_document(path: &Path) -> OnDisk {
+    let contents = match tokio::fs::read(path).await {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return OnDisk::Missing;
+        }
+        Err(_) => return OnDisk::Unreadable,
+    };
+    match serde_json::from_slice(&contents) {
+        Ok(stored) => OnDisk::Ready(stored),
+        Err(_) => OnDisk::Unreadable,
+    }
 }
 
 /// What a deployment's directory holds for one domain.

@@ -836,25 +836,16 @@ pub(crate) async fn store_domain(
     };
     let target =
         row_values_of_domain(handle, keys, &config, &defaults, changed).await?;
+    // Only whether a document is there matters here: a shape a newer build wrote
+    // and a file this build cannot read are both `write`'s to leave alone, and it
+    // reads the file again, which is the only answer that still holds when
+    // another instance has just replaced it.
     let existing =
         match documents.stored::<Document>(domain, schema_version).await {
-            // Which document a newer build wrote is `write`'s question: it reads
-            // the file again and refuses to lower that one there.
             Stored::Ready { document } | Stored::Newer { document } => {
                 Some(document)
             }
-            // Nothing to compare against is a document this write creates, which
-            // `write` then skips when it would change no value.
-            Stored::Missing => None,
-            // A file this build cannot read is data a write would overwrite, so
-            // the domain is left as it stands here.
-            Stored::Unreadable => {
-                tracing::warn!(
-                    document = domain,
-                    "Leaving a settings document that cannot be read alone"
-                );
-                return Ok(());
-            }
+            Stored::Missing | Stored::Unreadable => None,
         };
     // A domain with nothing to record and no document of its own keeps being
     // answered by the row: creating an empty one would take that answer away
@@ -993,8 +984,12 @@ fn domain_values(
         let Some(value) = values.get(key) else {
             continue;
         };
-        let written = if config.contains_key(key) {
+        let written = if let Some(shipped) = config.get(key) {
+            // Naming the key is what lets a local copy outrank a deployment's,
+            // and a copy that says what the deployment already says buys nothing
+            // while it keeps the deployment's later change from arriving.
             changed.is_some_and(|changed| changed.contains(key))
+                && !same_setting(key, shipped, value, defaults)
         } else {
             !defaults.get(key).is_some_and(|default| {
                 same_setting(key, default, value, defaults)
