@@ -24,11 +24,20 @@
 //! never written: only the local directory is. They sit directly in that
 //! directory rather than under a `settings` subdirectory, so the two layers are
 //! two depths.
+//!
+//! The five documents beside the settings — `ai`, `translation`, `log_share`,
+//! `java` and `login_proof` — are composed key by key from the layers that
+//! exist for them, which `composed` below does. Unlike the settings they are
+//! read as a domain at a time rather than as one set of keys, but the order is
+//! the same: the row while no local document holds the domain, the
+//! deployment's document, the local one.
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde_json::{Map, Value};
 use sqlx::SqlitePool;
 
 use crate::state::State;
@@ -173,6 +182,52 @@ impl<'a> Documents<'a> {
         }
     }
 
+    /// The local document as the keys it names, whichever build wrote it, or
+    /// nothing while it holds no readable one.
+    ///
+    /// A layer contributes its keys to the domain, so it is read as a map
+    /// rather than as the domain's type: a value this build cannot read then
+    /// costs that key, which `overlay` sorts out, instead of the document. The
+    /// version a newer build wrote does not stop the read either — those keys
+    /// are still what the domain was last set to, and the write that would lower
+    /// them is refused elsewhere.
+    pub(crate) async fn stored_keys(
+        &self,
+        name: &str,
+        schema_version: u32,
+    ) -> Option<Map<String, Value>> {
+        match read_document::<Map<String, Value>>(
+            &self.path(name),
+            name,
+            schema_version,
+        )
+        .await
+        {
+            Stored::Ready { document } | Stored::Newer { document } => {
+                Some(document)
+            }
+            Stored::Missing | Stored::Unreadable => None,
+        }
+    }
+
+    /// The keys the deployment ships for a domain, or nothing while it ships
+    /// no document for it.
+    pub(crate) async fn shipped_keys(
+        &self,
+        name: &str,
+        schema_version: u32,
+    ) -> Option<Map<String, Value>> {
+        let path = self.config_path(name)?;
+        match read_document::<Map<String, Value>>(&path, name, schema_version)
+            .await
+        {
+            Stored::Ready { document } | Stored::Newer { document } => {
+                Some(document)
+            }
+            Stored::Missing | Stored::Unreadable => None,
+        }
+    }
+
     /// Replaces a document with a temporary file and a rename, so a reader
     /// never sees half of one. A write that would change no value, or that
     /// would lower a document a newer build wrote, leaves the file as it is.
@@ -219,6 +274,93 @@ impl<'a> Documents<'a> {
         }
         crate::util::io::write(&path, contents).await?;
         Ok(())
+    }
+}
+
+/// The document one domain reads as, composed of the layers a document set
+/// holds for it.
+///
+/// The base is what `from_rows` recovers while no local document holds the
+/// domain, and the domain's own default while one does. A local document is
+/// written as what differs from the default — `write` leaves a value that is
+/// the default out — so a key it omits holds the default and never the row:
+/// reading the row under a local document would bring back a value the user has
+/// already moved away from, which no write could ever undo.
+///
+/// The deployment's document sits above that base and below the local one, so a
+/// value it pins is not shadowed by a row frozen before the deployment existed,
+/// and the user's own document is the last word.
+pub(super) async fn composed<T>(
+    documents: &Documents<'_>,
+    name: &str,
+    schema_version: u32,
+    from_rows: impl Future<Output = crate::Result<T>>,
+) -> crate::Result<T>
+where
+    T: Default + Serialize + DeserializeOwned,
+{
+    let local = documents.stored_keys(name, schema_version).await;
+    let base = match local {
+        Some(_) => T::default(),
+        None => from_rows.await?,
+    };
+    let mut values = keys_of(&base)?;
+    if let Some(shipped) = documents.shipped_keys(name, schema_version).await {
+        overlay::<T>(&mut values, &shipped, name, "deployment");
+    }
+    if let Some(local) = local {
+        overlay::<T>(&mut values, &local, name, "local");
+    }
+    Ok(serde_json::from_value(Value::Object(values))?)
+}
+
+/// The keys a domain's type carries, which is what the layers are laid over.
+fn keys_of<T: Serialize>(document: &T) -> crate::Result<Map<String, Value>> {
+    match serde_json::to_value(document)? {
+        Value::Object(keys) => Ok(keys),
+        // A domain composed key by key is one whose type is an object; a type
+        // of any other shape has no keys for a layer to answer.
+        other => Err(crate::ErrorKind::OtherError(format!(
+            "a settings document is not a set of keys: {other}"
+        ))
+        .into()),
+    }
+}
+
+/// Lays one layer over `values`, one key at a time: the keys the layer names are
+/// the whitelist, and each is judged by reading the whole domain back, so a
+/// value this build cannot read costs only that key and leaves what the layer
+/// below made of it.
+///
+/// A key the domain's type does not carry is kept as the layer wrote it and
+/// ignored by the read back, which is what lets a document from another shape
+/// still answer with the keys this build knows.
+fn overlay<T>(
+    values: &mut Map<String, Value>,
+    source: &Map<String, Value>,
+    name: &str,
+    layer: &str,
+) where
+    T: DeserializeOwned,
+{
+    for (key, value) in source {
+        let kept = values.insert(key.clone(), value.clone());
+        let Err(error) =
+            serde_json::from_value::<T>(Value::Object(values.clone()))
+        else {
+            continue;
+        };
+        match kept {
+            Some(kept) => values.insert(key.clone(), kept),
+            None => values.remove(key),
+        };
+        tracing::warn!(
+            document = name,
+            layer,
+            key,
+            %error,
+            "Ignoring a settings value a document carries that this build cannot read"
+        );
     }
 }
 
@@ -433,6 +575,26 @@ pub(crate) mod test_support {
     /// An empty in-memory database, opened where `sqlx` may be spelled: this
     /// module only lays the tables its own domains used to have over it.
     pub(crate) use crate::state::store::tests::support::empty_pool as pool;
+
+    /// The pair of directories a launcher reads: the one it writes, and the one
+    /// a deployment ships for it.
+    pub(crate) fn layered<'a>(
+        local: &tempfile::TempDir,
+        deployment: &tempfile::TempDir,
+        pool: &'a SqlitePool,
+    ) -> super::Documents<'a> {
+        super::Documents::at(local.path().to_path_buf(), pool)
+            .with_config_root(Some(deployment.path().to_path_buf()))
+    }
+
+    /// Writes a document the deployment ships, in the shape a document carries.
+    pub(crate) fn ship(dir: &tempfile::TempDir, name: &str, data: &str) {
+        std::fs::write(
+            dir.path().join(format!("{name}.json")),
+            format!(r#"{{"schema_version":1,"data":{data}}}"#),
+        )
+        .expect("a deployment document");
+    }
 
     /// The three AI tables, as the migrations leave them.
     pub(crate) async fn create_ai_tables(pool: &SqlitePool) {

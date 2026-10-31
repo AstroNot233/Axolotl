@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Documents, Stored, WRITES, is_false};
+use super::{Documents, Stored, WRITES, composed, is_false};
 use crate::state::store;
 
 pub(crate) const DOCUMENT: &str = "login_proof";
@@ -55,36 +55,38 @@ impl LoginProofDocument {
 
 /// The MAC of the proof this installation holds, or nothing when it holds none.
 ///
-/// A document that exists answers on its own: every key it leaves out is a
-/// default, so a proof an older build left in the row cannot come back.
+/// The proof is composed like the other domains, and the MAC has to verify
+/// against this machine's keyring key wherever it came from (`api/anti_piracy`),
+/// so a layer can answer with a proof but cannot mint one: the binding is the
+/// key, not the file.
 pub(crate) async fn read(
     documents: &Documents<'_>,
 ) -> crate::Result<Option<String>> {
-    let document = match documents
-        .stored::<LoginProofDocument>(DOCUMENT, SCHEMA_VERSION)
-        .await
-    {
-        Stored::Ready { document, .. } | Stored::Newer { document, .. } => {
-            document
-        }
-        Stored::Missing | Stored::Unreadable => {
-            let Some(mac) =
+    let document: LoginProofDocument =
+        composed(documents, DOCUMENT, SCHEMA_VERSION, async {
+            Ok(from_row(
                 store::official_login_proof::read_legacy_official_login_proof(
                     documents.pool(),
                 )
-                .await?
-            else {
-                return Ok(None);
-            };
-            LoginProofDocument {
-                verified: true,
-                version: PROOF_VERSION,
-                mac,
-            }
-        }
-    };
+                .await?,
+            ))
+        })
+        .await?;
 
     Ok(document.counts().then_some(document.mac))
+}
+
+/// The proof a row holds as a document, and the empty proof of an installation
+/// whose row holds none.
+fn from_row(mac: Option<String>) -> LoginProofDocument {
+    match mac {
+        Some(mac) => LoginProofDocument {
+            verified: true,
+            version: PROOF_VERSION,
+            mac,
+        },
+        None => LoginProofDocument::default(),
+    }
 }
 
 /// Writes the document the row hands over to, unless one is already in place.
@@ -108,14 +110,7 @@ pub(crate) async fn hand_over_if_missing(documents: &Documents<'_>) -> bool {
                 return false;
             }
         };
-    let document = match mac {
-        Some(mac) => LoginProofDocument {
-            verified: true,
-            version: PROOF_VERSION,
-            mac,
-        },
-        None => LoginProofDocument::default(),
-    };
+    let document = from_row(mac);
     match documents.write(DOCUMENT, SCHEMA_VERSION, &document).await {
         Ok(()) => true,
         Err(error) => {
@@ -173,7 +168,7 @@ mod tests {
 
     use super::*;
     use crate::state::documents::test_support::{
-        create_official_login_proof_table, pool,
+        create_official_login_proof_table, layered, pool, ship,
     };
 
     fn documents<'a>(
@@ -223,6 +218,36 @@ mod tests {
             read(&documents(&root, &pool)).await.unwrap(),
             None,
             "a key the document leaves out is its default, never the row's value"
+        );
+    }
+
+    /// The proof is machine state, so the one this installation holds is the
+    /// last word: a MAC a deployment ships cannot take its place. It could not
+    /// count even if it did, because a proof is checked against this machine's
+    /// keyring key (`api/anti_piracy`) rather than against the file.
+    #[tokio::test]
+    async fn a_local_proof_wins_over_the_deployment_one() {
+        let pool = installed_pool(None).await;
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        ship(
+            &deployment,
+            DOCUMENT,
+            r#"{"verified":true,"mac":"deployment-mac"}"#,
+        );
+        std::fs::write(
+            local.path().join("login_proof.json"),
+            r#"{"schema_version":1,"data":{"verified":true,"mac":"local-mac"}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            read(&layered(&local, &deployment, &pool))
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("local-mac"),
+            "the proof this installation holds outranks the one the deployment names"
         );
     }
 

@@ -6,7 +6,9 @@
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use super::{Documents, Stored, WRITES, default_true, is_false, is_true};
+use super::{
+    Documents, Stored, WRITES, composed, default_true, is_false, is_true,
+};
 use crate::state::store;
 
 pub(crate) const DOCUMENT: &str = "log_share";
@@ -75,23 +77,16 @@ fn is_logshare(value: &String) -> bool {
     value == "logshare"
 }
 
-/// The document, or the rows while it does not exist. A document that exists
-/// answers on its own: every key it leaves out is a default, so an older build
-/// falling back to the rows cannot resurrect what a newer one wrote.
+/// The document, composed of the keys the deployment ships and the ones the
+/// local document names, or the rows while neither of them answers. The two
+/// rows are one document, so a layer answers both halves together.
 pub(crate) async fn read(
     documents: &Documents<'_>,
 ) -> crate::Result<LogShareDocument> {
-    match documents
-        .stored::<LogShareDocument>(DOCUMENT, SCHEMA_VERSION)
-        .await
-    {
-        Stored::Ready { document, .. } | Stored::Newer { document, .. } => {
-            Ok(document)
-        }
-        Stored::Missing | Stored::Unreadable => {
-            from_database(documents.pool()).await
-        }
-    }
+    composed(documents, DOCUMENT, SCHEMA_VERSION, async {
+        from_database(documents.pool()).await
+    })
+    .await
 }
 
 async fn from_database(pool: &SqlitePool) -> crate::Result<LogShareDocument> {
@@ -216,7 +211,7 @@ mod tests {
 
     use super::*;
     use crate::state::documents::test_support::{
-        create_log_share_tables, pool,
+        create_log_share_tables, layered, pool, ship,
     };
 
     fn documents<'a>(
@@ -295,6 +290,56 @@ mod tests {
         );
         assert_eq!(document.ai_source, "logshare");
         assert!(!document.crash_analysis.enabled);
+    }
+
+    /// The two tables are one document, so a layer answers both of their keys
+    /// together: the deployment's document reaches the crash-analysis half as
+    /// well as the sharing one.
+    #[tokio::test]
+    async fn a_deployment_document_answers_both_halves() {
+        let pool = installed_pool().await;
+        sqlx::query(
+            "UPDATE log_share_settings SET share_provider = 'mclogs', auto_upload = FALSE",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE crash_analysis_ai_settings SET enabled = TRUE, provider_id = 'openai', model_id = 'gpt-x', ai_source = 'custom'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        ship(
+            &deployment,
+            DOCUMENT,
+            r#"{"share_provider":"logshare","ai_source":"logshare","crash_analysis":{"enabled":false,"provider_id":"deploy"}}"#,
+        );
+
+        let document =
+            read(&layered(&local, &deployment, &pool)).await.unwrap();
+
+        assert_eq!(
+            document.share_provider, "logshare",
+            "the deployment's answer for a key outranks the row's"
+        );
+        assert_eq!(document.ai_source, "logshare");
+        assert_eq!(
+            document.crash_analysis,
+            CrashAnalysis {
+                enabled: false,
+                provider_id: "deploy".into(),
+                model_id: String::new(),
+            },
+            "a layer answers the crash-analysis half too, and it answers the whole key rather than merging into it"
+        );
+        assert!(
+            !document.auto_upload,
+            "a key the deployment leaves out is still the row's"
+        );
     }
 
     #[tokio::test]

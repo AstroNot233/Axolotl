@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use super::{Documents, Stored, WRITES};
+use super::{Documents, Stored, WRITES, composed};
 use crate::state::store;
 
 pub(crate) const DOCUMENT: &str = "java";
@@ -162,23 +162,20 @@ impl JavaDocument {
     }
 }
 
-/// The document, or the rows while it does not exist. A document that exists
-/// answers on its own: every key it leaves out is a default, so an older build
-/// falling back to the rows cannot resurrect what a newer one wrote.
+/// The document, composed of the keys the deployment ships and the ones the
+/// local document names, or the rows while neither of them answers.
+///
+/// A layer answers a whole key, and the defaults are pointers at runtimes, so a
+/// composed document can name a runtime it does not hold. That is what
+/// `default_for` already answers nothing for: the pairing is kept by what the
+/// document holds, not by which layer wrote it.
 pub(crate) async fn read(
     documents: &Documents<'_>,
 ) -> crate::Result<JavaDocument> {
-    match documents
-        .stored::<JavaDocument>(DOCUMENT, SCHEMA_VERSION)
-        .await
-    {
-        Stored::Ready { document, .. } | Stored::Newer { document, .. } => {
-            Ok(document)
-        }
-        Stored::Missing | Stored::Unreadable => {
-            from_database(documents.pool()).await
-        }
-    }
+    composed(documents, DOCUMENT, SCHEMA_VERSION, async {
+        from_database(documents.pool()).await
+    })
+    .await
 }
 
 async fn from_database(pool: &SqlitePool) -> crate::Result<JavaDocument> {
@@ -336,7 +333,9 @@ mod tests {
     use sqlx::SqlitePool;
 
     use super::*;
-    use crate::state::documents::test_support::{create_java_tables, pool};
+    use crate::state::documents::test_support::{
+        create_java_tables, layered, pool, ship,
+    };
 
     fn documents<'a>(
         root: &tempfile::TempDir,
@@ -472,6 +471,70 @@ mod tests {
         assert!(
             document.default_for(21).is_none(),
             "a default naming a runtime the document does not hold answers nothing"
+        );
+        assert!(document.installed_defaults().is_empty());
+    }
+
+    /// A deployment's document replaces the list it names, and the default it
+    /// ships keeps pointing at a runtime the composed document holds.
+    #[tokio::test]
+    async fn a_deployment_document_pairs_its_own_runtime_with_its_default() {
+        let pool = installed_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        ship(
+            &deployment,
+            DOCUMENT,
+            r#"{"runtimes":[{"path":"/deploy/jdk/bin/java","major_version":21,"full_version":"21.0.2"}],"defaults":[{"major_version":21,"path":"/deploy/jdk/bin/java"}]}"#,
+        );
+
+        let document =
+            read(&layered(&local, &deployment, &pool)).await.unwrap();
+
+        assert_eq!(
+            document
+                .runtimes
+                .iter()
+                .map(|runtime| runtime.path.as_str())
+                .collect::<Vec<_>>(),
+            ["/deploy/jdk/bin/java"],
+            "the deployment answers the runtimes it names in place of the rows'"
+        );
+        assert_eq!(
+            document
+                .default_for(21)
+                .map(|runtime| runtime.path.as_str()),
+            Some("/deploy/jdk/bin/java"),
+            "a default answers only while the composed document holds the runtime it names"
+        );
+        assert!(document.default_for(17).is_none());
+    }
+
+    /// A default is a pointer, and the layers are laid key by key: a deployment
+    /// that answers the defaults alone leaves them pointing at a runtime the
+    /// composed document does not hold, which reads as no default at all.
+    #[tokio::test]
+    async fn a_deployment_default_without_its_runtime_is_not_a_default() {
+        let pool = installed_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        ship(
+            &deployment,
+            DOCUMENT,
+            r#"{"defaults":[{"major_version":21,"path":"/deploy/jdk/bin/java"}]}"#,
+        );
+
+        let document =
+            read(&layered(&local, &deployment, &pool)).await.unwrap();
+
+        assert_eq!(
+            document.runtimes.len(),
+            2,
+            "a key the deployment leaves out is still the rows'"
+        );
+        assert!(
+            document.default_for(21).is_none(),
+            "the pairing is kept by what the document holds, not by which layer wrote the pointer"
         );
         assert!(document.installed_defaults().is_empty());
     }

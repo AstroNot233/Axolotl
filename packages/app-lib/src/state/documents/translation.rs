@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use super::{Documents, Stored, WRITES, is_false};
+use super::{Documents, Stored, WRITES, composed, is_false};
 use crate::state::store;
 
 pub(crate) const DOCUMENT: &str = "translation";
@@ -100,23 +100,15 @@ fn is_deepl_endpoint(value: &String) -> bool {
     value == DEEPL_ENDPOINT
 }
 
-/// The document, or the row while it does not exist. A document that exists
-/// answers on its own: every key it leaves out is a default, so an older build
-/// falling back to the row cannot resurrect what a newer one wrote.
+/// The document, composed of the keys the deployment ships and the ones the
+/// local document names, or the row while neither of them answers.
 pub(crate) async fn read(
     documents: &Documents<'_>,
 ) -> crate::Result<TranslationDocument> {
-    match documents
-        .stored::<TranslationDocument>(DOCUMENT, SCHEMA_VERSION)
-        .await
-    {
-        Stored::Ready { document, .. } | Stored::Newer { document, .. } => {
-            Ok(document)
-        }
-        Stored::Missing | Stored::Unreadable => {
-            from_database(documents.pool()).await
-        }
-    }
+    composed(documents, DOCUMENT, SCHEMA_VERSION, async {
+        from_database(documents.pool()).await
+    })
+    .await
 }
 
 async fn from_database(
@@ -197,7 +189,7 @@ mod tests {
 
     use super::*;
     use crate::state::documents::test_support::{
-        create_translation_tables, pool,
+        create_translation_tables, layered, pool, ship,
     };
 
     fn documents<'a>(
@@ -269,6 +261,65 @@ mod tests {
         assert_eq!(document.mode, "bilingual");
         assert_eq!(document.style, "weakened");
         assert_eq!(document.deepl_api_key, None);
+    }
+
+    /// A deployment's document answers a domain no local document covers, and
+    /// it answers above the row: a value the row froze cannot shadow it.
+    #[tokio::test]
+    async fn a_deployment_document_applies_without_a_local_one() {
+        let pool = installed_pool().await;
+        sqlx::query(
+            "UPDATE translation_settings SET provider = 'deepl', target_language = 'zh-CN'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        ship(&deployment, DOCUMENT, r#"{"target_language":"ja"}"#);
+
+        let document =
+            read(&layered(&local, &deployment, &pool)).await.unwrap();
+
+        assert_eq!(
+            document.target_language, "ja",
+            "the deployment's answer for a key outranks the row's"
+        );
+        assert_eq!(
+            document.provider, "deepl",
+            "a key the deployment leaves out is still the row's"
+        );
+        assert!(
+            !local.path().join("translation.json").exists(),
+            "a read must not write the local directory"
+        );
+    }
+
+    /// A domain with no document on either layer is still answered by its row.
+    #[tokio::test]
+    async fn the_row_answers_when_no_document_exists() {
+        let pool = installed_pool().await;
+        sqlx::query(
+            "UPDATE translation_settings SET provider = 'deepl', target_language = 'zh-CN'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let local = tempfile::tempdir().unwrap();
+        let deployment = tempfile::tempdir().unwrap();
+        // The deployment ships documents, just not one for this domain.
+        ship(&deployment, "ai", r#"{"enabled":false}"#);
+
+        let document =
+            read(&layered(&local, &deployment, &pool)).await.unwrap();
+
+        assert_eq!(
+            document.provider, "deepl",
+            "a domain no layer holds a document for is answered by its row"
+        );
+        assert_eq!(document.target_language, "zh-CN");
     }
 
     #[tokio::test]

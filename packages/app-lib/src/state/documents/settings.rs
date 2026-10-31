@@ -1428,7 +1428,10 @@ mod tests {
         let local = tempfile::tempdir().unwrap();
         let deployment = tempfile::tempdir().unwrap();
         let shipped = deployment.path().join("ai.json");
-        let contents = br#"{"schema_version":1,"data":{"enabled":false}}"#;
+        // A key the write below does not name: the deployment's document then
+        // answers beside the local one, which is what shows the write landing
+        // in the local directory rather than merely shadowing the deployment.
+        let contents = br#"{"schema_version":1,"data":{"legacy_openai_credential_cleanup":true}}"#;
         std::fs::write(&shipped, contents).unwrap();
         let modified = std::fs::metadata(&shipped).unwrap().modified().unwrap();
         std::fs::set_permissions(
@@ -1453,7 +1456,15 @@ mod tests {
             local.path().join("ai.json").is_file(),
             "the write lands in the local directory"
         );
-        assert!(ai::read(&documents).await.unwrap().enabled);
+        let read = ai::read(&documents).await.unwrap();
+        assert!(
+            read.enabled,
+            "the local document holds the domain, so the write's value reads back"
+        );
+        assert!(
+            read.legacy_openai_credential_cleanup,
+            "the deployment's document still answers the key the local one leaves out"
+        );
         assert_eq!(
             std::fs::read(&shipped).unwrap().as_slice(),
             contents.as_slice(),
