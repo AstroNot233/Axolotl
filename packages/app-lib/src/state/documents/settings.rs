@@ -774,13 +774,15 @@ pub(crate) async fn store(
 /// document: the domains still answered by the row have the row as their only
 /// place, so stating them here as well would write files nothing reads yet.
 ///
-/// The row is read here, inside `WRITES`, rather than handed in: two writers
-/// reach this in either order, and settings read before the lock are a snapshot
-/// the other one may already have replaced — the older of the two would then be
-/// the one the file states. What is written is the row as it stands at the
-/// write, so the file states the latest committed settings whatever order the
-/// writers arrived in, and another process writing the same domain states the
-/// latest row it can see for the same reason.
+/// The row is read here, inside `WRITES`, rather than handed in: two writers of
+/// this process reach it in either order, and settings read before the lock are
+/// a snapshot the other one may already have replaced — the older of the two
+/// would then be the one the file states. What is written is the row as it
+/// stands at the write, so the file states the latest committed settings
+/// whatever order the writers arrived in.
+///
+/// One launcher runs at a time: the shell refuses a second instance, so nothing
+/// here takes a lock against another process.
 ///
 /// The rules are `store`'s, applied to one domain rather than to all of them: a
 /// key holding what the domain is provided with is left out, and a domain with
@@ -838,8 +840,8 @@ pub(crate) async fn store_domain(
         row_values_of_domain(handle, keys, &config, &defaults, changed).await?;
     // Only whether a document is there matters here: a shape a newer build wrote
     // and a file this build cannot read are both `write`'s to leave alone, and it
-    // reads the file again, which is the only answer that still holds when
-    // another instance has just replaced it.
+    // reads the file again, which is the answer that still holds when another
+    // writer of this process has replaced it since this read.
     let existing =
         match documents.stored::<Document>(domain, schema_version).await {
             Stored::Ready { document } | Stored::Newer { document } => {

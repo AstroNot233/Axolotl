@@ -249,7 +249,8 @@ impl<'a> Documents<'a> {
 
     /// Replaces a document with a temporary file and a rename, so a reader
     /// never sees half of one. A write that would change no value, or that
-    /// would lower a document a newer build wrote, leaves the file as it is.
+    /// would take a document written by an older build back to the shape this
+    /// one knows, leaves the file as it is.
     pub(crate) async fn write<T>(
         &self,
         name: &str,
@@ -260,9 +261,9 @@ impl<'a> Documents<'a> {
         T: Serialize,
     {
         let path = self.path(name);
-        // `WRITES` only serializes this process, so the file is read again
-        // here: a second instance, or a build that took longer than the
-        // caller's own read, can have replaced it meanwhile.
+        // `WRITES` serializes the writers of this process, and the file is read
+        // again anyway: another writer here may have replaced it since the one
+        // this write began with, and the file is the answer that counts.
         match written_document(&path).await {
             // A file this build cannot read is a shape it does not know, and
             // replacing it would lose the keys it cannot see — the same reason a
@@ -284,9 +285,10 @@ impl<'a> Documents<'a> {
                     return Ok(());
                 }
                 // The same rule `stored` applies to a read applies to the write
-                // that follows it, whatever the caller checked before: writing a
-                // document a newer build wrote would lower it to the keys this
-                // build knows.
+                // that follows it, whatever the caller checked before: the file
+                // was written by a build newer than this one, which is what a
+                // downgrade leaves behind, and stating the keys this build knows
+                // would drop the ones it does not.
                 if existing.schema_version > schema_version {
                     tracing::warn!(
                         path = %path.display(),
