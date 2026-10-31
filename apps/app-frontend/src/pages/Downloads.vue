@@ -596,6 +596,7 @@ import {
     hasDeterminateInstallProgress,
     installProgressFraction,
     installProgressTextSource,
+    isInstallMainTrackComplete as isMainTrackComplete,
 } from '@/helpers/install-progress'
 import type { LoadingBar } from '@/helpers/state'
 import { instanceKeys, instanceListQueryOptions } from '@/pages/instance/query-options'
@@ -1213,13 +1214,6 @@ function parallelPercent(job: InstallJobSnapshot) {
 
 function isFinished(job: InstallJobSnapshot) {
     return job.status === 'succeeded'
-}
-
-function isMainTrackComplete(job: InstallJobSnapshot) {
-    if (isFinished(job)) return true
-    const progress = effectiveInstallProgress(job)
-    if (job.phase === 'downloading_content' && progress?.total === 0) return true
-    return hasDeterminateInstallProgress(progress) && progress.current >= progress.total
 }
 
 function isParallelTrackComplete(job: InstallJobSnapshot) {
