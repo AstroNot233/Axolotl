@@ -24,12 +24,16 @@
 //! them leaves the domains a generation apart. They carry unrelated settings,
 //! which is why that is accepted rather than paid for with a cross-file write.
 //!
-//! `personalized_ads` is in no document: it is the one `Settings` field marked
-//! `#[serde(skip)]`, it stays a column of the row alone, and listing it here
-//! would promise a document that never carries it. The row is therefore read on
-//! every read and this key always comes from it: the layers above answer no part
-//! of it, so a document that exists cannot lower it to the default and no
-//! document's absence is needed to reach it (Q5).
+//! Two keys are the row's alone. `personalized_ads` is in no document: it is
+//! the one `Settings` field marked `#[serde(skip)]`, it stays a column of the
+//! row, and listing it here would promise a document that never carries it.
+//! `version` is in no document for the other direction: `Settings::migrate`
+//! reads it to decide which migrations to run, so a document that could answer
+//! it would let a file skip them. The row is therefore read on every read and
+//! both keys always come from it: the layers above answer no part of them, so a
+//! document that exists cannot lower `personalized_ads` to the default, no
+//! document's absence is needed to reach it, and no document can raise `version`
+//! past a migration (Q5).
 //!
 //! `Settings::get` composes these documents with the row once a start has named
 //! the directory they live in (`identify`), and answers from the row alone until
@@ -105,7 +109,9 @@ static VERSION: AtomicU64 = AtomicU64::new(0);
 /// again.
 ///
 /// A writer calls it once its change is in place: the document writers below,
-/// and `Settings::update`, `Settings::save_in` and the row writers for the row.
+/// `Settings::update` and the row writers for the row. A writer that changes the
+/// row inside a unit asks the unit to say it instead, so the invalidation lands
+/// when the commit does — see `Atom::invalidate_settings_after_commit`.
 pub(crate) fn invalidate() {
     VERSION.fetch_add(1, Ordering::SeqCst);
 }
@@ -116,8 +122,8 @@ pub(crate) fn invalidate() {
 ///
 /// The version travels with the domain and is bumped when that domain's key set
 /// changes, including when a key is dropped: it versions the shape of a
-/// document, unlike the `version` the `state` domain carries as a key, which
-/// versions the values it holds.
+/// document, unlike the `version` the row carries, which says which settings
+/// migrations have run and is therefore in no document.
 const DOMAINS: &[(&str, &[&str], u32)] = &[
     (
         "appearance",
@@ -224,9 +230,10 @@ const DOMAINS: &[(&str, &[&str], u32)] = &[
             "onboarding_version",
             "pending_update_toast_for_version",
             "skipped_update",
-            "version",
         ],
-        1,
+        // `version` was dropped from the key set: a document that could answer
+        // it would let a file skip the settings migrations.
+        2,
     ),
 ];
 
@@ -244,15 +251,24 @@ pub(crate) async fn cached(
     documents: &Documents<'_>,
     handle: &Handle,
 ) -> crate::Result<Settings> {
-    let version = VERSION.load(Ordering::SeqCst);
-    {
+    // The version is read with the cache's own lock held rather than before it,
+    // so nothing can move between reading it and comparing it: no await sits
+    // between the two, and a writer's `invalidate` can therefore not land in
+    // the middle and be missed. It narrows the window rather than closing it —
+    // a writer takes no cache lock, so one that moved just after this load is
+    // still answered from the entry this read saw. What guarantees a read after
+    // a write is fresh is the write's own invalidation, which lands once its
+    // change is in place.
+    let version = {
         let cached = CACHE.read().await;
+        let version = VERSION.load(Ordering::SeqCst);
         if let Some((stored, root, settings)) = cached.as_ref() {
             if *stored == version && root == &documents.root {
                 return Ok((**settings).clone());
             }
         }
-    }
+        version
+    };
     let settings = Arc::new(read(documents, handle).await?);
     // A write that landed while this read composed moved the version, and the
     // row it read may be the one that write replaced: what was composed is kept
@@ -320,6 +336,10 @@ pub(crate) async fn read(
     // `personalized_ads` is skipped when deserializing, so the map above cannot
     // carry it back; it is taken from the row the read already made.
     settings.personalized_ads = row_settings.personalized_ads;
+    // No document carries `version`, and the layers above cannot lower it: it is
+    // what `migrate` reads to decide which migrations to run, so it comes from
+    // the row the read already made rather than from what the map was left with.
+    settings.version = row_settings.version;
     // A document is text the user can edit by hand, so a value out of range is
     // pulled back into it rather than handed on as it stands.
     Ok(settings.normalize())
@@ -557,12 +577,18 @@ fn domain_values(
 
 /// Writes one key into the document of the domain that lists it, leaving the
 /// rest of that document as it stands.
+///
+/// A domain with no document yet has been answered by the row, so the first
+/// write that gives it one starts from what the row says for the rest of the
+/// domain: writing the single key into an empty document would make the domain
+/// that document's alone and drop every key beside it to the build default.
 pub(crate) async fn store_key(
     documents: &Documents<'_>,
+    handle: &Handle,
     key: &str,
     value: Value,
 ) -> crate::Result<()> {
-    let Some((name, _, schema_version)) = domain_of(key) else {
+    let Some((name, keys, schema_version)) = domain_of(key) else {
         // A key no domain lists is not stored in a document at all: the row is
         // the only place it can live, so there is nothing to write here.
         tracing::debug!(key, "Ignoring a settings key no domain lists");
@@ -574,11 +600,15 @@ pub(crate) async fn store_key(
         .shipped::<Document>(name, schema_version)
         .await
         .unwrap_or_default();
-    let Some(mut document) =
+    let Some((mut document, existed)) =
         writable_document(documents, name, schema_version).await
     else {
         return Ok(());
     };
+    if !existed {
+        document =
+            row_values_of_domain(handle, keys, &config, &defaults).await?;
+    }
     let says_nothing = provided(key, &config, &defaults)
         .is_some_and(|provided| same_setting(key, provided, &value, &defaults));
     let changed = if says_nothing {
@@ -591,6 +621,24 @@ pub(crate) async fn store_key(
         return Ok(());
     }
     write(documents, name, schema_version, &document).await
+}
+
+/// The keys of one domain as the row holds them, for a domain that has no
+/// document to read them from.
+///
+/// It goes through `domain_values` rather than copying the row: a key holding
+/// what the domain is provided with is left out, exactly as `store` leaves it
+/// out, so the document this seeds is the one a full store would write.
+async fn row_values_of_domain(
+    handle: &Handle,
+    keys: &[&str],
+    config: &Document,
+    defaults: &Document,
+) -> crate::Result<Document> {
+    let row: Document = serde_json::from_value(serde_json::to_value(
+        Settings::read_row(handle).await?,
+    )?)?;
+    Ok(domain_values(keys, &row, config, defaults))
 }
 
 /// Clears `key` while the document still holds exactly `expected`, which is
@@ -613,7 +661,7 @@ pub(crate) async fn clear_key_if(
     let _writing = WRITES.lock().await;
     // Only a document this build can rewrite is cleared: one it cannot read
     // and one a newer build wrote are both read-only here.
-    let Some(mut document) =
+    let Some((mut document, _)) =
         writable_document(documents, name, schema_version).await
     else {
         return Ok(());
@@ -651,17 +699,17 @@ async fn write(
     Ok(())
 }
 
-/// The local document a single-key writer starts from, or nothing when the
-/// document must not be written.
+/// The local document a single-key writer starts from, and whether it was
+/// already there, or nothing when the document must not be written.
 async fn writable_document(
     documents: &Documents<'_>,
     name: &str,
     schema_version: u32,
-) -> Option<Document> {
+) -> Option<(Document, bool)> {
     match documents.stored::<Document>(name, schema_version).await {
-        Stored::Ready { document } => Some(document),
+        Stored::Ready { document } => Some((document, true)),
         // The write of a domain with no document creates it.
-        Stored::Missing => Some(Document::new()),
+        Stored::Missing => Some((Document::new(), false)),
         // Writing either would lose what it holds: a shape a newer build wrote
         // is never lowered, and a file this build cannot read is left for its
         // owner rather than replaced.
@@ -799,6 +847,7 @@ mod tests {
         test_support::{create_ai_tables, pool as empty_pool},
     };
     use crate::state::settings::Theme;
+    use crate::state::store::settings::Settings as StoredSettings;
     use crate::state::store::tests::support::migrated_pool;
 
     fn document_keys() -> BTreeSet<&'static str> {
@@ -807,6 +856,12 @@ mod tests {
             .flat_map(|(_, keys, _)| keys.iter().copied())
             .collect()
     }
+
+    /// The keys no document carries: the row answers them alone, and a document
+    /// that could answer one would answer something the row decides. `version`
+    /// is what `Settings::migrate` reads to choose its migrations, so a document
+    /// carrying it would let a file skip them.
+    const ROW_ONLY: &[&str] = &["version"];
 
     /// The pair of directories a launcher reads: the one it writes, and the one
     /// a deployment ships.
@@ -834,8 +889,19 @@ mod tests {
         let unlisted: Vec<&String> = serialized
             .iter()
             .filter(|key| !documents.contains(key.as_str()))
+            .filter(|key| !ROW_ONLY.contains(&key.as_str()))
             .collect();
         assert!(unlisted.is_empty(), "keys no domain carries: {unlisted:?}");
+
+        let absent: Vec<&str> = ROW_ONLY
+            .iter()
+            .copied()
+            .filter(|key| !serialized.contains(*key))
+            .collect();
+        assert!(
+            absent.is_empty(),
+            "keys left out of every domain that the settings do not carry either: {absent:?}"
+        );
 
         let unknown: Vec<&str> = documents
             .iter()
@@ -900,6 +966,41 @@ mod tests {
             settings.custom_background_blur,
             Settings::default().custom_background_blur,
             "a value the type cannot take costs its own key only"
+        );
+    }
+
+    /// A key whose value the type cannot take is not a document the read
+    /// cannot use: the read is a whole `Settings`, so a value of the wrong type
+    /// where a struct belongs would fail it outright if the layers were laid
+    /// down without checking each key. `overlay` checks one key at a time and
+    /// drops the one that costs, so the read answers and the rest of the
+    /// document still counts.
+    #[tokio::test]
+    async fn a_value_of_the_wrong_type_costs_only_its_key() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        // `memory` is a nested struct, so a number here is legal JSON that no
+        // `MemorySettings` can be read from.
+        write_document(
+            settings_dir.path(),
+            "game",
+            r#""memory":5,"force_fullscreen":true"#,
+        );
+
+        let settings = Settings::get(&handle)
+            .await
+            .expect("a value of the wrong type costs its key, not the read");
+
+        assert_eq!(
+            settings.memory.maximum,
+            Settings::default().memory.maximum,
+            "the key whose value cannot be read keeps the default"
+        );
+        assert!(
+            settings.force_fullscreen,
+            "a key beside the one that costs still comes from the document"
         );
     }
 
@@ -1027,6 +1128,41 @@ mod tests {
         assert!(
             settings.personalized_ads,
             "every domain has a document, and the ads preference still comes from the row"
+        );
+    }
+
+    /// `version` is the other key the row answers alone, and for the opposite
+    /// reason: `Settings::migrate` reads it to decide which migrations to run,
+    /// so a document that could answer it would let a hand-edited file skip
+    /// them. It is read from the row whatever every document says, and a store
+    /// writes no document carrying it.
+    #[tokio::test]
+    async fn a_document_cannot_skip_the_settings_migrations() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let row = Settings::read_row(&handle).await.unwrap();
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        write_document(settings_dir.path(), "state", r#""version":999"#);
+
+        let settings = Settings::get(&handle).await.unwrap();
+        assert_eq!(
+            settings.version, row.version,
+            "the version a read answers is the row's, whatever the document says"
+        );
+        assert_ne!(
+            settings.version, 999,
+            "a document cannot raise the settings past the migrations it would run"
+        );
+
+        let root = settings_dir.path().join(DIR_NAME);
+        let documents = Documents::at(root.clone(), &pool);
+        store(&documents, &settings).await.unwrap();
+
+        let data = data(&root, "state");
+        assert!(
+            !data.contains_key("version"),
+            "a store leaves the key the row owns out of the document: {data:?}"
         );
     }
 
@@ -1656,9 +1792,14 @@ mod tests {
         .unwrap();
         let documents = Documents::at(local.path().to_path_buf(), &pool);
 
-        store_key(&documents, "theme", Value::from("light"))
-            .await
-            .unwrap();
+        store_key(
+            &documents,
+            &Handle::new(pool.clone()),
+            "theme",
+            Value::from("light"),
+        )
+        .await
+        .unwrap();
 
         let data = data(local.path(), "appearance");
         assert_eq!(
@@ -1670,6 +1811,54 @@ mod tests {
             data.get("locale"),
             Some(&Value::from("zh_cn")),
             "a key beside it keeps what the document held"
+        );
+    }
+
+    /// A domain with no document is answered by the row until the first
+    /// single-key write gives it one, so that write has to carry the row's
+    /// values for the rest of the domain: the document the write creates is the
+    /// authority for the whole domain from then on, and a sibling the write did
+    /// not name would otherwise drop to the build default.
+    #[tokio::test]
+    async fn a_single_key_write_keeps_the_row_values_of_its_siblings() {
+        let pool = migrated_pool().await;
+        let handle = Handle::new(pool.clone());
+        let mut row = Settings::read_row(&handle).await.unwrap();
+        row.skipped_update = Some("1.20.1".to_string());
+        row.auto_download_updates = Some(true);
+        row.update(&handle).await.unwrap();
+
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+        let root = settings_dir.path().join(DIR_NAME);
+        let documents = Documents::at(root.clone(), &pool);
+
+        store_key(&documents, &handle, "skipped_update", Value::from("9.9.9"))
+            .await
+            .unwrap();
+
+        let data = data(&root, "state");
+        assert_eq!(
+            data.get("skipped_update"),
+            Some(&Value::from("9.9.9")),
+            "the key the write names carries the value it was given"
+        );
+        assert_eq!(
+            data.get("auto_download_updates"),
+            Some(&Value::from(true)),
+            "a sibling the write did not name keeps the value the row held"
+        );
+
+        let settings = Settings::get(&handle).await.unwrap();
+        assert_eq!(
+            settings.skipped_update.as_deref(),
+            Some("9.9.9"),
+            "the write is what the key reads"
+        );
+        assert_eq!(
+            settings.auto_download_updates,
+            Some(true),
+            "and the row value beside it survives the document that now answers the domain"
         );
     }
 
@@ -1729,18 +1918,51 @@ mod tests {
         );
     }
 
-    /// A domain whose write fails costs that domain and no other, and the
-    /// caller is not handed a failure a start cannot act on.
+    /// A document this build cannot read costs its own domain and no other: it
+    /// is left byte for byte, and the domains after it are still written.
     ///
-    /// A write replaces a document with a file it creates beside it, so the
-    /// directory is what refuses it, and it then refuses every domain at once:
-    /// one domain failing while the rest land cannot be built here. What the
-    /// caller can observe is checked instead — the call reports no error and
-    /// leaves no document behind, and the same call writes every document once
-    /// the directory accepts them.
-    #[cfg(unix)]
+    /// The failure is put on the first domain a store reaches, so a store that
+    /// stopped at the first one it could not write would leave every document
+    /// behind it unwritten.
     #[tokio::test]
     async fn a_failed_domain_does_not_stop_the_others() {
+        let pool = migrated_pool().await;
+        let local = tempfile::tempdir().unwrap();
+        let unreadable = br#"{"schema_version":1,"data":{"theme":}"#;
+        std::fs::write(local.path().join("appearance.json"), unreadable)
+            .unwrap();
+        let documents = Documents::at(local.path().to_path_buf(), &pool);
+        let mut settings = Settings::default();
+        settings.backup_repository_path = Some("/from-the-row".to_string());
+
+        let stored = store(&documents, &settings).await;
+
+        stored.expect(
+            "a document that cannot be read is reported in the log, not to the caller",
+        );
+        assert_eq!(
+            std::fs::read(local.path().join("appearance.json"))
+                .unwrap()
+                .as_slice(),
+            unreadable.as_slice(),
+            "a document this build cannot read is left as it stands"
+        );
+        assert_eq!(
+            data(local.path(), "backup").get("backup_repository_path"),
+            Some(&Value::from("/from-the-row")),
+            "the domains after the one that could not be written are still written"
+        );
+    }
+
+    /// A directory that refuses every write costs every domain and panics
+    /// nowhere: a write replaces a document with a file it creates beside it,
+    /// so the directory is what refuses it, and it then refuses every domain at
+    /// once. What the caller can observe is checked — the call reports no error
+    /// and leaves no document behind, and the same call writes every document
+    /// once the directory accepts them.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unwritable_directory_leaves_every_document_unwritten() {
         use std::os::unix::fs::PermissionsExt;
 
         let pool = migrated_pool().await;
@@ -1948,6 +2170,45 @@ mod tests {
         assert!(
             Settings::get(&handle).await.unwrap().personalized_ads,
             "the row changed, so the next read composes again"
+        );
+    }
+
+    /// A unit's write is not the row until the unit commits, so a read between
+    /// the two composes the row before it. Said at the write rather than at the
+    /// commit, the invalidation would have that read cached under the version
+    /// the write moved, and nothing would move it again once the commit landed:
+    /// every later read would be answered with the row from before the commit
+    /// for the rest of the launch.
+    #[tokio::test]
+    async fn a_read_between_invalidate_and_commit_is_not_cached() {
+        let directory = tempfile::tempdir().unwrap();
+        // Two connections: the read below runs while the unit holds the other,
+        // which an in-memory database could not give it.
+        let pool = crate::state::store::tests::support::migrated_file_pool(
+            directory.path(),
+        )
+        .await;
+        let handle = Handle::new(pool.clone());
+        let settings_dir = tempfile::tempdir().unwrap();
+        identify(settings_dir.path());
+
+        let mut unit = crate::state::store::atom(&handle).await.unwrap();
+        StoredSettings::update_in(&mut unit, |record| {
+            record.personalized_ads = true;
+        })
+        .await
+        .unwrap();
+
+        assert!(
+            !Settings::get(&handle).await.unwrap().personalized_ads,
+            "the unit has not committed, so a read between the two composes the row before it"
+        );
+
+        unit.commit().await.unwrap();
+
+        assert!(
+            Settings::get(&handle).await.unwrap().personalized_ads,
+            "the read after the commit composes the row the unit wrote"
         );
     }
 }

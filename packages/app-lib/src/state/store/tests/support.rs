@@ -24,6 +24,26 @@ pub(crate) async fn migrated_pool() -> SqlitePool {
     pool().await
 }
 
+/// A migrated database kept on disk, reached through more than one connection.
+///
+/// An in-memory database is one per connection, so a test that has to read
+/// while a unit holds its connection open cannot use one: the read would wait
+/// for the connection the unit holds. A file is what two connections share.
+pub(crate) async fn migrated_file_pool(
+    directory: &std::path::Path,
+) -> SqlitePool {
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(directory.join("app.db"))
+        .create_if_missing(true);
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(2)
+        .connect_with(options)
+        .await
+        .unwrap();
+    sqlx::migrate!().run(&pool).await.unwrap();
+    pool
+}
+
 /// A database of its own with no tables, for a test that lays out the ones it
 /// needs rather than running the migrations. One connection, so every
 /// statement sees the same in-memory database.

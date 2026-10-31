@@ -120,6 +120,10 @@ impl Handle {
 /// does. Dropping an uncommitted unit rolls it back.
 pub(crate) struct Atom {
     transaction: sqlx::Transaction<'static, Sqlite>,
+    /// Whether a settings read has to be composed again once this unit lands.
+    /// It is registered by a writer that changes the settings row, and acted on
+    /// by `commit`, because a unit is not a change until it commits.
+    invalidate_settings: bool,
 }
 
 impl Atom {
@@ -127,8 +131,30 @@ impl Atom {
         &mut self.transaction
     }
 
+    /// Says that this unit changes the settings row, so a settings read
+    /// composed after it commits is the one to keep.
+    ///
+    /// A writer registers it rather than invalidating where it writes: a read
+    /// between the write and the commit composes the row this unit has not
+    /// replaced yet, and an invalidation at the write would have that answer
+    /// cached under the version it moved — with nothing moving it again once
+    /// the commit lands, the stale answer would then be the one every later read
+    /// is given.
+    pub(crate) fn invalidate_settings_after_commit(&mut self) {
+        self.invalidate_settings = true;
+    }
+
     pub(crate) async fn commit(self) -> crate::Result<()> {
-        self.transaction.commit().await?;
+        let Self {
+            transaction,
+            invalidate_settings,
+        } = self;
+        transaction.commit().await?;
+        // After the commit and not before: the row a read composes is the one
+        // this commit replaced from here on, and only from here on.
+        if invalidate_settings {
+            crate::state::documents::settings::invalidate();
+        }
         Ok(())
     }
 }
@@ -155,6 +181,7 @@ pub(crate) fn names_a_missing_row(error: &crate::Error) -> bool {
 pub(crate) async fn atom(handle: &Handle) -> crate::Result<Atom> {
     Ok(Atom {
         transaction: handle.pool.begin_with("BEGIN IMMEDIATE").await?,
+        invalidate_settings: false,
     })
 }
 

@@ -643,7 +643,10 @@ impl Settings {
         StoredSettings::set(handle, &Singleton, Some(&self.to_record()?))
             .await?;
         // A read composes the row with the documents, so the row changing is a
-        // reason for the next read to compose again.
+        // reason for the next read to compose again. `set` commits the unit it
+        // writes inside before it answers, so this invalidation already lands
+        // after that commit: unlike a caller's own unit, there is no window
+        // between the write and the commit to defer it for.
         super::documents::settings::invalidate();
         Ok(())
     }
@@ -794,11 +797,10 @@ impl Settings {
     pub(crate) async fn save_in(&self, unit: &mut Atom) -> crate::Result<()> {
         StoredSettings::atom_set(unit, &Singleton, Some(&self.to_record()?))
             .await?;
-        // Said before the unit commits rather than after it: a read that
-        // composed while the write was in flight is one a later read must not
-        // inherit, and a cache entry from before this point is stale either
-        // way.
-        super::documents::settings::invalidate();
+        // Registered rather than said here: a read between this write and the
+        // unit's commit still composes the row the commit has not replaced, so
+        // the invalidation belongs to the commit and not to the write.
+        unit.invalidate_settings_after_commit();
         Ok(())
     }
 
