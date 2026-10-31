@@ -336,7 +336,14 @@ pub(crate) trait Backend: Send + Sync {
 }
 
 /// Why a store would not take part, in the words the platform gave.
-pub(crate) struct Refused(String);
+///
+/// `permanent` marks the answer a host without a credential store gives: only that
+/// one is worth remembering, because a store that is merely busy or that dislikes
+/// one key answers differently the next time.
+pub(crate) struct Refused {
+    reason: String,
+    permanent: bool,
+}
 
 /// The platform's credential store.
 #[cfg(not(test))]
@@ -379,13 +386,21 @@ fn namespace() -> String {
 
 #[cfg(not(test))]
 fn refused(error: keyring::Error) -> Refused {
-    Refused(error.to_string())
+    Refused {
+        // A host with no credential store says so this way; a store that is
+        // locked, busy or unhappy with one key says something else, and asking
+        // again later is worth the call.
+        permanent: matches!(error, keyring::Error::NoStorageAccess(_)),
+        reason: error.to_string(),
+    }
 }
 
 /// Reports a refusal once: a host without a credential store refuses every
 /// secret, and the run needs to say so once rather than once per token.
-fn report(key: &str, Refused(reason): Refused) {
-    note_no_store();
+fn report(key: &str, Refused { reason, permanent }: Refused) {
+    if permanent {
+        note_no_store();
+    }
     if !REPORTED.swap(true, Ordering::Relaxed) {
         tracing::warn!(
             %key,
@@ -468,7 +483,12 @@ pub(crate) mod testing {
 
         fn delete(&self, key: &str) -> Result<(), Refused> {
             if self.refuses_deletes.load(Ordering::Relaxed) {
-                return Err(Refused("the keyring is locked".to_string()));
+                // A store that is locked, not one that is missing: the next
+                // call is worth making.
+                return Err(Refused {
+                    reason: "the keyring is locked".to_string(),
+                    permanent: false,
+                });
             }
             self.lock().remove(key);
             Ok(())
@@ -480,15 +500,24 @@ pub(crate) mod testing {
 
     impl Backend for Refusing {
         fn set(&self, _: &str, _: &str) -> Result<(), Refused> {
-            Err(Refused("no credential store".to_string()))
+            Err(Refused {
+                reason: "no credential store".to_string(),
+                permanent: true,
+            })
         }
 
         fn get(&self, _: &str) -> Result<Option<String>, Refused> {
-            Err(Refused("no credential store".to_string()))
+            Err(Refused {
+                reason: "no credential store".to_string(),
+                permanent: true,
+            })
         }
 
         fn delete(&self, _: &str) -> Result<(), Refused> {
-            Err(Refused("no credential store".to_string()))
+            Err(Refused {
+                reason: "no credential store".to_string(),
+                permanent: true,
+            })
         }
     }
 

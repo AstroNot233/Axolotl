@@ -453,19 +453,23 @@ fn overlay<T>(
 }
 
 /// What the document at `path` holds, whichever layer it belongs to.
-async fn read_document<T>(
-    path: &Path,
-    name: &str,
-    schema_version: u32,
-) -> Stored<T>
-where
-    T: DeserializeOwned + Default,
-{
-    // The shape is checked before anything is read: reading first and judging
-    // afterwards would already have paid the cost the check exists to avoid.
-    // `std::fs::metadata` follows a symbolic link, so a document a package
-    // manager links into a store is judged by the file it points at, which is
-    // the only thing the read would reach either.
+/// What a path can be read as.
+enum OnPath {
+    Missing,
+    Unreadable,
+    Readable,
+}
+
+/// Whether a document's path holds something a read may go ahead with.
+///
+/// The shape is judged before anything is read: reading first and refusing
+/// afterwards would have paid the cost the check exists to avoid, and a path that
+/// is not a regular file of a bounded size is not a document — a pipe there would
+/// block forever and an oversized file would fill memory before its size was
+/// ever looked at. `std::fs::metadata` follows a symbolic link, so a document a
+/// package manager links into a store is judged by the file it points at, which is
+/// the only thing the read would reach either.
+fn on_path(path: &Path) -> OnPath {
     match std::fs::metadata(path) {
         Ok(metadata)
             if !metadata.is_file() || metadata.len() > MAX_DOCUMENT_BYTES =>
@@ -475,11 +479,11 @@ where
                 len = metadata.len(),
                 "Ignoring a settings document that is not a regular file of a bounded size"
             );
-            return Stored::Unreadable;
+            OnPath::Unreadable
         }
-        Ok(_) => {}
+        Ok(_) => OnPath::Readable,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Stored::Missing;
+            OnPath::Missing
         }
         Err(error) => {
             tracing::warn!(
@@ -487,8 +491,23 @@ where
                 %error,
                 "Could not inspect a settings document"
             );
-            return Stored::Unreadable;
+            OnPath::Unreadable
         }
+    }
+}
+
+async fn read_document<T>(
+    path: &Path,
+    name: &str,
+    schema_version: u32,
+) -> Stored<T>
+where
+    T: DeserializeOwned + Default,
+{
+    match on_path(path) {
+        OnPath::Unreadable => return Stored::Unreadable,
+        OnPath::Missing => return Stored::Missing,
+        OnPath::Readable => {}
     }
     let contents = match tokio::fs::read(path).await {
         Ok(contents) => contents,
@@ -539,6 +558,11 @@ enum OnDisk {
 }
 
 async fn written_document(path: &Path) -> OnDisk {
+    match on_path(path) {
+        OnPath::Unreadable => return OnDisk::Unreadable,
+        OnPath::Missing => return OnDisk::Missing,
+        OnPath::Readable => {}
+    }
     let contents = match tokio::fs::read(path).await {
         Ok(contents) => contents,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
