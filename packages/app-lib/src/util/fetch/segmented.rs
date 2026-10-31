@@ -160,6 +160,8 @@ pub(crate) async fn download_segment(
         };
         let downloaded_before_attempt = requested_start - range.start;
         let requested_end = range.end();
+        let telemetry =
+            crate::util::download::telemetry::begin_request(request, route);
         let mut writer = output
             .open_range(
                 requested_start,
@@ -199,6 +201,9 @@ pub(crate) async fn download_segment(
             Ok(Err(_)) | Err(_) => return Err(SegmentDownloadError::Transport),
         };
         final_url = response_url;
+        if let Some(telemetry) = &telemetry {
+            telemetry.connected(response.version(), response.remote_addr());
+        }
         let parsed_content_range = parse_content_range(&response);
         tracing::debug!(
             path = %part_path.display(),
@@ -340,6 +345,7 @@ pub(crate) async fn download_segment(
                                 &request.integrity,
                                 validator,
                                 redirect_target,
+                                request.diagnostics.as_ref(),
                             )
                             .await;
                             hedge_active.store(false, Ordering::Release);
@@ -471,6 +477,9 @@ pub(crate) async fn download_segment(
                 }
             };
             counters.received(chunk.len() as u64);
+            if let Some(telemetry) = &telemetry {
+                telemetry.received(chunk.len());
+            }
             if let Some(feedback) = &endpoint_feedback {
                 feedback.record(
                     chunk.len(),
@@ -541,6 +550,11 @@ pub(crate) async fn download_segment(
             }
         }
         drop(stream);
+        if range.remaining() == 0
+            && let Some(telemetry) = &telemetry
+        {
+            telemetry.finish();
+        }
         if range.remaining() == 0 {
             writer
                 .flush()
@@ -1018,6 +1032,13 @@ pub(crate) async fn try_segmented_download(
         "Started segmented download"
     );
     let mut next_range_index = ranges.len();
+    crate::util::download::telemetry::record_budget(
+        request,
+        configured_limit,
+        concurrency_cap,
+        downloads.len(),
+        downloads.len(),
+    );
     let mut retained_ranges = ranges.len();
     let mut completed_ranges = 0;
     let mut scheduler = tokio::time::interval(DOWNLOAD_SCHEDULER_INTERVAL);
@@ -1202,6 +1223,7 @@ pub(crate) async fn try_segmented_download(
                     expansion_trial = None;
                 }
                 let active_ranges = downloads.len();
+                crate::util::download::telemetry::record_budget(request, configured_limit, concurrency_cap, retained_ranges, active_ranges);
                 let remaining_bytes = ranges
                     .iter()
                     .filter(|range| !range.state.lock().completed)
@@ -1374,6 +1396,13 @@ pub(crate) async fn try_segmented_download(
     }
     drop(progress_tx);
     drop(downloads);
+    crate::util::download::telemetry::record_budget(
+        request,
+        configured_limit,
+        concurrency_cap,
+        retained_ranges,
+        0,
+    );
     if let Some(write) = checkpoint_write
         && let Err(error) = write.await
     {

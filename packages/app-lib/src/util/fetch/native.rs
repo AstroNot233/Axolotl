@@ -691,6 +691,9 @@ async fn run_native_route_attempts(
         record_install_download_stage(request, DownloadItemStatus::Downloading)
             .await;
         let request_started = Instant::now();
+        crate::util::download::telemetry::record_single_budget(request);
+        let telemetry =
+            crate::util::download::telemetry::begin_request(request, route);
         let first_byte_timeout =
             native_first_byte_timeout(route, can_switch_route);
         // A truncated or invalid body may be a corrupt edge-cache
@@ -807,6 +810,9 @@ async fn run_native_route_attempts(
         let status = response.status();
         let remote_addr = response.remote_addr();
         let http_version = response.version();
+        if let Some(telemetry) = &telemetry {
+            telemetry.connected(http_version, remote_addr);
+        }
         let downgrade_slow_http2 =
             should_downgrade_slow_http2(http_version, retry_with_single_thread);
         let response_retry_after = retry_after(&response);
@@ -1108,6 +1114,7 @@ async fn run_native_route_attempts(
                         }
                     };
                     request.transfer_counters.received(chunk.len() as u64);
+                    if let Some(telemetry) = &telemetry { telemetry.received(chunk.len()); }
                     if let Some(feedback) = &endpoint_feedback { feedback.record(chunk.len(), crate::util::download::local_resources::pressure(part_path)); }
                     {
                     #[cfg(test)]
@@ -1290,6 +1297,13 @@ async fn run_native_route_attempts(
         }
         drop(alternate_probe);
         drop(stream);
+        if transfer_error.is_none()
+            && !recover_file_ranges
+            && !switched_endpoint
+            && let Some(telemetry) = &telemetry
+        {
+            telemetry.finish();
+        }
         file.flush()
             .await
             .map_err(|error| IOError::with_path(error, part_path))?;

@@ -1002,6 +1002,9 @@ impl State {
         self: &Arc<Self>,
         settings: &Settings,
     ) {
+        crate::util::download::telemetry::set_enabled(
+            settings.advanced_download_info_enabled(),
+        );
         self.minecraft_metadata_source
             .store(settings.minecraft_metadata_source as u8, Ordering::Relaxed);
         self.minecraft_file_source
@@ -1306,6 +1309,9 @@ impl State {
             &app_identifier,
         )
         .await?;
+        crate::util::download::telemetry::set_enabled(
+            settings.advanced_download_info_enabled(),
+        );
         let download_concurrency =
             settings.effective_max_concurrent_downloads();
         let fetch_semaphore =

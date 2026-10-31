@@ -77,6 +77,7 @@ trait RangeTransport: Sync {
 
 struct RangeIdentity {
     h2: bool,
+    proxied: bool,
     peer: Option<std::net::SocketAddr>,
     connection: Option<Arc<SharedH2Connection>>,
     aggregate_window: Option<Mutex<super::h2_receive::ConnectionRateWindow>>,
@@ -97,6 +98,7 @@ impl<'a> RangeResponse<'a> {
             body,
             identity: RangeIdentity {
                 h2,
+                proxied: false,
                 peer: None,
                 connection: None,
                 aggregate_window: None,
@@ -233,6 +235,7 @@ impl RangeTransport for NativeRangeTransport<'_> {
                 body: Box::pin(stream),
                 identity: RangeIdentity {
                     h2: true,
+                    proxied: super::telemetry::route_is_proxied(self.route),
                     peer: connection.remote_addr,
                     aggregate_window: Some(Mutex::new(
                         super::h2_receive::ConnectionRateWindow::new(
@@ -323,6 +326,7 @@ impl RangeTransport for NativeRangeTransport<'_> {
             body: Box::pin(stream),
             identity: RangeIdentity {
                 h2: false,
+                proxied: super::telemetry::route_is_proxied(self.route),
                 peer,
                 connection: None,
                 aggregate_window: None,
@@ -688,6 +692,16 @@ async fn recover_range(
                     continue;
                 }
             };
+        let telemetry = super::telemetry::begin_range(
+            request,
+            identity
+                .connection
+                .as_ref()
+                .map(|connection| connection.connection_id),
+            identity.peer,
+            identity.h2,
+            identity.proxied,
+        );
         let mut failure = None;
         let mut slow =
             super::native_slow::NativeSlowPolicy::for_http2(offset, None);
@@ -729,6 +743,9 @@ async fn recover_range(
                 }
             };
             request.transfer_counters.received(chunk.len() as u64);
+            if let Some(telemetry) = &telemetry {
+                telemetry.received(chunk.len());
+            }
             if chunk.len() as u64 > range.end - offset {
                 failure = Some(H2DownloadFailure::Protocol);
                 break;
@@ -766,6 +783,11 @@ async fn recover_range(
             }
         }
         drop(body);
+        if offset == range.end
+            && let Some(telemetry) = &telemetry
+        {
+            telemetry.finish();
+        }
         writer.flush().await.map_err(|_| H2DownloadFailure::Io)?;
         request
             .transfer_counters

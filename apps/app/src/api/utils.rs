@@ -285,7 +285,7 @@ pub async fn export_launcher_logs(
             "omitted"
         },
         if include_network_connections {
-            "included (fresh tests using launcher network settings)"
+            "included (fresh tests and current-session download diagnostics)"
         } else {
             "omitted"
         },
@@ -365,6 +365,19 @@ pub async fn export_launcher_logs(
             &mut writer,
             "network-connections.json",
             report.as_bytes(),
+        )
+        .await?;
+
+        let downloads = theseus::export_download_diagnostics(None);
+        let downloads = serde_json::to_string_pretty(&downloads)
+            .map_err(theseus::Error::from)?;
+        let downloads =
+            theseus::install::censor_shared_credentials(downloads, &state)
+                .await?;
+        write_zip_entry(
+            &mut writer,
+            "download-connections.json",
+            downloads.as_bytes(),
         )
         .await?;
     }

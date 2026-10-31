@@ -88,6 +88,10 @@ pub async fn patch(patch: serde_json::Value) -> crate::Result<Settings> {
     let _guard = SETTINGS_WRITE.lock().await;
     let state = State::get().await?;
     let settings = patch_with(&state.data, patch).await?;
+    // A persisted opt-out must take effect even if rebuilding HTTP fails.
+    crate::util::download::telemetry::set_enabled(
+        settings.advanced_download_info_enabled(),
+    );
     state.update_http_client_for_settings(&settings).await?;
     state.update_download_settings(&settings);
     Ok(settings)

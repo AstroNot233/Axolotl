@@ -462,6 +462,13 @@
                         :heading="formatMessage(messages.noFileDetailsTitle)"
                         :description="formatMessage(messages.noFileDetails)"
                     />
+                    <DownloadDiagnosticsPanel
+                        v-if="
+                            themeStore.devMode &&
+                            themeStore.getFeatureFlag('advanced_download_info')
+                        "
+                        :job-id="job.job_id"
+                    />
                 </div>
             </Card>
         </div>
@@ -594,6 +601,7 @@ import type { LoadingBar } from '@/helpers/state'
 import { instanceKeys, instanceListQueryOptions } from '@/pages/instance/query-options'
 import { injectContentInstall } from '@/providers/content-install'
 import { injectDownloadManager } from '@/providers/download-manager'
+import { useTheming } from '@/store/state'
 
 import {
     createDownloadFocusState,
@@ -601,11 +609,13 @@ import {
     reconcileDownloadFocus,
     stopDownloadFocusAutoFollow,
 } from './download-focus'
+import DownloadDiagnosticsPanel from './downloads/DownloadDiagnosticsPanel.vue'
 import { isSuccessfulUpgradeJob, upgradeResultLocation } from './instance/upgrade/result'
 
 type DownloadItem = InstallJobSnapshot['items'][number]
 
 const manager = injectDownloadManager()
+const themeStore = useTheming()
 const queryClient = useQueryClient()
 const instancesQuery = useQuery(instanceListQueryOptions())
 const instanceNames = computed(
