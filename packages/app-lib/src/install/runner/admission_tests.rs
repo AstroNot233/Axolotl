@@ -273,6 +273,65 @@ async fn stopped_worker_recovery_waits_for_execution_and_preserves_terminal_resu
 }
 
 #[tokio::test]
+async fn a_cancellation_whose_writes_both_timed_out_still_ends_canceled() {
+    let (_temp, state) = fixture().await;
+    let id = Uuid::new_v4();
+    let job = InstallJobState::new(request("first", "mod"));
+    store::insert(id, &job, InstallJobStatus::Running, &state)
+        .await
+        .unwrap();
+    // A worker is running, so its cancellation token is registered.
+    let token = tokio_util::sync::CancellationToken::new();
+    state.install_job_cancellations.insert(id, token.clone());
+    // The Canceling checkpoint waits behind a busy writer and gives up after
+    // 2 s: the worker is signaled, but the row stays Running.
+    let writer = state.install_db_semaphore.acquire().await.unwrap();
+    let snapshot = cancel_job_with_state(id, state.clone()).await.unwrap();
+    assert_eq!(snapshot.status, InstallJobStatus::Running);
+    assert!(token.is_cancelled());
+    // The worker's Canceled write is blocked by the same writer. Bound this
+    // simulated wait so the test need not wait for the 20 s permit timeout.
+    let worker_write = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        store::update_status(id, InstallJobStatus::Canceled, &job, &state),
+    )
+    .await;
+    assert!(worker_write.is_err());
+    assert_eq!(
+        store::get_required(id, &state).await.unwrap().status,
+        InstallJobStatus::Running
+    );
+    drop(writer);
+    state.install_job_cancellations.remove(&id);
+    // The worker's Canceled write then timed out as well; recovery receives
+    // that error together with the cancellation the worker was given.
+    let timeout: crate::Error = ErrorKind::InputError(
+        "Timed out waiting for the install database writer".into(),
+    )
+    .into();
+    lifecycle::recover_owned_job(id, &state, None, &timeout, true)
+        .await
+        .unwrap();
+    let canceled = store::get_required(id, &state).await.unwrap();
+    assert_eq!(canceled.status, InstallJobStatus::Canceled);
+    assert_eq!(canceled.state.error.unwrap().code, "canceled");
+
+    // The same Running row without a cancellation is a failure.
+    let other = Uuid::new_v4();
+    store::insert(other, &job, InstallJobStatus::Running, &state)
+        .await
+        .unwrap();
+    lifecycle::recover_owned_job(other, &state, None, &timeout, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        store::get_required(other, &state).await.unwrap().status,
+        InstallJobStatus::Failed
+    );
+    state.pool.close().await;
+}
+
+#[tokio::test]
 async fn cancellation_without_a_token_waits_for_owner_then_cleans_up_once() {
     let (_temp, state) = fixture().await;
     let id = Uuid::new_v4();

@@ -4679,8 +4679,17 @@
   "app.instances.edit-groups": {
     "message": "编辑分组"
   },
+  "app.instances.game-directory.managed": {
+    "message": "Axolotl 数据目录"
+  },
+  "app.instances.game-directory.managed-short": {
+    "message": "Axolotl 数据"
+  },
   "app.instances.group-by": {
     "message": "分组方式"
+  },
+  "app.instances.group.game-directory": {
+    "message": "游戏目录"
   },
   "app.instances.group.game-version": {
     "message": "游戏版本"
