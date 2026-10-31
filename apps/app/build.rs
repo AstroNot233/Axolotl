@@ -666,6 +666,7 @@ fn main() {
                         "download_job_delete",
                         "download_history_clear",
                         "download_job_support_details",
+                        "download_diagnostics",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

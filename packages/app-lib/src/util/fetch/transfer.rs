@@ -541,6 +541,32 @@ pub(crate) async fn download_to_path_inner(
     mut request: DownloadRequest,
     destination: &Path,
     semaphore: &FetchSemaphore,
+    progress: Option<&mut FetchProgressFn<'_>>,
+) -> crate::Result<DownloadResult> {
+    let capture =
+        crate::util::download::telemetry::begin_file(&mut request, destination);
+    let cancellation = request.cancellation.clone();
+    let result = download_to_path_tracked_inner(
+        request,
+        destination,
+        semaphore,
+        progress,
+    )
+    .await;
+    if let Some(capture) = &capture {
+        if cancellation.is_some_and(|token| token.is_cancelled()) {
+            capture.cancel();
+        } else {
+            capture.finish(result.is_ok());
+        }
+    }
+    result
+}
+
+async fn download_to_path_tracked_inner(
+    mut request: DownloadRequest,
+    destination: &Path,
+    semaphore: &FetchSemaphore,
     mut progress: Option<&mut FetchProgressFn<'_>>,
 ) -> crate::Result<DownloadResult> {
     let _endpoint_registration =

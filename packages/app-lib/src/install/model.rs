@@ -3297,10 +3297,20 @@ impl InstallJobState {
                     bytes_total,
                     max_attempts,
                 } => {
+                    let item_path = std::path::Path::new(path);
+                    let name = if item_path.is_absolute() {
+                        item_path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.clone())
+                    } else {
+                        path.clone()
+                    };
                     if let Some(item) = indices
                         .get(path)
                         .and_then(|&index| items.get_mut(index))
                     {
+                        item.name = name;
                         item.status = DownloadItemStatus::Queued;
                         item.bytes_downloaded = 0;
                         item.bytes_total = *bytes_total;
@@ -3313,7 +3323,7 @@ impl InstallJobState {
                         let index = items.len();
                         items.push(DownloadItemSnapshot {
                             id: path.clone(),
-                            name: path.clone(),
+                            name,
                             project_id: None,
                             version_id: None,
                             status: DownloadItemStatus::Queued,

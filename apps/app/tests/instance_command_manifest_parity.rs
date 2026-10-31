@@ -323,3 +323,25 @@ fn mod_translation_runtime_handlers_match_the_build_manifest() {
             .any(|permission| permission == "mod-translation:default")
     );
 }
+
+#[test]
+fn download_diagnostics_is_registered_and_limited_to_the_main_window() {
+    let runtime = runtime_commands(include_str!("../src/api/install.rs"));
+    let manifest = manifest_commands(include_str!("../build.rs"), "install");
+    assert_eq!(runtime, manifest);
+    assert!(runtime.contains("download_diagnostics"));
+    let frontend =
+        include_str!("../../app-frontend/src/helpers/download-diagnostics.ts");
+    assert!(frontend.contains("plugin:install|download_diagnostics"));
+    let capability: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/plugins.json"))
+            .unwrap();
+    assert_eq!(capability["windows"], serde_json::json!(["main"]));
+    assert!(
+        capability["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|permission| permission == "install:default")
+    );
+}

@@ -318,6 +318,7 @@ pub enum FeatureFlag {
     PageTransitions,
     ShowVersionEnvironmentColumn,
     AutoInstallDependencies,
+    AdvancedDownloadInfo,
 }
 
 /// The settings a database that has never been used holds.
@@ -435,6 +436,12 @@ impl Default for Settings {
 
 impl Settings {
     const CURRENT_VERSION: usize = 3;
+
+    pub(crate) fn advanced_download_info_enabled(&self) -> bool {
+        self.developer_mode
+            && self.feature_flags.get(&FeatureFlag::AdvancedDownloadInfo)
+                == Some(&true)
+    }
 
     /// The settings this launch runs with.
     ///
@@ -1176,6 +1183,28 @@ mod tests {
     use super::*;
     use crate::state::store::Collection as _;
     use crate::state::store::tests::support::migrated_pool;
+
+    #[test]
+    fn download_diagnostics_requires_developer_mode_and_explicit_flag() {
+        let mut settings = Settings::default();
+        assert!(!settings.advanced_download_info_enabled());
+        settings
+            .feature_flags
+            .insert(FeatureFlag::AdvancedDownloadInfo, true);
+        assert!(!settings.advanced_download_info_enabled());
+        settings.developer_mode = true;
+        assert!(settings.advanced_download_info_enabled());
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["feature_flags"]["advanced_download_info"], true);
+        let restored: Settings = serde_json::from_value(saved).unwrap();
+        assert!(restored.advanced_download_info_enabled());
+        settings
+            .feature_flags
+            .insert(FeatureFlag::AdvancedDownloadInfo, false);
+        assert!(!settings.advanced_download_info_enabled());
+        settings.developer_mode = false;
+        assert!(!settings.advanced_download_info_enabled());
+    }
 
     /// The keys where two settings carry different values, written out so a
     /// failure names them instead of printing two whole `Settings`.
