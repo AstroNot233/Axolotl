@@ -661,12 +661,16 @@ impl Settings {
         // is read again there rather than taken from `self`, so a writer that
         // landed in between is not undone by this one.
         //
+        // This writer cannot say which keys it changed — it states a whole
+        // `Settings` — so every domain is stated, and the keys a deployment
+        // answers are left out of the local documents as they always are.
+        //
         // A document that cannot be written costs that domain and is left in
         // the log: this is the whole-row writer a start reaches through the
         // directory move and the settings migrations, so it must not keep a
         // start from coming up.
         if let Err(error) =
-            super::documents::settings::store_cut_over(handle).await
+            super::documents::settings::store_cut_over(handle, None).await
         {
             tracing::warn!(
                 %error,
